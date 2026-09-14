@@ -94,22 +94,26 @@ public struct BookSourceConfiguration: Sendable, Hashable {
     public var storageBookmarkData: Data?
 
     public init(
-        kind: BookSourceKind,
-        name: String,
-        serverURL: String? = nil,
-        username: String? = nil,
-        password: String? = nil,
-        storagePath: String? = nil,
-        storageBookmarkData: Data? = nil,
-    ) {
-        self.kind = kind
-        self.name = name
-        self.serverURL = serverURL
-        self.username = username
-        self.password = password
-        self.storagePath = storagePath
-        self.storageBookmarkData = storageBookmarkData
-    }
+            kind: BookSourceKind,
+            name: String,
+            serverURL: String? = nil,
+            username: String? = nil,
+            password: String? = nil,
+            storagePath: String? = nil,
+            storageBookmarkData: Data? = nil,
+        ) {
+            self.kind = kind
+            self.name = name
+            // punk+rally: default a fresh storyteller source to the private cellar
+            // server so the connect/auth flow is pre-filled and never empty.
+            self.serverURL =
+                serverURL
+                ?? (kind == .storyteller ? kDefaultStorytellerServerURL : nil)
+            self.username = username
+            self.password = password
+            self.storagePath = storagePath
+            self.storageBookmarkData = storageBookmarkData
+        }
 }
 
 public enum LocalMediaLocationKind: String, Sendable, Codable, Hashable {

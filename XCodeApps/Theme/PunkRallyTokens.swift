@@ -5,6 +5,9 @@ public enum PunkRallyTheme {
     /// App brand display name
     public static let appName = "punk+rally"
     public static let libraryOpdsTitle = "punk+rally books"
+    /// Default Storyteller server — this is the private cellar server
+    /// (storyteller.banditoburrito.xyz), pre-filled into the connect/auth flow
+    /// from a fresh book source via SilveranKit's kDefaultStorytellerServerURL.
     public static let defaultStorytellerURL = "https://storyteller.banditoburrito.xyz"
 
     /// Shared brand accent colors (identical across Light and Dark chrome)

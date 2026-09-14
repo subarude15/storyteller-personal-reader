@@ -72,6 +72,10 @@ public let kDefaultMetadataRefreshIntervalSeconds: Double = 300
 public let kDefaultIsManuallyOffline = false
 public let kDefaultAutoSyncToNewerServerPosition = false
 
+/// punk+rally: default Storyteller server used when fresh-book-source creation
+/// is given no explicit server URL. This is the private cellar server.
+public let kDefaultStorytellerServerURL = "https://storyteller.banditoburrito.xyz"
+
 public let kDefaultShowAudioIndicator = true
 public let kDefaultTabBarSlot1 = "books"
 public let kDefaultTabBarSlot2 = "series"

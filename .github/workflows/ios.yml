@@ -1,0 +1,34 @@
+name: punk+rally iOS build
+
+on:
+  push:
+    branches: [punk-rally-ios]
+  pull_request:
+    branches: [punk-rally-ios]
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  LANG: en_US.UTF-8
+  SILVERAN_DISABLE_CODE_SIGNING: "1"
+  SILVERAN_IOS_DESTINATION: "generic/platform=iOS Simulator"
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install tools
+        run: brew install xcbeautify xcodegen
+
+      - name: Generate Xcode project
+        run: ./scripts/genxproj
+
+      - name: Build iOS target
+        run: ./scripts/iosbuild
