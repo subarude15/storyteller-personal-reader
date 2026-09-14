@@ -154,8 +154,6 @@ targets:
         product: SilveranReadaloud
       - target: "Silveran Reader Widgets (iOS)"
         embed: true
-      - target: "Silveran Reader (watchOS)"
-        embed: true
   Silveran Reader Widgets (iOS):
     type: app-extension
     platform: iOS
