@@ -15,4 +15,4 @@ xcodebuild -project Silveran.xcodeproj \
     -scheme "Silveran Reader (iOS)" \
     -configuration Debug \
     -destination "${DESTINATION}" \
-    -derivedDataPath .buildIos "${XCODEBUILD_OPTIONS[@]}"
+    -derivedDataPath .buildIos "${XCODEBUILD_OPTIONS[@]}" | xcbeautify
