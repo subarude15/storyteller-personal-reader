@@ -48,7 +48,7 @@ targets:
     info:
       path: XCodeApps/Info-macOS.plist
       properties:
-        CFBundleName: "Silveran Reader"
+        CFBundleName: "punk+rally"
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -58,13 +58,13 @@ targets:
         KEYCHAIN_SERVICE: "$(KEYCHAIN_SERVICE)"
         SILVERAN_WIDGET_APP_GROUP: "$(MAC_APP_GROUP_ID)"
         LSApplicationCategoryType: "public.app-category.books"
-        NSLocalNetworkUsageDescription: "Silveran Reader needs local network access to connect to your Storyteller server."
+        NSLocalNetworkUsageDescription: "punk+rally needs local network access to connect to your Storyteller server."
         ITSAppUsesNonExemptEncryption: false
         ATSApplicationFontsPath: "fonts"
         CFBundleURLTypes:
-          - CFBundleURLName: com.kyonifer.SilveranReader
+          - CFBundleURLName: com.punkrally.reader
             CFBundleURLSchemes:
-              - silveran
+              - punkrally
     sources:
       - path: XCodeApps
         includes:
@@ -93,16 +93,16 @@ targets:
         CODE_SIGN_ENTITLEMENTS: XCodeApps/SilveranReaderIos.entitlements
         CODE_SIGN_STYLE: Automatic
         INFOPLIST_FILE: XCodeApps/Info-iOS.plist
-        PRODUCT_BUNDLE_IDENTIFIER: "$(APP_BUNDLE_ID)"
+        PRODUCT_BUNDLE_IDENTIFIER: "com.punkrally.reader"
         #INFOPLIST_KEY_CFBundleDisplayName: Silveran Reader
-        #INFOPLIST_KEY_CFBundleName: Silveran Reader
+        INFOPLIST_KEY_CFBundleDisplayName: "punk+rally"
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
         #SWIFT_UPCOMING_FEATURE_NONSENDING_NONISOLATING_BY_DEFAULT: YES
     info:
       path: XCodeApps/Info-iOS.plist
       properties:
-        CFBundleName: "Silveran Reader"
-        CFBundleDisplayName: "Silveran Reader"
+        CFBundleName: "punk+rally"
+        CFBundleDisplayName: "punk+rally"
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -112,11 +112,11 @@ targets:
         KEYCHAIN_SERVICE: "$(KEYCHAIN_SERVICE)"
         SILVERAN_WIDGET_APP_GROUP: "$(APP_GROUP_ID)"
         LSApplicationCategoryType: "public.app-category.books"
-        NSLocalNetworkUsageDescription: "Silveran Reader needs local network access to connect to your Storyteller server."
+        NSLocalNetworkUsageDescription: "punk+rally needs local network access to connect to your Storyteller server."
         CFBundleURLTypes:
-          - CFBundleURLName: com.kyonifer.SilveranReader
+          - CFBundleURLName: com.punkrally.reader
             CFBundleURLSchemes:
-              - silveran
+              - punkrally
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -179,7 +179,7 @@ targets:
       path: XCodeApps/Info-Widgets-iOS.plist
       properties:
         CFBundleName: "Silveran Reader Widgets"
-        CFBundleDisplayName: "Silveran Reader"
+        CFBundleDisplayName: "punk+rally"
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -217,7 +217,7 @@ targets:
       path: XCodeApps/Info-Widgets-macOS.plist
       properties:
         CFBundleName: "Silveran Reader Widgets"
-        CFBundleDisplayName: "Silveran Reader"
+        CFBundleDisplayName: "punk+rally"
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -246,8 +246,8 @@ targets:
     info:
       path: XCodeApps/Info-watchOS.plist
       properties:
-        CFBundleName: "Silveran Reader"
-        CFBundleDisplayName: "Silveran Reader"
+        CFBundleName: "punk+rally"
+        CFBundleDisplayName: "punk+rally"
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -281,8 +281,8 @@ targets:
     info:
       path: XCodeApps/Info-tvOS.plist
       properties:
-        CFBundleName: "Silveran Reader"
-        CFBundleDisplayName: "Silveran Reader"
+        CFBundleName: "punk+rally"
+        CFBundleDisplayName: "punk+rally"
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"

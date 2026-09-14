@@ -1,7 +1,10 @@
 import Foundation
 
 public let kDefaultFontSize: Double = 24
-public let kDefaultFontFamily = "System Default"
+// punk+rally: Fast Serif is the designated default reader body. The constant
+// names a bundled family so new installs open on Fast Serif; users can still
+// switch via the Aa picker.
+public let kDefaultFontFamily = "Fast Serif"
 public let kDefaultLineSpacing: Double = 1.4
 public let kDefaultMarginLeftRightIOS: Double = 2
 public let kDefaultMarginLeftRightMac: Double = 5

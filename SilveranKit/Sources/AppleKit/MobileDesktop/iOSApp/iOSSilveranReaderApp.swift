@@ -264,7 +264,11 @@ private struct iOSRootView: View {
                 ProgressView(LastOpenBookStore.hasSavedRoute ? "Loading book..." : "Loading...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                iOSLibraryView()
+                if let customRoot = AppLaunchContext.iosRootView {
+                    customRoot
+                } else {
+                    iOSLibraryView()
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .silveranCreateReadaloud)) {
