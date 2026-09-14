@@ -1,0 +1,57 @@
+name: iOS CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ios-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build iOS app and run Swift tests
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Show build environment
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Install build tools
+        run: brew install xcodegen xcbeautify
+
+      - name: Generate Xcode project
+        run: |
+          ./scripts/genxproj
+          mkdir -p Silveran.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
+          cp Package.resolved Silveran.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+
+      - name: Build iOS app for simulator
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Silveran.xcodeproj \
+            -scheme "Silveran Reader (iOS)" \
+            -configuration Debug \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath .buildIos \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build | xcbeautify
+
+      - name: Run Swift package tests
+        run: swift test
