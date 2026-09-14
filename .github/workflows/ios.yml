@@ -25,11 +25,20 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app || sudo xcode-select -s /Applications/Xcode_16.app || true
+
       - name: Install tools
         run: brew install xcbeautify xcodegen
 
       - name: Generate Xcode project
         run: ./scripts/genxproj
+
+      - name: Resolve Package Dependencies
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project Silveran.xcodeproj \
+            -scheme "Silveran Reader (iOS)"
 
       - name: Build iOS target
         run: ./scripts/iosbuild
