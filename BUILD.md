@@ -124,8 +124,7 @@ xcodebuild -project Silveran.xcodeproj \
 - **Podcast playback**: feeds parse + show; episode playback via shared player is M2.
 - **Stats wiring**: tracker records sessions locally but isn't yet fed by the Silveran
   player/reader events (M2).
-- **Home Continue hero + sync chip** driven by real progress: currently static
-  placeholder — wire to Storyteller progress after mini-player + Shelf land.
+- **Home Continue hero + sync chip** driven by real progress: wired dynamically to MediaViewModel / LastOpenBookStore.
 
 ## Troubleshooting
 
