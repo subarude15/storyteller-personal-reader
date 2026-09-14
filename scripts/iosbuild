@@ -15,4 +15,4 @@ xcodebuild -project Silveran.xcodeproj \
     -scheme "Silveran Reader (iOS)" \
     -configuration Debug \
     -destination "${DESTINATION}" \
-    -derivedDataPath .buildIos "${XCODEBUILD_OPTIONS[@]}" | xcbeautify
+    -derivedDataPath .buildIos "${XCODEBUILD_OPTIONS[@]}" OTHER_SWIFT_FLAGS="-Xfrontend -solver-expression-time-threshold=500" | xcbeautify

@@ -26,7 +26,7 @@ targetTemplates:
         GENERATE_INFOPLIST_FILE: NO
         MARKETING_VERSION: 0.1
         PRODUCT_NAME: Silveran Reader
-        SWIFT_VERSION: 6.0
+        SWIFT_VERSION: 6.2
 
 targets:
   Silveran Reader (macOS):
@@ -174,7 +174,7 @@ targets:
         MARKETING_VERSION: 0.1
         PRODUCT_BUNDLE_IDENTIFIER: "$(APP_BUNDLE_ID).widgets"
         PRODUCT_NAME: Silveran Reader Widgets
-        SWIFT_VERSION: 6.0
+        SWIFT_VERSION: 6.2
     info:
       path: XCodeApps/Info-Widgets-iOS.plist
       properties:
@@ -212,7 +212,7 @@ targets:
         MARKETING_VERSION: 0.1
         PRODUCT_BUNDLE_IDENTIFIER: "$(APP_BUNDLE_ID).widgets"
         PRODUCT_NAME: Silveran Reader Widgets
-        SWIFT_VERSION: 6.0
+        SWIFT_VERSION: 6.2
     info:
       path: XCodeApps/Info-Widgets-macOS.plist
       properties:
@@ -328,7 +328,6 @@ schemes:
       targets:
         "Silveran Reader (iOS)": all
         "Silveran Reader Widgets (iOS)": all
-        "Silveran Reader (watchOS)": all
     run:
       config: Debug
       executable: "Silveran Reader (iOS)"

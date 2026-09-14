@@ -25,8 +25,8 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Select Xcode 16.4
-        run: sudo xcode-select -s /Applications/Xcode_16.4.app || sudo xcode-select -s /Applications/Xcode_16.app || true
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app || sudo xcode-select -s /Applications/Xcode_26.app || sudo xcode-select -s /Applications/Xcode.app || true
 
       - name: Install tools
         run: brew install xcbeautify xcodegen

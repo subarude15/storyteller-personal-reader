@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
@@ -7,7 +7,7 @@ let package = Package(
         .macOS(.v15),
         .iOS(.v18),
         .watchOS(.v10),
-        .tvOS(.v17)
+        .tvOS(.v17),
     ],
     products: [
         .library(name: "SilveranKit", targets: ["SilveranKit"]),
@@ -15,7 +15,7 @@ let package = Package(
         .library(name: "SilveranContentServer", targets: ["SilveranContentServer"]),
         .library(name: "SilveranAppleWidgets", targets: ["SilveranAppleWidgets"]),
         .library(name: "SilveranReadaloud", targets: ["SilveranReadaloud"]),
-        .library(name: "SilveranNode", type: .dynamic, targets: ["SilveranNode"])
+        .library(name: "SilveranNode", type: .dynamic, targets: ["SilveranNode"]),
     ],
     dependencies: [
         // Fork pinned past 0.9.20: upstream's development branch gained Android
@@ -28,7 +28,7 @@ let package = Package(
         .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.7.0"),
         .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.0.0"),
         .package(url: "https://github.com/kabiroberai/node-swift.git", from: "1.5.2"),
-        .package(url: "https://github.com/kyonifer/StoryAlign.git", "1.2.0"..<"1.2.4")
+        .package(url: "https://github.com/kyonifer/StoryAlign.git", from: "1.2.4"),
     ],
     targets: [
         .target(

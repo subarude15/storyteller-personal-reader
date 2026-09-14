@@ -55,11 +55,14 @@ the punk+rally Theme + PunkRallyModules source directories.
 # List available destinations
 xcodebuild -project Silveran.xcodeproj -scheme "Silveran Reader (iOS)" -showdestinations
 
-# Build
+# Build via script (includes code signing disable and simulator flags)
+./scripts/iosbuild
+
+# Or directly with xcodebuild:
 xcodebuild -project Silveran.xcodeproj \
   -scheme "Silveran Reader (iOS)" \
   -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
-  -configuration Debug build
+  -configuration Debug CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
 ```
 
 > If the scheme name differs (older fork), check `xcodebuild -list`.

@@ -42,8 +42,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/kyonifer/StoryAlign.git",
       "state" : {
-        "revision" : "aa4f268297b76a084c71e89ce0d740c0f7358249",
-        "version" : "1.2.3"
+        "revision" : "291897191cbdb69dbba163c976a3bcc50aa27ca0",
+        "version" : "1.2.4"
       }
     },
     {
