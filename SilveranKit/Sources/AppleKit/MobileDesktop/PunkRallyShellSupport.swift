@@ -3,9 +3,9 @@
 //  SilveranAppleKit
 //
 //  punk+rally host-app facades: public SwiftUI views over internal Silveran
-//  surfaces (mini-player bar, downloads shelf, library grid) so the five-tab
-//  host shell in the app target can compose them without reaching into
-//  module-internal types.
+//  surfaces (mini-player bar, downloads shelf, library grid, Home continue/sync)
+//  so the five-tab host shell in the app target can compose them without
+//  reaching into module-internal types.
 //
 
 #if os(iOS)
@@ -77,6 +77,32 @@ public struct PunkRallyLibraryView: View {
                     showSettings: $showSettings,
                     showOfflineSheet: $showOfflineSheet
                 )
+        }
+    }
+}
+
+/// Host-accessible continue action: opens the book last opened or currently in progress.
+@MainActor
+public enum PunkRallyContinueAction {
+    public static func openLastOrCurrentBook(mediaViewModel: MediaViewModel) {
+        if let pending = mediaViewModel.pendingOpenBookID,
+           let book = mediaViewModel.library.bookMetaData.first(where: { $0.id == pending }) {
+            let category = mediaViewModel.preferredDownloadedCategory(for: book) ?? (book.hasAvailableAudiobook ? .audio : .synced)
+            Task {
+                let data = await mediaViewModel.makePlayerBookDataLoadingCovers(for: book, category: category)
+                PlayerPresenter.shared.present(data)
+            }
+            return
+        }
+
+        Task {
+            if let bookData = await LastOpenBookStore.loadPlayerBookData() {
+                PlayerPresenter.shared.present(bookData)
+            } else if let firstBook = mediaViewModel.library.bookMetaData.first {
+                let category = mediaViewModel.preferredDownloadedCategory(for: firstBook) ?? (firstBook.hasAvailableAudiobook ? .audio : .synced)
+                let data = await mediaViewModel.makePlayerBookDataLoadingCovers(for: firstBook, category: category)
+                PlayerPresenter.shared.present(data)
+            }
         }
     }
 }
