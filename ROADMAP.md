@@ -23,7 +23,9 @@ Changing formats must never feel like switching between unrelated media items.
 - Prefer new personal-reader feature boundaries over invasive edits to upstream Silveran files.
 - Keep the fork easy to update from `kyonifer/silveran-reader`.
 
-## PR001 — Foundation & upstream safety
+## ✅ PR001 — Foundation & upstream safety
+
+Completed and merged.
 
 - Document product architecture and protected Silveran boundaries.
 - Document upstream synchronization workflow.
@@ -31,13 +33,23 @@ Changing formats must never feel like switching between unrelated media items.
 - Add progress-model regression tests that establish core progress semantics before UI work begins.
 - No intentional runtime UX changes.
 
-## PR002 — Personal app shell
+## 🚧 PR002 — Personal app shell
+
+In progress.
 
 Introduce the iPhone/iPad shell with primary navigation:
 
 **Home · Library · Podcasts · Journal**
 
 Settings remains secondary. Add a persistent mini-player presentation that can later represent either book or podcast playback while leaving Silveran's reader/player engines intact.
+
+Implementation notes:
+
+- New Personal Reader shell lives alongside the upstream Silveran iOS shell.
+- iOS entry point routes through the Personal Reader shell.
+- Home and Library reuse Silveran views/data directly.
+- Podcasts and Journal begin as explicit placeholders for their later feature PRs.
+- Existing Silveran ebook/audiobook players, restore behavior, background progress sync, deep links, and mini-player remain in use.
 
 ## PR003 — Home & library redesign
 
