@@ -93,8 +93,14 @@ private struct HomeTabView: View {
 
     private var syncState: SyncChipView.SyncState {
         guard let vm = mediaViewModel else { return .synced }
-        if vm.hasConnectionError {
-            let offlineCount = vm.library.bookMetaData.filter { $0.isDownloaded }.count
+        if vm.hasServerConnectionIssue {
+            let offlineCount = vm.library.bookMetaData.filter { item in
+                let hasDownload =
+                    vm.isCategoryDownloaded(.ebook, for: item)
+                    || vm.isCategoryDownloaded(.audio, for: item)
+                    || vm.isCategoryDownloaded(.synced, for: item)
+                return hasDownload && !vm.isLocalStandaloneBook(item.id)
+            }.count
             return .offline(count: offlineCount)
         }
         return .synced
@@ -150,7 +156,7 @@ private struct HomeTabView: View {
                             .font(.headline)
                             .foregroundStyle(chrome.text)
                             .lineLimit(2)
-                        Text(currentBook?.authors.first ?? "Browse your library to pick up where you left off.")
+                        Text(currentBook?.authors?.first?.name ?? "Browse your library to pick up where you left off.")
                             .font(.subheadline)
                             .foregroundStyle(chrome.textMuted)
                             .lineLimit(1)
