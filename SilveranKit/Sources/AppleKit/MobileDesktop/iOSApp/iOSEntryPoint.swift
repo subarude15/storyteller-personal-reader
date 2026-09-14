@@ -7,6 +7,6 @@ import SwiftUI
 public func iosAppEntryPoint(environment: SilveranEnvironment = SilveranEnvironment()) {
     bootstrapApplePlatformDefaultsIfNeeded()
     AppLaunchContext.environment = environment
-    SilveranReaderApp.main()
+    PersonalReaderApp.main()
 }
 #endif
