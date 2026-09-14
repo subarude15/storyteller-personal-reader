@@ -18,6 +18,7 @@ xcodebuild -resolvePackageDependencies \
     -derivedDataPath .buildIos
 
 # Patch WordAligner in StoryAlign checkouts if present to avoid Swift 6.2 type-checking timeout
+chmod -R u+w .buildIos 2>/dev/null || true
 python3 -c '
 import glob, os
 paths = glob.glob("**/*WordAligner.swift", recursive=True) + \
@@ -25,6 +26,7 @@ paths = glob.glob("**/*WordAligner.swift", recursive=True) + \
         glob.glob(os.path.expanduser("~/Library/Developer/Xcode/DerivedData/**/WordAligner.swift"), recursive=True)
 for path in paths:
     try:
+        os.chmod(path, 0o644)
         with open(path, "r") as f:
             content = f.read()
         target = """        let idealTakes: [Double] = (0..<intervals).map { i in
