@@ -11,7 +11,7 @@ The files are Xcode-ready and verified structurally on the Windows dev box; comp
 ## Prerequisites
 
 - macOS on **Apple Silicon**
-- **Xcode 16+** (Swift 6.0+ compatible)
+- **Xcode 16+** (Swift 6.2 compatible)
 - Git
 - `xcodegen` for regenerating the project from `XCodeApps/project.yml`:
   ```bash
