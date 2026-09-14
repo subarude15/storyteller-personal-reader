@@ -14,7 +14,7 @@ import SwiftUI
 /// Stats tab — reading/listening time, streak, finished count, average session.
 struct StatsView: View {
     @Environment(\.colorScheme) private var colorScheme
-    private let tracker = SessionTracker.shared
+    @State private var tracker = SessionTracker.shared
 
     private var chrome: PunkRallyTheme.Chrome {
         PunkRallyTheme.Chrome(scheme: colorScheme)

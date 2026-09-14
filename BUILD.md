@@ -33,7 +33,7 @@ The project is a SwiftPM package with XcodeGen-defined app targets. Resolve firs
 ```bash
 xcodebuild -resolvePackageDependencies \
   -project Silveran.xcodeproj \
-  -scheme "punk+rally (iOS)"
+  -scheme "Silveran Reader (iOS)"
 ```
 
 ## 3. Generate the Xcode project (after xcodegen install)
@@ -53,11 +53,11 @@ the punk+rally Theme + PunkRallyModules source directories.
 
 ```bash
 # List available destinations
-xcodebuild -project Silveran.xcodeproj -scheme "punk+rally (iOS)" -showdestinations
+xcodebuild -project Silveran.xcodeproj -scheme "Silveran Reader (iOS)" -showdestinations
 
 # Build
 xcodebuild -project Silveran.xcodeproj \
-  -scheme "punk+rally (iOS)" \
+  -scheme "Silveran Reader (iOS)" \
   -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
   -configuration Debug build
 ```
@@ -72,7 +72,7 @@ and press Run. Or from CLI:
 ```bash
 xcrun simctl boot "iPhone 16"
 open -a Simulator
-xcodebuild -project Silveran.xcodeproj -scheme "punk+rally (iOS)" \
+xcodebuild -project Silveran.xcodeproj -scheme "Silveran Reader (iOS)" \
   -destination 'platform=iOS Simulator,name=iPhone 16' build
 ```
 
@@ -83,7 +83,7 @@ Requires your Apple Developer team + signing. Set `DEVELOPMENT_TEAM` (e.g. env v
 
 ```bash
 xcodebuild -project Silveran.xcodeproj \
-  -scheme "punk+rally (iOS)" \
+  -scheme "Silveran Reader (iOS)" \
   -destination 'generic/platform=iOS' \
   -configuration Debug build
 ```

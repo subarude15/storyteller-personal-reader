@@ -253,6 +253,7 @@ public struct SyncChipView: View {
         .padding(.vertical, 4)
         .background(color.opacity(0.12))
         .clipShape(Capsule())
+        .accessibilityLabel(Text(label))
     }
 }
 

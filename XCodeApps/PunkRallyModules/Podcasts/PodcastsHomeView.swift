@@ -190,6 +190,7 @@ struct PodcastShowRow: View {
             RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius)
                 .stroke(chrome.border, lineWidth: 1)
         )
+        .accessibilityLabel(Text("\(show.title), \(show.episodes.count) episodes"))
     }
 }
 
@@ -283,6 +284,7 @@ struct AddPodcastFeedView: View {
 
 struct PodcastShowView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
     let viewModel: PodcastsViewModel
     let show: PRPodcastShow
 
@@ -357,7 +359,7 @@ struct PodcastShowView: View {
                 }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") {
-                        // dismiss handled by sheet environment
+                        dismiss()
                     }
                 }
             }

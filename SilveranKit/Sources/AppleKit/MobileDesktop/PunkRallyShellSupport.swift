@@ -18,6 +18,7 @@ public struct PunkRallyMiniPlayerBar: View {
 
     public var body: some View {
         GlobalMiniPlayerBar()
+            .accessibilityLabel("Mini player")
     }
 }
 
