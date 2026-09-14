@@ -6,6 +6,11 @@
 //  Wraps Silveran's existing library/player content where available; keeps
 //  podcasts and stats as independent local rails.
 //
+//  Library/Shelf surfaces are hosted by SilveranAppleKit's public punk+rally
+//  facade (PunkRallyShellSupport.swift): Shelf is downloads-only; Library is a
+//  searchable cover grid (no nested Silveran tab chrome). A shared mini-player
+//  bar sits above the tab bar, driven by Silveran's audio session monitor.
+//
 
 #if os(iOS)
 import SwiftUI
@@ -31,50 +36,40 @@ public struct PunkRallyTabView: View {
     public var body: some View {
         TabView(selection: $selectedTab) {
             HomeTabView()
-                .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerBar }
                 .tabItem {
                     Label("Home", systemImage: "house.fill")
                 }
                 .tag(Tab.home)
 
             LibraryTabView()
-                .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerBar }
                 .tabItem {
                     Label("Library", systemImage: "books.vertical.fill")
                 }
                 .tag(Tab.library)
 
             ShelfTabView()
-                .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerBar }
                 .tabItem {
                     Label("Shelf", systemImage: "arrow.down.circle.fill")
                 }
                 .tag(Tab.shelf)
 
             PodcastsHomeView()
-                .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerBar }
                 .tabItem {
                     Label("Podcasts", systemImage: "mic.fill")
                 }
                 .tag(Tab.podcasts)
 
             StatsView()
-                .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerBar }
                 .tabItem {
                     Label("Stats", systemImage: "chart.bar.fill")
                 }
                 .tag(Tab.stats)
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            PunkRallyMiniPlayerBar()
+        }
         .tint(PunkRallyTheme.Accent.primary)
         .preferredColorScheme(nil) // follow system appearance
-    }
-
-    @ViewBuilder
-    private var miniPlayerBar: some View {
-        // Silveran's GlobalMiniPlayerBar is internal to SilveranAppleKit and not
-        // visible from this app target. A public surfacing is added in the next
-        // milestone; for M1 the mini-player is omitted so the shell always builds.
-        EmptyView()
     }
 }
 
@@ -199,56 +194,19 @@ private struct HomeTabView: View {
 
 // MARK: - Library
 
-/// Full punk+rally Library = Silveran's own library surface (Home/Books/Downloads/More).
-/// Silveran's iOSLibraryView is the public entry point for the complete catalogue.
+/// Library = searchable punk+rally catalogue (Silveran's full grid, no inner tab bar).
 private struct LibraryTabView: View {
     var body: some View {
-        iOSLibraryView()
+        PunkRallyLibraryView()
     }
 }
 
 // MARK: - Shelf
 
-/// Shelf = the downloads / offline surface. Reuses Silveran's library and, when the
-/// MediaViewModel is present, shows only downloaded items; otherwise a punk+rally
-/// empty state ("Nothing offline yet").
+/// Shelf = downloads-only surface ("Nothing offline yet" when empty).
 private struct ShelfTabView: View {
     var body: some View {
-        LibraryPlaceholderView(
-            title: "Shelf",
-            emptyMessage: "Nothing offline yet — grab titles from Library."
-        )
-    }
-}
-
-// MARK: - Placeholder
-
-struct LibraryPlaceholderView: View {
-    @Environment(\.colorScheme) private var colorScheme
-    let title: String
-    let emptyMessage: String
-
-    private var chrome: PunkRallyTheme.Chrome {
-        PunkRallyTheme.Chrome(scheme: colorScheme)
-    }
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "books.vertical")
-                .font(.system(size: 44))
-                .foregroundStyle(chrome.textFaint)
-            Text(title)
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(chrome.text)
-            Text(emptyMessage)
-                .font(.body)
-                .foregroundStyle(chrome.textMuted)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(chrome.bg)
-        .navigationTitle(title)
+        PunkRallyShelfView()
     }
 }
 

@@ -105,6 +105,13 @@ xcodebuild -project Silveran.xcodeproj \
 - **AppLaunchContext hook** — Silveran's iOS root now consults
   `AppLaunchContext.iosRootView`; `EntryPointStub` injects the tab shell.
 - **Theme tokens** — `XCodeApps/Theme/PunkRallyTokens.swift` (light+dark chrome per DESIGN.md).
+- **Shelf = downloads-only** — `SilveranKit/.../PunkRallyShellSupport.swift` exposes
+  `PunkRallyShelfView` (searchable `DownloadedContentView` grid) as a public facade;
+  the Shelf tab uses it (no full-library duplication).
+- **Mini-player bar** — same facade exposes `PunkRallyMiniPlayerBar` (wraps Silveran's
+  internal `GlobalMiniPlayerBar`); the shell pins it above the tab bar via `safeAreaInset`.
+- **Library without nested tabs** — `PunkRallyLibraryView` wraps Silveran's
+  `BooksContentView` grid with search + detail navigation (no inner tab bar).
 - **Fast Fonts** — 5 TTFs bundled via `SilveranKit/Sources/Kit/Resources/assets/fonts/`;
   default reader body `Fast Serif` via `kDefaultFontFamily`.
 - **Podcasts rail (AGPL)** — `XCodeApps/PunkRallyModules/Podcasts/` (RSS parser, store,
@@ -112,17 +119,13 @@ xcodebuild -project Silveran.xcodeproj \
 - **Stats (AGPL)** — `XCodeApps/PunkRallyModules/Stats/` (session tracker, models, view).
 - **AGPL notice** — `XCodeApps/AGPL_NOTICE.md` + SPDX headers on ported files.
 
-## Known M1 gaps (next milestone)
+## Known gaps (next milestone)
 
-- **Library/Shelf real coverage**: M1 wires the tab shell; the Library tab wraps
-  Silveran's `iOSLibraryView`. The Shelf tab shows a punk+rally "Nothing offline yet"
-  placeholder rather than a true downloads-only surface (Silveran's downloads view is
-  internal to SilveranAppleKit — a public surfacing is scheduled).
 - **Podcast playback**: feeds parse + show; episode playback via shared player is M2.
 - **Stats wiring**: tracker records sessions locally but isn't yet fed by the Silveran
   player/reader events (M2).
-- **Mini-player bar**: omitted in M1 because Silveran's `GlobalMiniPlayerBar` is
-  internal to AppleKit; a public surfacing is scheduled.
+- **Home Continue hero + sync chip** driven by real progress: currently static
+  placeholder — wire to Storyteller progress after mini-player + Shelf land.
 
 ## Troubleshooting
 
