@@ -2,9 +2,10 @@ name: punk+rally iOS build
 
 on:
   push:
-    branches: [punk-rally-ios]
+    branches: [punk-rally-ios, main, "cursor/**"]
   pull_request:
-    branches: [punk-rally-ios]
+    branches: [punk-rally-ios, main]
+  workflow_dispatch:
 
 concurrency:
   group: ios-${{ github.ref }}

@@ -77,9 +77,23 @@ public struct PunkRallyTabView: View {
 
 private struct HomeTabView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(MediaViewModel.self) private var mediaViewModel: MediaViewModel?
 
     private var chrome: PunkRallyTheme.Chrome {
         PunkRallyTheme.Chrome(scheme: colorScheme)
+    }
+
+    private var syncState: SyncChipView.SyncState {
+        guard let vm = mediaViewModel else {
+            return .synced
+        }
+        if vm.hasServerConnectionIssue {
+            return .offline(count: vm.downloadedCount)
+        }
+        if !vm.pendingSyncsByBook.isEmpty {
+            return .syncing
+        }
+        return .synced
     }
 
     var body: some View {
@@ -105,41 +119,65 @@ private struct HomeTabView: View {
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(chrome.text)
             Spacer()
-            SyncChipView(state: .synced, scheme: colorScheme)
+            SyncChipView(state: syncState, scheme: colorScheme)
         }
     }
 
     private var continueHero: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(chrome.surface2)
-                    .frame(width: 72, height: 108)
-                    .overlay(
-                        Image(systemName: "book.closed.fill")
-                            .foregroundStyle(chrome.textFaint)
-                    )
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Continue")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(PunkRallyTheme.Accent.primary)
-                    Text("No book in progress")
-                        .font(.headline)
-                        .foregroundStyle(chrome.text)
-                    Text("Browse your library to pick up where you left off.")
-                        .font(.subheadline)
-                        .foregroundStyle(chrome.textMuted)
-                }
-                Spacer()
+        Button {
+            if let vm = mediaViewModel {
+                PunkRallyContinueAction.openLastOrCurrentBook(mediaViewModel: vm)
             }
+        } label: {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(chrome.surface2)
+                        .frame(width: 72, height: 108)
+                        .overlay(
+                            Image(systemName: "book.closed.fill")
+                                .foregroundStyle(chrome.textFaint)
+                        )
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Continue")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(PunkRallyTheme.Accent.primary)
+                        Text(currentBookTitle)
+                            .font(.headline)
+                            .foregroundStyle(chrome.text)
+                            .lineLimit(1)
+                        Text(currentBookSubtitle)
+                            .font(.subheadline)
+                            .foregroundStyle(chrome.textMuted)
+                            .lineLimit(2)
+                    }
+                    Spacer()
+                }
+            }
+            .padding(PunkRallyTheme.Metric.cardPadding)
+            .background(chrome.surface)
+            .clipShape(RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius)
+                    .stroke(chrome.border, lineWidth: 1)
+            )
         }
-        .padding(PunkRallyTheme.Metric.cardPadding)
-        .background(chrome.surface)
-        .clipShape(RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius)
-                .stroke(chrome.border, lineWidth: 1)
-        )
+        .buttonStyle(.plain)
+    }
+
+    private var currentBookTitle: String {
+        if let first = mediaViewModel?.library.bookMetaData.first {
+            return first.title
+        }
+        return "No book in progress"
+    }
+
+    private var currentBookSubtitle: String {
+        if let first = mediaViewModel?.library.bookMetaData.first {
+            let author = first.authors?.first?.name ?? "Storyteller"
+            return "\(author) · Tap to continue"
+        }
+        return "Browse your library to pick up where you left off."
     }
 
     private var upNextRow: some View {
