@@ -1,5 +1,5 @@
 DEVELOPMENT_TEAM = 9CJ7KG7UKQ
-APP_BUNDLE_ID = com.kyonifer.SilveranReader
+APP_BUNDLE_ID = com.punkrally.reader
 WATCH_APP_BUNDLE_ID = $(APP_BUNDLE_ID).watchkitapp
 APP_GROUP_ID = group.$(APP_BUNDLE_ID)
 // macOS only auto-grants sandbox access to Team-ID-prefixed group containers;

@@ -93,7 +93,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: XCodeApps/SilveranReaderIos.entitlements
         CODE_SIGN_STYLE: Automatic
         INFOPLIST_FILE: XCodeApps/Info-iOS.plist
-        PRODUCT_BUNDLE_IDENTIFIER: "com.punkrally.reader"
+        PRODUCT_BUNDLE_IDENTIFIER: "$(APP_BUNDLE_ID)"
         #INFOPLIST_KEY_CFBundleDisplayName: Silveran Reader
         INFOPLIST_KEY_CFBundleDisplayName: "punk+rally"
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
