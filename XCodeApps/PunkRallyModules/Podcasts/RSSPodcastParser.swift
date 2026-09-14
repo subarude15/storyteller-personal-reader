@@ -142,8 +142,9 @@ public final class RSSPodcastParser: NSObject, XMLParserDelegate {
                 pendingEpisode?.link = text
             }
         case "guid":
-            if inItem, pendingEpisode != nil {
-                pendingEpisode?.guid = text.isEmpty ? pendingEpisode?.link ?? "" : text
+            if inItem, var episode = pendingEpisode {
+                episode.guid = text.isEmpty ? episode.link : text
+                pendingEpisode = episode
             }
         case "pubDate":
             if inItem, pendingEpisode != nil {
