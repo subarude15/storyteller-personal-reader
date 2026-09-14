@@ -185,7 +185,7 @@ public final class RSSPodcastParser: NSObject, XMLParserDelegate {
     // MARK: - Private
 
     private func finalizeEpisode() {
-        guard var ep = pendingEpisode else { return }
+        guard let ep = pendingEpisode else { return }
         defer { pendingEpisode = nil }
 
         // Standardize episode ID: GUID first, fall back to link, then title slug.

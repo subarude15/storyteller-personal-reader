@@ -168,9 +168,9 @@ struct StatsView: View {
         )
     }
 
-    private func barHeight(_ seconds: TimeInterval, max: TimeInterval) -> CGFloat {
-        guard max > 0 else { return 4 }
-        return max(4, 100 * seconds / max)
+    private func barHeight(_ seconds: TimeInterval, max maxVal: TimeInterval) -> CGFloat {
+        guard maxVal > 0 else { return 4 }
+        return Swift.max(4, 100 * seconds / maxVal)
     }
 
     private func barColor(for day: PRDailyAggregate) -> Color {

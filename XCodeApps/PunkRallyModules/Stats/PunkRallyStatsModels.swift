@@ -34,8 +34,8 @@ public struct PRMediaSession: Identifiable, Codable, Equatable, Sendable {
         mediaID: String,
         mediaTitle: String,
         startedAt: Date,
-        endedAt: Date,
-        durationSeconds: TimeInterval,
+        endedAt: Date = Date(),
+        durationSeconds: TimeInterval = 0,
         endProgress: Double? = nil
     ) {
         self.id = id
