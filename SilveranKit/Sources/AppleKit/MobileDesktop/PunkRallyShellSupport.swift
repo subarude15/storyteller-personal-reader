@@ -469,7 +469,7 @@ private struct PodcastShelfDownloadRow: View {
     private func adStripChipColor(_ state: PodcastAdStripState) -> Color {
         switch state {
             case .original: return .secondary
-            case .cleaning: return PunkRallyTheme.Accent.primary
+            case .cleaning: return .blue
             case .clean: return .green
         }
     }
