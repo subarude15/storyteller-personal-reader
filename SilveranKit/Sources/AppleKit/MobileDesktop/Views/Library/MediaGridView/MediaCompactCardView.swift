@@ -29,35 +29,59 @@ struct MediaCompactCardView: View {
     }
 
     private var availableMediaColor: Color { palette.mutedAccent }
-    #if os(iOS)
-    @Environment(\.mediaNavigationPath) private var mediaNavigationPath
-    @Environment(\.editMetadataAction) private var editMetadataAction
-    @State private var pendingDetailsNavigation = false
-    #endif
-
-    var body: some View {
         #if os(iOS)
-        if let playerData = preferredPlayerBookData {
-            Button {
-                PlayerPresenter.shared.present(playerData)
-            } label: {
-                cardContent
-            }
-            .buttonStyle(.plain)
-            .background(deferredNavigationLinks)
-            .contextMenu { iOSContextMenu }
-        } else {
-            NavigationLink(value: item) {
-                cardContent
-            }
-            .buttonStyle(.plain)
-            .background(deferredNavigationLinks)
-            .contextMenu { iOSContextMenu }
-        }
-        #else
-        cardContent
+        @Environment(\.mediaNavigationPath) private var mediaNavigationPath
+        @Environment(\.editMetadataAction) private var editMetadataAction
+        @Environment(\.mediaGridTapOpensPlayer) private var mediaGridTapOpensPlayer
+        @State private var pendingDetailsNavigation = false
         #endif
-    }
+
+        var body: some View {
+            #if os(iOS)
+            if mediaGridTapOpensPlayer {
+                // ink+amp: tapping a downloaded ebook/audiobook/readaloud opens it
+                // in the player/reader. The punk shell presents the card via its
+                // own fullScreenCover and toasts when the open fails.
+                Button {
+                    openForPlayback()
+                } label: {
+                    cardContent
+                }
+                .buttonStyle(.plain)
+                .background(deferredNavigationLinks)
+                .contextMenu { iOSContextMenu }
+            } else if let playerData = preferredPlayerBookData {
+                Button {
+                    PlayerPresenter.shared.present(playerData)
+                } label: {
+                    cardContent
+                }
+                .buttonStyle(.plain)
+                .background(deferredNavigationLinks)
+                .contextMenu { iOSContextMenu }
+            } else {
+                NavigationLink(value: item) {
+                    cardContent
+                }
+                .buttonStyle(.plain)
+                .background(deferredNavigationLinks)
+                .contextMenu { iOSContextMenu }
+            }
+            #else
+            cardContent
+            #endif
+        }
+
+        #if os(iOS)
+        private func openForPlayback() {
+            Task {
+                await PunkRallyPlayerHost.open(
+                    item,
+                    mediaViewModel: mediaViewModel
+                )
+            }
+        }
+        #endif
 
     private var isDoubleCover: Bool {
         coverPreference == .storytellerDouble

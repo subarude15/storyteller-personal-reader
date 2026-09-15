@@ -14,6 +14,106 @@ import SwiftUI
 
 extension Notification.Name {
     public static let punkRallyShowShelf = Notification.Name("punkRallyShowShelf")
+    public static let punkRallyOpenPlayer = Notification.Name("punkRallyOpenPlayer")
+    public static let punkRallyOpenPlayerFailed = Notification.Name("punkRallyOpenPlayerFailed")
+}
+
+/// Hosts the single full-screen player/reader card for the ink+amp five-tab
+/// shell. The default Silveran library view attaches the card itself
+/// (iOSLibraryView.fullScreenCover); the punk shell replaces that root, so it
+/// must present the card, replay the player view switch, and report failures
+/// that would otherwise swallow the tap.
+@MainActor
+public enum PunkRallyPlayerHost {
+    /// Opens a downloaded title in the player/reader. Posts a failure
+    /// notification ("Can't open yet · try again") when no playable category
+    /// is downloaded or the resolved local media is missing.
+    public static func open(
+        _ item: BookMetadata,
+        mediaViewModel: MediaViewModel?
+    ) async {
+        guard let mediaViewModel else {
+            postOpenFailure()
+            return
+        }
+        guard let category = mediaViewModel.preferredDownloadedCategory(for: item) else {
+            postOpenFailure()
+            return
+        }
+        guard
+            await BookServiceActor.shared.resolveLocalMedia(
+                for: item.id,
+                category: category
+            ) != nil
+        else {
+            postOpenFailure()
+            return
+        }
+        let bookData = mediaViewModel.makePlayerBookData(for: item, category: category)
+        PlayerPresenter.shared.present(bookData)
+    }
+
+    private static func postOpenFailure() {
+        NotificationCenter.default.post(name: .punkRallyOpenPlayerFailed, object: nil)
+    }
+
+    /// Replays Silveran's playerView(for:) switch: audiobook vs ebook/readaloud.
+    /// If the resolved local media path is missing, calls `onFailure` so the
+    /// shell can toast "Can't open yet · try again".
+    @ViewBuilder
+    public static func playerView(
+        for bookData: PlayerBookData,
+        onFailure: @escaping () -> Void
+    ) -> some View {
+        if !Self.isOpenable(bookData) {
+            // Path missing / not on disk: surface the failure toast immediately
+            // instead of presenting an empty player.
+            Color.clear
+                .onAppear { onFailure() }
+        } else {
+            switch bookData.category {
+                case .audio:
+                    AudiobookPlayerView(
+                        bookData: bookData,
+                        onClose: { PlayerPresenter.shared.dismissCard() }
+                    )
+                    .navigationBarTitleDisplayMode(.inline)
+                case .ebook, .synced:
+                    EbookPlayerView(
+                        bookData: bookData,
+                        onClose: { PlayerPresenter.shared.dismissCard() }
+                    )
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+        }
+    }
+
+    private static func isOpenable(_ bookData: PlayerBookData) -> Bool {
+        guard let path = bookData.localMediaPath else { return false }
+        let exists = FileManager.default.fileExists(atPath: path.path)
+        if !exists {
+            debugLog(
+                "[PunkRallyPlayerHost] local media missing at \(path.path) for \(bookData.metadata.id)"
+            )
+        }
+        return exists
+    }
+}
+
+/// Internal environment switch: when true, tapping a downloaded card in the
+/// hosting grid opens the player/reader directly (via PunkRallyPlayerHost.open)
+/// instead of navigating to the detail screen. The punk Library/Shelf surfaces
+/// set this so taps on downloaded ebook/audiobook/readaloud titles go straight
+/// to playback.
+private struct MediaGridTapOpensPlayerKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var mediaGridTapOpensPlayer: Bool {
+        get { self[MediaGridTapOpensPlayerKey.self] }
+        set { self[MediaGridTapOpensPlayerKey.self] = newValue }
+    }
 }
 
 /// Mini-player bar (audio/readaloud) that sits above the tab bar.
@@ -146,6 +246,7 @@ public struct PunkRallyShelfView: View {
     public var body: some View {
         NavigationStack {
             DownloadedContentView(searchText: searchText)
+                .environment(\.mediaGridTapOpensPlayer, true)
                 .iOSLibraryToolbar(
                     showSettings: $showSettings,
                     showOfflineSheet: $showOfflineSheet
@@ -180,6 +281,7 @@ public struct PunkRallyLibraryView: View {
     public var body: some View {
         NavigationStack {
             BooksContentView(searchText: searchText)
+                .environment(\.mediaGridTapOpensPlayer, true)
                 .iOSLibraryToolbar(
                     showSettings: $showSettings,
                     showOfflineSheet: $showOfflineSheet

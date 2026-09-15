@@ -86,58 +86,93 @@ struct MediaItemCardView: View {
     @State private var doubleCoverSwapping = false
     #endif
     #if os(iOS)
-    @Environment(\.mediaNavigationPath) private var mediaNavigationPath
-    @Environment(\.editMetadataAction) private var editMetadataAction
-    @State private var pendingDetailsNavigation = false
-    @State private var copyBookData: CopyBookData?
-    @State private var pendingFolderDelete: FolderDeleteRequest?
-    #endif
+        @Environment(\.mediaNavigationPath) private var mediaNavigationPath
+        @Environment(\.editMetadataAction) private var editMetadataAction
+        @Environment(\.mediaGridTapOpensPlayer) private var mediaGridTapOpensPlayer
+        @State private var pendingDetailsNavigation = false
+        @State private var copyBookData: CopyBookData?
+        @State private var pendingFolderDelete: FolderDeleteRequest?
+        #endif
 
-    var body: some View {
+        var body: some View {
+            #if os(iOS)
+            if mediaGridTapOpensPlayer {
+                // ink+amp: tapping a downloaded ebook/audiobook/readaloud opens it
+                // in the player/reader. The punk shell presents the card via its
+                // own fullScreenCover and toasts when the open fails.
+                Button {
+                    openForPlayback()
+                } label: {
+                    cardContent
+                }
+                .buttonStyle(.plain)
+                .background(deferredNavigationLinks)
+                .contextMenu { iOSCardContextMenu }
+                .sheet(item: $copyBookData) { copyBookSheet($0) }
+                .confirmationDialog(
+                    folderDeleteTitle,
+                    isPresented: folderDeletePresented,
+                    titleVisibility: .visible,
+                    presenting: pendingFolderDelete,
+                ) { request in
+                    Button("Delete", role: .destructive) { performFolderDelete(request) }
+                } message: { request in
+                    Text(folderDeleteMessage(request))
+                }
+            } else if let playerData = preferredPlayerBookData {
+                Button {
+                    PlayerPresenter.shared.present(playerData)
+                } label: {
+                    cardContent
+                }
+                .buttonStyle(.plain)
+                .background(deferredNavigationLinks)
+                .contextMenu { iOSCardContextMenu }
+                .sheet(item: $copyBookData) { copyBookSheet($0) }
+                .confirmationDialog(
+                    folderDeleteTitle,
+                    isPresented: folderDeletePresented,
+                    titleVisibility: .visible,
+                    presenting: pendingFolderDelete,
+                ) { request in
+                    Button("Delete", role: .destructive) { performFolderDelete(request) }
+                } message: { request in
+                    Text(folderDeleteMessage(request))
+                }
+            } else {
+                NavigationLink(value: item) {
+                    cardContent
+                }
+                .buttonStyle(.plain)
+                .background(deferredNavigationLinks)
+                .contextMenu { iOSCardContextMenu }
+                .sheet(item: $copyBookData) { copyBookSheet($0) }
+                .confirmationDialog(
+                    folderDeleteTitle,
+                    isPresented: folderDeletePresented,
+                    titleVisibility: .visible,
+                    presenting: pendingFolderDelete,
+                ) { request in
+                    Button("Delete", role: .destructive) { performFolderDelete(request) }
+                } message: { request in
+                    Text(folderDeleteMessage(request))
+                }
+            }
+            #else
+            cardContent
+            #endif
+        }
+
         #if os(iOS)
-        if let playerData = preferredPlayerBookData {
-            Button {
-                PlayerPresenter.shared.present(playerData)
-            } label: {
-                cardContent
-            }
-            .buttonStyle(.plain)
-            .background(deferredNavigationLinks)
-            .contextMenu { iOSCardContextMenu }
-            .sheet(item: $copyBookData) { copyBookSheet($0) }
-            .confirmationDialog(
-                folderDeleteTitle,
-                isPresented: folderDeletePresented,
-                titleVisibility: .visible,
-                presenting: pendingFolderDelete,
-            ) { request in
-                Button("Delete", role: .destructive) { performFolderDelete(request) }
-            } message: { request in
-                Text(folderDeleteMessage(request))
-            }
-        } else {
-            NavigationLink(value: item) {
-                cardContent
-            }
-            .buttonStyle(.plain)
-            .background(deferredNavigationLinks)
-            .contextMenu { iOSCardContextMenu }
-            .sheet(item: $copyBookData) { copyBookSheet($0) }
-            .confirmationDialog(
-                folderDeleteTitle,
-                isPresented: folderDeletePresented,
-                titleVisibility: .visible,
-                presenting: pendingFolderDelete,
-            ) { request in
-                Button("Delete", role: .destructive) { performFolderDelete(request) }
-            } message: { request in
-                Text(folderDeleteMessage(request))
+        private func openForPlayback() {
+            Task {
+                await PunkRallyPlayerHost.open(
+                    item,
+                    mediaViewModel: mediaViewModel
+                )
             }
         }
-        #else
-        cardContent
         #endif
-    }
 
     #if os(iOS)
     @ViewBuilder

@@ -22,6 +22,8 @@ import SilveranAppleKit
 public struct PunkRallyTabView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var selectedTab: Tab = .home
+    @State private var openFailureToastVisible = false
+    @State private var openFailureToastTask: Task<Void, Never>?
 
     public init() {}
 
@@ -34,47 +36,94 @@ public struct PunkRallyTabView: View {
     }
 
     public var body: some View {
-        TabView(selection: $selectedTab) {
-            HomeTabView()
-                .tabItem {
-                    Label("Home", systemImage: "house.fill")
-                }
-                .tag(Tab.home)
+        ZStack {
+            TabView(selection: $selectedTab) {
+                HomeTabView()
+                    .tabItem {
+                        Label("Home", systemImage: "house.fill")
+                    }
+                    .tag(Tab.home)
 
-            LibraryTabView()
-                .tabItem {
-                    Label("Library", systemImage: "books.vertical.fill")
-                }
-                .tag(Tab.library)
+                LibraryTabView()
+                    .tabItem {
+                        Label("Library", systemImage: "books.vertical.fill")
+                    }
+                    .tag(Tab.library)
 
-            ShelfTabView()
-                .tabItem {
-                    Label("Shelf", systemImage: "arrow.down.circle.fill")
-                }
-                .tag(Tab.shelf)
+                ShelfTabView()
+                    .tabItem {
+                        Label("Shelf", systemImage: "arrow.down.circle.fill")
+                    }
+                    .tag(Tab.shelf)
 
-            PodcastsHomeView()
-                .tabItem {
-                    Label("Podcasts", systemImage: "mic.fill")
-                }
-                .tag(Tab.podcasts)
+                PodcastsHomeView()
+                    .tabItem {
+                        Label("Podcasts", systemImage: "mic.fill")
+                    }
+                    .tag(Tab.podcasts)
 
-            StatsView()
-                .tabItem {
-                    Label("Stats", systemImage: "chart.bar.fill")
+                StatsView()
+                    .tabItem {
+                        Label("Stats", systemImage: "chart.bar.fill")
+                    }
+                    .tag(Tab.stats)
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                PunkRallyMiniPlayerBar()
+            }
+            .tint(PunkRallyTheme.Accent.primary)
+            .preferredColorScheme(nil) // follow system appearance
+            .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowShelf)) { _ in
+                selectedTab = .shelf
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .silveranShowLibrary)) { _ in
+                selectedTab = .library
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyOpenPlayerFailed)
+            ) { _ in
+                showOpenFailureToast()
+            }
+            .fullScreenCover(item: PlayerPresenter.shared.cardItemBinding) { wrapper in
+                NavigationStack {
+                    PunkRallyPlayerHost.playerView(
+                        for: wrapper.data,
+                        onFailure: showOpenFailureToast
+                    )
                 }
-                .tag(Tab.stats)
+            }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            PunkRallyMiniPlayerBar()
+        .overlay(alignment: .top) {
+            if openFailureToastVisible {
+                Label(
+                    "Can't open yet · try again",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(
+                    Capsule()
+                        .fill(Color.black.opacity(0.82))
+                )
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .accessibilityLabel("Can't open yet · try again")
+            }
         }
-        .tint(PunkRallyTheme.Accent.primary)
-        .preferredColorScheme(nil) // follow system appearance
-        .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowShelf)) { _ in
-            selectedTab = .shelf
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .silveranShowLibrary)) { _ in
-            selectedTab = .library
+        .animation(.easeInOut(duration: 0.2), value: openFailureToastVisible)
+    }
+
+    private func showOpenFailureToast() {
+        openFailureToastTask?.cancel()
+        openFailureToastVisible = true
+        openFailureToastTask = Task {
+            try? await Task.sleep(for: .seconds(2.5))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.2)) {
+                openFailureToastVisible = false
+            }
         }
     }
 }
