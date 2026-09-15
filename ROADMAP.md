@@ -23,7 +23,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
   3. Do **not** force strip on every manual download — only auto-strip intent on **queue add**.
   4. Stub the Clean path (hooks + chip states). Real strip worker (NAS / OmniRoute free-first) is **Later / engineering** — not this IPA.
 
-**Do not start queue play-next/play-last + reorder ahead of this v1 UX+stub cut.**
+**Do not start Josh UI stamps / queue reorder ahead of this v1 UX+stub cut.** Next after stub = Josh UI stamps (played+remaining text; slim mini-player), then queue.
 
 ---
 
@@ -64,11 +64,15 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-### After ad-strip UX
+### After ad-strip UX stub
 1. ~~Find shows~~ → **Shipped**
-2. ~~Ad-strip download / queue UX~~ → **Now**
-3. **Podcast queue** — play-next / play-last + reorder (after ad-strip UX)
-4. **Cross-device Stats sync** — shared store; footer → “Synced across your devices”; merge by day (no double-count)
+2. ~~Ad-strip download / queue UX (v1 stub)~~ → **Now** (Cursor building)
+3. **Josh UI stamps (polish follow-up)** — do right after ad-strip stub Sideload:
+   - Home Continue / Up next **and** Library cards: show **played time + remaining as text** (not only a bar) so finishability is obvious
+   - Mini-player: **REMOVE scrubber and −15/+15** (accidental hits while swiping tabs/menus). Keep cover + title + play/pause (+ close)
+   - Full Now Playing: **KEEP** scrub + −15/+15 + elapsed/remaining
+4. **Podcast queue** — play-next / play-last + reorder
+5. **Cross-device Stats sync** — shared store; footer → “Synced across your devices”; merge by day (no double-count)
 
 ### UX polish (anytime after ad-strip UX)
 - Separate **Couldn’t save server** copy (≠ “Connection failed”)
