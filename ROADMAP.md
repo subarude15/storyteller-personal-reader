@@ -17,12 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- Board quiet — wait for Josh before NAS `AD_STRIP_URL` / silence-trim / YouTube / other Later items.
+- **P0: Stats sync never pushes** — StorytellerCollection.description typeMismatch (dict vs String). Fix so Retry/auto sync can upload the .inkamp.stats.v1 blob. Tip base ≥ `fdb5560` (Retry cut). **Skip docs tip `7f995a5`** for Sideload smoke — install the next code tip after this board lock.
 
 **Do not start NAS `AD_STRIP_URL` / silence-trim / YouTube unless Josh reorders.**
-
----
-
 ## Shipped
 
 ### Product / sync
