@@ -99,6 +99,27 @@ struct StatsView: View {
         }
     }
 
+    private var statPods: [StatPod] {
+        let s = tracker.snapshot
+        return [
+            StatPod(value: "\(s.streakDays)", label: "Day streak",
+                    symbol: "flame.fill", tint: PunkRallyTheme.Accent.primary),
+            StatPod(value: "\(s.finishedBooks30d)", label: "Finished · 30d",
+                    symbol: "checkmark.seal.fill", tint: PunkRallyTheme.Accent.success),
+            StatPod(value: s.averageSessionSeconds == 0
+                    ? "–" : s.averageSessionSeconds.minutesShort,
+                    label: "Avg session", symbol: "timer", tint: PunkRallyTheme.Accent.gold),
+        ]
+    }
+
+    private struct StatPod: Identifiable {
+        let value: String
+        let label: String
+        let symbol: String
+        let tint: Color
+        var id: String { label }
+    }
+
     private func statTile(value: String, label: String, symbol: String, tint: Color) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Image(systemName: symbol)
