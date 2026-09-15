@@ -106,9 +106,6 @@ struct GlobalMiniPlayerBar: View {
     private var presenter = PlayerPresenter.shared
     private var podcastPresenter = PodcastPlayerPresenter.shared
 
-    @State private var scrubFraction: Double = 0
-    @State private var isScrubbing = false
-
     var body: some View {
         content
             .onAppear { monitor.start() }
@@ -128,54 +125,39 @@ struct GlobalMiniPlayerBar: View {
     }
 
     private func barContent(_ snapshot: AudioSessionSnapshot) -> some View {
-        let displayFraction = isScrubbing ? scrubFraction : snapshot.bookProgress
-        return VStack(spacing: 4) {
-            HStack(spacing: 10) {
-                coverThumb(for: snapshot)
-                    .contentShape(Rectangle())
-                    .onTapGesture { presenter.expandMiniPlayer() }
+        HStack(spacing: 10) {
+            coverThumb(for: snapshot)
+                .contentShape(Rectangle())
+                .onTapGesture { presenter.expandMiniPlayer() }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(snapshot.title ?? "Now Playing")
-                        .font(.subheadline.weight(.medium))
-                        .lineLimit(1)
-                        .contentShape(Rectangle())
-                        .onTapGesture { presenter.expandMiniPlayer() }
+            Text(snapshot.title ?? "Now Playing")
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture { presenter.expandMiniPlayer() }
 
-                    progressRow(snapshot: snapshot, fraction: displayFraction)
-                }
-
-                skipButton(systemName: "gobackward.15", label: "Back 15 seconds") {
-                    Task { await AudioSessionActor.shared.skipPlayback(by: -15) }
-                }
-
-                Button {
-                    Task { try? await AudioSessionActor.shared.transport(.togglePlayPause) }
-                } label: {
-                    Image(systemName: snapshot.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.title3)
-                        .frame(width: 36, height: 36)
-                        .background(Circle().fill(Color.primary.opacity(0.1)))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(snapshot.isPlaying ? "Pause" : "Play")
-
-                skipButton(systemName: "goforward.15", label: "Forward 15 seconds") {
-                    Task { await AudioSessionActor.shared.skipPlayback(by: 15) }
-                }
-
-                Button {
-                    presenter.stopSession()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 36)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Stop playback")
+            Button {
+                Task { try? await AudioSessionActor.shared.transport(.togglePlayPause) }
+            } label: {
+                Image(systemName: snapshot.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.title3)
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(Color.primary.opacity(0.1)))
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(snapshot.isPlaying ? "Pause" : "Play")
 
+            Button {
+                presenter.stopSession()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 36)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Stop playback")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -183,40 +165,6 @@ struct GlobalMiniPlayerBar: View {
         .padding(.horizontal, 8)
         .padding(.bottom, 4)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: snapshot.isPlaying)
-        .onChange(of: snapshot.bookProgress) { _, newValue in
-            if !isScrubbing { scrubFraction = newValue }
-        }
-        .onAppear { scrubFraction = snapshot.bookProgress }
-    }
-
-    private func progressRow(snapshot: AudioSessionSnapshot, fraction: Double) -> some View {
-        HStack(spacing: 6) {
-            Text(Self.formatClock(snapshot.elapsedSeconds))
-                .font(.system(size: 10, weight: .medium).monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(minWidth: 28, alignment: .leading)
-
-            Slider(
-                value: Binding(
-                    get: { fraction },
-                    set: { scrubFraction = $0 }
-                ),
-                in: 0...1
-            ) { editing in
-                isScrubbing = editing
-                if !editing {
-                    let target = scrubFraction
-                    Task { await AudioSessionActor.shared.seekPlayback(toFraction: target) }
-                }
-            }
-            .controlSize(.mini)
-
-            Text("−\(Self.formatClock(snapshot.remainingSeconds))")
-                .font(.system(size: 10, weight: .medium).monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(minWidth: 32, alignment: .trailing)
-        }
-        .frame(height: 18)
     }
 
     @ViewBuilder
@@ -244,18 +192,6 @@ struct GlobalMiniPlayerBar: View {
             case .podcast: return "mic.fill"
             case .audiobook, .readaloud: return "book.fill"
         }
-    }
-
-    private func skipButton(systemName: String, label: String, action: @escaping () -> Void)
-        -> some View
-    {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.body.weight(.semibold))
-                .frame(width: 28, height: 36)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
     }
 
     static func formatClock(_ seconds: TimeInterval) -> String {

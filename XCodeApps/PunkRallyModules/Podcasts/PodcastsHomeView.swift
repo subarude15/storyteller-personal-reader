@@ -346,9 +346,15 @@ struct PodcastShowView: View {
     let show: PRPodcastShow
 
     @State private var isSubscribed = false
+    @State private var episodeFilter: ShowEpisodeFilter = .all
+    @State private var downloadStore = PodcastDownloadStore.shared
 
     private var chrome: PunkRallyTheme.Chrome {
         PunkRallyTheme.Chrome(scheme: colorScheme)
+    }
+
+    private var filteredEpisodes: [PRPodcastEpisode] {
+        show.episodes.filter { episodeMatchesFilter($0) }
     }
 
     var body: some View {
@@ -381,14 +387,25 @@ struct PodcastShowView: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
+
+                    Picker("Filter", selection: $episodeFilter) {
+                        ForEach(ShowEpisodeFilter.allCases) { filter in
+                            Text(filter.title).tag(filter)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                 }
 
                 Section("Episodes") {
                     if show.episodes.isEmpty {
                         Text("No episodes yet — check back later.")
                             .foregroundStyle(.secondary)
+                    } else if filteredEpisodes.isEmpty {
+                        Text("No episodes match this filter.")
+                            .foregroundStyle(.secondary)
                     } else {
-                        ForEach(show.episodes) { episode in
+                        ForEach(filteredEpisodes) { episode in
                             EpisodeRow(
                                 episode: episode,
                                 chrome: chrome,
@@ -432,6 +449,53 @@ struct PodcastShowView: View {
             }
         }
     }
+
+    private func episodeMatchesFilter(_ episode: PRPodcastEpisode) -> Bool {
+        switch episodeFilter {
+            case .all:
+                return true
+            case .downloaded:
+                return downloadStore.isDownloaded(episode.id)
+            case .inProgress:
+                let progress = episodePlayProgress(episode.id, duration: episode.durationSeconds)
+                return progress > 0.01 && progress < 0.95
+            case .cleanPending:
+                guard let record = downloadStore.record(for: episode.id) else { return false }
+                return record.wantsClean && record.adStripState != .clean
+        }
+    }
+
+    private func episodePlayProgress(_ episodeID: String, duration: TimeInterval?) -> Double {
+        if let record = downloadStore.record(for: episodeID) {
+            if record.isFinished || record.progress >= 0.95 { return 1 }
+            if record.progress > 0 { return record.progress }
+        }
+        if let entry = PodcastPlayheadStore.shared.entry(for: episodeID) {
+            if let d = entry.durationSeconds ?? duration, d > 0 {
+                return min(max(entry.positionSeconds / d, 0), 1)
+            }
+            return entry.progress
+        }
+        return 0
+    }
+}
+
+private enum ShowEpisodeFilter: String, CaseIterable, Identifiable {
+    case all
+    case downloaded
+    case inProgress
+    case cleanPending
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+            case .all: return "All"
+            case .downloaded: return "Downloaded"
+            case .inProgress: return "In progress"
+            case .cleanPending: return "Clean pending"
+        }
+    }
 }
 
 struct EpisodeRow: View {
@@ -442,7 +506,6 @@ struct EpisodeRow: View {
 
     @State private var downloadStore = PodcastDownloadStore.shared
     @State private var showMediaPicker = false
-    @State private var showDownloadSheet = false
 
     private var isDownloaded: Bool {
         downloadStore.isDownloaded(episode.id)
@@ -454,6 +517,26 @@ struct EpisodeRow: View {
 
     private var adStripState: PodcastAdStripState? {
         downloadStore.adStripState(for: episode.id)
+    }
+
+    private var playProgress: Double {
+        if let record = downloadStore.record(for: episode.id) {
+            if record.isFinished { return 1 }
+            if record.progress > 0 { return record.progress }
+        }
+        if let entry = PodcastPlayheadStore.shared.entry(for: episode.id) {
+            if let d = entry.durationSeconds ?? episode.durationSeconds, d > 0 {
+                return min(max(entry.positionSeconds / d, 0), 1)
+            }
+            return entry.progress
+        }
+        return 0
+    }
+
+    private var durationForProgress: TimeInterval? {
+        downloadStore.record(for: episode.id)?.durationSeconds
+            ?? PodcastPlayheadStore.shared.entry(for: episode.id)?.durationSeconds
+            ?? episode.durationSeconds
     }
 
     var body: some View {
@@ -469,58 +552,12 @@ struct EpisodeRow: View {
                         .foregroundStyle(chrome.textMuted)
                         .lineLimit(2)
                 }
-                HStack(spacing: 8) {
-                    if episode.hasAudioAndVideo {
-                        Text("A|V")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(PunkRallyTheme.Accent.primary)
-                    }
-                    if let duration = episode.durationSeconds {
-                        Text(duration.formattedDuration)
-                            .font(.caption2)
-                            .foregroundStyle(chrome.textFaint)
-                    }
-                    if let publishedAt = episode.publishedAt {
-                        Text(publishedAt.formatted(date: .abbreviated, time: .omitted))
-                            .font(.caption2)
-                            .foregroundStyle(chrome.textFaint)
-                    }
-                    if isDownloaded || downloadStore.isCleaning(episode.id) {
-                        if let state = adStripState {
-                            Text(state.chipLabel)
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(adStripChipColor(state))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(adStripChipColor(state).opacity(0.14))
-                                .clipShape(Capsule())
-                        } else {
-                            Image(systemName: "arrow.down.circle.fill")
-                                .font(.caption2)
-                                .foregroundStyle(PunkRallyTheme.Accent.primary)
-                        }
-                    } else if downloadStore.isDownloading(episode.id) {
-                        Text("Downloading…")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(chrome.textMuted)
-                    }
-                    if isPinned {
-                        Image(systemName: "pin.fill")
-                            .font(.caption2)
-                            .foregroundStyle(chrome.textMuted)
-                    }
-                }
+                statusCluster
             }
-            Spacer()
-            Button {
-                requestPlay()
-            } label: {
-                Image(systemName: "play.circle")
-                    .font(.title3)
-                    .foregroundStyle(PunkRallyTheme.Accent.primary)
-            }
-            .buttonStyle(.plain)
+            Spacer(minLength: 0)
         }
+        .contentShape(Rectangle())
+        .onTapGesture { requestPlay() }
         .padding(.vertical, 6)
         .sheet(isPresented: $showMediaPicker) {
             PodcastAudioVideoPickerSheet(
@@ -535,63 +572,108 @@ struct EpisodeRow: View {
             )
             .presentationDetents([.height(280)])
         }
-        .sheet(isPresented: $showDownloadSheet) {
-            PodcastDownloadIntentSheet(
-                episodeTitle: episode.title,
-                preferred: PodcastDownloadPreferenceStore.shared.lastIntent(for: showFeedURL),
-                onSelect: { intent in
-                    showDownloadSheet = false
-                    startDownload(intent: intent)
-                },
-                onCancel: { showDownloadSheet = false }
-            )
-            .presentationDetents([.height(300)])
-        }
-        .contextMenu {
-            if episode.hasAudioAndVideo {
-                Button {
-                    viewModel.play(episode: episode, mediaKind: .audio, feedURL: showFeedURL)
-                } label: {
-                    Label("Play Audio", systemImage: "headphones")
-                }
-                Button {
-                    viewModel.play(episode: episode, mediaKind: .video, feedURL: showFeedURL)
-                } label: {
-                    Label("Play Video", systemImage: "play.rectangle")
-                }
+        .contextMenu { episodeContextMenu }
+    }
+
+    /// L→R: download glyph · Clean chip · played / Xm left.
+    private var statusCluster: some View {
+        HStack(spacing: 8) {
+            downloadGlyph
+
+            if isDownloaded || downloadStore.isCleaning(episode.id),
+                let state = adStripState
+            {
+                Text(state.chipLabel)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(adStripChipColor(state))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(adStripChipColor(state).opacity(0.14))
+                    .clipShape(Capsule())
             }
-            if episode.audioURL != nil {
-                if isDownloaded {
-                    Button {
-                        downloadStore.deleteDownload(episodeID: episode.id)
-                    } label: {
-                        Label("Remove Download", systemImage: "trash")
-                    }
-                } else if downloadStore.isDownloading(episode.id)
-                    || downloadStore.isCleaning(episode.id)
-                {
-                    Label(
-                        downloadStore.isCleaning(episode.id) ? "Cleaning…" : "Downloading…",
-                        systemImage: "arrow.down.circle"
-                    )
+
+            if let label = PlaybackFinishabilityCopy.label(
+                progress: playProgress,
+                durationSeconds: durationForProgress
+            ) {
+                if playProgress >= 0.95 {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(Color.green)
+                    Text(label)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Color.green)
                 } else {
-                    Button {
-                        showDownloadSheet = true
-                    } label: {
-                        Label("Download", systemImage: "arrow.down.circle")
-                    }
+                    Text("· \(label)")
+                        .font(.caption2)
+                        .foregroundStyle(chrome.textMuted)
                 }
             }
-            if isDownloaded || isPinned {
+
+            if episode.hasAudioAndVideo {
+                Text("A|V")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(PunkRallyTheme.Accent.primary)
+            }
+
+            if isPinned {
+                Image(systemName: "pin.fill")
+                    .font(.caption2)
+                    .foregroundStyle(chrome.textMuted)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var downloadGlyph: some View {
+        if downloadStore.isDownloading(episode.id) {
+            ProgressView()
+                .controlSize(.mini)
+        } else if isDownloaded {
+            Image(systemName: "arrow.down.circle.fill")
+                .font(.caption)
+                .foregroundStyle(PunkRallyTheme.Accent.primary)
+                .accessibilityLabel("On device")
+        } else if episode.audioURL != nil {
+            Image(systemName: "icloud")
+                .font(.caption)
+                .foregroundStyle(chrome.textFaint)
+                .accessibilityLabel("Not downloaded")
+        }
+    }
+
+    @ViewBuilder
+    private var episodeContextMenu: some View {
+        if episode.hasAudioAndVideo {
+            Button {
+                viewModel.play(episode: episode, mediaKind: .audio, feedURL: showFeedURL)
+            } label: {
+                Label("Play Audio", systemImage: "headphones")
+            }
+            Button {
+                viewModel.play(episode: episode, mediaKind: .video, feedURL: showFeedURL)
+            } label: {
+                Label("Play Video", systemImage: "play.rectangle")
+            }
+        }
+
+        if episode.audioURL != nil {
+            if downloadStore.isDownloading(episode.id) || downloadStore.isCleaning(episode.id) {
+                Label(
+                    downloadStore.isCleaning(episode.id) ? "Cleaning…" : "Downloading…",
+                    systemImage: "arrow.down.circle"
+                )
+            } else {
                 Button {
-                    downloadStore.setPinned(episode.id, pinned: !isPinned)
+                    startDownload(intent: .original)
                 } label: {
-                    Label(
-                        isPinned ? "Remove Keep" : "Keep",
-                        systemImage: isPinned ? "pin.slash" : "pin"
-                    )
+                    Label("Download now", systemImage: "arrow.down.circle")
                 }
-            } else if episode.audioURL != nil {
+                Button {
+                    startDownload(intent: .clean)
+                } label: {
+                    Label("Strip ads, then download", systemImage: "wand.and.stars")
+                }
                 Button {
                     downloadStore.keepEpisode(
                         episodeID: episode.id,
@@ -602,8 +684,24 @@ struct EpisodeRow: View {
                         durationSeconds: episode.durationSeconds
                     )
                 } label: {
-                    Label("Keep", systemImage: "pin")
+                    Label("Queue", systemImage: "text.badge.plus")
                 }
+            }
+
+            if isDownloaded {
+                Button(role: .destructive) {
+                    downloadStore.deleteDownload(episodeID: episode.id)
+                } label: {
+                    Label("Remove download", systemImage: "trash")
+                }
+            }
+        }
+
+        if isPinned {
+            Button {
+                downloadStore.setPinned(episode.id, pinned: false)
+            } label: {
+                Label("Remove Keep", systemImage: "pin.slash")
             }
         }
     }
@@ -613,6 +711,7 @@ struct EpisodeRow: View {
             case .original: return chrome.textMuted
             case .cleaning: return PunkRallyTheme.Accent.primary
             case .clean: return Color.green
+            case .failed: return Color.orange
         }
     }
 

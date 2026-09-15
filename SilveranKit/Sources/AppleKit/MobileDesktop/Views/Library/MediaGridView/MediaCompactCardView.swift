@@ -1,5 +1,6 @@
 #if os(iOS) || os(macOS)
 import SwiftUI
+import SilveranKit
 
 struct MediaCompactCardView: View {
     let item: BookMetadata
@@ -160,11 +161,14 @@ struct MediaCompactCardView: View {
                         )
                         .padding(.trailing, 3)
                         .padding(.bottom, 3)
-                    } else if progressStyle == .text {
-                        ProgressTextBadge(progress: progress)
-                            .padding(.trailing, 3)
-                            .padding(.bottom, 3)
                     }
+                    // Always show finishability text so Library cards are not bar-only.
+                    ProgressTextBadge(
+                        progress: progress,
+                        durationSeconds: item.durationValue
+                    )
+                    .padding(.trailing, progressStyle == .circle && !shouldRenderDoubleCover ? 22 : 3)
+                    .padding(.bottom, 3)
                 }
             }
             .overlay(alignment: .bottomLeading) {

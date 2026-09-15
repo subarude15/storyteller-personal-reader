@@ -114,9 +114,11 @@ public final class PodcastDownloadStore {
             records[index].isPinned = true
             persistLedger()
             // Already on disk: if Original only, kick stub Clean so Keep matches queue UX.
-            if records[index].adStripState == .original,
+            if records[index].adStripState != .clean,
                 FileManager.default.fileExists(atPath: originalURL(for: records[index]).path)
             {
+                records[index].wantsClean = true
+                persistLedger()
                 Task { await runCleanPipeline(episodeID: episodeID) }
             }
             return
@@ -187,9 +189,11 @@ public final class PodcastDownloadStore {
         guard downloadTasks[episodeID] == nil else { return }
         if isDownloaded(episodeID) {
             if intent == .clean,
-                let record = record(for: episodeID),
-                record.adStripState != .clean
+                let index = records.firstIndex(where: { $0.episodeID == episodeID }),
+                records[index].adStripState != .clean
             {
+                records[index].wantsClean = true
+                persistLedger()
                 Task { await runCleanPipeline(episodeID: episodeID) }
             }
             return
@@ -307,7 +311,8 @@ public final class PodcastDownloadStore {
                 isPinned: pendingPins.contains(episodeID),
                 byteSize: size,
                 adStripState: .original,
-                cleanLocalFileName: nil
+                cleanLocalFileName: nil,
+                wantsClean: intent == .clean
             )
             if let index = records.firstIndex(where: { $0.episodeID == episodeID }) {
                 var merged = record
@@ -317,7 +322,13 @@ public final class PodcastDownloadStore {
                 merged.isFinished = records[index].isFinished
                 // Preserve an existing Clean sibling if re-downloading Original.
                 merged.cleanLocalFileName = records[index].cleanLocalFileName
-                merged.adStripState = records[index].adStripState == .clean ? .clean : .original
+                if records[index].adStripState == .clean {
+                    merged.adStripState = .clean
+                    merged.wantsClean = true
+                } else {
+                    merged.adStripState = .original
+                    merged.wantsClean = intent == .clean || records[index].wantsClean
+                }
                 records[index] = merged
             } else {
                 records.append(record)
@@ -333,13 +344,14 @@ public final class PodcastDownloadStore {
     }
 
     /// Stub Clean path: Cleaning… → copy Original to `audio.clean.*` → Clean.
-    /// On failure/timeout: chip stays Original; Original file remains playable.
+    /// On failure/timeout: chip → Clean failed; Original file remains playable.
     private func runCleanPipeline(episodeID: String) async {
         guard let index = records.firstIndex(where: { $0.episodeID == episodeID }) else { return }
         let record = records[index]
         let original = originalURL(for: record)
         guard FileManager.default.fileExists(atPath: original.path) else { return }
 
+        records[index].wantsClean = true
         records[index].adStripState = .cleaning
         persistLedger()
 
@@ -355,7 +367,7 @@ public final class PodcastDownloadStore {
             guard !Task.isCancelled else {
                 try? FileManager.default.removeItem(at: cleanURL)
                 if let i = records.firstIndex(where: { $0.episodeID == episodeID }) {
-                    records[i].adStripState = .original
+                    records[i].adStripState = .failed
                     persistLedger()
                 }
                 return
@@ -369,7 +381,7 @@ public final class PodcastDownloadStore {
             debugLog("[PodcastDownloadStore] clean stub failed for \(episodeID): \(error)")
             try? FileManager.default.removeItem(at: cleanURL)
             if let i = records.firstIndex(where: { $0.episodeID == episodeID }) {
-                records[i].adStripState = .original
+                records[i].adStripState = .failed
                 records[i].cleanLocalFileName = nil
                 persistLedger()
             }

@@ -413,9 +413,10 @@ private struct HomeTabView: View {
                         .font(.subheadline)
                         .foregroundStyle(chrome.textMuted)
                         .lineLimit(1)
-                        if let item, item.progress > 0 {
-                            ProgressView(value: item.progress)
-                                .tint(PunkRallyTheme.Accent.primary)
+                        if let item, let label = item.finishabilityLabel {
+                            Text(label)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(PunkRallyTheme.Accent.primary)
                         }
                     }
                     Spacer(minLength: 0)
@@ -463,6 +464,12 @@ private struct HomeTabView: View {
                                         .foregroundStyle(chrome.text)
                                         .lineLimit(2)
                                         .frame(width: 96, alignment: .leading)
+                                    if let label = item.finishabilityLabel {
+                                        Text(label)
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(chrome.textMuted)
+                                            .frame(width: 96, alignment: .leading)
+                                    }
                                 }
                             }
                             .buttonStyle(.plain)

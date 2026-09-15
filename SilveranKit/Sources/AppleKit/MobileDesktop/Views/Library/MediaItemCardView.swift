@@ -1,5 +1,6 @@
 #if os(iOS) || os(macOS)
 import SwiftUI
+import SilveranKit
 
 #if os(iOS)
 private struct MediaNavigationPathKey: EnvironmentKey {
@@ -545,8 +546,6 @@ struct MediaItemCardView: View {
                     .overlay(alignment: .bottomTrailing) {
                         let progress = mediaViewModel.progress(for: item.id)
                         if progress > 0 {
-                            // Circle progress lives in the bottom notch for double covers; over a
-                            // single cover it gets a dark backing disc for contrast.
                             if progressStyle == .circle && !shouldRenderDoubleCover {
                                 CoverThemedProgressBadge(
                                     item: item,
@@ -555,11 +554,16 @@ struct MediaItemCardView: View {
                                 )
                                 .padding(.trailing, 4)
                                 .padding(.bottom, 4)
-                            } else if progressStyle == .text {
-                                ProgressTextBadge(progress: progress)
-                                    .padding(.trailing, 4)
-                                    .padding(.bottom, 4)
                             }
+                            ProgressTextBadge(
+                                progress: progress,
+                                durationSeconds: item.durationValue
+                            )
+                            .padding(
+                                .trailing,
+                                progressStyle == .circle && !shouldRenderDoubleCover ? 24 : 4
+                            )
+                            .padding(.bottom, 4)
                         }
                     }
                     .overlay(alignment: .topLeading) {
@@ -808,10 +812,13 @@ struct CoverThemedProgressBadge: View {
 
 struct ProgressTextBadge: View {
     let progress: Double
+    var durationSeconds: TimeInterval? = nil
 
     var body: some View {
-        let clamped = min(max(progress, 0), 1)
-        Text("\(Int((clamped * 100).rounded()))%")
+        let text =
+            PlaybackFinishabilityCopy.label(progress: progress, durationSeconds: durationSeconds)
+            ?? "\(Int((min(max(progress, 0), 1) * 100).rounded()))%"
+        Text(text)
             .font(.system(size: 11, weight: .bold))
             .foregroundStyle(.white)
             .padding(.horizontal, 6)

@@ -422,11 +422,20 @@ private struct PodcastShelfDownloadRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Image(systemName: "mic.fill")
-                .foregroundStyle(.secondary)
-                .frame(width: 56, height: 56)
-                .background(Color.secondary.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+            ZStack(alignment: .bottomTrailing) {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.secondary.opacity(0.12))
+                    .frame(width: 72, height: 72)
+                    .overlay(
+                        Image(systemName: "mic.fill")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                    )
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.blue)
+                    .padding(4)
+            }
             Text(record.title)
                 .font(.caption.weight(.medium))
                 .lineLimit(2)
@@ -435,16 +444,25 @@ private struct PodcastShelfDownloadRow: View {
                 Text("POD")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.blue)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Color.blue.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 Text(record.adStripState.chipLabel)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(adStripChipColor(record.adStripState))
-                if record.isPinned {
-                    Image(systemName: "pin.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+            }
+            if let label = PlaybackFinishabilityCopy.label(
+                progress: record.progress,
+                durationSeconds: record.durationSeconds
+            ) {
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 88, alignment: .leading)
             }
         }
+        .frame(width: 88, alignment: .leading)
         .contentShape(Rectangle())
         .onTapGesture {
             play(record)
@@ -471,6 +489,7 @@ private struct PodcastShelfDownloadRow: View {
             case .original: return .secondary
             case .cleaning: return .blue
             case .clean: return .green
+            case .failed: return .orange
         }
     }
 

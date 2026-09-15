@@ -53,6 +53,20 @@ public enum HomeMixedItem: Identifiable, Equatable, Sendable {
         }
     }
 
+    /// Duration for finishability copy (audiobook/readaloud/ebook duration or podcast length).
+    public var durationSeconds: TimeInterval? {
+        switch self {
+            case .book(let book, _, _, _):
+                return book.durationValue
+            case .podcast(let entry):
+                return entry.durationSeconds
+        }
+    }
+
+    public var finishabilityLabel: String? {
+        PlaybackFinishabilityCopy.label(progress: progress, durationSeconds: durationSeconds)
+    }
+
     public var badge: PunkRallyTheme.KindBadgeType {
         switch self {
             case .book(_, _, _, let badge): return badge

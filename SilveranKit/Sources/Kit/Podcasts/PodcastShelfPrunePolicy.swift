@@ -68,10 +68,12 @@ public struct PodcastDownloadRecord: Identifiable, Codable, Equatable, Sendable 
     public var isFinished: Bool
     public var isPinned: Bool
     public var byteSize: Int64?
-    /// Ad-strip UX chip: Original / Cleaning… / Clean.
+    /// Ad-strip UX chip: Original / Cleaning… / Clean / Clean failed.
     public var adStripState: PodcastAdStripState
     /// Sibling Clean file under the same episode folder (e.g. `audio.clean.mp3`).
     public var cleanLocalFileName: String?
+    /// True when the user (or Keep/queue) asked for the Clean path — drives Clean pending filter.
+    public var wantsClean: Bool
 
     public init(
         episodeID: String,
@@ -88,7 +90,8 @@ public struct PodcastDownloadRecord: Identifiable, Codable, Equatable, Sendable 
         isPinned: Bool = false,
         byteSize: Int64? = nil,
         adStripState: PodcastAdStripState = .original,
-        cleanLocalFileName: String? = nil
+        cleanLocalFileName: String? = nil,
+        wantsClean: Bool = false
     ) {
         self.episodeID = episodeID
         self.title = title
@@ -105,6 +108,7 @@ public struct PodcastDownloadRecord: Identifiable, Codable, Equatable, Sendable 
         self.byteSize = byteSize
         self.adStripState = adStripState
         self.cleanLocalFileName = cleanLocalFileName
+        self.wantsClean = wantsClean
     }
 
     public var progress: Double {
@@ -121,7 +125,7 @@ public struct PodcastDownloadRecord: Identifiable, Codable, Equatable, Sendable 
     enum CodingKeys: String, CodingKey {
         case episodeID, title, showTitle, feedURL, remoteAudioURL, localFileName
         case downloadedAt, lastPlayedAt, durationSeconds, positionSeconds
-        case isFinished, isPinned, byteSize, adStripState, cleanLocalFileName
+        case isFinished, isPinned, byteSize, adStripState, cleanLocalFileName, wantsClean
     }
 
     public init(from decoder: Decoder) throws {
@@ -141,6 +145,7 @@ public struct PodcastDownloadRecord: Identifiable, Codable, Equatable, Sendable 
         byteSize = try c.decodeIfPresent(Int64.self, forKey: .byteSize)
         adStripState = try c.decodeIfPresent(PodcastAdStripState.self, forKey: .adStripState) ?? .original
         cleanLocalFileName = try c.decodeIfPresent(String.self, forKey: .cleanLocalFileName)
+        wantsClean = try c.decodeIfPresent(Bool.self, forKey: .wantsClean) ?? false
     }
 }
 
@@ -149,12 +154,21 @@ public enum PodcastAdStripState: String, Codable, Sendable, Equatable {
     case original
     case cleaning
     case clean
+    case failed
 
     public var chipLabel: String {
         switch self {
             case .original: return "Original"
             case .cleaning: return "Cleaning…"
             case .clean: return "Clean"
+            case .failed: return "Clean failed"
+        }
+    }
+
+    /// Show the Clean-path chip whenever we have an on-disk Original or an active strip.
+    public var showsChip: Bool {
+        switch self {
+            case .original, .cleaning, .clean, .failed: return true
         }
     }
 }
@@ -165,6 +179,32 @@ public enum PodcastDownloadIntent: String, Codable, Sendable, Equatable {
     case original
     /// “Strip ads, then download” or queue/Keep add — Clean pending after Original lands.
     case clean
+}
+
+/// Compact finishability copy for Home / Library / episode rows (“12m left”, “Played”).
+public enum PlaybackFinishabilityCopy {
+    /// ≥95% → “Played”; else duration-based “Xm left” or percent when duration unknown.
+    public static func label(progress: Double, durationSeconds: TimeInterval?) -> String? {
+        guard progress > 0.001 else { return nil }
+        if progress >= 0.95 { return "Played" }
+        if let durationSeconds, durationSeconds > 0 {
+            let left = max(0, durationSeconds * (1 - min(max(progress, 0), 1)))
+            return "\(compactDuration(left)) left"
+        }
+        let pct = Int((min(max(progress, 0), 1) * 100).rounded())
+        return "\(pct)%"
+    }
+
+    public static func compactDuration(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds.rounded()))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        if hours > 0 {
+            return minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
+        }
+        if minutes > 0 { return "\(minutes)m" }
+        return "<1m"
+    }
 }
 
 public enum PodcastPruneReason: String, Sendable, Equatable {
