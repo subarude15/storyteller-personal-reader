@@ -59,7 +59,10 @@ struct PodcastsHomeView: View {
             .sheet(isPresented: $showFindShows) {
                 FindPodcastShowsView(viewModel: viewModel) {
                     showFindShows = false
-                    showAddFeed = true
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(350))
+                        showAddFeed = true
+                    }
                 }
             }
             .sheet(isPresented: $showAddFeed) {
