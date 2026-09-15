@@ -30,7 +30,12 @@ final class AudioSessionMonitor {
     }
 
     private func apply(_ snapshot: AudioSessionSnapshot?) {
+        let hadSession = self.snapshot != nil
         self.snapshot = snapshot
+        if hadSession, snapshot == nil {
+            // Mini-player / engine teardown — close the listening stats block.
+            PunkRallyStatsEvents.sessionEnd()
+        }
         // Podcasts have no library cover; leave the placeholder in place
         // instead of querying BookServiceActor for a book that isn't there.
         if case .podcast = snapshot?.kind {

@@ -75,11 +75,17 @@ public struct PunkRallyTabView: View {
             }
             .tint(PunkRallyTheme.Accent.primary)
             .preferredColorScheme(nil) // follow system appearance
+            .onAppear {
+                SessionTrackerWiring.install()
+            }
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowShelf)) { _ in
                 selectedTab = .shelf
             }
             .onReceive(NotificationCenter.default.publisher(for: .silveranShowLibrary)) { _ in
                 selectedTab = .library
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowStats)) { _ in
+                selectedTab = .stats
             }
             .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyOpenPlayerFailed)
@@ -243,9 +249,17 @@ private struct HomeTabView: View {
     @State private var showOfflineSheet = false
     @State private var podcastStore = PodcastDownloadStore.shared
     @State private var queueTick = 0
+    @State private var tracker = SessionTracker.shared
+    @State private var statsTick = 0
 
     private var chrome: PunkRallyTheme.Chrome {
         PunkRallyTheme.Chrome(scheme: colorScheme)
+    }
+
+    private var statsSnapshot: PRStatsSnapshot {
+        let _ = statsTick
+        let _ = tracker.revision
+        return tracker.snapshot
     }
 
     private var mixedQueue: (continueItem: HomeMixedItem?, upNext: [HomeMixedItem]) {
@@ -318,6 +332,7 @@ private struct HomeTabView: View {
             }
             .onAppear {
                 queueTick &+= 1
+                statsTick &+= 1
                 Task { await mediaViewModel?.refreshMetadata(source: "HomeMixed") }
             }
             .onReceive(
@@ -329,7 +344,17 @@ private struct HomeTabView: View {
                 NotificationCenter.default.publisher(for: .punkRallyHomeQueueDidChange)
             ) { _ in
                 queueTick &+= 1
+                statsTick &+= 1
                 Task { await mediaViewModel?.refreshMetadata(source: "HomeMixedQueue") }
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyStatsSessionStart)
+            ) { _ in statsTick &+= 1 }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyStatsSessionEnd)
+            ) { _ in statsTick &+= 1 }
+            .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in
+                statsTick &+= 1
             }
         }
         .punkRallySheets(
@@ -446,11 +471,18 @@ private struct HomeTabView: View {
     }
 
     private var statsStrip: some View {
-        HStack(spacing: 12) {
-            statCell("0m", "Today")
-            statCell("0m", "This week")
-            statCell("0", "Streak")
+        let snapshot = statsSnapshot
+        return Button {
+            NotificationCenter.default.post(name: .punkRallyShowStats, object: nil)
+        } label: {
+            HStack(spacing: 12) {
+                statCell(snapshot.todaySeconds.hoursMinutes, "Today")
+                statCell(snapshot.weekSeconds.hoursMinutes, "This week")
+                statCell("\(snapshot.streakDays)", "Streak")
+            }
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open Stats")
     }
 
     private func statCell(_ value: String, _ label: String) -> some View {

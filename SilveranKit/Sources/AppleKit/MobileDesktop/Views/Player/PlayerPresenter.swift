@@ -43,6 +43,12 @@ public final class PlayerPresenter {
         card = PresentedPlayerCard(data: data)
         BookRecentStore.shared.record(data.metadata.id)
         NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
+        let statsKind = data.category == .ebook ? "reading" : "listening"
+        PunkRallyStatsEvents.sessionStart(
+            kind: statsKind,
+            mediaID: "\(data.metadata.id)",
+            mediaTitle: data.metadata.title
+        )
         Task { await LastOpenBookStore.save(bookData: data) }
         if !replacingCard {
             // A replaced card ends its own session through its view teardown;
@@ -69,6 +75,10 @@ public final class PlayerPresenter {
                 LastOpenBookStore.clearIfMatching(
                     bookId: bookID,
                     category: current.data.category,
+                )
+                PunkRallyStatsEvents.sessionEnd(
+                    mediaID: "\(bookID)",
+                    progress: snapshot?.bookProgress
                 )
             }
             self.card = nil
@@ -111,6 +121,7 @@ public final class PlayerPresenter {
                 bookId: kind.bookID,
                 category: Self.category(for: kind),
             )
+            PunkRallyStatsEvents.sessionEnd()
             await Self.endLiveSession(excluding: nil)
         }
     }

@@ -5,8 +5,8 @@
 //  Ported from Enve Book Player (AGPL-3.0-only):
 //  https://github.com/opisaac9001/Enve-Book-Player
 //  Original: ios/enve/Services/ListeningStats/ListeningStatsTracker.swift
-//  Modifications: local-only; no Audiobookshelf progress sync; listens to
-//  Silveran player/reader events (wired in the next milestone).
+//  Modifications: local-only; no Audiobookshelf progress sync; wired to
+//  Silveran player/reader via PunkRallyStatsEvents + SessionTrackerWiring.
 //
 //  SPDX-License-Identifier: AGPL-3.0-only
 
@@ -25,6 +25,9 @@ final class SessionTracker {
 
     private var sessions: [PRMediaSession] = []
     private var finished: [PRFinishedBook] = []
+
+    /// Bumped whenever aggregates change so SwiftUI refreshes.
+    private(set) var revision: Int = 0
 
     /// Active (unclosed) session, if any.
     private var activeSession: PRMediaSession?
@@ -47,6 +50,9 @@ final class SessionTracker {
 
     /// Begin a session for a media item.
     func startSession(kind: PRMediaSession.Kind, mediaID: String, mediaTitle: String) {
+        if let active = activeSession, active.mediaID == mediaID, active.kind == kind {
+            return
+        }
         closeActiveIfNeeded()
         activeSession = PRMediaSession(
             kind: kind,
@@ -54,17 +60,22 @@ final class SessionTracker {
             mediaTitle: mediaTitle,
             startedAt: Date()
         )
+        revision &+= 1
     }
 
     /// End the active session and record its duration.
-    func endSession(progress: Double? = nil) {
+    /// When `mediaID` is set, only ends if it matches the active session (avoids
+    /// races when a book card dismiss overlaps a newly started podcast).
+    func endSession(mediaID: String? = nil, progress: Double? = nil) {
         guard let active = activeSession else { return }
+        if let mediaID, active.mediaID != mediaID { return }
         let ended = Date()
         let duration = ended.timeIntervalSince(active.startedAt)
 
         // Only record sessions of meaningful length (≥ 30 seconds).
         guard duration >= 30 else {
             activeSession = nil
+            revision &+= 1
             return
         }
 
@@ -74,13 +85,27 @@ final class SessionTracker {
         session.endProgress = progress
         sessions.append(session)
         activeSession = nil
+
+        if let progress, progress >= 0.95 {
+            recordFinished(mediaID: session.mediaID, mediaTitle: session.mediaTitle)
+        }
+        revision &+= 1
         scheduleSave()
+    }
+
+    /// Title for an in-flight or recent session (podcast finish labeling).
+    func activeMediaTitle(for mediaID: String) -> String? {
+        if let active = activeSession, active.mediaID == mediaID {
+            return active.mediaTitle
+        }
+        return sessions.last(where: { $0.mediaID == mediaID })?.mediaTitle
     }
 
     /// Note that a book finished (progress hit 100%).
     func recordFinished(mediaID: String, mediaTitle: String) {
         guard !finished.contains(where: { $0.mediaID == mediaID }) else { return }
         finished.append(PRFinishedBook(mediaID: mediaID, mediaTitle: mediaTitle, finishedAt: Date()))
+        revision &+= 1
         scheduleSave()
     }
 
@@ -91,7 +116,7 @@ final class SessionTracker {
         scheduleSave()
     }
 
-    /// Compute the full stats snapshot.
+    /// Compute the full stats snapshot (includes live active session time).
     var snapshot: PRStatsSnapshot {
         let calendar = Calendar.current
         let now = Date()
@@ -103,30 +128,57 @@ final class SessionTracker {
         let todayStart = startOfDay(now)
         let weekStart = calendar.date(byAdding: .day, value: -6, to: todayStart) ?? todayStart
 
-        let todaySeconds = sessions
+        let live: TimeInterval = {
+            guard let active = activeSession else { return 0 }
+            let elapsed = now.timeIntervalSince(active.startedAt)
+            return elapsed >= 30 ? elapsed : 0
+        }()
+        let liveKind = activeSession?.kind
+        let liveStartedAt = activeSession?.startedAt
+
+        var todaySeconds = sessions
             .filter { $0.endedAt >= todayStart }
             .reduce(0) { $0 + $1.durationSeconds }
-
-        let weekSeconds = sessions
+        var weekSeconds = sessions
             .filter { $0.endedAt >= weekStart }
             .reduce(0) { $0 + $1.durationSeconds }
 
-        let streakDays = computeStreak(calendar: calendar, today: todayStart)
+        if live > 0, let liveStartedAt, liveStartedAt >= todayStart {
+            todaySeconds += live
+        }
+        if live > 0, let liveStartedAt, liveStartedAt >= weekStart {
+            weekSeconds += live
+        }
+
+        let streakDays = computeStreak(
+            calendar: calendar,
+            today: todayStart,
+            activeCountsToday: live > 0
+        )
 
         let thirtyDaysAgo = calendar.date(byAdding: .day, value: -30, to: now) ?? now
         let finished30d = finished.filter { $0.finishedAt >= thirtyDaysAgo }.count
 
-        let avgSession = sessions.isEmpty
+        let allDurations = sessions.map(\.durationSeconds) + (live > 0 ? [live] : [])
+        let avgSession = allDurations.isEmpty
             ? 0
-            : sessions.map(\.durationSeconds).reduce(0, +) / Double(sessions.count)
+            : allDurations.reduce(0, +) / Double(allDurations.count)
 
-        let recentDays = (0..<7).reversed().map { offset in
+        let recentDays = (0..<7).reversed().map { offset -> PRDailyAggregate in
             let day = calendar.date(byAdding: .day, value: -offset, to: todayStart) ?? todayStart
-            return PRDailyAggregate(
-                day: day,
-                listenSeconds: sessionsForDay(day, kind: .listening, calendar: calendar),
-                readSeconds: sessionsForDay(day, kind: .reading, calendar: calendar)
-            )
+            var listen = sessionsForDay(day, kind: .listening, calendar: calendar)
+            var read = sessionsForDay(day, kind: .reading, calendar: calendar)
+            if live > 0,
+                let liveStartedAt,
+                calendar.isDate(liveStartedAt, inSameDayAs: day),
+                let liveKind
+            {
+                switch liveKind {
+                    case .listening: listen += live
+                    case .reading: read += live
+                }
+            }
+            return PRDailyAggregate(day: day, listenSeconds: listen, readSeconds: read)
         }
 
         return PRStatsSnapshot(
@@ -181,11 +233,14 @@ final class SessionTracker {
             .reduce(0) { $0 + $1.durationSeconds }
     }
 
-    private func computeStreak(calendar: Calendar, today: Date) -> Int {
+    private func computeStreak(calendar: Calendar, today: Date, activeCountsToday: Bool) -> Int {
         // Count consecutive days (ending today or yesterday) with any session.
-        let daysWithSessions = Set(
+        var daysWithSessions = Set(
             sessions.map { calendar.startOfDay(for: $0.endedAt) }
         )
+        if activeCountsToday {
+            daysWithSessions.insert(today)
+        }
 
         var streak = 0
         var cursor = today

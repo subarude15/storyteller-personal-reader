@@ -91,6 +91,11 @@ public final class PodcastPlayerPresenter {
         // Always present the full card (video must not start as mini-bar only).
         self.episode = nil
         self.episode = episode
+        PunkRallyStatsEvents.sessionStart(
+            kind: "listening",
+            mediaID: "podcast/\(episode.id)",
+            mediaTitle: episode.title
+        )
         return true
     }
 
@@ -105,9 +110,15 @@ public final class PodcastPlayerPresenter {
             if closing?.isVideo == true {
                 activeEpisode = nil
                 await AudioSessionActor.shared.closePodcast()
+                PunkRallyStatsEvents.sessionEnd(mediaID: "podcast/\(closing!.id)")
             } else if snapshot?.isPlaying != true {
                 activeEpisode = nil
                 await AudioSessionActor.shared.closePodcast()
+                if let closing {
+                    PunkRallyStatsEvents.sessionEnd(mediaID: "podcast/\(closing.id)")
+                } else {
+                    PunkRallyStatsEvents.sessionEnd()
+                }
             }
             NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
         }

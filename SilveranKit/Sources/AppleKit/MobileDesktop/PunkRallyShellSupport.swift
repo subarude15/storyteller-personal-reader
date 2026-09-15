@@ -14,6 +14,7 @@ import SwiftUI
 
 extension Notification.Name {
     public static let punkRallyShowShelf = Notification.Name("punkRallyShowShelf")
+    public static let punkRallyShowStats = Notification.Name("punkRallyShowStats")
     public static let punkRallyOpenPlayer = Notification.Name("punkRallyOpenPlayer")
     public static let punkRallyOpenPlayerFailed = Notification.Name("punkRallyOpenPlayerFailed")
     /// PodcastsViewModel.play(episode:) → host shell: open the episode on the
@@ -21,6 +22,56 @@ extension Notification.Name {
     public static let punkRallyPlayPodcastEpisode = Notification.Name("punkRallyPlayPodcastEpisode")
     /// Book or podcast last-touched changed — Home should rebuild Continue / Up next.
     public static let punkRallyHomeQueueDidChange = Notification.Name("punkRallyHomeQueueDidChange")
+    /// Stats SessionTracker: begin a local reading/listening block.
+    /// userInfo: kind ("reading"|"listening"), mediaID, mediaTitle
+    public static let punkRallyStatsSessionStart = Notification.Name("punkRallyStatsSessionStart")
+    /// Stats SessionTracker: end the active block.
+    /// userInfo: progress (Double, optional 0...1)
+    public static let punkRallyStatsSessionEnd = Notification.Name("punkRallyStatsSessionEnd")
+    /// Stats SessionTracker: media reached ~finished locally.
+    /// userInfo: mediaID, mediaTitle
+    public static let punkRallyStatsMediaFinished = Notification.Name("punkRallyStatsMediaFinished")
+}
+
+/// Posts SessionTracker lifecycle events from AppleKit players into the app target.
+public enum PunkRallyStatsEvents {
+    public static func sessionStart(kind: String, mediaID: String, mediaTitle: String) {
+        NotificationCenter.default.post(
+            name: .punkRallyStatsSessionStart,
+            object: nil,
+            userInfo: [
+                "kind": kind,
+                "mediaID": mediaID,
+                "mediaTitle": mediaTitle,
+            ]
+        )
+    }
+
+    public static func sessionEnd(mediaID: String? = nil, progress: Double? = nil) {
+        var info: [String: Any] = [:]
+        if let mediaID {
+            info["mediaID"] = mediaID
+        }
+        if let progress {
+            info["progress"] = progress
+        }
+        NotificationCenter.default.post(
+            name: .punkRallyStatsSessionEnd,
+            object: nil,
+            userInfo: info.isEmpty ? nil : info
+        )
+    }
+
+    public static func mediaFinished(mediaID: String, mediaTitle: String) {
+        NotificationCenter.default.post(
+            name: .punkRallyStatsMediaFinished,
+            object: nil,
+            userInfo: [
+                "mediaID": mediaID,
+                "mediaTitle": mediaTitle,
+            ]
+        )
+    }
 }
 
 /// Hosts the single full-screen player/reader card for the ink+amp five-tab

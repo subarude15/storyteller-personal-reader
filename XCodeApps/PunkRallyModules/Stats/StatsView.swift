@@ -15,12 +15,15 @@ import SwiftUI
 struct StatsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var tracker = SessionTracker.shared
+    @State private var tick = 0
 
     private var chrome: PunkRallyTheme.Chrome {
         PunkRallyTheme.Chrome(scheme: colorScheme)
     }
 
     var body: some View {
+        let _ = tracker.revision
+        let _ = tick
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
@@ -38,6 +41,10 @@ struct StatsView: View {
         .task {
             tracker.pruneOldSessions()
         }
+        .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in
+            // Live active-session seconds — revision may be unchanged while elapsed grows.
+            tick &+= 1
+        }
     }
 
     // MARK: - Hero
@@ -54,8 +61,16 @@ struct StatsView: View {
                 .foregroundStyle(chrome.text)
 
             HStack(spacing: 16) {
-                legendDot(color: PunkRallyTheme.Accent.primary, label: "Listen")
-                legendDot(color: PunkRallyTheme.Accent.gold, label: "Read")
+                let listen = snapshot.recentDays.reduce(0.0) { $0 + $1.listenSeconds }
+                let read = snapshot.recentDays.reduce(0.0) { $0 + $1.readSeconds }
+                legendDot(
+                    color: PunkRallyTheme.Accent.primary,
+                    label: "Listen \(listen.minutesShort)"
+                )
+                legendDot(
+                    color: PunkRallyTheme.Accent.gold,
+                    label: "Read \(read.minutesShort)"
+                )
                 Spacer()
             }
             .font(.caption)

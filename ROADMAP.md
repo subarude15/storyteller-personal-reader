@@ -17,9 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **Stats** — hook local `SessionTracker` to reader/player events so Today / week / streak move (zeros today are expected — M1 never wired this). Local Cursor on NUC.
+- [ ] **Stats (SessionTracker local)** — in progress on tip; wait Sideload green then Josh smoke (Home Today/week leave 0m after a few minutes read/listen). Local only — footer still “Stats stay on this iPhone”.
 
-**Do not start Podcast Index / iTunes search ahead of Stats.**
+**Do not start Podcast Index / iTunes search or cross-device Stats sync ahead of this Sideload green.**
 
 ---
 
@@ -51,9 +51,10 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-### 1. Stats (Now is the SessionTracker hook above)
-1. ~~Hook local SessionTracker~~ → **Now**
+### 1. Stats follow-ups (after SessionTracker Sideload green)
+1. ~~Hook local SessionTracker~~ → **Now / this tip**
 2. Optional later: cross-device Stats sync (single phone+iPad number via shared store; footer flips from “stay on this iPhone” to “Synced across your devices”; merge by day — no double-count)
+3. Then Later: Podcast Index / Find shows
 
 ### UX polish (anytime after Now, not ahead of Stats)
 - Separate **Couldn’t save server** copy (≠ “Connection failed”)
