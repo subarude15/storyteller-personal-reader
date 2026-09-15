@@ -65,4 +65,3 @@ jobs:
           path: .buildIosDevice/punkrally-sideload-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
-
