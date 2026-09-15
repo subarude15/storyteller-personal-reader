@@ -92,6 +92,7 @@ public final class PodcastPlayerPresenter {
     /// card's dismiss-keeps-playing behavior); otherwise the session ends.
     public func dismiss() {
         Task { @MainActor in
+            await Self.persistPodcastProgress(markFinished: false)
             let snapshot = await AudioSessionActor.shared.currentSnapshot()
             episode = nil
             if snapshot?.isPlaying != true {
@@ -110,6 +111,19 @@ public final class PodcastPlayerPresenter {
         // observes `episode`, so reasserting it is enough to re-show.
         episode = nil
         episode = current
+    }
+
+    /// Writes listen progress into the podcast download ledger (Shelf prune).
+    public static func persistPodcastProgress(markFinished: Bool) async {
+        guard let progress = await AudioSessionActor.shared.podcastPlaybackProgress() else {
+            return
+        }
+        PodcastDownloadStore.shared.updatePlayback(
+            episodeID: progress.episodeID,
+            positionSeconds: progress.position,
+            durationSeconds: progress.duration > 0 ? progress.duration : nil,
+            markFinished: markFinished || progress.isFinished
+        )
     }
 }
 #endif

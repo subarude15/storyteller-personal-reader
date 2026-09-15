@@ -383,6 +383,14 @@ extension SettingsView {
                     }
                 }
 
+                Section("Podcasts") {
+                    NavigationLink {
+                        PodcastDownloadsSettingsView()
+                    } label: {
+                        Label("Downloads", systemImage: "arrow.down.circle")
+                    }
+                }
+
                 Section {
                     NavigationLink {
                         IOSDebugLogView()

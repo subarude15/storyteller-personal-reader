@@ -8,7 +8,8 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 | **Branch** | `punk-rally-ios` |
 | **Bundle ID** | `com.punkrally.reader` (do not change) |
 | **NUC workspace** | `C:\Users\imalo\dev\silveran-ios\silveran-reader` |
-| **In-repo docs** | DESIGN.md, UX-SHELL.md, UX-BACKLOG.md, PODCASTS-SHELF-PRUNE.md, ROADMAP.md (repo root) |
+| **Docs beside repo** | `C:\Users\imalo\dev\silveran-ios\` (mirrors; in-tree copies at repo root) |
+| **Policy in repo** | `PODCASTS-SHELF-PRUNE.md` |
 
 **Product gate (proven 2026-09-15):** Storyteller place sync phone ↔ iPad — same spot after listen/read. That is the core reason for ink+amp.
 
@@ -16,10 +17,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **Shelf auto-prune** for podcast downloads — implement PODCASTS-SHELF-PRUNE.md (in repo); first-time Auto-clean explainer; one speed chip already shipped on tip 3639b67
-- [x] Josh smoke-tested Sideload tip **3639b67** — shared Now Playing + **one** PlaybackRateButton (Actions [34982178742](https://github.com/subarude15/storyteller-personal-reader/actions/runs/34982178742))
+- [x] **Josh:** Sideload tip **`3639b67`** shared Now Playing + one speed chip — smoke-tested / **shipped**
+- [x] **Shelf auto-prune (podcast downloads only)** — implemented this cut (await Sideload IPA)
 
-**Do not start Audio|Video / Home mixed / Stats until Shelf prune lands.**
+**Next up after Sideload green:** Audio | Video episode sheet. Do not retouch player/speed.
+
 ---
 
 ## Shipped
@@ -41,20 +43,21 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] CI: Builtin/StoryAlign / Xcode pin / Sideload unsigned IPA pipeline
 
 ### Podcasts
-- [x] Shared Now Playing + playback speed (`66fadcd` + compile fix `3639b67`) — Sideload **green**; awaiting Josh install / smoke-test
+- [x] Shared Now Playing + playback speed (`66fadcd` + compile fix `3639b67`) — Josh smoke-tested / **shipped** (one speed chip only)
+- [x] Shelf auto-prune for podcast downloads (Settings → Podcasts → Downloads; podcasts-only ledger)
 
 ---
 
 ## Next (strict order — do not reorder)
 
-### 1. Shelf auto-prune (podcast downloads only)
-**Owner:** Smokey / Hermes / Cursor · **Policy:** `PODCASTS-SHELF-PRUNE.md` (outside repo root until copied in)
+### 1. Shelf auto-prune (podcast downloads only) — **SHIPPED (this PR)**
+**Owner:** Smokey / Hermes / Cursor · **Policy:** `PODCASTS-SHELF-PRUNE.md`
 
-- Settings → Podcasts → Downloads: Auto-clean (default On), Remove when finished (On), Max age (30d), Max downloads (50), Protect if played ≥10%, Pin/Keep, Clean now + preview
-- First time Auto-clean turns On → one-time explainer sheet (then silent overnight prune)
-- Podcasts-only — never touch ebook / audiobook / readaloud Shelf or Storyteller local media
-- Optional Shelf footer: `Pruned N episodes · Settings`
-- Acceptance from prune doc: pinned never wiped; 40%/10d kept; 2%/35d pruned; 98% pruned when finished; over-cap oldest eligible until ≤50
+- [x] Settings → Podcasts → Downloads: Auto-clean (default On), Remove when finished (On), Max age (30d), Max downloads (50), Protect if played ≥10%, Pin/Keep, Clean now + preview
+- [x] First time Auto-clean turns On → one-time explainer sheet (then silent overnight prune)
+- [x] Podcasts-only — never touch ebook / audiobook / readaloud Shelf or Storyteller local media
+- [x] Optional Shelf footer: `Pruned N episodes · Settings`
+- [x] Acceptance covered by `PodcastShelfPrunePolicyTests`
 - Do **not** retouch Keychain, player/speed wiring, or add a second speed dial
 
 ### 2. Audio | Video episode sheet

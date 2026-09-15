@@ -13,6 +13,7 @@
 import Foundation
 import Observation
 import SwiftUI
+import SilveranAppleKit
 
 @MainActor
 @Observable
@@ -107,8 +108,10 @@ final class PodcastsViewModel {
     /// SilveranKit/AppleKit player types directly (same loose-coupling
     /// pattern as `.punkRallyShowShelf` / `.punkRallyOpenPlayerFailed`).
     /// Podcasts stay on the RSS rail; this never touches Storyteller state.
+    /// Prefers an on-device podcast download when present.
     func play(episode: PRPodcastEpisode) {
-        guard let audioURL = episode.audioURL else { return }
+        guard let remote = episode.audioURL else { return }
+        let audioURL = PodcastDownloadStore.shared.localAudioURL(for: episode.id) ?? remote
         var userInfo: [String: Any] = [
             "episodeID": episode.id,
             "title": episode.title,

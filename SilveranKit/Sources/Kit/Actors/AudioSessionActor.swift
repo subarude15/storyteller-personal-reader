@@ -284,11 +284,32 @@ public actor AudioSessionActor {
         await teardownNowPlayingCommands()
     }
 
+    /// Progress snapshot for the podcast download ledger / Shelf prune.
+    public func podcastPlaybackProgress() async -> (
+        episodeID: String,
+        position: TimeInterval,
+        duration: TimeInterval,
+        isFinished: Bool
+    )? {
+        guard case .podcast(let episodeID) = currentKind else { return nil }
+        let position = await podcastPlayer?.currentTime ?? 0
+        let duration = podcastDuration
+        let finished = duration > 0
+            ? position / duration >= 0.95
+            : false
+        return (episodeID, position, duration, finished)
+    }
+
     private func handlePodcastEvent(_ event: AudioPlayerEvent) async {
         switch event {
             case .didFinishPlaying:
                 podcastIsPlaying = false
                 await publishPodcastState()
+                NotificationCenter.default.post(
+                    name: Notification.Name("punkRallyPodcastDidFinish"),
+                    object: nil,
+                    userInfo: ["episodeID": podcastEpisodeID as Any]
+                )
             case .interruptionBegan, .routeChanged:
                 podcastIsPlaying = false
                 await publishPodcastState()

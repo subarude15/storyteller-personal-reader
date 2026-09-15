@@ -11,6 +11,7 @@
 
 #if os(iOS)
 import SwiftUI
+import SilveranAppleKit
 
 /// Podcasts tab: shows grid, latest episodes, and Add Feed.
 struct PodcastsHomeView: View {
@@ -332,7 +333,12 @@ struct PodcastShowView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(show.episodes) { episode in
-                            EpisodeRow(episode: episode, chrome: chrome, viewModel: viewModel)
+                            EpisodeRow(
+                                episode: episode,
+                                chrome: chrome,
+                                viewModel: viewModel,
+                                showFeedURL: show.feedURL
+                            )
                         }
                     }
                 }
@@ -376,6 +382,17 @@ struct EpisodeRow: View {
     let episode: PRPodcastEpisode
     let chrome: PunkRallyTheme.Chrome
     let viewModel: PodcastsViewModel
+    var showFeedURL: URL? = nil
+
+    @State private var downloadStore = PodcastDownloadStore.shared
+
+    private var isDownloaded: Bool {
+        downloadStore.isDownloaded(episode.id)
+    }
+
+    private var isPinned: Bool {
+        downloadStore.record(for: episode.id)?.isPinned ?? false
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -401,6 +418,16 @@ struct EpisodeRow: View {
                             .font(.caption2)
                             .foregroundStyle(chrome.textFaint)
                     }
+                    if isDownloaded {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(PunkRallyTheme.Accent.primary)
+                    }
+                    if isPinned {
+                        Image(systemName: "pin.fill")
+                            .font(.caption2)
+                            .foregroundStyle(chrome.textMuted)
+                    }
                 }
             }
             Spacer()
@@ -414,6 +441,55 @@ struct EpisodeRow: View {
             .buttonStyle(.plain)
         }
         .padding(.vertical, 6)
+        .contextMenu {
+            if let audioURL = episode.audioURL {
+                if isDownloaded {
+                    Button {
+                        downloadStore.deleteDownload(episodeID: episode.id)
+                    } label: {
+                        Label("Remove Download", systemImage: "trash")
+                    }
+                } else if downloadStore.isDownloading(episode.id) {
+                    Label("Downloading…", systemImage: "arrow.down.circle")
+                } else {
+                    Button {
+                        downloadStore.enqueueDownload(
+                            episodeID: episode.id,
+                            title: episode.title,
+                            showTitle: episode.showTitle,
+                            feedURL: showFeedURL,
+                            remoteAudioURL: audioURL,
+                            durationSeconds: episode.durationSeconds
+                        )
+                    } label: {
+                        Label("Download", systemImage: "arrow.down.circle")
+                    }
+                }
+            }
+            if isDownloaded || isPinned {
+                Button {
+                    downloadStore.setPinned(episode.id, pinned: !isPinned)
+                } label: {
+                    Label(
+                        isPinned ? "Remove Keep" : "Keep",
+                        systemImage: isPinned ? "pin.slash" : "pin"
+                    )
+                }
+            } else if episode.audioURL != nil {
+                Button {
+                    downloadStore.keepEpisode(
+                        episodeID: episode.id,
+                        title: episode.title,
+                        showTitle: episode.showTitle,
+                        feedURL: showFeedURL,
+                        remoteAudioURL: episode.audioURL,
+                        durationSeconds: episode.durationSeconds
+                    )
+                } label: {
+                    Label("Keep", systemImage: "pin")
+                }
+            }
+        }
     }
 }
 

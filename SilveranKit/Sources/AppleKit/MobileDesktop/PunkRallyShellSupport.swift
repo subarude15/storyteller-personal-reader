@@ -251,11 +251,13 @@ public extension View {
 }
 
 /// Downloads-only shelf surface ("Shelf" tab): searchable grid of downloaded titles.
-/// Wrapper around Silveran's internal `DownloadedContentView`.
+/// Wrapper around Silveran's internal `DownloadedContentView`, plus an optional
+/// podcast-downloads strip and prune footer (RSS only — never Storyteller media).
 public struct PunkRallyShelfView: View {
     @State private var searchText = ""
     @State private var showSettings = false
     @State private var showOfflineSheet = false
+    @State private var downloadStore = PodcastDownloadStore.shared
 
     public init() {}
 
@@ -263,6 +265,35 @@ public struct PunkRallyShelfView: View {
         NavigationStack {
             DownloadedContentView(searchText: searchText)
                 .environment(\.mediaGridTapOpensPlayer, true)
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    VStack(spacing: 0) {
+                        PodcastShelfDownloadsStrip(store: downloadStore, searchText: searchText)
+                        if downloadStore.settings.lastPruneCount > 0 {
+                            Button {
+                                showSettings = true
+                            } label: {
+                                HStack {
+                                    Text(
+                                        "Pruned \(downloadStore.settings.lastPruneCount) episode\(downloadStore.settings.lastPruneCount == 1 ? "" : "s") · Settings"
+                                    )
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 10)
+                                .background(.bar)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(
+                                "Pruned \(downloadStore.settings.lastPruneCount) episodes. Open Settings."
+                            )
+                        }
+                    }
+                }
                 .iOSLibraryToolbar(
                     showSettings: $showSettings,
                     showOfflineSheet: $showOfflineSheet
@@ -280,6 +311,113 @@ public struct PunkRallyShelfView: View {
         .punkRallySheets(
             showSettings: $showSettings,
             showOfflineSheet: $showOfflineSheet
+        )
+    }
+}
+
+/// Compact list of offline RSS episodes on Shelf (separate from book downloads).
+private struct PodcastShelfDownloadsStrip: View {
+    let store: PodcastDownloadStore
+    let searchText: String
+
+    private var downloads: [PodcastDownloadRecord] {
+        let all = store.allDownloads()
+        guard !searchText.isEmpty else { return all }
+        let q = searchText.lowercased()
+        return all.filter {
+            $0.title.lowercased().contains(q)
+                || ($0.showTitle?.lowercased().contains(q) ?? false)
+        }
+    }
+
+    var body: some View {
+        if !downloads.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Podcast downloads")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(downloads) { record in
+                            PodcastShelfDownloadRow(record: record, store: store)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                }
+            }
+            .background(.bar)
+        }
+    }
+}
+
+private struct PodcastShelfDownloadRow: View {
+    let record: PodcastDownloadRecord
+    let store: PodcastDownloadStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Image(systemName: "mic.fill")
+                .foregroundStyle(.secondary)
+                .frame(width: 56, height: 56)
+                .background(Color.secondary.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            Text(record.title)
+                .font(.caption.weight(.medium))
+                .lineLimit(2)
+                .frame(width: 88, alignment: .leading)
+            HStack(spacing: 4) {
+                Text("POD")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.blue)
+                if record.isPinned {
+                    Image(systemName: "pin.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            play(record)
+        }
+        .contextMenu {
+            Button {
+                store.setPinned(record.episodeID, pinned: !record.isPinned)
+            } label: {
+                Label(
+                    record.isPinned ? "Remove Keep" : "Keep",
+                    systemImage: record.isPinned ? "pin.slash" : "pin"
+                )
+            }
+            Button(role: .destructive) {
+                store.deleteDownload(episodeID: record.episodeID)
+            } label: {
+                Label("Remove Download", systemImage: "trash")
+            }
+        }
+    }
+
+    private func play(_ record: PodcastDownloadRecord) {
+        guard let local = store.localAudioURL(for: record.episodeID)
+            ?? record.remoteAudioURL
+        else { return }
+        var userInfo: [String: Any] = [
+            "episodeID": record.episodeID,
+            "title": record.title,
+            "audioURL": local,
+        ]
+        userInfo["showTitle"] = record.showTitle
+        if let duration = record.durationSeconds {
+            userInfo["durationSeconds"] = duration
+        }
+        NotificationCenter.default.post(
+            name: .punkRallyPlayPodcastEpisode,
+            object: nil,
+            userInfo: userInfo
         )
     }
 }

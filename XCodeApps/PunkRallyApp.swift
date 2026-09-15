@@ -21,6 +21,7 @@ import SilveranAppleKit
 /// otherwise show ink+amp placeholders so the shell always builds standalone.
 public struct PunkRallyTabView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab: Tab = .home
     @State private var openFailureToastVisible = false
     @State private var openFailureToastTask: Task<Void, Never>?
@@ -89,6 +90,24 @@ public struct PunkRallyTabView: View {
                 NotificationCenter.default.publisher(for: .punkRallyPlayPodcastEpisode)
             ) { note in
                 playPodcast(from: note.userInfo)
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(
+                    for: Notification.Name("punkRallyPodcastDidFinish")
+                )
+            ) { _ in
+                Task {
+                    await PodcastPlayerPresenter.persistPodcastProgress(markFinished: true)
+                }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active {
+                    _ = PodcastDownloadStore.shared.runOvernightPruneIfDue()
+                } else if phase == .background {
+                    Task {
+                        await PodcastPlayerPresenter.persistPodcastProgress(markFinished: false)
+                    }
+                }
             }
             .fullScreenCover(item: PlayerPresenter.shared.cardItemBinding) { wrapper in
                 NavigationStack {
