@@ -223,7 +223,7 @@ public final class RSSPodcastParser: NSObject, XMLParserDelegate {
     }
 
     /// Picks the best audio and video URLs from enclosure list (MIME / extension).
-    private private static func classifyEnclosures(_ enclosures: [Enclosure]) -> (audio: URL?, video: URL?) {
+    private static func classifyEnclosures(_ enclosures: [Enclosure]) -> (audio: URL?, video: URL?) {
         var audio: URL?
         var video: URL?
         for enclosure in enclosures {
