@@ -13,6 +13,7 @@ public struct PodcastPlayerView: View {
     private let onClose: () -> Void
 
     @State private var monitor = AudioSessionMonitor.shared
+    @State private var presenter = PodcastPlayerPresenter.shared
     @State private var errorMessage: String?
     @State private var scrubFraction: Double = 0
     @State private var isScrubbing = false
@@ -82,8 +83,22 @@ public struct PodcastPlayerView: View {
         .onChange(of: monitor.snapshot?.bookProgress ?? 0) { _, newValue in
             if !isScrubbing { scrubFraction = newValue }
         }
-        .alert("Podcast Error", isPresented: .constant(errorMessage != nil)) {
-            Button("OK") { errorMessage = nil }
+        .onChange(of: presenter.startError) { _, message in
+            if let message {
+                errorMessage = message
+            }
+        }
+        .alert("Podcast Error", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 {
+                errorMessage = nil
+                presenter.clearStartError()
+            } }
+        )) {
+            Button("OK") {
+                errorMessage = nil
+                presenter.clearStartError()
+            }
         } message: {
             if let errorMessage { Text(errorMessage) }
         }
@@ -109,8 +124,13 @@ public struct PodcastPlayerView: View {
         .navigationBarBackButtonHidden(true)
     }
 
+    /// Pause only when audio is truly playing — never while opening/buffering.
     private var isPlaying: Bool {
-        monitor.snapshot?.isPlaying ?? false
+        !presenter.isOpening && (monitor.snapshot?.isPlaying ?? false)
+    }
+
+    private var isOpening: Bool {
+        presenter.isOpening
     }
 
     private var currentRate: Double {
@@ -202,13 +222,27 @@ public struct PodcastPlayerView: View {
                 .accessibilityLabel("Back 15 seconds")
 
                 Button {
+                    guard !isOpening else { return }
                     Task { try? await AudioSessionActor.shared.transport(.togglePlayPause) }
                 } label: {
-                    Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                        .font(.system(size: 56))
+                    if isOpening {
+                        VStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.large)
+                            Text("Loading…")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(width: 72, height: 72)
+                        .accessibilityLabel("Loading")
+                    } else {
+                        Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                            .font(.system(size: 56))
+                    }
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(isPlaying ? "Pause" : "Play")
+                .disabled(isOpening)
+                .accessibilityLabel(isOpening ? "Loading" : (isPlaying ? "Pause" : "Play"))
 
                 Button {
                     Task { await AudioSessionActor.shared.skipPlayback(by: 15) }

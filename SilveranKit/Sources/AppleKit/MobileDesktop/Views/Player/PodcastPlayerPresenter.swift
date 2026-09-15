@@ -46,6 +46,12 @@ public final class PodcastPlayerPresenter {
 
     public private(set) var episode: Episode?
 
+    /// True while openPodcast is in flight — Now Playing shows Loading…, not Pause.
+    public private(set) var isOpening = false
+
+    /// Brief start failure for the card (Play stays available).
+    public private(set) var startError: String?
+
     /// Artwork URL for the live podcast session (card or mini-player).
     public var artworkURL: URL? {
         (episode ?? activeEpisode)?.coverURL
@@ -76,17 +82,33 @@ public final class PodcastPlayerPresenter {
     /// Starts streaming the episode on the shared audio session and shows the
     /// full Now Playing card (required for video — never mini-bar alone).
     /// Returns false when the audio pipeline is unavailable.
+    ///
+    /// Never early-returns success just because `self.episode == episode` —
+    /// Home Continue / reopen must reopen or transport(.play) until the
+    /// playhead actually advances.
     @discardableResult
     public func play(_ episode: Episode) async -> Bool {
-        if self.episode == episode { return true }
+        startError = nil
+
+        // Same card already up AND session truly progressing → keep card, done.
+        if self.episode == episode,
+            await AudioSessionActor.shared.podcastIsActivelyProgressing(episodeID: episode.id)
+        {
+            return true
+        }
+
         // One card app-wide: a book card must not sit behind a podcast card.
         if PlayerPresenter.shared.card != nil {
             PlayerPresenter.shared.dismissCard()
         }
         let resumeAt = Self.resumePositionSeconds(for: episode.id)
-        // Retain episode before open so mini/NP can resolve artworkURL while
-        // the audio session starts publishing snapshots.
+        // Show card immediately with Loading… while the session opens.
         activeEpisode = episode
+        self.episode = nil
+        self.episode = episode
+        isOpening = true
+        defer { isOpening = false }
+
         do {
             try await AudioSessionActor.shared.openPodcast(
                 episodeID: episode.id,
@@ -98,18 +120,23 @@ public final class PodcastPlayerPresenter {
             )
         } catch {
             debugLog("[PodcastPlayerPresenter] Failed to open episode: \(error)")
-            activeEpisode = nil
+            startError = "Couldn't start playback"
+            // Keep card visible with Play + error; drop live-session retain.
+            activeEpisode = episode
             return false
         }
-        // Always present the full card (video must not start as mini-bar only).
-        self.episode = nil
-        self.episode = episode
+
         PunkRallyStatsEvents.sessionStart(
             kind: "listening",
             mediaID: "podcast/\(episode.id)",
             mediaTitle: episode.title
         )
         return true
+    }
+
+    /// Clears a transient start error after the user dismisses it.
+    public func clearStartError() {
+        startError = nil
     }
 
     /// Closes the card. Audio may continue in the mini player; video sessions
@@ -120,6 +147,8 @@ public final class PodcastPlayerPresenter {
             let closing = episode ?? activeEpisode
             let snapshot = await AudioSessionActor.shared.currentSnapshot()
             episode = nil
+            startError = nil
+            isOpening = false
             if closing?.isVideo == true {
                 activeEpisode = nil
                 await AudioSessionActor.shared.closePodcast()
@@ -153,6 +182,8 @@ public final class PodcastPlayerPresenter {
     public func clearActiveEpisodeAfterStop() {
         episode = nil
         activeEpisode = nil
+        startError = nil
+        isOpening = false
     }
 
     /// Writes listen progress into the playhead store (always) and download

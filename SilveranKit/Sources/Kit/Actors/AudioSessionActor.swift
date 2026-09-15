@@ -70,6 +70,7 @@ public enum AudiobookSessionError: Error, LocalizedError, Sendable {
     case bookNotFound(String)
     case localMediaUnavailable(String)
     case audiobookNotOpen
+    case podcastStartFailed(String)
 
     public var errorDescription: String? {
         switch self {
@@ -79,6 +80,8 @@ public enum AudiobookSessionError: Error, LocalizedError, Sendable {
                 return "No downloaded audiobook is available for \(id)."
             case .audiobookNotOpen:
                 return "No audiobook is open."
+            case .podcastStartFailed:
+                return "Couldn't start podcast playback."
         }
     }
 }
@@ -264,13 +267,23 @@ public actor AudioSessionActor {
         if case .podcast(let currentID) = currentKind, currentID == episodeID,
             podcastPlayer != nil
         {
-            // Same episode still live (mini-player / keep-playing) — do not
-            // reload or seek to a stale saved playhead.
-            try? await transport(.play)
-            return
+            // Same episode still attached — only keep it if transport actually
+            // progresses. A stalled player (Pause icon, playhead stuck at 0:00)
+            // must tear down and reload the URL instead of a no-op .play.
+            if !Self.podcastLooksStalled(
+                isPlaying: podcastIsPlaying,
+                currentTime: await podcastPlayer?.currentTime ?? 0,
+                rate: podcastRate
+            ) {
+                try? await transport(.play)
+                if await waitForPodcastTimeProgress(timeout: 2.0) {
+                    return
+                }
+            }
+            await closePodcast()
+        } else {
+            await closeCurrent()
         }
-
-        await closeCurrent()
 
         let config = await SettingsActor.shared.config
         let rate = min(max(config.playback.defaultPlaybackSpeed, 0.5), 10)
@@ -306,7 +319,50 @@ public actor AudioSessionActor {
         }
 
         await configureNowPlayingCommands(for: .podcast(episodeID))
-        try await transport(.play)
+        await player.play()
+        guard await waitForPodcastTimeProgress(timeout: 5.0) else {
+            podcastIsPlaying = false
+            await publishPodcastState()
+            throw AudiobookSessionError.podcastStartFailed(episodeID)
+        }
+    }
+
+    /// True when the shared session is this episode and the playhead is moving.
+    public func podcastIsActivelyProgressing(episodeID: String) async -> Bool {
+        guard case .podcast(let currentID) = currentKind, currentID == episodeID,
+            podcastPlayer != nil
+        else { return false }
+        return await waitForPodcastTimeProgress(timeout: 0.9)
+    }
+
+    /// Stalled same-episode session: claims playing (or odd rate) but playhead ~0.
+    private static func podcastLooksStalled(
+        isPlaying: Bool,
+        currentTime: TimeInterval,
+        rate: Double
+    ) -> Bool {
+        if rate > 0.01 && rate < 0.4 { return true }
+        if isPlaying && currentTime < 0.35 { return true }
+        if isPlaying && rate < 0.01 { return true }
+        return false
+    }
+
+    /// Poll until `currentTime` advances past the baseline, or timeout.
+    @discardableResult
+    private func waitForPodcastTimeProgress(timeout: TimeInterval) async -> Bool {
+        guard podcastPlayer != nil else { return false }
+        let baseline = await podcastPlayer?.currentTime ?? 0
+        let deadline = ContinuousClock.now + .seconds(timeout)
+        while ContinuousClock.now < deadline {
+            let now = await podcastPlayer?.currentTime ?? 0
+            if now > baseline + 0.05 {
+                podcastIsPlaying = true
+                await publishPodcastState()
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(120))
+        }
+        return false
     }
 
     public func closePodcast() async {
@@ -662,7 +718,9 @@ public actor AudioSessionActor {
                 switch command {
                     case .play:
                         await podcastPlayer?.play()
-                        podcastIsPlaying = true
+                        // Do not claim Pause/playing until the playhead moves.
+                        let advanced = await waitForPodcastTimeProgress(timeout: 1.6)
+                        podcastIsPlaying = advanced
                         await publishPodcastState()
                     case .pause:
                         await podcastPlayer?.pause()
