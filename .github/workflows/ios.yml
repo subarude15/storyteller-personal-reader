@@ -2,9 +2,10 @@ name: punk+rally iOS build
 
 on:
   push:
-    branches: [punk-rally-ios]
+    branches: [punk-rally-ios, "cursor/**"]
   pull_request:
     branches: [punk-rally-ios]
+  workflow_dispatch:
 
 concurrency:
   group: ios-${{ github.ref }}
@@ -18,11 +19,15 @@ env:
 
 jobs:
   build:
+    name: iOS Simulator Build
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app || sudo xcode-select -s /Applications/Xcode_26.app || sudo xcode-select -s /Applications/Xcode.app || true
 
       - name: Install tools
         run: brew install xcbeautify xcodegen
@@ -32,3 +37,32 @@ jobs:
 
       - name: Build iOS target
         run: ./scripts/iosbuild
+
+  ipa:
+    name: Sideload Device IPA
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app || sudo xcode-select -s /Applications/Xcode_26.app || sudo xcode-select -s /Applications/Xcode.app || true
+
+      - name: Install tools
+        run: brew install xcbeautify xcodegen
+
+      - name: Generate Xcode project
+        run: ./scripts/genxproj
+
+      - name: Build and package unsigned device IPA
+        run: ./scripts/package-ipa "Silveran Reader Sideload (iOS)" Release .buildIosDevice punkrally-sideload-unsigned.ipa
+
+      - name: Upload unsigned IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: punkrally-sideload-unsigned-ipa
+          path: .buildIosDevice/punkrally-sideload-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+

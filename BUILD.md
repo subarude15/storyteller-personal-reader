@@ -55,11 +55,14 @@ the punk+rally Theme + PunkRallyModules source directories.
 # List available destinations
 xcodebuild -project Silveran.xcodeproj -scheme "Silveran Reader (iOS)" -showdestinations
 
-# Build
+# Build via script (includes code signing disable and simulator flags)
+./scripts/iosbuild
+
+# Or directly with xcodebuild:
 xcodebuild -project Silveran.xcodeproj \
   -scheme "Silveran Reader (iOS)" \
   -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
-  -configuration Debug build
+  -configuration Debug CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
 ```
 
 > If the scheme name differs (older fork), check `xcodebuild -list`.
@@ -87,6 +90,16 @@ xcodebuild -project Silveran.xcodeproj \
   -destination 'generic/platform=iOS' \
   -configuration Debug build
 ```
+
+## 7. Build unsigned device IPA for AltStore / Sideloading (Free Apple ID)
+
+For sideloading onto physical iPhone/iPad with a free Apple ID via AltStore Classic, use the slim sideload target and packaging script:
+
+```bash
+./scripts/package-ipa "Silveran Reader Sideload (iOS)" Release .buildIosDevice punkrally-sideload-unsigned.ipa
+```
+
+This builds an unsigned device IPA with CarPlay, widgets, and watchOS companions stripped so it installs cleanly on free personal Apple Developer accounts. See [SIDELOAD.md](SIDELOAD.md) for full AltStore Classic + AltServer on Windows instructions.
 
 ## Signing & identity
 
@@ -124,8 +137,7 @@ xcodebuild -project Silveran.xcodeproj \
 - **Podcast playback**: feeds parse + show; episode playback via shared player is M2.
 - **Stats wiring**: tracker records sessions locally but isn't yet fed by the Silveran
   player/reader events (M2).
-- **Home Continue hero + sync chip** driven by real progress: currently static
-  placeholder — wire to Storyteller progress after mini-player + Shelf land.
+- **Home Continue hero + sync chip** driven by real progress: wired dynamically to MediaViewModel / LastOpenBookStore.
 
 ## Troubleshooting
 

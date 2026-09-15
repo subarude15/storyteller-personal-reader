@@ -23,7 +23,7 @@ let package = Package(
         // no tagged release has yet. Repoint at upstream once a release includes it.
         .package(
             url: "https://github.com/kyonifer/ZIPFoundation.git",
-            revision: "187ee77287ea4b23df4d7de32771ec38bbafb840",
+            revision: "187ee77287ea4b23df4d7de32771ec38bbafb840"
         ),
         .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.7.0"),
         .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.0.0"),

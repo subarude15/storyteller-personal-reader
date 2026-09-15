@@ -93,7 +93,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: XCodeApps/SilveranReaderIos.entitlements
         CODE_SIGN_STYLE: Automatic
         INFOPLIST_FILE: XCodeApps/Info-iOS.plist
-        PRODUCT_BUNDLE_IDENTIFIER: "com.punkrally.reader"
+        PRODUCT_BUNDLE_IDENTIFIER: "$(APP_BUNDLE_ID)"
         #INFOPLIST_KEY_CFBundleDisplayName: Silveran Reader
         INFOPLIST_KEY_CFBundleDisplayName: "punk+rally"
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
@@ -154,8 +154,67 @@ targets:
         product: SilveranReadaloud
       - target: "Silveran Reader Widgets (iOS)"
         embed: true
-      - target: "Silveran Reader (watchOS)"
-        embed: true
+
+  Silveran Reader Sideload (iOS):
+    templates:
+      - appBase
+    platform: iOS
+    settings:
+      base:
+        IPHONEOS_DEPLOYMENT_TARGET: 18.0
+        CODE_SIGN_ENTITLEMENTS: XCodeApps/SilveranReaderSideload.entitlements
+        CODE_SIGN_STYLE: Automatic
+        INFOPLIST_FILE: XCodeApps/Info-iOS-Sideload.plist
+        PRODUCT_BUNDLE_IDENTIFIER: "com.punkrally.reader"
+        INFOPLIST_KEY_CFBundleDisplayName: "punk+rally"
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+    info:
+      path: XCodeApps/Info-iOS-Sideload.plist
+      properties:
+        CFBundleName: "punk+rally"
+        CFBundleDisplayName: "punk+rally"
+        CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundlePackageType: "$(PRODUCT_BUNDLE_PACKAGE_TYPE)"
+        CFBundleExecutable: "$(EXECUTABLE_NAME)"
+        KEYCHAIN_ACCESS_GROUP: "$(KEYCHAIN_ACCESS_GROUP)"
+        KEYCHAIN_SERVICE: "$(KEYCHAIN_SERVICE)"
+        LSApplicationCategoryType: "public.app-category.books"
+        NSLocalNetworkUsageDescription: "punk+rally needs local network access to connect to your Storyteller server."
+        CFBundleURLTypes:
+          - CFBundleURLName: com.punkrally.reader
+            CFBundleURLSchemes:
+              - punkrally
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIBackgroundModes:
+          - audio
+          - fetch
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.kyonifer.silveran.progresssync.refresh
+        ITSAppUsesNonExemptEncryption: false
+    sources:
+      - path: XCodeApps
+        includes:
+          - "**/*.swift"
+      - path: XCodeApps/Assets.xcassets
+        type: assetcatalog
+      - path: XCodeApps/PrivacyInfo.xcprivacy
+        buildPhase: resources
+    dependencies:
+      - package: Silveran
+        product: SilveranAppleKit
+      - package: Silveran
+        product: SilveranReadaloud
   Silveran Reader Widgets (iOS):
     type: app-extension
     platform: iOS
@@ -328,10 +387,26 @@ schemes:
       targets:
         "Silveran Reader (iOS)": all
         "Silveran Reader Widgets (iOS)": all
-        "Silveran Reader (watchOS)": all
     run:
       config: Debug
       executable: "Silveran Reader (iOS)"
+    test:
+      config: Debug
+      targets: []
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+  "Silveran Reader Sideload (iOS)":
+    shared: true
+    build:
+      targets:
+        "Silveran Reader Sideload (iOS)": all
+    run:
+      config: Debug
+      executable: "Silveran Reader Sideload (iOS)"
     test:
       config: Debug
       targets: []

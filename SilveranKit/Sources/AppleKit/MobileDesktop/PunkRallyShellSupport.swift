@@ -80,4 +80,18 @@ public struct PunkRallyLibraryView: View {
         }
     }
 }
+
+/// Helper actions for opening current or restored book in the punk+rally shell.
+public enum PunkRallyContinueAction {
+    @MainActor
+    public static func openLastOrCurrentBook(mediaViewModel: MediaViewModel? = nil) async {
+        if let data = await LastOpenBookStore.loadPlayerBookData() {
+            PlayerPresenter.shared.present(data)
+            return
+        }
+        if let vm = mediaViewModel, let firstBook = vm.library.bookMetaData.first {
+            vm.pendingOpenBookID = firstBook.id
+        }
+    }
+}
 #endif
