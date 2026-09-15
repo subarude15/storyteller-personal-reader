@@ -17,9 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **Cross-device Stats sync** — shared store; footer → “Synced across your devices”; merge by day (no double-count). Tip ≥ podcast queue Sideload green.
+- [ ] **Cross-device Stats sync** — tip ≥ `2f7deb4`. Shared store; footer → “Synced across your devices” (Ui footer lines); merge by day (no double-count). Local Cursor in flight.
 
-**Do not start real PrincessDonut / NAS strip ahead of Stats sync unless Josh reorders.**
+**Do not start NAS `AD_STRIP_URL` / silence-trim / YouTube ahead of Stats sync unless Josh reorders.** Soft UX polish (Couldn’t save server copy, empty state, missing covers) can land anytime.
 
 ---
 
@@ -64,14 +64,12 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-### After podcast queue
-1. ~~Find shows~~ → **Shipped**
-2. ~~Ad-strip download / queue UX (v1 stub)~~ → **Shipped** (`130c877`)
-3. ~~Episode status cluster + Josh UI stamps~~ → **Shipped** (`b719921`)
-4. ~~Podcast queue play-next / play-last + reorder~~ → **Shipped** (`2f7deb4`)
-5. **Cross-device Stats sync** — shared store; footer → “Synced across your devices”; merge by day (no double-count) → **Now**
+### After queue
+1. ~~Podcast queue~~ → **Shipped** (`2f7deb4`)
+2. **Cross-device Stats sync** → **Now**
+3. Then Later order below (do not reorder without Josh)
 
-### UX polish (anytime after queue)
+### Soft UX polish (anytime)
 - Separate **Couldn’t save server** copy (≠ “Connection failed”)
 - Empty state when URL prefilled but no saved Storyteller source
 - Missing Storyteller covers (cosmetic; not a blocker)
@@ -80,13 +78,13 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Later / ideas (not blocking)
 
-- Silence-trim spike
-- **NAS `AD_STRIP_URL` worker** (PrincessDonut; OmniRoute free-first via `/v1` for any LLM step) — replace `StubPodcastAdStripPipeline`; app UX+hooks already shipped
-- Cross-device Stats sync (shared store; footer Synced; merge by day)
-- **In-app YouTube** (not RSS Audio|Video enclosures) — separate from dual-enclosure A|V sheet
-- Glance / Watch tile: now-playing + Continue deep-link
-- One-tap LAN failover: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
-- CarPlay (out of current build scope)
+Strict order (Smokey / Nas-ty):
+1. **NAS `AD_STRIP_URL` worker** (PrincessDonut; OmniRoute free-first via `/v1` for any LLM step) — replace `StubPodcastAdStripPipeline`
+2. **Silence-trim** — with that worker (same pipeline family)
+3. **In-app YouTube** (not RSS Audio|Video enclosures) — separate from dual-enclosure A|V sheet
+4. **Glance / Watch** tile: now-playing + Continue deep-link
+5. **One-tap LAN failover**: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
+6. **CarPlay** (out of current build scope)
 
 
 ## Constraints
