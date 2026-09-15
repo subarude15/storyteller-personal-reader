@@ -17,9 +17,14 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **Podcast queue** — play-next / play-last + reorder. Tip ≥ ad-strip stub Sideload green. Local Cursor on NUC.
+- [ ] **Episode status cluster + show filters + Shelf POD** — tip ≥ `130c877`. Local Cursor on NUC. Fold Josh UI stamps in the same cut:
+  1. Episode rows: download icon / **Clean** chip / **played | Xm left** (text, not bar-only)
+  2. Show filters: **All | Downloaded | In progress | Clean pending**
+  3. Shelf: **POD** badge for podcast downloads
+  4. Mini-player: **drop scrubber and −15/+15** (accidental hits while swiping). Keep cover + title + play/pause (+ close). Full Now Playing **keeps** scrub + −15/+15 + elapsed/remaining
+  5. Home Continue / Up next **and** Library cards: **elapsed + remaining as text** for finishability
 
-**Do not start real PrincessDonut / NAS strip ahead of queue UX.** Josh UI stamps (played+remaining text; slim mini-player) can land as polish alongside or right after queue.
+**Do not start queue play-next / reorder ahead of this status-cluster cut.**
 
 ---
 
@@ -48,7 +53,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] Audio | Video episode sheet (`e2e0de0` + `6cc51ba`) — Sideload green [Actions 34990644848](https://github.com/subarude15/storyteller-personal-reader/actions/runs/34990644848)
 - [x] **Podcast playhead resume** — `PodcastPlayheadStore`; seek on `openPodcast` (`be395da`); Josh confirmed
 - [x] **Find shows** — Apple iTunes Search API → Subscribe → `PodcastSubscriptionStore` (`a0fc4e4`, Sideload [35013733091](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35013733091)); Josh confirmed
-- [x] **Ad-strip download / queue UX (v1 = UX + hooks + stub)** — tip `60a211b` (`c93deac` + shelf chip fix); Download sheet Original vs Clean (per-show last choice); Keep/queue → Clean pending; chips Original | Cleaning… | Clean; `PodcastAdStripPipeline` + `StubPodcastAdStripPipeline` (no-op copy Original → `audio.clean.*` sibling after ~1.2s; soft-fail → Original); player prefers Clean when chip == Clean; Original never deleted; Sideload green [35019916837](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35019916837)
+- [x] **Ad-strip download / queue UX (v1 = UX + hooks + stub)** — tip `130c877` (prior `60a211b` / `c93deac`); Download sheet Original vs Clean (per-show last choice); Keep/queue → Clean pending; chips Original | Cleaning… | Clean; `StubPodcastAdStripPipeline`; Sideload green [35019916837](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35019916837)
 
 ### Shell polish
 - [x] **Mini-player above tab bar** — per-tab inset (`be395da`, Sideload [35008731469](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35008731469)); Josh confirmed
@@ -61,17 +66,14 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-### After queue UX
+### After episode status cluster
 1. ~~Find shows~~ → **Shipped**
-2. ~~Ad-strip download / queue UX (v1 stub)~~ → **Shipped**
-3. ~~Podcast queue play-next / play-last + reorder~~ → **Now**
-4. **Josh UI stamps (polish follow-up)**
-   - Home Continue / Up next **and** Library cards: show **played time + remaining as text** (not only a bar) so finishability is obvious
-   - Mini-player: **REMOVE scrubber and −15/+15** (accidental hits while swiping tabs/menus). Keep cover + title + play/pause (+ close)
-   - Full Now Playing: **KEEP** scrub + −15/+15 + elapsed/remaining
+2. ~~Ad-strip download / queue UX (v1 stub)~~ → **Shipped** (`130c877`)
+3. ~~Episode status cluster + Josh UI stamps~~ → **Now**
+4. **Podcast queue** — play-next / play-last + reorder
 5. **Cross-device Stats sync** — shared store; footer → “Synced across your devices”; merge by day (no double-count)
 
-### UX polish (anytime after queue)
+### UX polish (anytime after status cluster)
 - Separate **Couldn’t save server** copy (≠ “Connection failed”)
 - Empty state when URL prefilled but no saved Storyteller source
 - Missing Storyteller covers (cosmetic; not a blocker)
@@ -81,7 +83,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ## Later / ideas (not blocking)
 
 - Silence-trim spike
-- **Real PrincessDonut ad-strip worker** (NAS; OmniRoute free-first via `/v1` for any LLM step) — replace `StubPodcastAdStripPipeline`; app UX+hooks already shipped
+- **NAS `AD_STRIP_URL` worker** (PrincessDonut; OmniRoute free-first via `/v1` for any LLM step) — replace `StubPodcastAdStripPipeline`; app UX+hooks already shipped
 - Cross-device Stats sync (shared store; footer Synced; merge by day)
 - **In-app YouTube** (not RSS Audio|Video enclosures) — separate from dual-enclosure A|V sheet
 - Glance / Watch tile: now-playing + Continue deep-link
