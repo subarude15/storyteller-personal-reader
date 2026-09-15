@@ -104,7 +104,7 @@ public struct BookSourceConfiguration: Sendable, Hashable {
         ) {
             self.kind = kind
             self.name = name
-            // punk+rally: default a fresh storyteller source to the private cellar
+            // ink+amp: default a fresh storyteller source to the private cellar
             // server so the connect/auth flow is pre-filled and never empty.
             self.serverURL =
                 serverURL

@@ -1,18 +1,18 @@
 //
 //  PunkRallyPodcastModels.swift
-//  punk+rally
+//  ink+amp
 //
 //  Ported from Enve Book Player (AGPL-3.0-only):
 //  https://github.com/opisaac9001/Enve-Book-Player
 //  Original: ios/enve/Screens/Podcasts/PodcastsModel.swift
-//  Modifications: RSS-only (no Audiobookshelf provider), punk+rally tokens.
+//  Modifications: RSS-only (no Audiobookshelf provider), ink+amp tokens.
 //
 //  SPDX-License-Identifier: AGPL-3.0-only
 
 import Foundation
 
 /// A podcast show sourced from an RSS feed. Covers only Storyteller-free RSS podcasts
-/// (podcasts are NOT Storyteller OPDS in the punk+rally model).
+/// (podcasts are NOT Storyteller OPDS in the ink+amp model).
 public struct PRPodcastShow: Identifiable, Equatable, Sendable {
     public var id: String { feedURL?.absoluteString ?? uuid }
     public let uuid: String

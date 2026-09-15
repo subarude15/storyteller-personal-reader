@@ -1,11 +1,11 @@
 //
 //  PodcastsHomeView.swift
-//  punk+rally
+//  ink+amp
 //
 //  Ported from Enve Book Player (AGPL-3.0-only):
 //  https://github.com/opisaac9001/Enve-Book-Player
 //  Original: ios/enve/Screens/Podcasts/PodcastsHomeScreen.swift
-//  Modifications: punk+rally tokens; RSS-only; no server provider.
+//  Modifications: ink+amp tokens; RSS-only; no server provider.
 //
 //  SPDX-License-Identifier: AGPL-3.0-only
 

@@ -1,12 +1,12 @@
 //
 //  PodcastsViewModel.swift
-//  punk+rally
+//  ink+amp
 //
 //  Ported from Enve Book Player (AGPL-3.0-only):
 //  https://github.com/opisaac9001/Enve-Book-Player
 //  Original: ios/enve/Screens/Podcasts/PodcastsModel.swift
 //  Modifications: RSS-only (no server shows); subscription store integration;
-//  punk+rally presentation state.
+//  ink+amp presentation state.
 //
 //  SPDX-License-Identifier: AGPL-3.0-only
 
@@ -103,7 +103,7 @@ final class PodcastsViewModel {
 
     private func fetchFeed(_ feedURL: URL) async -> PRPodcastShow? {
         var request = URLRequest(url: feedURL)
-        request.setValue("punk-rally/1.0 (RSS Podcast Client)", forHTTPHeaderField: "User-Agent")
+        request.setValue("ink-amp/1.0 (RSS Podcast Client)", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 20
 
         do {

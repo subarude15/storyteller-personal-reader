@@ -1,11 +1,11 @@
 //
 //  StatsView.swift
-//  punk+rally
+//  ink+amp
 //
 //  Ported from Enve Book Player (AGPL-3.0-only):
 //  https://github.com/opisaac9001/Enve-Book-Player
 //  Original: ios/enve/Screens/Journal/JournalScreen.swift + JournalStatsComponents.swift
-//  Modifications: local aggregates only; punk+rally tokens; 7-day bar chart.
+//  Modifications: local aggregates only; ink+amp tokens; 7-day bar chart.
 //
 //  SPDX-License-Identifier: AGPL-3.0-only
 

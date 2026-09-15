@@ -1,6 +1,6 @@
 //
 //  RSSPodcastParser.swift
-//  punk+rally
+//  ink+amp
 //
 //  Ported from Enve Book Player (AGPL-3.0-only):
 //  https://github.com/opisaac9001/Enve-Book-Player

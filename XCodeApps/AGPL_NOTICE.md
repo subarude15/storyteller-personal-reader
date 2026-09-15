@@ -1,6 +1,6 @@
-# AGPL-3.0 Attribution Notice — punk+rally Reader
+# AGPL-3.0 Attribution Notice — ink+amp Reader
 
-Portions of the `punk+rally` Reader iOS app are ported from
+Portions of the `ink+amp` Reader iOS app are ported from
 [**Enve Book Player**](https://github.com/opisaac9001/Enve-Book-Player),
 which is licensed under the **GNU Affero General Public License v3.0
 (AGPL-3.0-only)**.

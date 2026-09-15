@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// punk+rally Design System Tokens (per UX-SHELL.md and DESIGN.md)
+/// ink+amp Design System Tokens (per UX-SHELL.md and DESIGN.md)
 public enum PunkRallyTheme {
     /// App brand display name
-    public static let appName = "punk+rally"
-    public static let libraryOpdsTitle = "punk+rally books"
+    public static let appName = "ink+amp"
+    public static let libraryOpdsTitle = "ink+amp books"
     /// Default Storyteller server — this is the private cellar server
     /// (storyteller.banditoburrito.xyz), pre-filled into the connect/auth flow
     /// from a fresh book source via SilveranKit's kDefaultStorytellerServerURL.
@@ -155,7 +155,7 @@ public enum PunkRallyTheme {
     }
 }
 
-/// SwiftUI View extension to quickly access punk+rally tokens
+/// SwiftUI View extension to quickly access ink+amp tokens
 extension View {
     public func punkRallyTheme(_ scheme: ColorScheme) -> PunkRallyTheme.Chrome {
         PunkRallyTheme.Chrome(scheme: scheme)

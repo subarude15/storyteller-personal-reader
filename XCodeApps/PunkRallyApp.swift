@@ -1,12 +1,12 @@
 //
 //  PunkRallyApp.swift
-//  punk+rally
+//  ink+amp
 //
 //  Five-tab root (Home · Library · Shelf · Podcasts · Stats) per UX-SHELL.md.
 //  Wraps Silveran's existing library/player content where available; keeps
 //  podcasts and stats as independent local rails.
 //
-//  Library/Shelf surfaces are hosted by SilveranAppleKit's public punk+rally
+//  Library/Shelf surfaces are hosted by SilveranAppleKit's public ink+amp
 //  facade (PunkRallyShellSupport.swift): Shelf is downloads-only; Library is a
 //  searchable cover grid (no nested Silveran tab chrome). A shared mini-player
 //  bar sits above the tab bar, driven by Silveran's audio session monitor.
@@ -16,9 +16,9 @@
 import SwiftUI
 import SilveranAppleKit
 
-/// punk+rally five-tab shell. Library/Shelf reuse Silveran's own views when
+/// ink+amp five-tab shell. Library/Shelf reuse Silveran's own views when
 /// MediaViewModel is available in the environment (SilveranReaderApp injects it);
-/// otherwise show punk+rally placeholders so the shell always builds standalone.
+/// otherwise show ink+amp placeholders so the shell always builds standalone.
 public struct PunkRallyTabView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var selectedTab: Tab = .home
@@ -127,7 +127,7 @@ private struct HomeTabView: View {
                 .padding(.vertical, 12)
             }
             .background(chrome.bg)
-            .navigationTitle("punk+rally")
+            .navigationTitle("ink+amp")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 12) {
@@ -269,7 +269,7 @@ private struct HomeTabView: View {
 
 // MARK: - Library
 
-/// Library = searchable punk+rally catalogue (Silveran's full grid, no inner tab bar).
+/// Library = searchable ink+amp catalogue (Silveran's full grid, no inner tab bar).
 private struct LibraryTabView: View {
     var body: some View {
         PunkRallyLibraryView()

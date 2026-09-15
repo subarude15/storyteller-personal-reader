@@ -2,7 +2,7 @@
 //  PunkRallyShellSupport.swift
 //  SilveranAppleKit
 //
-//  punk+rally host-app facades: public SwiftUI views over internal Silveran
+//  ink+amp host-app facades: public SwiftUI views over internal Silveran
 //  surfaces (mini-player bar, downloads shelf, library grid) so the five-tab
 //  host shell in the app target can compose them without reaching into
 //  module-internal types.
@@ -27,7 +27,7 @@ public struct PunkRallyMiniPlayerBar: View {
     }
 }
 
-/// Sheet presentation modifier for punk+rally surfaces (Library, Shelf, Home)
+/// Sheet presentation modifier for ink+amp surfaces (Library, Shelf, Home)
 /// wiring SettingsView and OfflineStatusSheet with full retry / downloads / settings routing.
 public struct PunkRallySheetsModifier: ViewModifier {
     @Binding var showSettings: Bool
@@ -201,7 +201,7 @@ public struct PunkRallyLibraryView: View {
     }
 }
 
-/// Helper actions for opening current or restored book in the punk+rally shell.
+/// Helper actions for opening current or restored book in the ink+amp shell.
 public enum PunkRallyContinueAction {
     @MainActor
     public static func openLastOrCurrentBook(mediaViewModel: MediaViewModel? = nil) async {

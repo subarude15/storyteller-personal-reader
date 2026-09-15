@@ -191,7 +191,7 @@ struct BookSourceEditorView: View {
         let initialKind = source?.kind ?? .storyteller
         _kind = State(initialValue: initialKind)
         _name = State(initialValue: source?.name ?? Self.defaultName(for: initialKind))
-        // punk+rally: fresh storyteller source opens pre-filled with the private
+        // ink+amp: fresh storyteller source opens pre-filled with the private
         // cellar server so connect/auth never starts empty. Existing sources keep
         // their stored credentials (loaded into serverURL later).
         _serverURL = State(

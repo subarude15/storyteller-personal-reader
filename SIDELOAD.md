@@ -1,6 +1,6 @@
 # AltStore Classic Sideload Guide (Free Apple ID)
 
-This guide explains how to install **punk+rally** on an iPhone or iPad using **AltStore Classic** and a **free Apple ID**, with **AltServer on Windows** (or macOS) for automated 7-day refreshes. No paid Apple Developer membership ($99/year) is required.
+This guide explains how to install **ink+amp** on an iPhone or iPad using **AltStore Classic** and a **free Apple ID**, with **AltServer on Windows** (or macOS) for automated 7-day refreshes. No paid Apple Developer membership ($99/year) is required.
 
 ---
 
@@ -35,18 +35,18 @@ This guide explains how to install **punk+rally** on an iPhone or iPad using **A
 
 ---
 
-## 3. Downloading the punk+rally Unsigned IPA
+## 3. Downloading the ink+amp Unsigned IPA
 
 1. Navigate to the GitHub repository: `subarude15/storyteller-personal-reader`
 2. Go to the **Actions** tab.
-3. Click on the latest workflow run on the `punk-rally-ios` branch (or your active PR).
+3. Click on the latest workflow run on the `ink-amp-ios` branch (or your active PR).
 4. Scroll down to the **Artifacts** section at the bottom of the run summary.
 5. Download `punkrally-sideload-unsigned-ipa`.
 6. Unzip the downloaded file on your computer or directly on your iPhone/iPad to get `punkrally-sideload-unsigned.ipa`.
 
 ---
 
-## 4. Installing punk+rally via AltStore
+## 4. Installing ink+amp via AltStore
 
 ### Method A: Direct on iPhone/iPad (Recommended)
 1. AirDrop or download `punkrally-sideload-unsigned.ipa` to the **Files** app on your iPhone/iPad.

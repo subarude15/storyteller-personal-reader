@@ -48,7 +48,7 @@ targets:
     info:
       path: XCodeApps/Info-macOS.plist
       properties:
-        CFBundleName: "punk+rally"
+        CFBundleName: "ink+amp"
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -58,7 +58,7 @@ targets:
         KEYCHAIN_SERVICE: "$(KEYCHAIN_SERVICE)"
         SILVERAN_WIDGET_APP_GROUP: "$(MAC_APP_GROUP_ID)"
         LSApplicationCategoryType: "public.app-category.books"
-        NSLocalNetworkUsageDescription: "punk+rally needs local network access to connect to your Storyteller server."
+        NSLocalNetworkUsageDescription: "ink+amp needs local network access to connect to your Storyteller server."
         ITSAppUsesNonExemptEncryption: false
         ATSApplicationFontsPath: "fonts"
         CFBundleURLTypes:
@@ -95,14 +95,14 @@ targets:
         INFOPLIST_FILE: XCodeApps/Info-iOS.plist
         PRODUCT_BUNDLE_IDENTIFIER: "$(APP_BUNDLE_ID)"
         #INFOPLIST_KEY_CFBundleDisplayName: Silveran Reader
-        INFOPLIST_KEY_CFBundleDisplayName: "punk+rally"
+        INFOPLIST_KEY_CFBundleDisplayName: "ink+amp"
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
         #SWIFT_UPCOMING_FEATURE_NONSENDING_NONISOLATING_BY_DEFAULT: YES
     info:
       path: XCodeApps/Info-iOS.plist
       properties:
-        CFBundleName: "punk+rally"
-        CFBundleDisplayName: "punk+rally"
+        CFBundleName: "ink+amp"
+        CFBundleDisplayName: "ink+amp"
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -112,7 +112,7 @@ targets:
         KEYCHAIN_SERVICE: "$(KEYCHAIN_SERVICE)"
         SILVERAN_WIDGET_APP_GROUP: "$(APP_GROUP_ID)"
         LSApplicationCategoryType: "public.app-category.books"
-        NSLocalNetworkUsageDescription: "punk+rally needs local network access to connect to your Storyteller server."
+        NSLocalNetworkUsageDescription: "ink+amp needs local network access to connect to your Storyteller server."
         CFBundleURLTypes:
           - CFBundleURLName: com.punkrally.reader
             CFBundleURLSchemes:
@@ -166,13 +166,13 @@ targets:
         CODE_SIGN_STYLE: Automatic
         INFOPLIST_FILE: XCodeApps/Info-iOS-Sideload.plist
         PRODUCT_BUNDLE_IDENTIFIER: "$(APP_BUNDLE_ID)"
-        INFOPLIST_KEY_CFBundleDisplayName: "punk+rally"
+        INFOPLIST_KEY_CFBundleDisplayName: "ink+amp"
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
     info:
       path: XCodeApps/Info-iOS-Sideload.plist
       properties:
-        CFBundleName: "punk+rally"
-        CFBundleDisplayName: "punk+rally"
+        CFBundleName: "ink+amp"
+        CFBundleDisplayName: "ink+amp"
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -181,7 +181,7 @@ targets:
         KEYCHAIN_ACCESS_GROUP: "$(KEYCHAIN_ACCESS_GROUP)"
         KEYCHAIN_SERVICE: "$(KEYCHAIN_SERVICE)"
         LSApplicationCategoryType: "public.app-category.books"
-        NSLocalNetworkUsageDescription: "punk+rally needs local network access to connect to your Storyteller server."
+        NSLocalNetworkUsageDescription: "ink+amp needs local network access to connect to your Storyteller server."
         CFBundleURLTypes:
           - CFBundleURLName: com.punkrally.reader
             CFBundleURLSchemes:
@@ -238,7 +238,7 @@ targets:
       path: XCodeApps/Info-Widgets-iOS.plist
       properties:
         CFBundleName: "Silveran Reader Widgets"
-        CFBundleDisplayName: "punk+rally"
+        CFBundleDisplayName: "ink+amp"
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -276,7 +276,7 @@ targets:
       path: XCodeApps/Info-Widgets-macOS.plist
       properties:
         CFBundleName: "Silveran Reader Widgets"
-        CFBundleDisplayName: "punk+rally"
+        CFBundleDisplayName: "ink+amp"
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -305,8 +305,8 @@ targets:
     info:
       path: XCodeApps/Info-watchOS.plist
       properties:
-        CFBundleName: "punk+rally"
-        CFBundleDisplayName: "punk+rally"
+        CFBundleName: "ink+amp"
+        CFBundleDisplayName: "ink+amp"
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -340,8 +340,8 @@ targets:
     info:
       path: XCodeApps/Info-tvOS.plist
       properties:
-        CFBundleName: "punk+rally"
-        CFBundleDisplayName: "punk+rally"
+        CFBundleName: "ink+amp"
+        CFBundleDisplayName: "ink+amp"
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"

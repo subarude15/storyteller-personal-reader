@@ -1,6 +1,6 @@
-# Building punk+rally (iOS)
+# Building ink+amp (iOS)
 
-punk+rally is a fork of [Silveran Reader](https://github.com/kyonifer/silveran-reader)
+ink+amp is a fork of [Silveran Reader](https://github.com/kyonifer/silveran-reader)
 that keeps SilveranKit's Storyteller sync brain and adds a phone-first five-tab shell
 (Home · Library · Shelf · Podcasts · Stats), RSS podcasts and reading stats ported from
 Enve Book Player (AGPL), and Fast Font defaults.
@@ -23,7 +23,7 @@ The files are Xcode-ready and verified structurally on the Windows dev box; comp
 ```bash
 git clone https://github.com/YOUR_GITHUB/silveran-reader.git
 cd silveran-reader
-git checkout punk-rally-ios
+git checkout ink-amp-ios
 ```
 
 ## 2. Resolve Swift packages
@@ -47,7 +47,7 @@ cd ..
 ```
 
 This produces `Silveran.xcodeproj` at repo root from `XCodeApps/project.yml`, including
-the punk+rally Theme + PunkRallyModules source directories.
+the ink+amp Theme + PunkRallyModules source directories.
 
 ## 4. Build for iOS Simulator
 
@@ -69,7 +69,7 @@ xcodebuild -project Silveran.xcodeproj \
 
 ## 5. Run in Simulator
 
-Open `Silveran.xcodeproj`, select the **punk+rally** scheme, pick an iPhone simulator,
+Open `Silveran.xcodeproj`, select the **ink+amp** scheme, pick an iPhone simulator,
 and press Run. Or from CLI:
 
 ```bash
@@ -104,7 +104,7 @@ This builds an unsigned device IPA with CarPlay, widgets, and watchOS companions
 ## Signing & identity
 
 - Default bundle ID: `com.punkrally.reader`
-- App display name: `punk+rally`
+- App display name: `ink+amp`
 - Entitlements: `XCodeApps/SilveranReaderIos.entitlements` (keychain, network, audio,
   background fetch)
 - Set `DEVELOPMENT_TEAM` in `XCodeApps/Configs/Debug.xcconfig` / `Release.xcconfig`
