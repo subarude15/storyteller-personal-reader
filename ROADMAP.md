@@ -17,9 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- Board quiet — Josh confirmed Stats push on tip `cf5c663`. Pick next: **RSS video player** vs **NAS `AD_STRIP_URL`** vs **in-app YouTube** (then we lock Now). Soft polish anytime.
+- **NAS `AD_STRIP_URL` worker** (PrincessDonut) — replace `StubPodcastAdStripPipeline` with a real strip endpoint the app can hit. OmniRoute free-first via `/v1` for any LLM step. Tip base ≥ `cf5c663` (Stats push shipped). Soft polish anytime.
 
-**Do not start NAS `AD_STRIP_URL` / silence-trim / YouTube / RSS video player unless Josh picks one.**
+**Do not start silence-trim / in-app YouTube / RSS video player unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
