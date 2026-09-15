@@ -113,7 +113,7 @@ public final class PodcastDownloadStore {
         if let index = records.firstIndex(where: { $0.episodeID == episodeID }) {
             records[index].isPinned = true
             persistLedger()
-            // Already on disk: if Original only, kick stub Clean so Keep matches queue UX.
+            // Already on disk: if Original only, kick Clean so Keep matches queue UX.
             if records[index].adStripState != .clean,
                 FileManager.default.fileExists(atPath: originalURL(for: records[index]).path)
             {
@@ -343,8 +343,8 @@ public final class PodcastDownloadStore {
         }
     }
 
-    /// Stub Clean path: Cleaning… → copy Original to `audio.clean.*` → Clean.
-    /// On failure/timeout: chip → Clean failed; Original file remains playable.
+    /// Clean path: Cleaning… → NAS worker (AD_STRIP_URL) → `audio.clean.mp3` → Clean.
+    /// On failure/timeout: chip → Clean failed + toast; Original remains playable.
     private func runCleanPipeline(episodeID: String) async {
         guard let index = records.firstIndex(where: { $0.episodeID == episodeID }) else { return }
         let record = records[index]
@@ -355,21 +355,18 @@ public final class PodcastDownloadStore {
         records[index].adStripState = .cleaning
         persistLedger()
 
-        let ext = original.pathExtension.isEmpty ? "mp3" : original.pathExtension
-        let cleanName = "audio.clean.\(ext)"
+        // Worker always returns MPEG audio; keep a stable Clean sibling name.
+        let cleanName = "audio.clean.mp3"
         let cleanURL = episodeFolder(for: episodeID).appendingPathComponent(cleanName)
 
         do {
-            try await StubPodcastAdStripPipeline.shared.produceCleanCopy(
+            try await PodcastAdStripHTTPPipeline.shared.produceCleanCopy(
                 originalURL: original,
                 cleanURL: cleanURL
             )
             guard !Task.isCancelled else {
                 try? FileManager.default.removeItem(at: cleanURL)
-                if let i = records.firstIndex(where: { $0.episodeID == episodeID }) {
-                    records[i].adStripState = .failed
-                    persistLedger()
-                }
+                markCleanFailed(episodeID: episodeID, toast: true)
                 return
             }
             guard let i = records.firstIndex(where: { $0.episodeID == episodeID }) else { return }
@@ -378,13 +375,20 @@ public final class PodcastDownloadStore {
             records[i].adStripState = .clean
             persistLedger()
         } catch {
-            debugLog("[PodcastDownloadStore] clean stub failed for \(episodeID): \(error)")
+            debugLog("[PodcastDownloadStore] clean failed for \(episodeID): \(error)")
             try? FileManager.default.removeItem(at: cleanURL)
-            if let i = records.firstIndex(where: { $0.episodeID == episodeID }) {
-                records[i].adStripState = .failed
-                records[i].cleanLocalFileName = nil
-                persistLedger()
-            }
+            markCleanFailed(episodeID: episodeID, toast: true)
+        }
+    }
+
+    private func markCleanFailed(episodeID: String, toast: Bool) {
+        if let i = records.firstIndex(where: { $0.episodeID == episodeID }) {
+            records[i].adStripState = .failed
+            records[i].cleanLocalFileName = nil
+            persistLedger()
+        }
+        if toast {
+            NotificationCenter.default.post(name: .punkRallyAdStripFailed, object: nil)
         }
     }
 

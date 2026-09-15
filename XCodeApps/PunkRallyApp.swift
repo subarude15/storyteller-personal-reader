@@ -105,6 +105,11 @@ public struct PunkRallyTabView: View {
                 showShellToast("Couldn't sync Stats · try again")
             }
             .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyAdStripFailed)
+            ) { _ in
+                showShellToast("Clean failed · try again")
+            }
+            .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyPlayPodcastEpisode)
             ) { note in
                 playPodcast(from: note.userInfo)

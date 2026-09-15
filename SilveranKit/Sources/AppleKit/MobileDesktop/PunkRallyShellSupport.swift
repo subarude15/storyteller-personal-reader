@@ -40,6 +40,8 @@ extension Notification.Name {
     )
     /// Stats sync landed Offline after Syncing… — host shows a short toast.
     public static let punkRallyStatsSyncFailed = Notification.Name("punkRallyStatsSyncFailed")
+    /// Clean-path ad strip failed / timed out — host shows a short toast.
+    public static let punkRallyAdStripFailed = Notification.Name("punkRallyAdStripFailed")
 }
 
 /// Posts SessionTracker lifecycle events from AppleKit players into the app target.

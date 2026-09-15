@@ -112,7 +112,9 @@ targets:
         KEYCHAIN_SERVICE: "$(KEYCHAIN_SERVICE)"
         SILVERAN_WIDGET_APP_GROUP: "$(APP_GROUP_ID)"
         LSApplicationCategoryType: "public.app-category.books"
-        NSLocalNetworkUsageDescription: "ink+amp needs local network access to connect to your Storyteller server."
+        NSLocalNetworkUsageDescription: "ink+amp needs local network access to connect to your Storyteller server and ad-strip worker."
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         CFBundleURLTypes:
           - CFBundleURLName: com.punkrally.reader
             CFBundleURLSchemes:
@@ -183,7 +185,9 @@ targets:
         # to the default (app-keyed) access group when this Info key is absent.
         KEYCHAIN_SERVICE: "$(KEYCHAIN_SERVICE)"
         LSApplicationCategoryType: "public.app-category.books"
-        NSLocalNetworkUsageDescription: "ink+amp needs local network access to connect to your Storyteller server."
+        NSLocalNetworkUsageDescription: "ink+amp needs local network access to connect to your Storyteller server and ad-strip worker."
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         CFBundleURLTypes:
           - CFBundleURLName: com.punkrally.reader
             CFBundleURLSchemes:
