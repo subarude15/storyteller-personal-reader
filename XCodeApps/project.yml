@@ -178,7 +178,9 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundlePackageType: "$(PRODUCT_BUNDLE_PACKAGE_TYPE)"
         CFBundleExecutable: "$(EXECUTABLE_NAME)"
-        KEYCHAIN_ACCESS_GROUP: "$(KEYCHAIN_ACCESS_GROUP)"
+        # KEYCHAIN_ACCESS_GROUP omitted: free AltStore signing can't use the
+        # shared $(AppIdentifierPrefix) group; SecurityKeychainStore falls back
+        # to the default (app-keyed) access group when this Info key is absent.
         KEYCHAIN_SERVICE: "$(KEYCHAIN_SERVICE)"
         LSApplicationCategoryType: "public.app-category.books"
         NSLocalNetworkUsageDescription: "ink+amp needs local network access to connect to your Storyteller server."

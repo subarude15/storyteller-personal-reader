@@ -770,7 +770,7 @@ struct BookSourceEditorView: View {
             return
                 "Could not save folder source. The selected folder may already belong to another source."
         }
-        guard let sourceID else { return "Connection failed." }
+        guard let sourceID else { return "Couldn't save credentials (Keychain)" }
         let storytellerStatus = await BookServiceActor.shared.connectionStatus(sourceID: sourceID)
         if case .error(let message) = storytellerStatus {
             return message
