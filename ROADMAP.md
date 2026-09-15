@@ -70,7 +70,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - Glance / Watch tile: now-playing + Continue deep-link
 - One-tap LAN failover: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
 - CarPlay (out of current build scope)
-- Podcast Index / iTunes search
+- Podcast search — Podcasts tab Find shows → iTunes/Podcast Index lookup → art + Subscribe (resolves RSS); paste-URL stays as fallback. After Home mixed + Stats.
 
 ---
 
