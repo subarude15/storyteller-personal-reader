@@ -69,6 +69,7 @@ public enum HomeMixedQueue {
         preferredCategory: (BookMetadata) -> LocalMediaCategory?,
         podcastRecents: [PodcastRecentEntry],
         podcastDownloads: [PodcastDownloadRecord],
+        bookLocalTouches: [BookID: Date] = [:],
         upNextLimit: Int = 5
     ) -> (continueItem: HomeMixedItem?, upNext: [HomeMixedItem]) {
         var items: [HomeMixedItem] = []
@@ -78,12 +79,18 @@ public enum HomeMixedQueue {
             let fraction = bp?.progressFraction ?? book.progress
             guard fraction > 0.001, fraction < 0.995 else { continue }
             let ms = bp?.timestamp ?? book.position?.timestamp
-            let date: Date
+            let progressDate: Date
             if let ms, ms > 0 {
-                date = Date(timeIntervalSince1970: ms / 1000)
+                // Storyteller / PSA timestamps are unix milliseconds.
+                progressDate = Date(timeIntervalSince1970: ms / 1000)
             } else {
-                date = .distantPast
+                progressDate = .distantPast
             }
+            let localDate = bookLocalTouches[book.id] ?? .distantPast
+            let date = max(progressDate, localDate)
+            // Skip books we have never actually touched and that lack a progress ts —
+            // they would otherwise float as distantPast noise under real activity.
+            guard date > .distantPast else { continue }
             items.append(
                 .book(
                     book,

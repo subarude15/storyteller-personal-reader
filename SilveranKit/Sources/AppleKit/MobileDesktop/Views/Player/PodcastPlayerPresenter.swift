@@ -109,6 +109,7 @@ public final class PodcastPlayerPresenter {
                 activeEpisode = nil
                 await AudioSessionActor.shared.closePodcast()
             }
+            NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
         }
     }
 

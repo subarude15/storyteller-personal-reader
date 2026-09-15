@@ -19,6 +19,8 @@ extension Notification.Name {
     /// PodcastsViewModel.play(episode:) → host shell: open the episode on the
     /// shared audio session and present the podcast card.
     public static let punkRallyPlayPodcastEpisode = Notification.Name("punkRallyPlayPodcastEpisode")
+    /// Book or podcast last-touched changed — Home should rebuild Continue / Up next.
+    public static let punkRallyHomeQueueDidChange = Notification.Name("punkRallyHomeQueueDidChange")
 }
 
 /// Hosts the single full-screen player/reader card for the ink+amp five-tab

@@ -103,12 +103,20 @@ public struct PunkRallyTabView: View {
                             episodeID: episodeID,
                             progress: 1
                         )
+                        NotificationCenter.default.post(
+                            name: .punkRallyHomeQueueDidChange,
+                            object: nil
+                        )
                     }
                 }
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
                     _ = PodcastDownloadStore.shared.runOvernightPruneIfDue()
+                    NotificationCenter.default.post(
+                        name: .punkRallyHomeQueueDidChange,
+                        object: nil
+                    )
                 } else if phase == .background {
                     Task {
                         await PodcastPlayerPresenter.persistPodcastProgress(markFinished: false)
@@ -118,6 +126,10 @@ public struct PunkRallyTabView: View {
                                 progress: progress.duration > 0
                                     ? progress.position / progress.duration
                                     : 0
+                            )
+                            NotificationCenter.default.post(
+                                name: .punkRallyHomeQueueDidChange,
+                                object: nil
                             )
                         }
                     }
@@ -195,6 +207,7 @@ public struct PunkRallyTabView: View {
                 progress: PodcastDownloadStore.shared.record(for: episodeID)?.progress ?? 0
             )
         )
+        NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
 
         let episode = PodcastPlayerPresenter.Episode(
             id: episodeID,
@@ -248,6 +261,7 @@ private struct HomeTabView: View {
             },
             podcastRecents: PodcastRecentStore.shared.all(),
             podcastDownloads: podcastStore.allDownloads(),
+            bookLocalTouches: BookRecentStore.shared.all(),
             upNextLimit: 5
         )
     }
@@ -302,11 +316,20 @@ private struct HomeTabView: View {
                     }
                 }
             }
-            .onAppear { queueTick &+= 1 }
+            .onAppear {
+                queueTick &+= 1
+                Task { await mediaViewModel?.refreshMetadata(source: "HomeMixed") }
+            }
             .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyPlayPodcastEpisode)
             ) { _ in
                 queueTick &+= 1
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyHomeQueueDidChange)
+            ) { _ in
+                queueTick &+= 1
+                Task { await mediaViewModel?.refreshMetadata(source: "HomeMixedQueue") }
             }
         }
         .punkRallySheets(

@@ -398,6 +398,12 @@ extension SettingsView {
                         Label("Debug Log", systemImage: "doc.text")
                     }
                 }
+
+                Section {
+                    LabeledContent("Build", value: PunkRallyBuildIdentity.stamp)
+                } footer: {
+                    Text("AltStore identity stamp (America/New_York MMDDYY.HHmm).")
+                }
             }
             .navigationTitle("Settings")
         }

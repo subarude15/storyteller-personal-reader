@@ -41,6 +41,8 @@ public final class PlayerPresenter {
         dismissalKeepsSession = false
         let replacingCard = card != nil
         card = PresentedPlayerCard(data: data)
+        BookRecentStore.shared.record(data.metadata.id)
+        NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
         Task { await LastOpenBookStore.save(bookData: data) }
         if !replacingCard {
             // A replaced card ends its own session through its view teardown;
@@ -53,6 +55,8 @@ public final class PlayerPresenter {
     public func dismissCard() {
         guard let current = card else { return }
         let bookID = current.data.metadata.id
+        BookRecentStore.shared.record(bookID)
+        NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
         Task { @MainActor in
             let kind = await AudioSessionActor.shared.currentSessionKind()
             let snapshot = await AudioSessionActor.shared.currentSnapshot()

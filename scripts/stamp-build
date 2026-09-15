@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Writes America/New_York MMDDYY.HHmm into PunkRallyBuildIdentity.stampSource
+# so AltStore IPAs are distinguishable.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)"
+ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+TARGET="${ROOT}/SilveranKit/Sources/AppleKit/MobileDesktop/PunkRallyBuildIdentity.swift"
+
+STAMP="$(TZ=America/New_York date +%m%d%y.%H%M)"
+
+python3 - "$TARGET" "$STAMP" <<'PY'
+import pathlib, re, sys
+path = pathlib.Path(sys.argv[1])
+stamp = sys.argv[2]
+text = path.read_text(encoding="utf-8")
+updated, n = re.subn(
+    r'public static let stampSource = "[^"]*"',
+    f'public static let stampSource = "{stamp}"',
+    text,
+    count=1,
+)
+if n != 1:
+    raise SystemExit(f"stamp-build: could not patch stampSource in {path}")
+path.write_text(updated, encoding="utf-8")
+print(f"PunkRally build stamp: {stamp}")
+PY

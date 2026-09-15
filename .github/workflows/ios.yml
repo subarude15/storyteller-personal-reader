@@ -35,8 +35,11 @@ jobs:
       - name: Generate app icons
         run: ./scripts/genicons
 
-      - name: Generate Xcode project
-        run: ./scripts/genxproj
+      - name: Stamp build identity + generate Xcode project
+        run: |
+          chmod +x scripts/stamp-build scripts/genxproj
+          ./scripts/stamp-build
+          ./scripts/genxproj
 
       - name: Build iOS target
         run: ./scripts/iosbuild
@@ -58,8 +61,11 @@ jobs:
       - name: Generate app icons
         run: ./scripts/genicons
 
-      - name: Generate Xcode project
-        run: ./scripts/genxproj
+      - name: Stamp build identity + generate Xcode project
+        run: |
+          chmod +x scripts/stamp-build scripts/genxproj
+          ./scripts/stamp-build
+          ./scripts/genxproj
 
       - name: Build and package unsigned device IPA
         run: ./scripts/package-ipa "Silveran Reader Sideload (iOS)" Release .buildIosDevice punkrally-sideload-unsigned.ipa
