@@ -17,9 +17,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **Cross-device Stats sync** — tip ≥ `2f7deb4`. Shared store; footer → “Synced across your devices” (Ui footer lines); merge by day (no double-count). Local Cursor in flight.
-
-**Do not start NAS `AD_STRIP_URL` / silence-trim / YouTube ahead of Stats sync unless Josh reorders.** Soft UX polish (Couldn’t save server copy, empty state, missing covers) can land anytime.
+*(No forced Now — wait for Josh before NAS `AD_STRIP_URL` / silence-trim / YouTube. Soft UX polish can land anytime.)*
 
 ---
 
@@ -64,9 +62,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-### After queue
+### After Stats sync
 1. ~~Podcast queue~~ → **Shipped** (`2f7deb4`)
-2. **Cross-device Stats sync** → **Now**
+2. ~~Cross-device Stats sync~~ → **Shipped** (`c5791ec`)
 3. Then Later order below (do not reorder without Josh)
 
 ### Soft UX polish (anytime)
