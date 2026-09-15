@@ -150,7 +150,9 @@ public final class PlayerPresenter {
             case .audiobook(let id):
                 await AudioSessionActor.shared.close(ifOwnedBy: id)
             case .podcast:
+                await PodcastPlayerPresenter.persistPodcastProgress(markFinished: false)
                 await AudioSessionActor.shared.closePodcast()
+                PodcastPlayerPresenter.shared.clearActiveEpisodeAfterStop()
         }
     }
 

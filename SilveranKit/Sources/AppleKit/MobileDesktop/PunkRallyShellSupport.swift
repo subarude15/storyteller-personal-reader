@@ -185,14 +185,23 @@ extension EnvironmentValues {
     }
 }
 
-/// Mini-player bar (audio/readaloud) that sits above the tab bar.
-/// Wrapper around Silveran's internal `GlobalMiniPlayerBar`.
+/// Mini-player bar that sits above the tab bar via per-tab `safeAreaInset`
+/// (never overlay the UITabBar — TabView-level inset covers the bar on iOS).
 public struct PunkRallyMiniPlayerBar: View {
     public init() {}
 
     public var body: some View {
         GlobalMiniPlayerBar()
             .accessibilityLabel("Mini player")
+    }
+}
+
+extension View {
+    /// Pads tab content and places the mini player above the tab bar.
+    public func punkRallyMiniPlayerInset() -> some View {
+        safeAreaInset(edge: .bottom, spacing: 0) {
+            PunkRallyMiniPlayerBar()
+        }
     }
 }
 

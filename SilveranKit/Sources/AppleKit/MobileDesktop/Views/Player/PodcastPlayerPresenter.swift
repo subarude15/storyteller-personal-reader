@@ -75,13 +75,15 @@ public final class PodcastPlayerPresenter {
         if PlayerPresenter.shared.card != nil {
             PlayerPresenter.shared.dismissCard()
         }
+        let resumeAt = Self.resumePositionSeconds(for: episode.id)
         do {
             try await AudioSessionActor.shared.openPodcast(
                 episodeID: episode.id,
                 title: episode.title,
                 author: episode.showTitle,
                 audioURL: episode.audioURL,
-                duration: episode.duration
+                duration: episode.duration,
+                startAtSeconds: resumeAt
             )
         } catch {
             debugLog("[PodcastPlayerPresenter] Failed to open episode: \(error)")
@@ -135,17 +137,45 @@ public final class PodcastPlayerPresenter {
         episode = current
     }
 
-    /// Writes listen progress into the podcast download ledger (Shelf prune).
+    /// After mini-player Stop — session is gone; drop retained episode so the
+    /// next play goes through openPodcast + resume seek.
+    public func clearActiveEpisodeAfterStop() {
+        episode = nil
+        activeEpisode = nil
+    }
+
+    /// Writes listen progress into the playhead store (always) and download
+    /// ledger when the episode is on Shelf.
     public static func persistPodcastProgress(markFinished: Bool) async {
         guard let progress = await AudioSessionActor.shared.podcastPlaybackProgress() else {
             return
         }
+        let duration = progress.duration > 0 ? progress.duration : nil
+        PodcastPlayheadStore.shared.save(
+            episodeID: progress.episodeID,
+            positionSeconds: progress.position,
+            durationSeconds: duration,
+            markFinished: markFinished || progress.isFinished
+        )
         PodcastDownloadStore.shared.updatePlayback(
             episodeID: progress.episodeID,
             positionSeconds: progress.position,
-            durationSeconds: progress.duration > 0 ? progress.duration : nil,
+            durationSeconds: duration,
             markFinished: markFinished || progress.isFinished
         )
+    }
+
+    /// Prefer streaming playhead; fall back to download ledger position.
+    private static func resumePositionSeconds(for episodeID: String) -> TimeInterval? {
+        if let stored = PodcastPlayheadStore.shared.position(for: episodeID), stored > 1 {
+            return stored
+        }
+        if let downloaded = PodcastDownloadStore.shared.record(for: episodeID)?.positionSeconds,
+            downloaded > 1
+        {
+            return downloaded
+        }
+        return nil
     }
 }
 #endif

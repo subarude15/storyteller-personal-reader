@@ -41,37 +41,39 @@ public struct PunkRallyTabView: View {
         ZStack {
             TabView(selection: $selectedTab) {
                 HomeTabView()
+                    .punkRallyMiniPlayerInset()
                     .tabItem {
                         Label("Home", systemImage: "house.fill")
                     }
                     .tag(Tab.home)
 
                 LibraryTabView()
+                    .punkRallyMiniPlayerInset()
                     .tabItem {
                         Label("Library", systemImage: "books.vertical.fill")
                     }
                     .tag(Tab.library)
 
                 ShelfTabView()
+                    .punkRallyMiniPlayerInset()
                     .tabItem {
                         Label("Shelf", systemImage: "arrow.down.circle.fill")
                     }
                     .tag(Tab.shelf)
 
                 PodcastsHomeView()
+                    .punkRallyMiniPlayerInset()
                     .tabItem {
                         Label("Podcasts", systemImage: "mic.fill")
                     }
                     .tag(Tab.podcasts)
 
                 StatsView()
+                    .punkRallyMiniPlayerInset()
                     .tabItem {
                         Label("Stats", systemImage: "chart.bar.fill")
                     }
                     .tag(Tab.stats)
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                PunkRallyMiniPlayerBar()
             }
             .tint(PunkRallyTheme.Accent.primary)
             .preferredColorScheme(nil) // follow system appearance

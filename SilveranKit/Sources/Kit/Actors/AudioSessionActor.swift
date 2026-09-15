@@ -225,6 +225,7 @@ public actor AudioSessionActor {
         author: String?,
         audioURL: URL,
         duration: TimeInterval? = nil,
+        startAtSeconds: TimeInterval? = nil,
     ) async throws {
         guard let factory = SilveranPlatform.audioPlayerFactory else {
             throw AudiobookSessionError.audiobookNotOpen
@@ -233,6 +234,8 @@ public actor AudioSessionActor {
         if case .podcast(let currentID) = currentKind, currentID == episodeID,
             podcastPlayer != nil
         {
+            // Same episode still live (mini-player / keep-playing) — do not
+            // reload or seek to a stale saved playhead.
             try? await transport(.play)
             return
         }
@@ -262,6 +265,15 @@ public actor AudioSessionActor {
         podcastRate = rate
         podcastIsPlaying = false
         currentKind = .podcast(episodeID)
+
+        if let startAtSeconds, startAtSeconds > 1 {
+            let durationCap = podcastDuration
+            let capped =
+                durationCap > 0
+                ? min(startAtSeconds, max(0, durationCap - 1))
+                : startAtSeconds
+            await player.seek(to: capped)
+        }
 
         await configureNowPlayingCommands(for: .podcast(episodeID))
         try await transport(.play)

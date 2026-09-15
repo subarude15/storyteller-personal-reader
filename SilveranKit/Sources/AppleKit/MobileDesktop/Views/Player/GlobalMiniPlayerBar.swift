@@ -65,6 +65,7 @@ final class AudioSessionMonitor {
 struct GlobalMiniPlayerBar: View {
     private var monitor = AudioSessionMonitor.shared
     private var presenter = PlayerPresenter.shared
+    private var podcastPresenter = PodcastPlayerPresenter.shared
 
     var body: some View {
         content
@@ -73,7 +74,12 @@ struct GlobalMiniPlayerBar: View {
 
     @ViewBuilder
     private var content: some View {
-        if let snapshot = monitor.snapshot, presenter.card == nil {
+        // Hide while a full-screen card is up so the inset collapses; show only
+        // for headless / mini-player playback above the tab bar.
+        if let snapshot = monitor.snapshot,
+            presenter.card == nil,
+            podcastPresenter.episode == nil
+        {
             barContent(snapshot)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         }

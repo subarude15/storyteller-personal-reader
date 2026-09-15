@@ -17,8 +17,8 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **P0 Mini-player above tab bar** — `safeAreaInset(edge: .bottom)` (or ~56pt) when GlobalMiniPlayerBar is visible; tab bar full-width and tappable underneath. Tip ≥ `4d303dd`. Local Cursor only.
-- [ ] **P0 Podcast resume position** — persist RSS episode playhead; reopen resumes near last spot (not 0:00). Same spirit as audiobook progress.
+- [ ] **P0 Mini-player above tab bar** — per-tab `punkRallyMiniPlayerInset()` (not TabView-level). In progress on tip; wait Sideload green.
+- [ ] **P0 Podcast resume position** — `PodcastPlayheadStore` + `openPodcast(startAtSeconds:)`. In progress on tip; wait Sideload green.
 - [x] **Stats (SessionTracker local)** — wired `c627bbe`; Sideload green ([Actions 35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694)).
 
 **Do not start Podcast Index / cross-device Stats / −15/+15 / mini-player cover art ahead of these P0s.**
