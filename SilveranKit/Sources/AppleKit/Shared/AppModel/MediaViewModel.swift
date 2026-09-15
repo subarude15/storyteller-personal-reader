@@ -164,7 +164,8 @@ public final class MediaViewModel {
     public var libraryViewSnapshot = LibraryViewSnapshot()
     public var bookSources: [BookSourceRecord] = []
     public var uploadPermittedSourceIDs: Set<BookSourceID> = []
-    var bookProgressCache: [BookID: BookProgress] = [:]
+    /// Book progress map for Home Continue / Up next last-touched ordering.
+    public private(set) var bookProgressCache: [BookID: BookProgress] = [:]
     @ObservationIgnored private var readBookIds: Set<BookID> = []
 
     @ObservationIgnored private let libraryDerivationActor = LibraryDerivationActor()
