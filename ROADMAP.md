@@ -17,9 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **NAS `AD_STRIP_URL` worker** (PrincessDonut) — replace `StubPodcastAdStripPipeline` with a real strip endpoint the app can hit. OmniRoute free-first via `/v1` for any LLM step. Tip base ≥ `cf5c663` (Stats push shipped). Soft polish anytime.
+- **NAS `AD_STRIP_URL` full cut (option 2)** — Cursor owns **app + Docker worker + compose/docs** in one cut (replace `StubPodcastAdStripPipeline`). Settings **Ad strip URL** + **Test**; upload Original → poll → Clean sibling (never delete Original); chips + fail toast; dumb ffmpeg first; OmniRoute free-first `/v1` if any LLM step. Tip base ≥ `cf5c663`. Nas-ty deploys on PrincessDonut after docs land. Soft polish anytime.
 
-**Do not start silence-trim / in-app YouTube / RSS video player unless Josh reorders.**
+**Do not start silence-trim / hybrid video / Glance unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
@@ -68,29 +68,28 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ### After Stats sync
 1. ~~Podcast queue~~ → **Shipped** (`2f7deb4`)
 2. ~~Cross-device Stats sync~~ → **Shipped** (`c5791ec`)
-3. Then Later order below (do not reorder without Josh)
+3. ~~NAS `AD_STRIP_URL` worker~~ → **Now** (full cut option 2: app + Docker + docs)
+4. **After strip Sideload (Josh locked):** **Hybrid video** — default to **RSS video playback** in full Now Playing when a video enclosure exists; otherwise show a **Watch on YouTube** chip (handoff / open URL — **not** a full in-app YouTube embed/SDK). Soft polish anytime.
 
 ### Soft UX polish (anytime)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
-- ~~Stats push / description decode~~ → **Shipped** (``cf5c663``) — Josh confirmed
-- Separate **Couldn’t save server** copy (≠ “Connection failed”)
+- ~~Stats push / description decode~~ → **Shipped** (`cf5c663`) — Josh confirmed
+- Separate **Couldn't save server** copy (≠ “Connection failed”)
 - Empty state when URL prefilled but no saved Storyteller source
 - Missing Storyteller covers (cosmetic; not a blocker)
 
 ---
-
 ## Later / ideas (not blocking)
 
 Strict order (Smokey / Nas-ty):
-1. **NAS `AD_STRIP_URL` worker** (PrincessDonut; OmniRoute free-first via `/v1` for any LLM step) — replace `StubPodcastAdStripPipeline`
+1. ~~NAS `AD_STRIP_URL` worker~~ → **Now** (Josh picked full cut option 2)
 2. **Silence-trim** — with that worker (same pipeline family)
-3. **In-app YouTube** (not RSS Audio|Video enclosures) — separate from dual-enclosure A|V sheet
+3. ~~Full in-app YouTube embed/SDK~~ → **superseded** by Josh hybrid: RSS video default when enclosure exists + **Watch on YouTube** chip (not full embed) — see **Next** after strip
 4. **Glance / Watch** tile: now-playing + Continue deep-link
 5. **One-tap LAN failover**: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
 6. **CarPlay** (out of current build scope)
 
-**P1000 (Later, not ahead of P0 / NAS strip):** **Podcast cross-device sync** — subscriptions + playheads only (same Storyteller account pair as place sync / Stats). **Downloads stay per-device** (no cross-device file sync).
-
+**P1000 (Later, not ahead of NAS strip / hybrid video):** **Podcast cross-device sync** — subscriptions + playheads only (same Storyteller account pair as place sync / Stats). **Downloads stay per-device** (no cross-device file sync).
 
 ## Constraints
 
