@@ -17,10 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [x] **P0 Podcast resume / Home Continue stall** — reopen / Home Continue no longer early-returns or no-op `.play` on a stalled same-episode session; Loading… until playhead advances; Pause only when audio is truly playing. Stats sync stays timeout-bounded and off the audio start path.
-- Cross-device Stats sync Sideload was green (`c5791ec`); Josh smoke after this P0 Sideload.
+- [ ] **Stats Retry sync** — tip ≥ `7eb0a9e`. Josh wants this soft polish now. Settings “Last stats sync · Not yet” and Stats footer both tappable → Syncing… then Synced / Offline · local only; soft-timeout Stats reach check (place sync ≠ Stats finish). Local Cursor on NUC.
 
-**Do not start NAS `AD_STRIP_URL` / silence-trim / YouTube ahead of Josh’s call.**
+**Do not start NAS `AD_STRIP_URL` / silence-trim / YouTube ahead of this soft polish unless Josh reorders.**
 
 ---
 
@@ -52,7 +51,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **Ad-strip download / queue UX (v1 = UX + hooks + stub)** — tip `130c877` (prior `60a211b` / `c93deac`); Download sheet Original vs Clean (per-show last choice); Keep/queue → Clean pending; chips Original | Cleaning… | Clean; `StubPodcastAdStripPipeline`; Sideload green [35019916837](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35019916837)
 - [x] **Episode status cluster + show filters + Josh UI stamps** — tip `b719921`; download glyph · Clean chip (incl. Clean failed) · Xm left/Played; show filters All|Downloaded|In progress|Clean pending; Shelf POD chrome; mini-player cover+title+play/pause(+close) only (scrub/−15/+15 stay on full Now Playing); Home/Library finishability text via `PlaybackFinishabilityCopy`; Sideload green [35023934089](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35023934089)
 - [x] **Podcast play queue** — tip `2f7deb4`; Play Next / Play Last in episode menus; `PodcastPlaybackQueueStore` + editable `PodcastPlaybackQueueView` (drag reorder, remove, clear finished); auto-advance on finish via shared player; persisted upcoming order; Sideload green [35025614228](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35025614228)
-- [x] **P0 Podcast resume / Home Continue stall** — reopen same episode no longer early-returns success or no-op `.play` on a stalled session; Loading… until playhead advances; Pause only when truly playing; Stats sync timeout-bounded off audio path
+- [x] **P0 Podcast resume / Home Continue stall** — tip `7eb0a9e`; Josh confirmed; Loading until playhead advances; Pause only when truly playing; Sideload green [35031138576](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35031138576)
 
 ### Shell polish
 - [x] **Mini-player above tab bar** — per-tab inset (`be395da`, Sideload [35008731469](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35008731469)); Josh confirmed
@@ -72,7 +71,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 3. Then Later order below (do not reorder without Josh)
 
 ### Soft UX polish (anytime)
-- **Stats Retry sync** — Settings “Last stats sync · Not yet” / Offline footer tappable to retry; soft-timeout Stats reach check (place sync ≠ Stats finish). After resume P0.
+- ~~Stats Retry sync~~ → **Now**
 - Separate **Couldn’t save server** copy (≠ “Connection failed”)
 - Empty state when URL prefilled but no saved Storyteller source
 - Missing Storyteller covers (cosmetic; not a blocker)
