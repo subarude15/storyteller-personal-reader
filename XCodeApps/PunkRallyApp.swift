@@ -24,6 +24,7 @@ public struct PunkRallyTabView: View {
     @State private var selectedTab: Tab = .home
     @State private var openFailureToastVisible = false
     @State private var openFailureToastTask: Task<Void, Never>?
+    @State private var podcastPresenter = PodcastPlayerPresenter.shared
 
     public init() {}
 
@@ -84,6 +85,11 @@ public struct PunkRallyTabView: View {
             ) { _ in
                 showOpenFailureToast()
             }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyPlayPodcastEpisode)
+            ) { note in
+                playPodcast(from: note.userInfo)
+            }
             .fullScreenCover(item: PlayerPresenter.shared.cardItemBinding) { wrapper in
                 NavigationStack {
                     PunkRallyPlayerHost.playerView(
@@ -113,6 +119,37 @@ public struct PunkRallyTabView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: openFailureToastVisible)
+        // Podcast card is a separate presentation source (the book card above
+        // lives on the inner TabView); two fullScreenCovers on one view would
+        // collide, so this one attaches to the ZStack.
+        .fullScreenCover(item: podcastPresenter.episodeItemBinding) { episode in
+            NavigationStack {
+                PodcastPlayerView(
+                    episode: episode,
+                    onClose: { podcastPresenter.dismiss() }
+                )
+            }
+        }
+    }
+
+    /// Builds an episode from the `punkRallyPlayPodcastEpisode` userInfo posted
+    /// by `PodcastsViewModel.play(episode:)` and hands it to the shared player.
+    private func playPodcast(from userInfo: [AnyHashable: Any]?) {
+        guard
+            let userInfo,
+            let episodeID = userInfo["episodeID"] as? String,
+            let title = userInfo["title"] as? String,
+            let audioURL = userInfo["audioURL"] as? URL
+        else { return }
+        let episode = PodcastPlayerPresenter.Episode(
+            id: episodeID,
+            title: title,
+            showTitle: userInfo["showTitle"] as? String,
+            summary: userInfo["summary"] as? String,
+            audioURL: audioURL,
+            duration: userInfo["durationSeconds"] as? TimeInterval
+        )
+        Task { await podcastPresenter.play(episode) }
     }
 
     private func showOpenFailureToast() {

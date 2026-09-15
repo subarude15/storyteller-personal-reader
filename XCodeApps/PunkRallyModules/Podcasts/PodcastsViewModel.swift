@@ -99,6 +99,33 @@ final class PodcastsViewModel {
         subs.removeAll()
     }
 
+    // MARK: - Playback
+
+    /// Sends an episode to Silveran's shared player (mini-player / Now
+    /// Playing / PlaybackRateButton — same path as audiobooks) via a plain
+    /// NotificationCenter bridge, so this module never needs to import
+    /// SilveranKit/AppleKit player types directly (same loose-coupling
+    /// pattern as `.punkRallyShowShelf` / `.punkRallyOpenPlayerFailed`).
+    /// Podcasts stay on the RSS rail; this never touches Storyteller state.
+    func play(episode: PRPodcastEpisode) {
+        guard let audioURL = episode.audioURL else { return }
+        var userInfo: [String: Any] = [
+            "episodeID": episode.id,
+            "title": episode.title,
+            "audioURL": audioURL,
+        ]
+        userInfo["summary"] = episode.summary
+        userInfo["showTitle"] = episode.showTitle
+        if let duration = episode.durationSeconds {
+            userInfo["durationSeconds"] = duration
+        }
+        NotificationCenter.default.post(
+            name: Notification.Name("punkRallyPlayPodcastEpisode"),
+            object: nil,
+            userInfo: userInfo
+        )
+    }
+
     // MARK: - Fetch
 
     private func fetchFeed(_ feedURL: URL) async -> PRPodcastShow? {

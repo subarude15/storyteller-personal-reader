@@ -86,11 +86,27 @@ public enum AudiobookSessionError: Error, LocalizedError, Sendable {
 public enum AudioSessionKind: Sendable, Equatable {
     case audiobook(BookID)
     case readaloud(BookID)
+    /// RSS podcast episode playing through the shared player. Podcasts are not
+    /// Storyteller books, so the id is the episode's stable string id and the
+    /// media is a remote URL rather than local downloaded media.
+    case podcast(String)
 
     public var bookID: BookID {
         switch self {
             case .audiobook(let id), .readaloud(let id):
                 return id
+            case .podcast(let episodeID):
+                return BookID(sourceID: "podcast", uuid: episodeID)
+        }
+    }
+
+    /// Stable identity for the session, used where a BookID is not meaningful.
+    public var sessionID: String {
+        switch self {
+            case .audiobook(let id), .readaloud(let id):
+                return "\(id.sourceID)/\(id.uuid)"
+            case .podcast(let episodeID):
+                return "podcast/\(episodeID)"
         }
     }
 }
@@ -165,6 +181,19 @@ public actor AudioSessionActor {
     private var sleepTimerChapterID: String?
     private var lastSleepTimerUpdate = Date()
 
+    // MARK: - Podcast arm (RSS rail)
+
+    /// Dedicated player for a streamed RSS episode. Podcasts are not
+    /// Storyteller books and have no local media, so they cannot go through
+    /// `AudiobookActor` (which requires a downloaded package on disk).
+    private var podcastPlayer: (any AudioPlaying)?
+    private var podcastEpisodeID: String?
+    private var podcastTitle: String?
+    private var podcastAuthor: String?
+    private var podcastDuration: TimeInterval = 0
+    private var podcastRate: Double = 1.0
+    private var podcastIsPlaying = false
+
     private init() {}
 
     public func openAudiobook(bookID: BookID) async throws {
@@ -182,6 +211,137 @@ public actor AudioSessionActor {
         }
 
         try await openAudiobook(book: book, mediaURL: media.url)
+    }
+
+    /// Opens a streamed RSS podcast episode on the shared player. Ends any
+    /// book session first (one audio session app-wide), then streams the
+    /// episode through a dedicated player. Speed comes from the same
+    /// `playback.defaultPlaybackSpeed` setting the audiobook arm uses, and
+    /// `setPlaybackRate` (PlaybackRateButton / Now Playing) drives this arm
+    /// exactly like the others.
+    public func openPodcast(
+        episodeID: String,
+        title: String,
+        author: String?,
+        audioURL: URL,
+        duration: TimeInterval? = nil,
+    ) async throws {
+        guard let factory = SilveranPlatform.audioPlayerFactory else {
+            throw AudiobookSessionError.audiobookNotOpen
+        }
+
+        if case .podcast(let currentID) = currentKind, currentID == episodeID,
+            podcastPlayer != nil
+        {
+            try? await transport(.play)
+            return
+        }
+
+        await closeCurrent()
+
+        let config = await SettingsActor.shared.config
+        let rate = min(max(config.playback.defaultPlaybackSpeed, 0.5), 10)
+
+        try? await factory.prepareSession(longForm: true)
+        let player = factory.makePlayer(profile: .smilSegment)
+        do {
+            let loaded = try await player.load(url: audioURL)
+            podcastDuration = duration ?? loaded
+        } catch {
+            throw AudiobookSessionError.localMediaUnavailable(episodeID)
+        }
+        await player.setRate(rate)
+        await player.setEventHandler { event in
+            Task { await AudioSessionActor.shared.handlePodcastEvent(event) }
+        }
+
+        podcastPlayer = player
+        podcastEpisodeID = episodeID
+        podcastTitle = title
+        podcastAuthor = author
+        podcastRate = rate
+        podcastIsPlaying = false
+        currentKind = .podcast(episodeID)
+
+        await configureNowPlayingCommands(for: .podcast(episodeID))
+        try await transport(.play)
+    }
+
+    public func closePodcast() async {
+        guard case .podcast = currentKind else { return }
+        await podcastPlayer?.stop()
+        podcastPlayer = nil
+        podcastEpisodeID = nil
+        podcastTitle = nil
+        podcastAuthor = nil
+        podcastDuration = 0
+        podcastIsPlaying = false
+        currentKind = nil
+        artworkData = nil
+        notifyObservers(nil)
+        notifySnapshotObservers(nil)
+        await updateNowPlaying(nil)
+        await teardownNowPlayingCommands()
+    }
+
+    private func handlePodcastEvent(_ event: AudioPlayerEvent) async {
+        switch event {
+            case .didFinishPlaying:
+                podcastIsPlaying = false
+                await publishPodcastState()
+            case .interruptionBegan, .routeChanged:
+                podcastIsPlaying = false
+                await publishPodcastState()
+            case .interruptionEnded:
+                break
+        }
+    }
+
+    private func publishPodcastState() async {
+        notifySnapshotObservers(podcastSnapshot())
+        await updateNowPlaying(podcastNowPlaying())
+    }
+
+    private func podcastSnapshot() -> AudioSessionSnapshot? {
+        guard let episodeID = podcastEpisodeID else { return nil }
+        let current = podcastPlayer?.currentTime ?? 0
+        let total = podcastDuration
+        return AudioSessionSnapshot(
+            kind: .podcast(episodeID),
+            title: podcastTitle,
+            author: podcastAuthor,
+            isPlaying: podcastIsPlaying,
+            chapterLabel: nil,
+            bookProgress: total > 0 ? min(max(current / total, 0), 1) : 0,
+            playbackRate: podcastRate,
+        )
+    }
+
+    /// Skips the current podcast episode by `seconds` (negative rewinds).
+    public func skipPodcast(by seconds: TimeInterval) async {
+        guard let player = podcastPlayer else { return }
+        let current = await player.currentTime
+        let target = podcastDuration > 0
+            ? min(max(current + seconds, 0), podcastDuration)
+            : max(current + seconds, 0)
+        await player.seek(to: target)
+        await publishPodcastState()
+    }
+
+    private func podcastNowPlaying() -> NowPlayingInfo? {
+        guard podcastEpisodeID != nil else { return nil }
+        let current = podcastPlayer?.currentTime ?? 0
+        let total = podcastDuration
+        return NowPlayingInfo(
+            title: podcastTitle ?? "Podcast",
+            artist: podcastAuthor ?? "Podcast",
+            albumTitle: podcastAuthor ?? "",
+            duration: total,
+            elapsedTime: current,
+            playbackRate: podcastRate,
+            isPlaying: podcastIsPlaying,
+            artwork: artworkData,
+        )
     }
 
     public func openAudiobook(book: BookMetadata, mediaURL: URL) async throws {
@@ -300,6 +460,8 @@ public actor AudioSessionActor {
                 await updateNowPlaying(
                     readaloudNowPlaying(from: await SMILPlayerActor.shared.getCurrentState())
                 )
+            case .podcast:
+                await publishPodcastState()
         }
     }
 
@@ -322,6 +484,8 @@ public actor AudioSessionActor {
                 await closeAudiobook()
             case .readaloud:
                 await closeReadaloudArm()
+            case .podcast:
+                await closePodcast()
             case nil:
                 break
         }
@@ -334,7 +498,9 @@ public actor AudioSessionActor {
             case .readaloud(let id) where id == bookID:
                 await closeReadaloudArm()
             default:
-                if await SMILPlayerActor.shared.getLoadedBookID() == bookID {
+                if case .podcast = currentKind, currentKind?.bookID == bookID {
+                    await closePodcast()
+                } else if await SMILPlayerActor.shared.getLoadedBookID() == bookID {
                     await SMILPlayerActor.shared.cleanup()
                 }
         }
@@ -378,6 +544,23 @@ public actor AudioSessionActor {
                     case .togglePlayPause:
                         try await SMILPlayerActor.shared.togglePlayPause()
                 }
+            case .podcast:
+                switch command {
+                    case .play:
+                        await podcastPlayer?.play()
+                        podcastIsPlaying = true
+                        await publishPodcastState()
+                    case .pause:
+                        await podcastPlayer?.pause()
+                        podcastIsPlaying = false
+                        await publishPodcastState()
+                    case .togglePlayPause:
+                        if podcastIsPlaying {
+                            await transport(.pause)
+                        } else {
+                            await transport(.play)
+                        }
+                }
             case nil:
                 break
         }
@@ -391,6 +574,10 @@ public actor AudioSessionActor {
                 await publishState()
             case .readaloud:
                 await SMILPlayerActor.shared.setPlaybackRate(clamped)
+            case .podcast:
+                podcastRate = clamped
+                await podcastPlayer?.setRate(clamped)
+                await publishPodcastState()
             case nil:
                 return
         }
@@ -485,6 +672,8 @@ public actor AudioSessionActor {
                     return nil
                 }
                 return readaloudSnapshot(from: state, fallbackBookID: id)
+            case .podcast:
+                return podcastSnapshot()
             case nil:
                 return nil
         }
@@ -985,6 +1174,8 @@ public actor AudioSessionActor {
         let supportsChangePlaybackPosition: Bool
         if case .audiobook = kind {
             supportsChangePlaybackPosition = true
+        } else if case .podcast = kind {
+            supportsChangePlaybackPosition = true
         } else {
             supportsChangePlaybackPosition = false
         }
@@ -1025,6 +1216,8 @@ public actor AudioSessionActor {
                         await AudiobookActor.shared.skipForward(interval)
                     case .readaloud:
                         await SMILPlayerActor.shared.skipForward(seconds: interval)
+                    case .podcast:
+                        await skipPodcast(by: interval)
                     case nil:
                         break
                 }
@@ -1034,12 +1227,17 @@ public actor AudioSessionActor {
                         await AudiobookActor.shared.skipBackward(interval)
                     case .readaloud:
                         await SMILPlayerActor.shared.skipBackward(seconds: interval)
+                    case .podcast:
+                        await skipPodcast(by: -interval)
                     case nil:
                         break
                 }
             case .changePlaybackPosition(let position):
                 if case .audiobook = currentKind {
                     await AudiobookActor.shared.seekWithinCurrentChapter(to: position)
+                } else if case .podcast = currentKind {
+                    await podcastPlayer?.seek(to: position)
+                    await publishPodcastState()
                 }
             case .changePlaybackRate(let rate):
                 await setPlaybackRate(rate)

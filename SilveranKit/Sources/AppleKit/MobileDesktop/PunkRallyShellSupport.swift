@@ -16,6 +16,9 @@ extension Notification.Name {
     public static let punkRallyShowShelf = Notification.Name("punkRallyShowShelf")
     public static let punkRallyOpenPlayer = Notification.Name("punkRallyOpenPlayer")
     public static let punkRallyOpenPlayerFailed = Notification.Name("punkRallyOpenPlayerFailed")
+    /// PodcastsViewModel.play(episode:) → host shell: open the episode on the
+    /// shared audio session and present the podcast card.
+    public static let punkRallyPlayPodcastEpisode = Notification.Name("punkRallyPlayPodcastEpisode")
 }
 
 /// Hosts the single full-screen player/reader card for the ink+amp five-tab

@@ -31,6 +31,13 @@ final class AudioSessionMonitor {
 
     private func apply(_ snapshot: AudioSessionSnapshot?) {
         self.snapshot = snapshot
+        // Podcasts have no library cover; leave the placeholder in place
+        // instead of querying BookServiceActor for a book that isn't there.
+        if case .podcast = snapshot?.kind {
+            coverBookID = nil
+            coverImage = nil
+            return
+        }
         guard let bookID = snapshot?.kind.bookID else {
             coverBookID = nil
             coverImage = nil

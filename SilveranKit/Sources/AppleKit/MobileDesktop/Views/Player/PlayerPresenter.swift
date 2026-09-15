@@ -82,6 +82,10 @@ public final class PlayerPresenter {
     public func expandMiniPlayer() {
         Task { @MainActor in
             guard let kind = await AudioSessionActor.shared.currentSessionKind() else { return }
+            if case .podcast = kind {
+                PodcastPlayerPresenter.shared.expandFromMiniPlayer()
+                return
+            }
             guard
                 let data = await Self.loadPlayerBookData(
                     bookID: kind.bookID,
@@ -113,6 +117,10 @@ public final class PlayerPresenter {
                 return .audio
             case .readaloud:
                 return .synced
+            case .podcast:
+                // Podcasts have no Storyteller media category; callers check
+                // the kind directly before using this value.
+                return .audio
         }
     }
 
@@ -126,6 +134,8 @@ public final class PlayerPresenter {
                 await AudioSessionActor.shared.close(ifOwnedBy: id)
             case .audiobook(let id):
                 await AudioSessionActor.shared.close(ifOwnedBy: id)
+            case .podcast:
+                await AudioSessionActor.shared.closePodcast()
         }
     }
 

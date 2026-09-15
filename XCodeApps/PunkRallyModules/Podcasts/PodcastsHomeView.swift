@@ -332,7 +332,7 @@ struct PodcastShowView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(show.episodes) { episode in
-                            EpisodeRow(episode: episode, chrome: chrome)
+                            EpisodeRow(episode: episode, chrome: chrome, viewModel: viewModel)
                         }
                     }
                 }
@@ -375,6 +375,7 @@ struct PodcastShowView: View {
 struct EpisodeRow: View {
     let episode: PRPodcastEpisode
     let chrome: PunkRallyTheme.Chrome
+    let viewModel: PodcastsViewModel
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -403,9 +404,14 @@ struct EpisodeRow: View {
                 }
             }
             Spacer()
-            Image(systemName: "play.circle")
-                .font(.title3)
-                .foregroundStyle(PunkRallyTheme.Accent.primary)
+            Button {
+                viewModel.play(episode: episode)
+            } label: {
+                Image(systemName: "play.circle")
+                    .font(.title3)
+                    .foregroundStyle(PunkRallyTheme.Accent.primary)
+            }
+            .buttonStyle(.plain)
         }
         .padding(.vertical, 6)
     }
