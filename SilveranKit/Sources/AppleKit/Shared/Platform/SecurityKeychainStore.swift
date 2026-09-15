@@ -106,7 +106,7 @@ public struct SecurityKeychainStore: KeychainStoring {
         if configuredService != nil {
             return configuredAccessGroup
         }
-        return Self.requiredInfoValue(for: Self.accessGroupInfoKey)
+        return Self.infoValue(for: Self.accessGroupInfoKey)
     }
 
     #if canImport(Security)
