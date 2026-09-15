@@ -469,6 +469,24 @@ private struct PodcastShelfDownloadRow: View {
         }
         .contextMenu {
             Button {
+                Task {
+                    guard let item = shelfQueueItem(from: record) else { return }
+                    let start = await PodcastPlaybackQueueStore.shared.enqueuePlayNext(item)
+                    if start { play(record) }
+                }
+            } label: {
+                Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+            }
+            Button {
+                Task {
+                    guard let item = shelfQueueItem(from: record) else { return }
+                    let start = await PodcastPlaybackQueueStore.shared.enqueuePlayLast(item)
+                    if start { play(record) }
+                }
+            } label: {
+                Label("Play Last", systemImage: "text.line.last.and.arrowtriangle.forward")
+            }
+            Button {
                 store.setPinned(record.episodeID, pinned: !record.isPinned)
             } label: {
                 Label(
@@ -482,6 +500,22 @@ private struct PodcastShelfDownloadRow: View {
                 Label("Remove Download", systemImage: "trash")
             }
         }
+    }
+
+    private func shelfQueueItem(from record: PodcastDownloadRecord) -> PodcastPlaybackQueueItem? {
+        guard let audio = store.localAudioURL(for: record.episodeID) ?? record.remoteAudioURL else {
+            return nil
+        }
+        return PodcastPlaybackQueueItem(
+            episodeID: record.episodeID,
+            title: record.title,
+            showTitle: record.showTitle,
+            audioURL: audio,
+            durationSeconds: record.durationSeconds,
+            coverURL: nil,
+            feedURL: record.feedURL,
+            mediaKindRaw: "audio"
+        )
     }
 
     private func adStripChipColor(_ state: PodcastAdStripState) -> Color {

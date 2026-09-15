@@ -14,6 +14,7 @@ import Foundation
 import Observation
 import SwiftUI
 import SilveranAppleKit
+import SilveranKit
 
 @MainActor
 @Observable
@@ -115,6 +116,40 @@ final class PodcastsViewModel {
 
     // MARK: - Playback
 
+    func playNext(
+        episode: PRPodcastEpisode,
+        mediaKind: PRPodcastMediaKind? = nil,
+        feedURL: URL? = nil
+    ) {
+        Task {
+            let kind = resolvedMediaKind(for: episode, feedURL: feedURL, override: mediaKind)
+            guard let item = makeQueueItem(episode: episode, mediaKind: kind, feedURL: feedURL) else {
+                return
+            }
+            let startNow = await PodcastPlaybackQueueStore.shared.enqueuePlayNext(item)
+            if startNow {
+                play(episode: episode, mediaKind: kind, feedURL: feedURL)
+            }
+        }
+    }
+
+    func playLast(
+        episode: PRPodcastEpisode,
+        mediaKind: PRPodcastMediaKind? = nil,
+        feedURL: URL? = nil
+    ) {
+        Task {
+            let kind = resolvedMediaKind(for: episode, feedURL: feedURL, override: mediaKind)
+            guard let item = makeQueueItem(episode: episode, mediaKind: kind, feedURL: feedURL) else {
+                return
+            }
+            let startNow = await PodcastPlaybackQueueStore.shared.enqueuePlayLast(item)
+            if startNow {
+                play(episode: episode, mediaKind: kind, feedURL: feedURL)
+            }
+        }
+    }
+
     /// Sends an episode to Silveran's shared player (mini-player / Now
     /// Playing / PlaybackRateButton — same path as audiobooks) via a plain
     /// NotificationCenter bridge. Prefer local download for audio when present.
@@ -183,6 +218,55 @@ final class PodcastsViewModel {
             name: Notification.Name("punkRallyPlayPodcastEpisode"),
             object: nil,
             userInfo: userInfo
+        )
+    }
+
+    private func resolvedMediaKind(
+        for episode: PRPodcastEpisode,
+        feedURL: URL?,
+        override: PRPodcastMediaKind?
+    ) -> PRPodcastMediaKind {
+        if let override { return override }
+        if episode.hasAudioAndVideo, let feedURL {
+            return PodcastMediaPreferenceStore.shared.preference(for: feedURL) ?? .audio
+        }
+        if episode.videoURL != nil, episode.audioURL == nil { return .video }
+        return .audio
+    }
+
+    private func makeQueueItem(
+        episode: PRPodcastEpisode,
+        mediaKind: PRPodcastMediaKind,
+        feedURL: URL?
+    ) -> PodcastPlaybackQueueItem? {
+        let remote: URL?
+        switch mediaKind {
+            case .audio:
+                remote = episode.audioURL
+            case .video:
+                remote = episode.videoURL ?? episode.audioURL
+        }
+        guard let remote else { return nil }
+
+        let playURL: URL
+        if mediaKind == .audio,
+            let local = PodcastDownloadStore.shared.localAudioURL(for: episode.id)
+        {
+            playURL = local
+        } else {
+            playURL = remote
+        }
+
+        return PodcastPlaybackQueueItem(
+            episodeID: episode.id,
+            title: episode.title,
+            showTitle: episode.showTitle,
+            summary: episode.summary,
+            audioURL: playURL,
+            durationSeconds: episode.durationSeconds,
+            coverURL: episode.coverURL,
+            feedURL: feedURL,
+            mediaKindRaw: mediaKind.rawValue
         )
     }
 

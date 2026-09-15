@@ -22,6 +22,8 @@ struct PodcastsHomeView: View {
     @State private var showAddFeed = false
     @State private var selectedShow: PRPodcastShow?
     @State private var refreshTask: Task<Void, Never>?
+    @State private var showPlaybackQueue = false
+    @State private var playbackQueue = PodcastPlaybackQueueStore.shared
 
     private var chrome: PunkRallyTheme.Chrome {
         PunkRallyTheme.Chrome(scheme: colorScheme)
@@ -42,6 +44,18 @@ struct PodcastsHomeView: View {
             }
             .navigationTitle("Podcasts")
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showPlaybackQueue = true
+                    } label: {
+                        if playbackQueue.count > 0 {
+                            Label("Play queue", systemImage: "list.bullet")
+                                .badge(playbackQueue.count)
+                        } else {
+                            Label("Play queue", systemImage: "list.bullet")
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showFindShows = true
@@ -72,6 +86,14 @@ struct PodcastsHomeView: View {
             .sheet(item: $selectedShow) { show in
                 PodcastShowView(viewModel: viewModel, show: show)
             }
+            .sheet(isPresented: $showPlaybackQueue) {
+                PodcastPlaybackQueueView()
+            }
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .punkRallyPodcastPlaybackQueueDidChange)
+        ) { _ in
+            playbackQueue = PodcastPlaybackQueueStore.shared
         }
         .task {
             await viewModel.loadIfNeeded()
@@ -657,6 +679,19 @@ struct EpisodeRow: View {
             }
         }
 
+        if episode.audioURL != nil || episode.videoURL != nil {
+            Button {
+                viewModel.playNext(episode: episode, feedURL: showFeedURL)
+            } label: {
+                Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+            }
+            Button {
+                viewModel.playLast(episode: episode, feedURL: showFeedURL)
+            } label: {
+                Label("Play Last", systemImage: "text.line.last.and.arrowtriangle.forward")
+            }
+        }
+
         if episode.audioURL != nil {
             if downloadStore.isDownloading(episode.id) || downloadStore.isCleaning(episode.id) {
                 Label(
@@ -684,7 +719,7 @@ struct EpisodeRow: View {
                         durationSeconds: episode.durationSeconds
                     )
                 } label: {
-                    Label("Queue", systemImage: "text.badge.plus")
+                    Label("Keep", systemImage: "pin")
                 }
             }
 

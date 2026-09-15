@@ -116,6 +116,14 @@ public struct PunkRallyTabView: View {
                             object: nil
                         )
                     }
+                    if let next = PodcastPlaybackQueueStore.shared.consumeNext() {
+                        let info = next.playNotificationUserInfo(fromQueueAdvance: true)
+                        NotificationCenter.default.post(
+                            name: .punkRallyPlayPodcastEpisode,
+                            object: nil,
+                            userInfo: info
+                        )
+                    }
                 }
             }
             .onChange(of: scenePhase) { _, phase in
@@ -194,6 +202,10 @@ public struct PunkRallyTabView: View {
             let title = userInfo["title"] as? String,
             let audioURL = userInfo["audioURL"] as? URL
         else { return }
+        let fromQueueAdvance = (userInfo["fromQueueAdvance"] as? Bool) ?? false
+        if !fromQueueAdvance {
+            PodcastPlaybackQueueStore.shared.noteManualPlay(episodeID: episodeID)
+        }
         let mediaKind = (userInfo["mediaKind"] as? String).flatMap(PRPodcastMediaKind.init(rawValue:))
             ?? .audio
         let showTitle = userInfo["showTitle"] as? String

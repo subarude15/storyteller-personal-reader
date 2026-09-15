@@ -16,6 +16,7 @@ public struct PodcastPlayerView: View {
     @State private var errorMessage: String?
     @State private var scrubFraction: Double = 0
     @State private var isScrubbing = false
+    @State private var showPlaybackQueue = false
 
     public init(episode: PodcastPlayerPresenter.Episode, onClose: @escaping () -> Void) {
         self.episode = episode
@@ -94,6 +95,16 @@ public struct PodcastPlayerView: View {
                     Label("Podcasts", systemImage: "chevron.left")
                 }
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showPlaybackQueue = true
+                } label: {
+                    Label("Play queue", systemImage: "list.bullet")
+                }
+            }
+        }
+        .sheet(isPresented: $showPlaybackQueue) {
+            PodcastPlaybackQueueView()
         }
         .navigationBarBackButtonHidden(true)
     }
