@@ -70,6 +70,12 @@ public struct PunkRallyTabView: View {
         }
         .tint(PunkRallyTheme.Accent.primary)
         .preferredColorScheme(nil) // follow system appearance
+        .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowShelf)) { _ in
+            selectedTab = .shelf
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .silveranShowLibrary)) { _ in
+            selectedTab = .library
+        }
     }
 }
 
@@ -78,6 +84,8 @@ public struct PunkRallyTabView: View {
 private struct HomeTabView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(MediaViewModel.self) private var mediaViewModel: MediaViewModel?
+    @State private var showSettings = false
+    @State private var showOfflineSheet = false
 
     private var chrome: PunkRallyTheme.Chrome {
         PunkRallyTheme.Chrome(scheme: colorScheme)
@@ -120,7 +128,32 @@ private struct HomeTabView: View {
             }
             .background(chrome.bg)
             .navigationTitle("punk+rally")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 12) {
+                        if mediaViewModel?.hasServerConnectionIssue == true {
+                            Button {
+                                showOfflineSheet = true
+                            } label: {
+                                Image(systemName: mediaViewModel?.connectionIssueIcon ?? "exclamationmark.triangle")
+                                    .foregroundStyle(.red)
+                            }
+                            .accessibilityLabel("Server connection issue")
+                        }
+                        Button {
+                            showSettings = true
+                        } label: {
+                            Label("Settings", systemImage: "gearshape")
+                        }
+                        .accessibilityLabel("Settings")
+                    }
+                }
+            }
         }
+        .punkRallySheets(
+            showSettings: $showSettings,
+            showOfflineSheet: $showOfflineSheet
+        )
     }
 
     private var greetingHeader: some View {
@@ -129,7 +162,16 @@ private struct HomeTabView: View {
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(chrome.text)
             Spacer()
-            SyncChipView(state: syncState, scheme: colorScheme)
+            Button {
+                if case .offline = syncState {
+                    showOfflineSheet = true
+                } else {
+                    showSettings = true
+                }
+            } label: {
+                SyncChipView(state: syncState, scheme: colorScheme)
+            }
+            .buttonStyle(.plain)
         }
     }
 
