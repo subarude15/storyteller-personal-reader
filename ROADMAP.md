@@ -17,7 +17,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **P0 Podcast resume / Home Continue stall** — tip ≥ `c5791ec` (docs tip `579ef08` is **not** the fix). Fresh start from Podcasts tab works; **reopen same episode / Home Continue** shows Pause at `0:00` with no audio. Fix early-return when card already thinks it’s that ep; Loading until playhead advances. Local Cursor on NUC — wait for real fix push + Sideload (skip docs-only IPAs).
+- [ ] **P0 Podcast resume / Home Continue stall** — tip ≥ `c5791ec` (docs tips `579ef08` / `32453a9` / `4539634` are **not** the fix — skip those Sideloads). Fresh start from Podcasts tab works; **reopen same episode / Home Continue** shows Pause at `0:00` with no audio. Fix early-return when card already thinks it’s that ep; Loading until playhead advances. Local Cursor on NUC — wait for real fix push + Sideload (skip docs-only IPAs).
 - Cross-device Stats sync Sideload is green (`c5791ec`) but **Josh smoke parked** until this P0 Sideload is green again.
 
 **Do not start NAS `AD_STRIP_URL` / silence-trim / YouTube ahead of this P0.**
@@ -71,6 +71,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 3. Then Later order below (do not reorder without Josh)
 
 ### Soft UX polish (anytime)
+- **Stats Retry sync** — Settings “Last stats sync · Not yet” / Offline footer tappable to retry; soft-timeout Stats reach check (place sync ≠ Stats finish). After resume P0.
 - Separate **Couldn’t save server** copy (≠ “Connection failed”)
 - Empty state when URL prefilled but no saved Storyteller source
 - Missing Storyteller covers (cosmetic; not a blocker)
