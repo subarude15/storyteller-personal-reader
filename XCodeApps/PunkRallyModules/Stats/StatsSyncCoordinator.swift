@@ -43,8 +43,10 @@ final class StatsSyncCoordinator {
 
     private static let lastSyncKey = InkampStatsSyncDefaults.lastSuccessfulSyncAtKey
     private static let collectionUUIDKey = "punkRally.stats.collectionUUID.v1"
-    /// Hard cap so a hung Storyteller auth/fetch cannot freeze Stats UI indefinitely.
+    /// Per-step soft timeout so a hung Storyteller auth/fetch cannot stall forever.
     private static let networkTimeoutSeconds: TimeInterval = 8
+    /// Whole-sync ceiling (reach + fetch + push); lands Offline if exceeded.
+    private static let overallTimeoutSeconds: TimeInterval = 18
 
     private(set) var status: StatsSyncStatus = .offlineLocalOnly
     private(set) var lastSuccessfulSyncAt: Date?
@@ -58,9 +60,10 @@ final class StatsSyncCoordinator {
         if lastSuccessfulSyncAt != nil {
             status = .synced
         }
+        publishUI()
     }
 
-    /// Debounced sync after local session writes.
+    /// Debounced sync after local session writes (never on the audio start path).
     func scheduleSyncAfterLocalChange() {
         debounceTask?.cancel()
         debounceTask = Task { [weak self] in
@@ -70,11 +73,18 @@ final class StatsSyncCoordinator {
         }
     }
 
-    /// Immediate sync (Stats tab appear, app foreground). Callers that must not
-    /// block UI (app-active) should wrap in `Task { await … }` (fire-and-forget).
+    /// Immediate sync (Stats tab, app foreground, Settings/footer Retry).
+    /// Callers that must not block UI (app-active) wrap in `Task { await … }`.
     func syncNow(reason: String) async {
+        // Flip to Syncing… immediately so Settings/footer never sit on "Not yet".
+        status = .syncing
+        revision &+= 1
+        publishUI()
+
         if let inFlight {
             await inFlight.value
+            // A coalesced waiter still needs the latest UI after the in-flight ends.
+            publishUI()
             return
         }
         let task = Task { @MainActor in
@@ -86,53 +96,94 @@ final class StatsSyncCoordinator {
     }
 
     private func performSync(reason: String) async {
-        status = .syncing
-        revision &+= 1
+        let finished = await Self.withTimeout(seconds: Self.overallTimeoutSeconds) {
+            await Self.runNetworkSync()
+        }
 
-        let canReach =
-            await Self.withTimeout(seconds: Self.networkTimeoutSeconds) {
-                await BookServiceActor.shared.canReachStorytellerForStatsSync()
-            } ?? false
-        guard canReach else {
+        guard let finished else {
             status = .offlineLocalOnly
             revision &+= 1
+            publishUI()
+            debugLog("[StatsSync] reason=\(reason) overallTimeout")
             return
         }
 
-        let localDoc = SessionTracker.shared.exportSyncDocument()
+        switch finished {
+            case .synced(let now, let sessionCount):
+                lastSuccessfulSyncAt = now
+                UserDefaults.standard.set(now, forKey: Self.lastSyncKey)
+                status = .synced
+                revision &+= 1
+                publishUI()
+                debugLog(
+                    "[StatsSync] reason=\(reason) pushed=true sessions=\(sessionCount)"
+                )
+            case .offline:
+                status = .offlineLocalOnly
+                revision &+= 1
+                publishUI()
+                debugLog("[StatsSync] reason=\(reason) pushed=false")
+        }
+    }
+
+    private enum SyncOutcome: Sendable {
+        case synced(Date, sessionCount: Int)
+        case offline
+    }
+
+    /// Network body isolated from MainActor so timeouts can cancel cleanly.
+    private static func runNetworkSync() async -> SyncOutcome {
+        let canReach =
+            await withTimeout(seconds: networkTimeoutSeconds) {
+                await BookServiceActor.shared.canReachStorytellerForStatsSync()
+            } ?? false
+        guard canReach else { return .offline }
+
+        let localDoc = await MainActor.run {
+            SessionTracker.shared.exportSyncDocument()
+        }
         let fetch =
-            await Self.withTimeout(seconds: Self.networkTimeoutSeconds) {
+            await withTimeout(seconds: networkTimeoutSeconds) {
                 await BookServiceActor.shared.fetchInkampStatsDocument()
             } ?? .unavailable
 
         let merged: InkampStatsSyncDocument
         switch fetch {
             case .unavailable:
-                status = .offlineLocalOnly
-                revision &+= 1
-                return
+                return .offline
             case .empty:
                 merged = localDoc
             case .document(let remoteDoc):
                 merged = StatsSyncMerge.mergeDocuments(local: localDoc, remote: remoteDoc)
         }
 
-        SessionTracker.shared.applyMergedSyncDocument(merged)
+        await MainActor.run {
+            SessionTracker.shared.applyMergedSyncDocument(merged)
+        }
 
         let pushed =
-            await Self.withTimeout(seconds: Self.networkTimeoutSeconds) {
+            await withTimeout(seconds: networkTimeoutSeconds) {
                 await BookServiceActor.shared.pushInkampStatsDocument(merged)
             } ?? false
         if pushed {
-            let now = Date()
-            lastSuccessfulSyncAt = now
-            UserDefaults.standard.set(now, forKey: Self.lastSyncKey)
-            status = .synced
-        } else {
-            status = .offlineLocalOnly
+            return .synced(Date(), sessionCount: merged.sessions.count)
         }
-        revision &+= 1
-        debugLog("[StatsSync] reason=\(reason) pushed=\(pushed) sessions=\(merged.sessions.count)")
+        return .offline
+    }
+
+    private func publishUI() {
+        var info: [String: Any] = [
+            "isSyncing": status == .syncing,
+            "footerLabel": status.footerLabel,
+        ]
+        if let lastSuccessfulSyncAt {
+            info["lastSuccessfulSyncAt"] = lastSuccessfulSyncAt
+        }
+        NotificationCenter.default.post(
+            name: .punkRallyStatsSyncUIDidChange,
+            object: nil,
+            userInfo: info
+        )
     }
 
     /// Returns `nil` when `seconds` elapse before `operation` completes.

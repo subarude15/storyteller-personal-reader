@@ -228,24 +228,38 @@ struct StatsView: View {
     // MARK: - Footer
 
     private var syncFooter: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 8) {
-                Image(systemName: sync.status.footerSymbol)
-                    .foregroundStyle(chrome.textFaint)
-                Text(sync.status.footerLabel)
-                    .font(.caption)
-                    .foregroundStyle(chrome.textFaint)
+        let canRetry = sync.status != .syncing
+        return Button {
+            guard canRetry else { return }
+            Task { await sync.syncNow(reason: "footerRetry") }
+        } label: {
+            VStack(spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: sync.status.footerSymbol)
+                        .foregroundStyle(chrome.textFaint)
+                    Text(sync.status.footerLabel)
+                        .font(.caption)
+                        .foregroundStyle(chrome.textFaint)
+                }
+                if let last = sync.lastSuccessfulSyncAt {
+                    Text("Last Stats sync · \(Self.syncTimeFormatter.string(from: last))")
+                        .font(.caption2)
+                        .foregroundStyle(chrome.textFaint.opacity(0.85))
+                } else if sync.status != .syncing {
+                    Text("Last Stats sync · Not yet · Tap to retry")
+                        .font(.caption2)
+                        .foregroundStyle(chrome.textFaint.opacity(0.85))
+                }
             }
-            if let last = sync.lastSuccessfulSyncAt {
-                Text("Last Stats sync · \(Self.syncTimeFormatter.string(from: last))")
-                    .font(.caption2)
-                    .foregroundStyle(chrome.textFaint.opacity(0.85))
-            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 8)
+            .contentShape(Rectangle())
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 8)
+        .buttonStyle(.plain)
+        .disabled(!canRetry)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(sync.status.footerLabel)
+        .accessibilityHint(canRetry ? "Retries Stats sync across your devices" : "")
     }
 
     private static let syncTimeFormatter: DateFormatter = {

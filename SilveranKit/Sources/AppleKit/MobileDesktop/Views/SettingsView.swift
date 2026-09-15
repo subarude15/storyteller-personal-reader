@@ -398,7 +398,7 @@ extension SettingsView {
                     Text("Stats")
                 } footer: {
                     Text(
-                        "Minutes sync across your devices when Storyteller is signed in (same account as place sync)."
+                        "Minutes sync across your devices when Storyteller is signed in (same account as place sync). Tap the row to retry sync."
                     )
                 }
 
@@ -424,23 +424,58 @@ extension SettingsView {
 #if os(iOS)
 private struct StatsLastSyncSettingsRow: View {
     @State private var lastSync: Date?
+    @State private var isSyncing = false
+    @State private var footerLabel: String?
     @State private var tick = 0
 
     var body: some View {
         let _ = tick
-        LabeledContent("Last Stats sync") {
-            Text(lastSyncLabel)
-                .foregroundStyle(.secondary)
+        Button {
+            guard !isSyncing else { return }
+            isSyncing = true
+            footerLabel = "Syncing…"
+            NotificationCenter.default.post(name: .punkRallyRetryStatsSync, object: nil)
+        } label: {
+            LabeledContent("Last Stats sync") {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(primaryLabel)
+                        .foregroundStyle(isSyncing ? Color.accentColor : .secondary)
+                        .multilineTextAlignment(.trailing)
+                    if let secondaryLabel {
+                        Text(secondaryLabel)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
         }
+        .buttonStyle(.plain)
+        .disabled(isSyncing)
+        .accessibilityHint("Retries Stats sync across your devices")
         .onAppear { reload() }
         .onReceive(Timer.publish(every: 15, on: .main, in: .common).autoconnect()) { _ in
-            reload()
+            if !isSyncing { reload() }
             tick &+= 1
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .punkRallyStatsSyncUIDidChange)
+        ) { note in
+            applyUI(note.userInfo)
         }
     }
 
-    private var lastSyncLabel: String {
-        guard let lastSync else { return "Not yet" }
+    private var primaryLabel: String {
+        if isSyncing { return "Syncing…" }
+        if let footerLabel { return footerLabel }
+        guard lastSync != nil else { return "Not yet" }
+        return "Synced across your devices"
+    }
+
+    private var secondaryLabel: String? {
+        if isSyncing { return nil }
+        guard let lastSync else {
+            return footerLabel == nil ? nil : "Not yet"
+        }
         return Self.formatter.string(from: lastSync)
     }
 
@@ -448,6 +483,20 @@ private struct StatsLastSyncSettingsRow: View {
         lastSync = UserDefaults.standard.object(
             forKey: InkampStatsSyncDefaults.lastSuccessfulSyncAtKey
         ) as? Date
+    }
+
+    private func applyUI(_ userInfo: [AnyHashable: Any]?) {
+        if let syncing = userInfo?["isSyncing"] as? Bool {
+            isSyncing = syncing
+        }
+        if let label = userInfo?["footerLabel"] as? String {
+            footerLabel = label
+        }
+        if let last = userInfo?["lastSuccessfulSyncAt"] as? Date {
+            lastSync = last
+        } else if isSyncing == false {
+            reload()
+        }
     }
 
     private static let formatter: DateFormatter = {

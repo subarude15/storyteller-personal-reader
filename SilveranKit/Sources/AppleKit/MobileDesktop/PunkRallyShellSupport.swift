@@ -31,6 +31,13 @@ extension Notification.Name {
     /// Stats SessionTracker: media reached ~finished locally.
     /// userInfo: mediaID, mediaTitle
     public static let punkRallyStatsMediaFinished = Notification.Name("punkRallyStatsMediaFinished")
+    /// Settings / Stats footer: request an immediate Stats sync retry.
+    public static let punkRallyRetryStatsSync = Notification.Name("punkRallyRetryStatsSync")
+    /// StatsSyncCoordinator published UI (Settings row + footer).
+    /// userInfo: isSyncing (Bool), lastSuccessfulSyncAt (Date?), footerLabel (String)
+    public static let punkRallyStatsSyncUIDidChange = Notification.Name(
+        "punkRallyStatsSyncUIDidChange"
+    )
 }
 
 /// Posts SessionTracker lifecycle events from AppleKit players into the app target.

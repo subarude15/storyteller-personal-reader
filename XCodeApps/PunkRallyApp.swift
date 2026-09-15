@@ -90,6 +90,11 @@ public struct PunkRallyTabView: View {
                 selectedTab = .stats
             }
             .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyRetryStatsSync)
+            ) { _ in
+                Task { await StatsSyncCoordinator.shared.syncNow(reason: "settingsRetry") }
+            }
+            .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyOpenPlayerFailed)
             ) { _ in
                 showOpenFailureToast()
