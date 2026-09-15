@@ -298,13 +298,13 @@ public actor AudioSessionActor {
     }
 
     private func publishPodcastState() async {
-        notifySnapshotObservers(podcastSnapshot())
-        await updateNowPlaying(podcastNowPlaying())
+        notifySnapshotObservers(await podcastSnapshot())
+        await updateNowPlaying(await podcastNowPlaying())
     }
 
-    private func podcastSnapshot() -> AudioSessionSnapshot? {
+    private func podcastSnapshot() async -> AudioSessionSnapshot? {
         guard let episodeID = podcastEpisodeID else { return nil }
-        let current = podcastPlayer?.currentTime ?? 0
+        let current = await podcastPlayer?.currentTime ?? 0
         let total = podcastDuration
         return AudioSessionSnapshot(
             kind: .podcast(episodeID),
@@ -328,9 +328,9 @@ public actor AudioSessionActor {
         await publishPodcastState()
     }
 
-    private func podcastNowPlaying() -> NowPlayingInfo? {
+    private func podcastNowPlaying() async -> NowPlayingInfo? {
         guard podcastEpisodeID != nil else { return nil }
-        let current = podcastPlayer?.currentTime ?? 0
+        let current = await podcastPlayer?.currentTime ?? 0
         let total = podcastDuration
         return NowPlayingInfo(
             title: podcastTitle ?? "Podcast",
@@ -556,9 +556,9 @@ public actor AudioSessionActor {
                         await publishPodcastState()
                     case .togglePlayPause:
                         if podcastIsPlaying {
-                            await transport(.pause)
+                            try await transport(.pause)
                         } else {
-                            await transport(.play)
+                            try await transport(.play)
                         }
                 }
             case nil:
@@ -673,7 +673,7 @@ public actor AudioSessionActor {
                 }
                 return readaloudSnapshot(from: state, fallbackBookID: id)
             case .podcast:
-                return podcastSnapshot()
+                return await podcastSnapshot()
             case nil:
                 return nil
         }
