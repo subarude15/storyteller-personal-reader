@@ -8,7 +8,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 | **Branch** | `punk-rally-ios` |
 | **Bundle ID** | `com.punkrally.reader` (do not change) |
 | **NUC workspace** | `C:\Users\imalo\dev\silveran-ios\silveran-reader` |
-| **Docs beside repo** | `C:\Users\imalo\dev\silveran-ios\` (`PODCASTS-SHELF-PRUNE.md`, `UX-SHELL.md`, `UX-BACKLOG.md`, `DESIGN.md`) |
+| **In-repo docs** | DESIGN.md, UX-SHELL.md, UX-BACKLOG.md, PODCASTS-SHELF-PRUNE.md, ROADMAP.md (repo root) |
 
 **Product gate (proven 2026-09-15):** Storyteller place sync phone ↔ iPad — same spot after listen/read. That is the core reason for ink+amp.
 
@@ -16,12 +16,10 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **Josh:** install Sideload IPA tip **`3639b67`** (shared Now Playing + speed + AudioSessionActor fix) from [Actions 34982178742](https://github.com/subarude15/storyteller-personal-reader/actions/runs/34982178742) → `punkrally-sideload-unsigned-ipa` on phone + iPad
-- [ ] Smoke-test: podcast opens on **shared** Now Playing with **one** speed chip (`PlaybackRateButton` — no second dial)
-- [ ] Say when the player feels good → unlock Shelf prune
+- [ ] **Shelf auto-prune** for podcast downloads — implement PODCASTS-SHELF-PRUNE.md (in repo); first-time Auto-clean explainer; one speed chip already shipped on tip 3639b67
+- [x] Josh smoke-tested Sideload tip **3639b67** — shared Now Playing + **one** PlaybackRateButton (Actions [34982178742](https://github.com/subarude15/storyteller-personal-reader/actions/runs/34982178742))
 
-**Do not start Shelf prune until Josh confirms the player smoke-test.**
-
+**Do not start Audio|Video / Home mixed / Stats until Shelf prune lands.**
 ---
 
 ## Shipped
