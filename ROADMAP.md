@@ -17,10 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [x] **Mini / full player polish** — −15/+15, elapsed|scrub|remaining, podcast cover on mini (`b8c85f9`, Sideload [35011914260](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35011914260))
-- [ ] **Next = Find shows** — Podcasts tab → iTunes / Podcast Index lookup → art + Subscribe (paste-URL stays fallback)
+- [ ] **Find shows** — tip ≥ `70866b7`. Podcasts tab → iTunes / Podcast Index lookup → art + Subscribe (resolves RSS); paste-URL stays as fallback. Local Cursor on NUC.
 
-**Do not start podcast queue / cross-device Stats / in-app YouTube ahead of Find shows.**
+**Do not start podcast queue / ad-strip / cross-device Stats / in-app YouTube ahead of Find shows.**
 
 ---
 
@@ -51,7 +50,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ### Shell polish
 - [x] **Mini-player above tab bar** — per-tab inset (`be395da`, Sideload [35008731469](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35008731469)); Josh confirmed
-- [x] **Mini / full player chrome** — −15/+15, scrubber, podcast cover (`b8c85f9`, Sideload [35011914260](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35011914260))
+- [x] **Mini / full player polish** — −15/+15, elapsed|scrub|remaining, podcast cover on mini (`b8c85f9` / tip ≥ `70866b7`, Sideload [35011914260](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35011914260)); Josh ready for next
 
 ### Stats
 - [x] **SessionTracker local** — ebook / audiobook / readaloud / podcast → Home + Stats tab (`c627bbe`, Sideload [35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694))
@@ -60,12 +59,12 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-### After player polish
-1. **Find shows** — Podcasts tab → iTunes / Podcast Index lookup → art + Subscribe (resolves RSS); paste-URL stays fallback
+### After Find shows
+1. ~~Find shows~~ → **Now**
 2. **Podcast queue** — after AI ad-strip if Josh gates that first
 3. **Cross-device Stats sync** — shared store; footer → “Synced across your devices”; merge by day (no double-count)
 
-### UX polish (anytime after Now player polish)
+### UX polish (anytime after Find shows)
 - Separate **Couldn’t save server** copy (≠ “Connection failed”)
 - Empty state when URL prefilled but no saved Storyteller source
 - Missing Storyteller covers (cosmetic; not a blocker)
@@ -77,7 +76,6 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - Silence-trim spike
 - AI sponsored/ad strip (async post-download; on-device / NAS / OmniRoute) — may gate podcast queue
 - Podcast queue (after ad-strip if Josh gates it)
-- Find shows — Podcasts tab → iTunes / Podcast Index → art + Subscribe; paste-URL fallback
 - Cross-device Stats sync (shared store; footer Synced; merge by day)
 - **In-app YouTube** (not RSS Audio|Video enclosures) — separate from dual-enclosure A|V sheet
 - Glance / Watch tile: now-playing + Continue deep-link

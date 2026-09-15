@@ -13,10 +13,11 @@
 import SwiftUI
 import SilveranAppleKit
 
-/// Podcasts tab: shows grid, latest episodes, and Add Feed.
+/// Podcasts tab: shows grid, latest episodes, Find shows, and paste-URL fallback.
 struct PodcastsHomeView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var viewModel = PodcastsViewModel()
+    @State private var showFindShows = false
     @State private var showAddFeed = false
     @State private var selectedShow: PRPodcastShow?
     @State private var refreshTask: Task<Void, Never>?
@@ -30,6 +31,8 @@ struct PodcastsHomeView: View {
             Group {
                 if viewModel.isLoading && viewModel.shows.isEmpty {
                     skeletonGrid
+                } else if viewModel.loadFailed && viewModel.shows.isEmpty {
+                    loadFailedState
                 } else if viewModel.shows.isEmpty {
                     emptyState
                 } else {
@@ -40,10 +43,23 @@ struct PodcastsHomeView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
+                        showFindShows = true
+                    } label: {
+                        Label("Find shows", systemImage: "magnifyingglass")
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
                         showAddFeed = true
                     } label: {
-                        Label("Add Feed", systemImage: "plus")
+                        Label("Paste RSS URL", systemImage: "link")
                     }
+                }
+            }
+            .sheet(isPresented: $showFindShows) {
+                FindPodcastShowsView(viewModel: viewModel) {
+                    showFindShows = false
+                    showAddFeed = true
                 }
             }
             .sheet(isPresented: $showAddFeed) {
@@ -93,15 +109,15 @@ struct PodcastsHomeView: View {
             Text("No podcasts yet")
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(chrome.text)
-            Text("Add an RSS feed to start listening — podcasts stay separate from your Storyteller library.")
+            Text("Find a show by name, or paste an RSS feed URL. Podcasts stay separate from your Storyteller library.")
                 .font(.body)
                 .foregroundStyle(chrome.textMuted)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
             Button {
-                showAddFeed = true
+                showFindShows = true
             } label: {
-                Label("Add Feed", systemImage: "plus.circle.fill")
+                Label("Find shows", systemImage: "magnifyingglass")
                     .font(.headline)
                     .foregroundStyle(Color.white)
                     .padding(.horizontal, 20)
@@ -110,6 +126,42 @@ struct PodcastsHomeView: View {
                     .clipShape(Capsule())
             }
             .padding(.top, 8)
+            Button {
+                showAddFeed = true
+            } label: {
+                Label("Paste RSS URL", systemImage: "link")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(PunkRallyTheme.Accent.primary)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(chrome.bg)
+    }
+
+    private var loadFailedState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 44))
+                .foregroundStyle(chrome.textFaint)
+            Text("Couldn't refresh feeds")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(chrome.text)
+            Text("Check your connection and try again. Your subscriptions are still saved on this device.")
+                .font(.body)
+                .foregroundStyle(chrome.textMuted)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            Button {
+                Task { await viewModel.load() }
+            } label: {
+                Label("Try again", systemImage: "arrow.clockwise")
+                    .font(.headline)
+                    .foregroundStyle(Color.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(PunkRallyTheme.Accent.primary)
+                    .clipShape(Capsule())
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(chrome.bg)
@@ -227,9 +279,9 @@ struct AddPodcastFeedView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 } header: {
-                    Text("RSS Feed URL")
+                    Text("Advanced — paste RSS")
                 } footer: {
-                    Text("Enter the direct RSS/Atom feed URL of the podcast. Shows appear under Podcasts — they never mix into your Storyteller library.")
+                    Text("Use this when Find shows can't locate the feed. Enter the direct RSS/Atom URL. Shows appear under Podcasts — they never mix into your Storyteller library.")
                 }
 
                 if let errorMessage {
@@ -251,13 +303,13 @@ struct AddPodcastFeedView: View {
                                 Text("Adding…")
                             }
                         } else {
-                            Text("Add Feed")
+                            Text("Subscribe")
                         }
                     }
                     .disabled(!isValidURL || isAdding)
                 }
             }
-            .navigationTitle("Add Podcast Feed")
+            .navigationTitle("Paste RSS URL")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -273,8 +325,8 @@ struct AddPodcastFeedView: View {
         guard let url = URL(string: trimmedURL) else { return }
         isAdding = true
         errorMessage = nil
-        await viewModel.subscribe(feedURL: url)
-        if viewModel.show(for: url) != nil {
+        let ok = await viewModel.subscribe(feedURL: url)
+        if ok {
             dismiss()
         } else {
             errorMessage = "Couldn't load that feed. Check the URL and try again."

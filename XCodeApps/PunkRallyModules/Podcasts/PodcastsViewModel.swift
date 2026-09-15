@@ -81,9 +81,22 @@ final class PodcastsViewModel {
         store.markRefreshed(feedURL)
     }
 
-    func subscribe(feedURL: URL) async {
+    /// Subscribe only after the RSS feed loads successfully.
+    @discardableResult
+    func subscribe(feedURL: URL) async -> Bool {
+        guard let show = await fetchFeed(feedURL) else { return false }
         store.subscribe(to: feedURL)
-        await refreshFeed(feedURL)
+        if let index = shows.firstIndex(where: { $0.feedURL == feedURL }) {
+            shows[index] = show
+        } else {
+            shows.append(show)
+        }
+        store.markRefreshed(feedURL)
+        return true
+    }
+
+    func isSubscribed(to feedURL: URL) -> Bool {
+        store.isSubscribed(to: feedURL)
     }
 
     func unsubscribe(feedURL: URL) async {
