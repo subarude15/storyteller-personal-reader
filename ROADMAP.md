@@ -17,9 +17,10 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **Mini / full player polish** — in progress on tip (−15/+15, scrub elapsed/remaining, podcast cover on mini). Wait Sideload green; Next = Find shows.
+- [x] **Mini / full player polish** — −15/+15, elapsed|scrub|remaining, podcast cover on mini (`b8c85f9`, Sideload [35011914260](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35011914260))
+- [ ] **Next = Find shows** — Podcasts tab → iTunes / Podcast Index lookup → art + Subscribe (paste-URL stays fallback)
 
-**Do not start Find shows / podcast queue / cross-device Stats / in-app YouTube ahead of this polish Sideload green.**
+**Do not start podcast queue / cross-device Stats / in-app YouTube ahead of Find shows.**
 
 ---
 
@@ -50,6 +51,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ### Shell polish
 - [x] **Mini-player above tab bar** — per-tab inset (`be395da`, Sideload [35008731469](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35008731469)); Josh confirmed
+- [x] **Mini / full player chrome** — −15/+15, scrubber, podcast cover (`b8c85f9`, Sideload [35011914260](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35011914260))
 
 ### Stats
 - [x] **SessionTracker local** — ebook / audiobook / readaloud / podcast → Home + Stats tab (`c627bbe`, Sideload [35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694))
