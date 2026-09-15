@@ -87,6 +87,8 @@ Strict order (Smokey / Nas-ty):
 5. **One-tap LAN failover**: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
 6. **CarPlay** (out of current build scope)
 
+**P1000 (Later, not ahead of P0 / NAS strip):** **Podcast cross-device sync** — subscriptions + playheads only (same Storyteller account pair as place sync / Stats). **Downloads stay per-device** (no cross-device file sync).
+
 
 ## Constraints
 
