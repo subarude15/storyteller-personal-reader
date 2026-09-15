@@ -17,7 +17,10 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-*(No forced Now — wait for Josh before NAS `AD_STRIP_URL` / silence-trim / YouTube. Soft UX polish can land anytime.)*
+- [ ] **P0 Podcast playback stall** — tip ≥ `c5791ec`. Josh: podcast sits **Paused at 0:00** / won’t play (or stalls after open). Fix shared-player / podcast open path so play starts and advances. Local Cursor on NUC.
+- Cross-device Stats sync Sideload is green (`c5791ec`) but **Josh smoke parked** until this P0 Sideload is green again.
+
+**Do not start NAS `AD_STRIP_URL` / silence-trim / YouTube ahead of this P0.**
 
 ---
 
