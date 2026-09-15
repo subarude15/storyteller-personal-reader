@@ -17,9 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **Stats Retry sync** — tip ≥ `7eb0a9e`. Josh wants this soft polish now. Settings “Last stats sync · Not yet” and Stats footer both tappable → Syncing… then Synced / Offline · local only; soft-timeout Stats reach check (place sync ≠ Stats finish). Local Cursor on NUC.
+- Board quiet — wait for Josh before NAS `AD_STRIP_URL` / silence-trim / YouTube / other Later items.
 
-**Do not start NAS `AD_STRIP_URL` / silence-trim / YouTube ahead of this soft polish unless Josh reorders.**
+**Do not start NAS `AD_STRIP_URL` / silence-trim / YouTube unless Josh reorders.**
 
 ---
 
@@ -61,6 +61,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ### Stats
 - [x] **SessionTracker local** — ebook / audiobook / readaloud / podcast → Home + Stats tab (`c627bbe`, Sideload [35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694))
 - [x] **Cross-device Stats sync** — tip `c5791ec` (`a5226d6` + BookServiceActor fix); private Storyteller collection `.inkamp.stats.v1` blob (same auth as place sync); session-id LWW merge (no double-count / no drop); footer Synced / Syncing… / Offline · local only; Settings last sync time; Sideload green [35028364424](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35028364424)
+- [x] **Stats Retry sync** — tip `fdb5560`; Settings last-sync row + Stats footer tappable → Syncing… then Synced / Offline · local only; soft overall + per-step timeouts; Sideload green [35033759537](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35033759537)
 ---
 
 ## Next (strict order — do not reorder)
@@ -71,7 +72,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 3. Then Later order below (do not reorder without Josh)
 
 ### Soft UX polish (anytime)
-- ~~Stats Retry sync~~ → **Now**
+- ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
 - Separate **Couldn’t save server** copy (≠ “Connection failed”)
 - Empty state when URL prefilled but no saved Storyteller source
 - Missing Storyteller covers (cosmetic; not a blocker)
