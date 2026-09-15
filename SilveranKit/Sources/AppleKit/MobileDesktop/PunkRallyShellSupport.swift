@@ -26,8 +26,11 @@ extension Notification.Name {
 @MainActor
 public enum PunkRallyPlayerHost {
     /// Opens a downloaded title in the player/reader. Posts a failure
-    /// notification ("Can't open yet · try again") when no playable category
-    /// is downloaded or the resolved local media is missing.
+    /// notification ("Can't open yet · try again") ONLY when the title IS
+    /// downloaded but playback can't start (no local media resolved / path not
+    /// on disk). Callers must check `preferredDownloadedCategory(for:) == nil`
+    /// first and route those taps to the book detail (download UI) instead —
+    /// an undownloaded tap is not a failure.
     public static func open(
         _ item: BookMetadata,
         mediaViewModel: MediaViewModel?
@@ -51,6 +54,16 @@ public enum PunkRallyPlayerHost {
         }
         let bookData = mediaViewModel.makePlayerBookData(for: item, category: category)
         PlayerPresenter.shared.present(bookData)
+    }
+
+    /// Whether the card should open the player (title already has local media)
+    /// vs navigate to the book detail (nothing downloaded yet → download UI).
+    public static func shouldOpenPlayer(
+        for item: BookMetadata,
+        mediaViewModel: MediaViewModel?
+    ) -> Bool {
+        guard let mediaViewModel else { return false }
+        return mediaViewModel.preferredDownloadedCategory(for: item) != nil
     }
 
     private static func postOpenFailure() {

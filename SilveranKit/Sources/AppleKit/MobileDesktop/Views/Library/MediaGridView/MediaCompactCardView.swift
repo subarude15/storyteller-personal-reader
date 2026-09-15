@@ -39,9 +39,10 @@ struct MediaCompactCardView: View {
         var body: some View {
             #if os(iOS)
             if mediaGridTapOpensPlayer {
-                // ink+amp: tapping a downloaded ebook/audiobook/readaloud opens it
-                // in the player/reader. The punk shell presents the card via its
-                // own fullScreenCover and toasts when the open fails.
+                // ink+amp: tapping a downloaded ebook/audiobook/readaloud opens
+                // it in the player/reader. An undownloaded tap opens the book
+                // detail (download UI) — no toast. The toast fires only when a
+                // downloaded title can't resolve/open its local media.
                 Button {
                     openForPlayback()
                 } label: {
@@ -73,15 +74,21 @@ struct MediaCompactCardView: View {
         }
 
         #if os(iOS)
-        private func openForPlayback() {
-            Task {
-                await PunkRallyPlayerHost.open(
-                    item,
-                    mediaViewModel: mediaViewModel
-                )
-            }
-        }
-        #endif
+                private func openForPlayback() {
+                    if PunkRallyPlayerHost.shouldOpenPlayer(for: item, mediaViewModel: mediaViewModel) {
+                        Task {
+                            await PunkRallyPlayerHost.open(
+                                item,
+                                mediaViewModel: mediaViewModel
+                            )
+                        }
+                    } else {
+                        // Nothing downloaded yet: open the book detail (download UI)
+                        // instead of toasting — an undownloaded tap is not a failure.
+                        handleDetailsNavigation()
+                    }
+                }
+                #endif
 
     private var isDoubleCover: Bool {
         coverPreference == .storytellerDouble
