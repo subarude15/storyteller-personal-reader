@@ -17,11 +17,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **P0 Mini-player above tab bar** — per-tab `punkRallyMiniPlayerInset()` (not TabView-level). In progress on tip; wait Sideload green.
-- [ ] **P0 Podcast resume position** — `PodcastPlayheadStore` + `openPodcast(startAtSeconds:)`. In progress on tip; wait Sideload green.
+- [x] **P0 Mini-player above tab bar** — per-tab `punkRallyMiniPlayerInset()` (`be395da`, Sideload [35008731469](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35008731469))
+- [x] **P0 Podcast resume position** — `PodcastPlayheadStore` + `openPodcast(startAtSeconds:)` (`be395da`)
 - [x] **Stats (SessionTracker local)** — wired `c627bbe`; Sideload green ([Actions 35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694)).
 
-**Do not start Podcast Index / cross-device Stats / −15/+15 / mini-player cover art ahead of these P0s.**
+**Next:** Josh smoke both P0s. Do not start Podcast Index / cross-device Stats ahead of smoke.
 
 ---
 
@@ -48,6 +48,10 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] Shared Now Playing + playback speed (`66fadcd` + `3639b67`) — Josh smoke-tested / shipped (one `PlaybackRateButton`)
 - [x] Shelf auto-prune for RSS downloads (`81cd134`) — Sideload **green**
 - [x] Audio | Video episode sheet (`e2e0de0` + `6cc51ba`) — Sideload green [Actions 34990644848](https://github.com/subarude15/storyteller-personal-reader/actions/runs/34990644848)
+- [x] **Podcast playhead resume** — `PodcastPlayheadStore` (UserDefaults / app group); seek on `openPodcast` (`be395da`)
+
+### Shell polish
+- [x] **Mini-player above tab bar** — per-tab inset, not TabView overlay (`be395da`, Sideload [35008731469](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35008731469))
 
 ### Stats
 - [x] **SessionTracker local** — ebook / audiobook / readaloud / podcast → Home + Stats tab (`c627bbe`, Sideload [35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694))
