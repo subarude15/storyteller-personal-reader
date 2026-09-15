@@ -104,18 +104,40 @@ final class PodcastsViewModel {
 
     /// Sends an episode to Silveran's shared player (mini-player / Now
     /// Playing / PlaybackRateButton — same path as audiobooks) via a plain
-    /// NotificationCenter bridge, so this module never needs to import
-    /// SilveranKit/AppleKit player types directly (same loose-coupling
-    /// pattern as `.punkRallyShowShelf` / `.punkRallyOpenPlayerFailed`).
-    /// Podcasts stay on the RSS rail; this never touches Storyteller state.
-    /// Prefers an on-device podcast download when present.
-    func play(episode: PRPodcastEpisode) {
-        guard let remote = episode.audioURL else { return }
-        let audioURL = PodcastDownloadStore.shared.localAudioURL(for: episode.id) ?? remote
+    /// NotificationCenter bridge. Prefer local download for audio when present.
+    /// For dual-enclosure episodes, pass the chosen `mediaKind` (Audio | Video).
+    func play(
+        episode: PRPodcastEpisode,
+        mediaKind: PRPodcastMediaKind = .audio,
+        feedURL: URL? = nil
+    ) {
+        let remote: URL?
+        switch mediaKind {
+            case .audio:
+                remote = episode.audioURL
+            case .video:
+                remote = episode.videoURL ?? episode.audioURL
+        }
+        guard let remote else { return }
+
+        if let feedURL {
+            PodcastMediaPreferenceStore.shared.setPreference(mediaKind, for: feedURL)
+        }
+
+        let playURL: URL
+        if mediaKind == .audio,
+            let local = PodcastDownloadStore.shared.localAudioURL(for: episode.id)
+        {
+            playURL = local
+        } else {
+            playURL = remote
+        }
+
         var userInfo: [String: Any] = [
             "episodeID": episode.id,
             "title": episode.title,
-            "audioURL": audioURL,
+            "audioURL": playURL,
+            "mediaKind": mediaKind.rawValue,
         ]
         userInfo["summary"] = episode.summary
         userInfo["showTitle"] = episode.showTitle

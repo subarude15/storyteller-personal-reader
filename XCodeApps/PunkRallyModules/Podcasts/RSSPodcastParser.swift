@@ -29,7 +29,7 @@ public final class RSSPodcastParser: NSObject, XMLParserDelegate {
         var pubDateString: String = ""
         var durationString: String = ""
         var episodeInt: Int?
-        var enclosure: Enclosure?
+        var enclosures: [Enclosure] = []
         var itunesImageURL: URL?
     }
 
@@ -87,13 +87,17 @@ public final class RSSPodcastParser: NSObject, XMLParserDelegate {
         case "item":
             inItem = true
             pendingEpisode = PendingEpisode()
-        case "enclosure":
+        case "enclosure", "media:content":
             if pendingEpisode != nil {
-                pendingEpisode?.enclosure = Enclosure(
-                    url: attributeDict["url"].flatMap(URL.init(string:)),
-                    type: attributeDict["type"],
+                let enclosure = Enclosure(
+                    url: (attributeDict["url"] ?? attributeDict["href"]).flatMap(URL.init(string:)),
+                    type: attributeDict["type"] ?? attributeDict["medium"],
                     length: attributeDict["length"].flatMap(Int.init)
+                        ?? attributeDict["fileSize"].flatMap(Int.init)
                 )
+                if enclosure.url != nil {
+                    pendingEpisode?.enclosures.append(enclosure)
+                }
             }
         case "itunes:image":
             if let href = attributeDict["href"], pendingEpisode == nil {
@@ -200,13 +204,15 @@ public final class RSSPodcastParser: NSObject, XMLParserDelegate {
         let publishedAt = Self.parseDate(ep.pubDateString)
 
         let cover = ep.itunesImageURL ?? showImageURL
+        let (audioURL, videoURL) = Self.classifyEnclosures(ep.enclosures)
 
         episodes.append(
             PRPodcastEpisode(
                 id: episodeID,
                 title: ep.title.isEmpty ? "Untitled Episode" : ep.title,
                 summary: ep.summary.isEmpty ? nil : ep.summary,
-                audioURL: ep.enclosure?.url,
+                audioURL: audioURL,
+                videoURL: videoURL,
                 durationSeconds: duration,
                 publishedAt: publishedAt,
                 episodeNumber: ep.episodeInt,
@@ -214,6 +220,41 @@ public final class RSSPodcastParser: NSObject, XMLParserDelegate {
                 coverURL: cover
             )
         )
+    }
+
+    /// Picks the best audio and video URLs from enclosure list (MIME / extension).
+    static func classifyEnclosures(_ enclosures: [Enclosure]) -> (audio: URL?, video: URL?) {
+        var audio: URL?
+        var video: URL?
+        for enclosure in enclosures {
+            guard let url = enclosure.url else { continue }
+            switch mediaKind(for: enclosure) {
+                case .audio:
+                    if audio == nil { audio = url }
+                case .video:
+                    if video == nil { video = url }
+                case nil:
+                    // Unknown type: treat as audio if we have nothing yet.
+                    if audio == nil, video == nil { audio = url }
+            }
+        }
+        return (audio, video)
+    }
+
+    private static func mediaKind(for enclosure: Enclosure) -> PRPodcastMediaKind? {
+        let type = (enclosure.type ?? "").lowercased()
+        if type.hasPrefix("video") || type == "video" { return .video }
+        if type.hasPrefix("audio") || type == "audio" { return .audio }
+
+        let ext = enclosure.url?.pathExtension.lowercased() ?? ""
+        switch ext {
+            case "mp4", "m4v", "mov", "webm", "mkv":
+                return .video
+            case "mp3", "m4a", "aac", "ogg", "opus", "wav", "flac":
+                return .audio
+            default:
+                return nil
+        }
     }
 
     static func parseDuration(_ raw: String) -> TimeInterval? {

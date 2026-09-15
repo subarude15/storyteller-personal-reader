@@ -160,13 +160,15 @@ public struct PunkRallyTabView: View {
             let title = userInfo["title"] as? String,
             let audioURL = userInfo["audioURL"] as? URL
         else { return }
+        let mediaKind = (userInfo["mediaKind"] as? String).flatMap(PRPodcastMediaKind.init(rawValue:))
         let episode = PodcastPlayerPresenter.Episode(
             id: episodeID,
             title: title,
             showTitle: userInfo["showTitle"] as? String,
             summary: userInfo["summary"] as? String,
             audioURL: audioURL,
-            duration: userInfo["durationSeconds"] as? TimeInterval
+            duration: userInfo["durationSeconds"] as? TimeInterval,
+            isVideo: mediaKind == .video
         )
         Task { await podcastPresenter.play(episode) }
     }

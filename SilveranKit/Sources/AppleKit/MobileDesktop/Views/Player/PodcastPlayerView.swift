@@ -25,9 +25,19 @@ public struct PodcastPlayerView: View {
             Spacer(minLength: 0)
 
             VStack(spacing: 8) {
-                Image(systemName: "mic.fill")
+                Image(systemName: episode.isVideo ? "play.rectangle.fill" : "mic.fill")
                     .font(.system(size: 44))
                     .foregroundStyle(.secondary)
+
+                if episode.isVideo {
+                    Text("VIDEO")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.15))
+                        .clipShape(Capsule())
+                }
 
                 Text(episode.title)
                     .font(.title3.weight(.semibold))

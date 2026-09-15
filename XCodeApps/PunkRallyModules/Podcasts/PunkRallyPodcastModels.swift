@@ -56,6 +56,7 @@ public struct PRPodcastEpisode: Identifiable, Equatable, Sendable {
     public let title: String
     public let summary: String?
     public let audioURL: URL?
+    public let videoURL: URL?
     public let durationSeconds: TimeInterval?
     public let publishedAt: Date?
     public let episodeNumber: Int?
@@ -67,6 +68,7 @@ public struct PRPodcastEpisode: Identifiable, Equatable, Sendable {
         title: String,
         summary: String? = nil,
         audioURL: URL? = nil,
+        videoURL: URL? = nil,
         durationSeconds: TimeInterval? = nil,
         publishedAt: Date? = nil,
         episodeNumber: Int? = nil,
@@ -77,6 +79,7 @@ public struct PRPodcastEpisode: Identifiable, Equatable, Sendable {
         self.title = title
         self.summary = summary
         self.audioURL = audioURL
+        self.videoURL = videoURL
         self.durationSeconds = durationSeconds
         self.publishedAt = publishedAt
         self.episodeNumber = episodeNumber
@@ -84,9 +87,27 @@ public struct PRPodcastEpisode: Identifiable, Equatable, Sendable {
         self.coverURL = coverURL
     }
 
+    /// True when the feed published both an audio and a video enclosure.
+    public var hasAudioAndVideo: Bool {
+        audioURL != nil && videoURL != nil
+    }
+
     public var isFileRecentlyAdded: Bool {
         guard let publishedAt else { return false }
         return Date().timeIntervalSince(publishedAt) < 7 * 24 * 3600
+    }
+}
+
+/// Preferred enclosure when an episode offers both audio and video.
+public enum PRPodcastMediaKind: String, Codable, Sendable, CaseIterable {
+    case audio
+    case video
+
+    public var displayName: String {
+        switch self {
+            case .audio: return "Audio"
+            case .video: return "Video"
+        }
     }
 }
 

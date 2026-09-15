@@ -19,6 +19,8 @@ public final class PodcastPlayerPresenter {
         public let summary: String?
         public let audioURL: URL
         public let duration: TimeInterval?
+        /// True when the chosen enclosure is video (full Now Playing card; shared player).
+        public let isVideo: Bool
 
         public init(
             id: String,
@@ -26,7 +28,8 @@ public final class PodcastPlayerPresenter {
             showTitle: String? = nil,
             summary: String? = nil,
             audioURL: URL,
-            duration: TimeInterval? = nil
+            duration: TimeInterval? = nil,
+            isVideo: Bool = false
         ) {
             self.id = id
             self.title = title
@@ -34,6 +37,7 @@ public final class PodcastPlayerPresenter {
             self.summary = summary
             self.audioURL = audioURL
             self.duration = duration
+            self.isVideo = isVideo
         }
     }
 
@@ -62,7 +66,8 @@ public final class PodcastPlayerPresenter {
     }
 
     /// Starts streaming the episode on the shared audio session and shows the
-    /// card. Returns false when the audio pipeline is unavailable.
+    /// full Now Playing card (required for video — never mini-bar alone).
+    /// Returns false when the audio pipeline is unavailable.
     @discardableResult
     public func play(_ episode: Episode) async -> Bool {
         if self.episode == episode { return true }
@@ -83,19 +88,24 @@ public final class PodcastPlayerPresenter {
             return false
         }
         activeEpisode = episode
+        // Always present the full card (video must not start as mini-bar only).
+        self.episode = nil
         self.episode = episode
         return true
     }
 
-    /// Closes the card. When playback is live the session keeps running so the
-    /// episode continues in the mini player / Now Playing (mirrors the book
-    /// card's dismiss-keeps-playing behavior); otherwise the session ends.
+    /// Closes the card. Audio may continue in the mini player; video sessions
+    /// end with the card so video never runs mini-bar alone.
     public func dismiss() {
         Task { @MainActor in
             await Self.persistPodcastProgress(markFinished: false)
+            let closing = episode ?? activeEpisode
             let snapshot = await AudioSessionActor.shared.currentSnapshot()
             episode = nil
-            if snapshot?.isPlaying != true {
+            if closing?.isVideo == true {
+                activeEpisode = nil
+                await AudioSessionActor.shared.closePodcast()
+            } else if snapshot?.isPlaying != true {
                 activeEpisode = nil
                 await AudioSessionActor.shared.closePodcast()
             }

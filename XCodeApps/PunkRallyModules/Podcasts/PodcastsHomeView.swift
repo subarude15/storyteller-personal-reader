@@ -385,6 +385,7 @@ struct EpisodeRow: View {
     var showFeedURL: URL? = nil
 
     @State private var downloadStore = PodcastDownloadStore.shared
+    @State private var showMediaPicker = false
 
     private var isDownloaded: Bool {
         downloadStore.isDownloaded(episode.id)
@@ -408,6 +409,11 @@ struct EpisodeRow: View {
                         .lineLimit(2)
                 }
                 HStack(spacing: 8) {
+                    if episode.hasAudioAndVideo {
+                        Text("A|V")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(PunkRallyTheme.Accent.primary)
+                    }
                     if let duration = episode.durationSeconds {
                         Text(duration.formattedDuration)
                             .font(.caption2)
@@ -432,7 +438,7 @@ struct EpisodeRow: View {
             }
             Spacer()
             Button {
-                viewModel.play(episode: episode)
+                requestPlay()
             } label: {
                 Image(systemName: "play.circle")
                     .font(.title3)
@@ -441,7 +447,32 @@ struct EpisodeRow: View {
             .buttonStyle(.plain)
         }
         .padding(.vertical, 6)
+        .sheet(isPresented: $showMediaPicker) {
+            PodcastAudioVideoPickerSheet(
+                episode: episode,
+                preferred: PodcastMediaPreferenceStore.shared.preference(for: showFeedURL)
+                    ?? .audio,
+                onSelect: { kind in
+                    showMediaPicker = false
+                    viewModel.play(episode: episode, mediaKind: kind, feedURL: showFeedURL)
+                },
+                onCancel: { showMediaPicker = false }
+            )
+            .presentationDetents([.height(280)])
+        }
         .contextMenu {
+            if episode.hasAudioAndVideo {
+                Button {
+                    viewModel.play(episode: episode, mediaKind: .audio, feedURL: showFeedURL)
+                } label: {
+                    Label("Play Audio", systemImage: "headphones")
+                }
+                Button {
+                    viewModel.play(episode: episode, mediaKind: .video, feedURL: showFeedURL)
+                } label: {
+                    Label("Play Video", systemImage: "play.rectangle")
+                }
+            }
             if let audioURL = episode.audioURL {
                 if isDownloaded {
                     Button {
@@ -487,6 +518,80 @@ struct EpisodeRow: View {
                     )
                 } label: {
                     Label("Keep", systemImage: "pin")
+                }
+            }
+        }
+    }
+
+    private func requestPlay() {
+        if episode.hasAudioAndVideo {
+            showMediaPicker = true
+        } else if episode.videoURL != nil, episode.audioURL == nil {
+            viewModel.play(episode: episode, mediaKind: .video, feedURL: showFeedURL)
+        } else {
+            viewModel.play(episode: episode, mediaKind: .audio, feedURL: showFeedURL)
+        }
+    }
+}
+
+/// Sheet shown only when an episode has both audio and video enclosures.
+private struct PodcastAudioVideoPickerSheet: View {
+    let episode: PRPodcastEpisode
+    let preferred: PRPodcastMediaKind
+    let onSelect: (PRPodcastMediaKind) -> Void
+    let onCancel: () -> Void
+
+    @State private var selection: PRPodcastMediaKind
+
+    init(
+        episode: PRPodcastEpisode,
+        preferred: PRPodcastMediaKind,
+        onSelect: @escaping (PRPodcastMediaKind) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.episode = episode
+        self.preferred = preferred
+        self.onSelect = onSelect
+        self.onCancel = onCancel
+        _selection = State(initialValue: preferred)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 20) {
+                Text(episode.title)
+                    .font(.headline)
+                    .lineLimit(2)
+
+                Text("This episode has audio and video. Which do you want?")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                Picker("Media", selection: $selection) {
+                    Text("Audio").tag(PRPodcastMediaKind.audio)
+                    Text("Video").tag(PRPodcastMediaKind.video)
+                }
+                .pickerStyle(.segmented)
+                .accessibilityLabel("Audio or Video")
+
+                Button {
+                    onSelect(selection)
+                } label: {
+                    Text(selection == .video ? "Play Video" : "Play Audio")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Spacer(minLength: 0)
+            }
+            .padding(24)
+            .navigationTitle("Audio | Video")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onCancel)
                 }
             }
         }
