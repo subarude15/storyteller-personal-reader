@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)"
+cd "${SCRIPT_DIR}/.."
+
+SCHEME="${1:-Silveran Reader Sideload (iOS)}"
+CONFIGURATION="${2:-Release}"
+OUTPUT_DIR="${3:-.buildIosDevice}"
+IPA_NAME="${4:-punkrally-sideload-unsigned.ipa}"
+
+DESTINATION="generic/platform=iOS"
+
+echo "==> Building device target: ${SCHEME} (${CONFIGURATION}) for ${DESTINATION}"
+
+# Resolve package dependencies
+xcodebuild -resolvePackageDependencies \
+    -project Silveran.xcodeproj \
+    -scheme "${SCHEME}" \
+    -derivedDataPath "${OUTPUT_DIR}"
+
+# Patch WordAligner in StoryAlign checkouts if present to avoid Swift 6.2 type-checking timeout
+chmod -R u+w "${OUTPUT_DIR}" 2>/dev/null || true
+python3 -c '
+import glob, os
+paths = glob.glob("**/*WordAligner.swift", recursive=True) + \
+        glob.glob("'${OUTPUT_DIR}'/**/WordAligner.swift", recursive=True) + \
+        glob.glob(os.path.expanduser("~/Library/Developer/Xcode/DerivedData/**/WordAligner.swift"), recursive=True)
+for path in paths:
+    try:
+        os.chmod(path, 0o644)
+        with open(path, "r") as f:
+            content = f.read()
+        target = """        let idealTakes: [Double] = (0..<intervals).map { i in
+            Double(totalWords) * max(0.0, bounds[i+1] - bounds[i]) / totalDuration
+        }"""
+        replacement = """        let idealTakes: [Double] = (0..<intervals).map { i -> Double in
+            let span = max(0.0, bounds[i+1] - bounds[i])
+            return Double(totalWords) * span / totalDuration
+        }"""
+        if target in content:
+            with open(path, "w") as f:
+                f.write(content.replace(target, replacement))
+            print(f"Patched {path}")
+    except Exception as e:
+        print(f"Error checking {path}: {e}")
+' 2>&1 || true
+
+# Build device slice without code signing
+xcodebuild -project Silveran.xcodeproj \
+    -scheme "${SCHEME}" \
+    -configuration "${CONFIGURATION}" \
+    -destination "${DESTINATION}" \
+    -derivedDataPath "${OUTPUT_DIR}" \
+    CODE_SIGNING_ALLOWED=NO \
+    CODE_SIGNING_REQUIRED=NO \
+    CODE_SIGN_IDENTITY="" \
+    AD_HOC_CODE_SIGNING_ALLOWED=YES \
+    build | xcbeautify
+
+# Locate built .app bundle in Build/Products
+APP_PATH="$(find "${OUTPUT_DIR}/Build/Products" -maxdepth 3 -type d -name "*.app" | head -n 1)"
+
+if [[ -z "${APP_PATH}" || ! -d "${APP_PATH}" ]]; then
+    echo "ERROR: Could not find built .app bundle under ${OUTPUT_DIR}/Build/Products"
+    exit 1
+fi
+
+echo "==> Found built application: ${APP_PATH}"
+
+# Package Payload/<App>.app into .ipa
+STAGE_DIR="$(mktemp -d)"
+trap 'rm -rf "${STAGE_DIR}"' EXIT
+
+PAYLOAD_DIR="${STAGE_DIR}/Payload"
+mkdir -p "${PAYLOAD_DIR}"
+cp -R "${APP_PATH}" "${PAYLOAD_DIR}/"
+
+IPA_OUTPUT_PATH="${OUTPUT_DIR}/${IPA_NAME}"
+mkdir -p "$(dirname "${IPA_OUTPUT_PATH}")"
+rm -f "${IPA_OUTPUT_PATH}"
+
+(cd "${STAGE_DIR}" && zip -qr "${SCRIPT_DIR}/../${IPA_OUTPUT_PATH}" Payload)
+
+echo "==> Successfully created unsigned IPA: ${IPA_OUTPUT_PATH}"
+ls -lh "${IPA_OUTPUT_PATH}"

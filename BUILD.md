@@ -91,6 +91,16 @@ xcodebuild -project Silveran.xcodeproj \
   -configuration Debug build
 ```
 
+## 7. Build unsigned device IPA for AltStore / Sideloading (Free Apple ID)
+
+For sideloading onto physical iPhone/iPad with a free Apple ID via AltStore Classic, use the slim sideload target and packaging script:
+
+```bash
+./scripts/package-ipa "Silveran Reader Sideload (iOS)" Release .buildIosDevice punkrally-sideload-unsigned.ipa
+```
+
+This builds an unsigned device IPA with CarPlay, widgets, and watchOS companions stripped so it installs cleanly on free personal Apple Developer accounts. See [SIDELOAD.md](SIDELOAD.md) for full AltStore Classic + AltServer on Windows instructions.
+
 ## Signing & identity
 
 - Default bundle ID: `com.punkrally.reader`
