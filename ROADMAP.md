@@ -17,10 +17,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [x] **Find shows** — iTunes Search → art + Subscribe (`a0fc4e4` / `3de4574`, Sideload [35013733091](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35013733091)); paste-URL fallback kept
-- [ ] **Next = Podcast queue** — after AI ad-strip if Josh still gates that first; otherwise queue when ready
+- Quiet — no active P0. **Find shows** shipped (`a0fc4e4`, Josh confirmed).
+- **When Josh picks next:** either **AI ad-strip** first (gates queue) **or** **Podcast queue** directly. Do not start both until he chooses.
+- **Later after that:** cross-device Stats; in-app YouTube stays separate Later.
 
-**Do not start cross-device Stats / in-app YouTube ahead of queue (or ad-strip gate).**
+**Board is clear until Josh picks queue vs ad-strip.**
 
 ---
 
@@ -48,7 +49,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] Shelf auto-prune for RSS downloads (`81cd134`) — Sideload **green**
 - [x] Audio | Video episode sheet (`e2e0de0` + `6cc51ba`) — Sideload green [Actions 34990644848](https://github.com/subarude15/storyteller-personal-reader/actions/runs/34990644848)
 - [x] **Podcast playhead resume** — `PodcastPlayheadStore`; seek on `openPodcast` (`be395da`); Josh confirmed
-- [x] **Find shows** — Apple iTunes Search API → Subscribe → `PodcastSubscriptionStore` (`a0fc4e4`, Sideload [35013733091](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35013733091))
+- [x] **Find shows** — Apple iTunes Search API → Subscribe → `PodcastSubscriptionStore` (`a0fc4e4`, Sideload [35013733091](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35013733091)); Josh confirmed
 
 ### Shell polish
 - [x] **Mini-player above tab bar** — per-tab inset (`be395da`, Sideload [35008731469](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35008731469)); Josh confirmed
@@ -61,12 +62,12 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-### After Find shows
+### When Josh picks
 1. ~~Find shows~~ → **Shipped**
-2. **Podcast queue** — after AI ad-strip if Josh gates that first
+2. **AI ad-strip** *or* **Podcast queue** — Josh chooses; if ad-strip gates queue, do strip first
 3. **Cross-device Stats sync** — shared store; footer → “Synced across your devices”; merge by day (no double-count)
 
-### UX polish (anytime after Find shows)
+### UX polish (anytime)
 - Separate **Couldn’t save server** copy (≠ “Connection failed”)
 - Empty state when URL prefilled but no saved Storyteller source
 - Missing Storyteller covers (cosmetic; not a blocker)
