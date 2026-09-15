@@ -17,12 +17,12 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **P0 Home mixed last-touched** — in progress on tip (BookRecentStore + max(progress, local open/dismiss) + Home refresh). Wait for Sideload green, then Josh smoke: book then podcast (and reverse) must reorder Continue / Up next.
-- [x] **Build identity stamp** — Settings → Build shows `MMDDYY.HHmm` America/New_York (`scripts/stamp-build` on CI). Ships with last-touched cut.
-- [ ] **Stats** — hook local `SessionTracker` to reader/player events first; optional cross-device sync later (**blocked until last-touched Sideload green + Josh smoke**)
-- [x] Home mixed Continue / Up next shell (`5245ed2` + `5babd3a`) — Sideload green on `bf2aaf5`; last-touched fix this tip
+- [x] **P0 Home mixed last-touched** — `be1b3ca` Sideload **green** ([Actions 35003191824](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35003191824)). Continue / Up next = max(BookProgress ms, BookRecentStore open/dismiss) + podcast recents. **Josh smoke:** book then podcast (and reverse) must reorder.
+- [x] **Build identity stamp** — Settings → Build `MMDDYY.HHmm` America/New_York (`scripts/stamp-build` on CI)
+- [ ] **Stats** — hook local `SessionTracker` to reader/player events first; optional cross-device sync later (start after Josh confirms last-touched order)
+- [x] Home mixed Continue / Up next shell (`5245ed2` + `5babd3a` + last-touched `be1b3ca`)
 
-**Do not start Stats or Podcast Index / iTunes search ahead of last-touched P0 green.**
+**Do not start Podcast Index / iTunes search ahead of Stats.**
 
 ---
 
@@ -40,12 +40,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] M1 shell: Home · Library · Shelf · Podcasts · Stats
 - [x] Shelf downloads-only + mini-player
 - [x] Home Continue + sync chip (PR 4 / `937ef9a`)
-- [x] **Home mixed Continue / Up next** shell — books + podcasts (`5245ed2` / `5babd3a`); last-touched P0 in Now
+- [x] **Home mixed Continue / Up next** — books + podcasts one rail (`5245ed2` / `5babd3a`); last-touched fix `be1b3ca` Sideload green
 - [x] ink+amp display name + twin-pages AppIcon (keep `com.punkrally.reader`)
 - [x] Settings half of PR 6
 - [x] CI: Builtin/StoryAlign / Xcode pin / Sideload unsigned IPA pipeline
 - [x] Build identity stamp (Settings → Build / `scripts/stamp-build`)
-
 ### Podcasts
 - [x] Shared Now Playing + playback speed (`66fadcd` + `3639b67`) — Josh smoke-tested / shipped (one `PlaybackRateButton`)
 - [x] Shelf auto-prune for RSS downloads (`81cd134`) — Sideload **green**
