@@ -23,8 +23,8 @@ public struct PunkRallyTabView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab: Tab = .home
-    @State private var openFailureToastVisible = false
-    @State private var openFailureToastTask: Task<Void, Never>?
+    @State private var shellToastMessage: String?
+    @State private var shellToastTask: Task<Void, Never>?
     @State private var podcastPresenter = PodcastPlayerPresenter.shared
 
     public init() {}
@@ -97,7 +97,12 @@ public struct PunkRallyTabView: View {
             .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyOpenPlayerFailed)
             ) { _ in
-                showOpenFailureToast()
+                showShellToast("Can't open yet · try again")
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyStatsSyncFailed)
+            ) { _ in
+                showShellToast("Couldn't sync Stats · try again")
             }
             .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyPlayPodcastEpisode)
@@ -161,15 +166,15 @@ public struct PunkRallyTabView: View {
                 NavigationStack {
                     PunkRallyPlayerHost.playerView(
                         for: wrapper.data,
-                        onFailure: showOpenFailureToast
+                        onFailure: { showShellToast("Can't open yet · try again") }
                     )
                 }
             }
         }
         .overlay(alignment: .top) {
-            if openFailureToastVisible {
+            if let shellToastMessage {
                 Label(
-                    "Can't open yet · try again",
+                    shellToastMessage,
                     systemImage: "exclamationmark.triangle.fill"
                 )
                 .font(.subheadline.weight(.medium))
@@ -182,10 +187,10 @@ public struct PunkRallyTabView: View {
                 )
                 .padding(.top, 8)
                 .transition(.move(edge: .top).combined(with: .opacity))
-                .accessibilityLabel("Can't open yet · try again")
+                .accessibilityLabel(shellToastMessage)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: openFailureToastVisible)
+        .animation(.easeInOut(duration: 0.2), value: shellToastMessage)
         // Podcast card is a separate presentation source (the book card above
         // lives on the inner TabView); two fullScreenCovers on one view would
         // collide, so this one attaches to the ZStack.
@@ -248,14 +253,14 @@ public struct PunkRallyTabView: View {
         Task { await podcastPresenter.play(episode) }
     }
 
-    private func showOpenFailureToast() {
-        openFailureToastTask?.cancel()
-        openFailureToastVisible = true
-        openFailureToastTask = Task {
+    private func showShellToast(_ message: String) {
+        shellToastTask?.cancel()
+        shellToastMessage = message
+        shellToastTask = Task {
             try? await Task.sleep(for: .seconds(2.5))
             guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: 0.2)) {
-                openFailureToastVisible = false
+                shellToastMessage = nil
             }
         }
     }

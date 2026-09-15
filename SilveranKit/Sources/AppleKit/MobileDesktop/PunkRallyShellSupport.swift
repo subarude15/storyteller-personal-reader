@@ -38,6 +38,8 @@ extension Notification.Name {
     public static let punkRallyStatsSyncUIDidChange = Notification.Name(
         "punkRallyStatsSyncUIDidChange"
     )
+    /// Stats sync landed Offline after Syncing… — host shows a short toast.
+    public static let punkRallyStatsSyncFailed = Notification.Name("punkRallyStatsSyncFailed")
 }
 
 /// Posts SessionTracker lifecycle events from AppleKit players into the app target.

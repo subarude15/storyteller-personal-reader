@@ -9,6 +9,7 @@
 
 import Foundation
 import Observation
+import SilveranAppleKit
 import SilveranKit
 
 /// Health of cross-device Stats sync for footer / Settings.
@@ -105,6 +106,7 @@ final class StatsSyncCoordinator {
             revision &+= 1
             publishUI()
             debugLog("[StatsSync] reason=\(reason) pushed=false detail=overallTimeout")
+            notifySyncFailedIfUserFacing(reason: reason)
             return
         }
 
@@ -123,6 +125,17 @@ final class StatsSyncCoordinator {
                 revision &+= 1
                 publishUI()
                 debugLog("[StatsSync] reason=\(reason) pushed=false detail=\(detail)")
+                notifySyncFailedIfUserFacing(reason: reason)
+        }
+    }
+
+    /// Toast only for tappable Retry (footer/Settings) — not silent appActive/localChange.
+    private func notifySyncFailedIfUserFacing(reason: String) {
+        switch reason {
+            case "footerRetry", "settingsRetry":
+                NotificationCenter.default.post(name: .punkRallyStatsSyncFailed, object: nil)
+            default:
+                break
         }
     }
 
