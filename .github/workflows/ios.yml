@@ -30,7 +30,10 @@ jobs:
         run: sudo xcode-select -s /Applications/Xcode_26.3.app || sudo xcode-select -s /Applications/Xcode_26.app || sudo xcode-select -s /Applications/Xcode.app || true
 
       - name: Install tools
-        run: brew install xcbeautify xcodegen
+        run: brew install xcbeautify xcodegen imagemagick
+
+      - name: Generate app icons
+        run: ./scripts/genicons
 
       - name: Generate Xcode project
         run: ./scripts/genxproj
@@ -50,7 +53,10 @@ jobs:
         run: sudo xcode-select -s /Applications/Xcode_26.3.app || sudo xcode-select -s /Applications/Xcode_26.app || sudo xcode-select -s /Applications/Xcode.app || true
 
       - name: Install tools
-        run: brew install xcbeautify xcodegen
+        run: brew install xcbeautify xcodegen imagemagick
+
+      - name: Generate app icons
+        run: ./scripts/genicons
 
       - name: Generate Xcode project
         run: ./scripts/genxproj
