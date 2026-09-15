@@ -17,7 +17,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **P0: Stats sync never pushes** — StorytellerCollection.description typeMismatch (dict vs String). Flexible decode (String or JSON object → string); don't fail the whole collections list on one bad row. Stats .inkamp.stats.v1 push/pull must not depend on unrelated collections decoding. Log a concrete reason when pushed=false. Soft polish: toast `Couldn't sync Stats · try again` if push fails after Syncing…. Tip base ≥ `fdb5560`. **Skip docs tips `7f995a5` / `343081b`** for Sideload — next code tip only.
+- **Smoke tip `cf5c663`** (Stats push / flexible `description` decode) — Sideload [35035504839](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35035504839) → `punkrally-sideload-unsigned-ipa`. Both devices: Retry → Syncing… → Synced (`pushed=true`); fail should toast, not silent Offline; week totals can converge; Home Continue still resumes.
 
 **Do not start NAS `AD_STRIP_URL` / silence-trim / YouTube unless Josh reorders.**
 ## Shipped
@@ -59,6 +59,8 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **SessionTracker local** — ebook / audiobook / readaloud / podcast → Home + Stats tab (`c627bbe`, Sideload [35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694))
 - [x] **Cross-device Stats sync** — tip `c5791ec` (`a5226d6` + BookServiceActor fix); private Storyteller collection `.inkamp.stats.v1` blob (same auth as place sync); session-id LWW merge (no double-count / no drop); footer Synced / Syncing… / Offline · local only; Settings last sync time; Sideload green [35028364424](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35028364424)
 - [x] **Stats Retry sync** — tip `fdb5560`; Settings last-sync row + Stats footer tappable → Syncing… then Synced / Offline · local only; soft overall + per-step timeouts; Sideload green [35033759537](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35033759537)
+- [x] **Stats push / description decode** — tip `cf5c663`; tolerate collection `description` objects (String or dict); isolate stats blob; `pushed=false` reason log; fail toast; Sideload green [35035504839](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35035504839)
+
 ---
 
 ## Next (strict order — do not reorder)
@@ -70,6 +72,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ### Soft UX polish (anytime)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
+- ~~Stats push / description decode~~ → **Sideload green** (`cf5c663`) — awaiting Josh smoke
 - Separate **Couldn’t save server** copy (≠ “Connection failed”)
 - Empty state when URL prefilled but no saved Storyteller source
 - Missing Storyteller covers (cosmetic; not a blocker)
