@@ -17,7 +17,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **P0: Stats sync never pushes** — StorytellerCollection.description typeMismatch (dict vs String). Fix so Retry/auto sync can upload the .inkamp.stats.v1 blob. Tip base ≥ `fdb5560` (Retry cut). **Skip docs tip `7f995a5`** for Sideload smoke — install the next code tip after this board lock.
+- **P0: Stats sync never pushes** — StorytellerCollection.description typeMismatch (dict vs String). Flexible decode (String or JSON object → string); don't fail the whole collections list on one bad row. Stats .inkamp.stats.v1 push/pull must not depend on unrelated collections decoding. Log a concrete reason when pushed=false. Soft polish: toast `Couldn't sync Stats · try again` if push fails after Syncing…. Tip base ≥ `fdb5560`. **Skip docs tips `7f995a5` / `343081b`** for Sideload — next code tip only.
 
 **Do not start NAS `AD_STRIP_URL` / silence-trim / YouTube unless Josh reorders.**
 ## Shipped
