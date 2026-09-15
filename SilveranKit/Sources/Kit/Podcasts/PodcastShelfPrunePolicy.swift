@@ -68,6 +68,10 @@ public struct PodcastDownloadRecord: Identifiable, Codable, Equatable, Sendable 
     public var isFinished: Bool
     public var isPinned: Bool
     public var byteSize: Int64?
+    /// Ad-strip UX chip: Original / Cleaning… / Clean.
+    public var adStripState: PodcastAdStripState
+    /// Sibling Clean file under the same episode folder (e.g. `audio.clean.mp3`).
+    public var cleanLocalFileName: String?
 
     public init(
         episodeID: String,
@@ -82,7 +86,9 @@ public struct PodcastDownloadRecord: Identifiable, Codable, Equatable, Sendable 
         positionSeconds: TimeInterval = 0,
         isFinished: Bool = false,
         isPinned: Bool = false,
-        byteSize: Int64? = nil
+        byteSize: Int64? = nil,
+        adStripState: PodcastAdStripState = .original,
+        cleanLocalFileName: String? = nil
     ) {
         self.episodeID = episodeID
         self.title = title
@@ -97,6 +103,8 @@ public struct PodcastDownloadRecord: Identifiable, Codable, Equatable, Sendable 
         self.isFinished = isFinished
         self.isPinned = isPinned
         self.byteSize = byteSize
+        self.adStripState = adStripState
+        self.cleanLocalFileName = cleanLocalFileName
     }
 
     public var progress: Double {
@@ -109,6 +117,54 @@ public struct PodcastDownloadRecord: Identifiable, Codable, Equatable, Sendable 
     public func activityDate(relativeTo now: Date = Date()) -> Date {
         max(downloadedAt, lastPlayedAt ?? downloadedAt)
     }
+
+    enum CodingKeys: String, CodingKey {
+        case episodeID, title, showTitle, feedURL, remoteAudioURL, localFileName
+        case downloadedAt, lastPlayedAt, durationSeconds, positionSeconds
+        case isFinished, isPinned, byteSize, adStripState, cleanLocalFileName
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        episodeID = try c.decode(String.self, forKey: .episodeID)
+        title = try c.decode(String.self, forKey: .title)
+        showTitle = try c.decodeIfPresent(String.self, forKey: .showTitle)
+        feedURL = try c.decodeIfPresent(URL.self, forKey: .feedURL)
+        remoteAudioURL = try c.decodeIfPresent(URL.self, forKey: .remoteAudioURL)
+        localFileName = try c.decode(String.self, forKey: .localFileName)
+        downloadedAt = try c.decode(Date.self, forKey: .downloadedAt)
+        lastPlayedAt = try c.decodeIfPresent(Date.self, forKey: .lastPlayedAt)
+        durationSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .durationSeconds)
+        positionSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .positionSeconds) ?? 0
+        isFinished = try c.decodeIfPresent(Bool.self, forKey: .isFinished) ?? false
+        isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+        byteSize = try c.decodeIfPresent(Int64.self, forKey: .byteSize)
+        adStripState = try c.decodeIfPresent(PodcastAdStripState.self, forKey: .adStripState) ?? .original
+        cleanLocalFileName = try c.decodeIfPresent(String.self, forKey: .cleanLocalFileName)
+    }
+}
+
+/// Playback / download chip for ad-strip UX.
+public enum PodcastAdStripState: String, Codable, Sendable, Equatable {
+    case original
+    case cleaning
+    case clean
+
+    public var chipLabel: String {
+        switch self {
+            case .original: return "Original"
+            case .cleaning: return "Cleaning…"
+            case .clean: return "Clean"
+        }
+    }
+}
+
+/// How the user asked to download an episode.
+public enum PodcastDownloadIntent: String, Codable, Sendable, Equatable {
+    /// Manual “Download now” — Original file only (no strip).
+    case original
+    /// “Strip ads, then download” or queue/Keep add — Clean pending after Original lands.
+    case clean
 }
 
 public enum PodcastPruneReason: String, Sendable, Equatable {

@@ -12,6 +12,7 @@
 #if os(iOS)
 import SwiftUI
 import SilveranAppleKit
+import SilveranKit
 
 /// Podcasts tab: shows grid, latest episodes, Find shows, and paste-URL fallback.
 struct PodcastsHomeView: View {
@@ -441,6 +442,7 @@ struct EpisodeRow: View {
 
     @State private var downloadStore = PodcastDownloadStore.shared
     @State private var showMediaPicker = false
+    @State private var showDownloadSheet = false
 
     private var isDownloaded: Bool {
         downloadStore.isDownloaded(episode.id)
@@ -448,6 +450,10 @@ struct EpisodeRow: View {
 
     private var isPinned: Bool {
         downloadStore.record(for: episode.id)?.isPinned ?? false
+    }
+
+    private var adStripState: PodcastAdStripState? {
+        downloadStore.adStripState(for: episode.id)
     }
 
     var body: some View {
@@ -479,10 +485,24 @@ struct EpisodeRow: View {
                             .font(.caption2)
                             .foregroundStyle(chrome.textFaint)
                     }
-                    if isDownloaded {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .font(.caption2)
-                            .foregroundStyle(PunkRallyTheme.Accent.primary)
+                    if isDownloaded || downloadStore.isCleaning(episode.id) {
+                        if let state = adStripState {
+                            Text(state.chipLabel)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(adStripChipColor(state))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(adStripChipColor(state).opacity(0.14))
+                                .clipShape(Capsule())
+                        } else {
+                            Image(systemName: "arrow.down.circle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(PunkRallyTheme.Accent.primary)
+                        }
+                    } else if downloadStore.isDownloading(episode.id) {
+                        Text("Downloading…")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(chrome.textMuted)
                     }
                     if isPinned {
                         Image(systemName: "pin.fill")
@@ -515,6 +535,18 @@ struct EpisodeRow: View {
             )
             .presentationDetents([.height(280)])
         }
+        .sheet(isPresented: $showDownloadSheet) {
+            PodcastDownloadIntentSheet(
+                episodeTitle: episode.title,
+                preferred: PodcastDownloadPreferenceStore.shared.lastIntent(for: showFeedURL),
+                onSelect: { intent in
+                    showDownloadSheet = false
+                    startDownload(intent: intent)
+                },
+                onCancel: { showDownloadSheet = false }
+            )
+            .presentationDetents([.height(300)])
+        }
         .contextMenu {
             if episode.hasAudioAndVideo {
                 Button {
@@ -528,25 +560,23 @@ struct EpisodeRow: View {
                     Label("Play Video", systemImage: "play.rectangle")
                 }
             }
-            if let audioURL = episode.audioURL {
+            if episode.audioURL != nil {
                 if isDownloaded {
                     Button {
                         downloadStore.deleteDownload(episodeID: episode.id)
                     } label: {
                         Label("Remove Download", systemImage: "trash")
                     }
-                } else if downloadStore.isDownloading(episode.id) {
-                    Label("Downloading…", systemImage: "arrow.down.circle")
+                } else if downloadStore.isDownloading(episode.id)
+                    || downloadStore.isCleaning(episode.id)
+                {
+                    Label(
+                        downloadStore.isCleaning(episode.id) ? "Cleaning…" : "Downloading…",
+                        systemImage: "arrow.down.circle"
+                    )
                 } else {
                     Button {
-                        downloadStore.enqueueDownload(
-                            episodeID: episode.id,
-                            title: episode.title,
-                            showTitle: episode.showTitle,
-                            feedURL: showFeedURL,
-                            remoteAudioURL: audioURL,
-                            durationSeconds: episode.durationSeconds
-                        )
+                        showDownloadSheet = true
                     } label: {
                         Label("Download", systemImage: "arrow.down.circle")
                     }
@@ -578,6 +608,28 @@ struct EpisodeRow: View {
         }
     }
 
+    private func adStripChipColor(_ state: PodcastAdStripState) -> Color {
+        switch state {
+            case .original: return chrome.textMuted
+            case .cleaning: return PunkRallyTheme.Accent.primary
+            case .clean: return Color.green
+        }
+    }
+
+    private func startDownload(intent: PodcastDownloadIntent) {
+        guard let audioURL = episode.audioURL else { return }
+        PodcastDownloadPreferenceStore.shared.setLastIntent(intent, for: showFeedURL)
+        downloadStore.enqueueDownload(
+            episodeID: episode.id,
+            title: episode.title,
+            showTitle: episode.showTitle,
+            feedURL: showFeedURL,
+            remoteAudioURL: audioURL,
+            durationSeconds: episode.durationSeconds,
+            intent: intent
+        )
+    }
+
     private func requestPlay() {
         if episode.hasAudioAndVideo {
             showMediaPicker = true
@@ -586,6 +638,98 @@ struct EpisodeRow: View {
         } else {
             viewModel.play(episode: episode, mediaKind: .audio, feedURL: showFeedURL)
         }
+    }
+}
+
+/// Episode download sheet: Original vs Clean; remembers last choice per show.
+private struct PodcastDownloadIntentSheet: View {
+    let episodeTitle: String
+    let preferred: PodcastDownloadIntent
+    let onSelect: (PodcastDownloadIntent) -> Void
+    let onCancel: () -> Void
+
+    @State private var selection: PodcastDownloadIntent
+
+    init(
+        episodeTitle: String,
+        preferred: PodcastDownloadIntent,
+        onSelect: @escaping (PodcastDownloadIntent) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.episodeTitle = episodeTitle
+        self.preferred = preferred
+        self.onSelect = onSelect
+        self.onCancel = onCancel
+        _selection = State(initialValue: preferred)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 20) {
+                Text(episodeTitle)
+                    .font(.headline)
+                    .lineLimit(2)
+
+                Text("How do you want to download?")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                VStack(spacing: 12) {
+                    downloadChoiceButton(
+                        title: "Download now",
+                        subtitle: "Original — no ad strip",
+                        intent: .original
+                    )
+                    downloadChoiceButton(
+                        title: "Strip ads, then download",
+                        subtitle: "Clean path (stub strip this IPA)",
+                        intent: .clean
+                    )
+                }
+
+                Spacer()
+            }
+            .padding(20)
+            .navigationTitle("Download")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onCancel)
+                }
+            }
+        }
+    }
+
+    private func downloadChoiceButton(
+        title: String,
+        subtitle: String,
+        intent: PodcastDownloadIntent
+    ) -> some View {
+        Button {
+            onSelect(intent)
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.body.weight(.semibold))
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if selection == intent {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(PunkRallyTheme.Accent.primary)
+                }
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.secondary.opacity(selection == intent ? 0.18 : 0.08))
+            )
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
     }
 }
 

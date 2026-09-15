@@ -53,18 +53,35 @@ public final class PodcastDownloadStore {
 
     public func isDownloaded(_ episodeID: String) -> Bool {
         guard let record = record(for: episodeID) else { return false }
-        return FileManager.default.fileExists(atPath: localURL(for: record).path)
+        return FileManager.default.fileExists(atPath: originalURL(for: record).path)
     }
 
+    /// Playback URL: Clean sibling when chip == Clean and file exists; else Original.
     public func localAudioURL(for episodeID: String) -> URL? {
         guard let record = record(for: episodeID) else { return nil }
-        let url = localURL(for: record)
-        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return url
+        if record.adStripState == .clean,
+            let cleanName = record.cleanLocalFileName
+        {
+            let clean = episodeFolder(for: record.episodeID).appendingPathComponent(cleanName)
+            if FileManager.default.fileExists(atPath: clean.path) {
+                return clean
+            }
+        }
+        let original = originalURL(for: record)
+        guard FileManager.default.fileExists(atPath: original.path) else { return nil }
+        return original
+    }
+
+    public func adStripState(for episodeID: String) -> PodcastAdStripState? {
+        record(for: episodeID)?.adStripState
     }
 
     public func isDownloading(_ episodeID: String) -> Bool {
         downloadTasks[episodeID] != nil
+    }
+
+    public func isCleaning(_ episodeID: String) -> Bool {
+        record(for: episodeID)?.adStripState == .cleaning
     }
 
     // MARK: - Pin / progress
@@ -82,6 +99,7 @@ public final class PodcastDownloadStore {
     }
 
     /// Keep an episode: pin if already downloaded, otherwise download then pin.
+    /// Queue / Keep always uses the Clean pending path (auto-strip intent).
     public func keepEpisode(
         episodeID: String,
         title: String,
@@ -95,6 +113,12 @@ public final class PodcastDownloadStore {
         if let index = records.firstIndex(where: { $0.episodeID == episodeID }) {
             records[index].isPinned = true
             persistLedger()
+            // Already on disk: if Original only, kick stub Clean so Keep matches queue UX.
+            if records[index].adStripState == .original,
+                FileManager.default.fileExists(atPath: originalURL(for: records[index]).path)
+            {
+                Task { await runCleanPipeline(episodeID: episodeID) }
+            }
             return
         }
         guard let remoteAudioURL else { return }
@@ -104,7 +128,8 @@ public final class PodcastDownloadStore {
             showTitle: showTitle,
             feedURL: feedURL,
             remoteAudioURL: remoteAudioURL,
-            durationSeconds: durationSeconds
+            durationSeconds: durationSeconds,
+            intent: .clean
         )
     }
 
@@ -148,16 +173,27 @@ public final class PodcastDownloadStore {
 
     // MARK: - Download / delete
 
+    /// Enqueue a download. `.original` = manual Download now (no strip).
+    /// `.clean` = Strip-then-download or queue/Keep (Clean pending after Original).
     public func enqueueDownload(
         episodeID: String,
         title: String,
         showTitle: String?,
         feedURL: URL?,
         remoteAudioURL: URL,
-        durationSeconds: TimeInterval?
+        durationSeconds: TimeInterval?,
+        intent: PodcastDownloadIntent = .original
     ) {
         guard downloadTasks[episodeID] == nil else { return }
-        if isDownloaded(episodeID) { return }
+        if isDownloaded(episodeID) {
+            if intent == .clean,
+                let record = record(for: episodeID),
+                record.adStripState != .clean
+            {
+                Task { await runCleanPipeline(episodeID: episodeID) }
+            }
+            return
+        }
 
         downloadTasks[episodeID] = Task { [weak self] in
             defer { Task { @MainActor in self?.downloadTasks[episodeID] = nil } }
@@ -167,7 +203,8 @@ public final class PodcastDownloadStore {
                 showTitle: showTitle,
                 feedURL: feedURL,
                 remoteAudioURL: remoteAudioURL,
-                durationSeconds: durationSeconds
+                durationSeconds: durationSeconds,
+                intent: intent
             )
         }
     }
@@ -177,9 +214,8 @@ public final class PodcastDownloadStore {
         downloadTasks[episodeID] = nil
         guard let index = records.firstIndex(where: { $0.episodeID == episodeID }) else { return }
         let record = records[index]
-        let fileURL = localURL(for: record)
-        try? FileManager.default.removeItem(at: fileURL)
-        try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent())
+        let folder = episodeFolder(for: record.episodeID)
+        try? FileManager.default.removeItem(at: folder)
         records.remove(at: index)
         persistLedger()
     }
@@ -238,7 +274,8 @@ public final class PodcastDownloadStore {
         showTitle: String?,
         feedURL: URL?,
         remoteAudioURL: URL,
-        durationSeconds: TimeInterval?
+        durationSeconds: TimeInterval?,
+        intent: PodcastDownloadIntent
     ) async {
         do {
             let (tempURL, response) = try await URLSession.shared.download(from: remoteAudioURL)
@@ -268,7 +305,9 @@ public final class PodcastDownloadStore {
                 downloadedAt: Date(),
                 durationSeconds: durationSeconds,
                 isPinned: pendingPins.contains(episodeID),
-                byteSize: size
+                byteSize: size,
+                adStripState: .original,
+                cleanLocalFileName: nil
             )
             if let index = records.firstIndex(where: { $0.episodeID == episodeID }) {
                 var merged = record
@@ -276,27 +315,77 @@ public final class PodcastDownloadStore {
                 merged.positionSeconds = records[index].positionSeconds
                 merged.lastPlayedAt = records[index].lastPlayedAt
                 merged.isFinished = records[index].isFinished
+                // Preserve an existing Clean sibling if re-downloading Original.
+                merged.cleanLocalFileName = records[index].cleanLocalFileName
+                merged.adStripState = records[index].adStripState == .clean ? .clean : .original
                 records[index] = merged
             } else {
                 records.append(record)
             }
             persistLedger()
+
+            if intent == .clean {
+                await runCleanPipeline(episodeID: episodeID)
+            }
         } catch {
             debugLog("[PodcastDownloadStore] download failed for \(episodeID): \(error)")
         }
     }
 
-    private func localURL(for record: PodcastDownloadRecord) -> URL {
-        rootDirectory()
-            .appendingPathComponent(Self.safeFolderName(record.episodeID), isDirectory: true)
-            .appendingPathComponent(record.localFileName)
+    /// Stub Clean path: Cleaning… → copy Original to `audio.clean.*` → Clean.
+    /// On failure/timeout: chip stays Original; Original file remains playable.
+    private func runCleanPipeline(episodeID: String) async {
+        guard let index = records.firstIndex(where: { $0.episodeID == episodeID }) else { return }
+        let record = records[index]
+        let original = originalURL(for: record)
+        guard FileManager.default.fileExists(atPath: original.path) else { return }
+
+        records[index].adStripState = .cleaning
+        persistLedger()
+
+        let ext = original.pathExtension.isEmpty ? "mp3" : original.pathExtension
+        let cleanName = "audio.clean.\(ext)"
+        let cleanURL = episodeFolder(for: episodeID).appendingPathComponent(cleanName)
+
+        do {
+            try await StubPodcastAdStripPipeline.shared.produceCleanCopy(
+                originalURL: original,
+                cleanURL: cleanURL
+            )
+            guard !Task.isCancelled else {
+                try? FileManager.default.removeItem(at: cleanURL)
+                if let i = records.firstIndex(where: { $0.episodeID == episodeID }) {
+                    records[i].adStripState = .original
+                    persistLedger()
+                }
+                return
+            }
+            guard let i = records.firstIndex(where: { $0.episodeID == episodeID }) else { return }
+            // Never delete Original when Clean lands.
+            records[i].cleanLocalFileName = cleanName
+            records[i].adStripState = .clean
+            persistLedger()
+        } catch {
+            debugLog("[PodcastDownloadStore] clean stub failed for \(episodeID): \(error)")
+            try? FileManager.default.removeItem(at: cleanURL)
+            if let i = records.firstIndex(where: { $0.episodeID == episodeID }) {
+                records[i].adStripState = .original
+                records[i].cleanLocalFileName = nil
+                persistLedger()
+            }
+        }
+    }
+
+    private func originalURL(for record: PodcastDownloadRecord) -> URL {
+        episodeFolder(for: record.episodeID).appendingPathComponent(record.localFileName)
+    }
+
+    private func episodeFolder(for episodeID: String) -> URL {
+        rootDirectory().appendingPathComponent(Self.safeFolderName(episodeID), isDirectory: true)
     }
 
     private func episodeDirectory(for episodeID: String) throws -> URL {
-        let dir = rootDirectory().appendingPathComponent(
-            Self.safeFolderName(episodeID),
-            isDirectory: true
-        )
+        let dir = episodeFolder(for: episodeID)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }

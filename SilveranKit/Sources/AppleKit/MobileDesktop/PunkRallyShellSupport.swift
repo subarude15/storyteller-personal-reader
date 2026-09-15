@@ -435,6 +435,9 @@ private struct PodcastShelfDownloadRow: View {
                 Text("POD")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.blue)
+                Text(record.adStripState.chipLabel)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(adStripChipColor(record.adStripState))
                 if record.isPinned {
                     Image(systemName: "pin.fill")
                         .font(.caption2)
@@ -460,6 +463,14 @@ private struct PodcastShelfDownloadRow: View {
             } label: {
                 Label("Remove Download", systemImage: "trash")
             }
+        }
+    }
+
+    private func adStripChipColor(_ state: PodcastAdStripState) -> Color {
+        switch state {
+            case .original: return .secondary
+            case .cleaning: return PunkRallyTheme.Accent.primary
+            case .clean: return .green
         }
     }
 
