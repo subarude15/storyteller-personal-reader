@@ -17,11 +17,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [x] **P0 Mini-player above tab bar** — per-tab `punkRallyMiniPlayerInset()` (`be395da`, Sideload [35008731469](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35008731469))
-- [x] **P0 Podcast resume position** — `PodcastPlayheadStore` + `openPodcast(startAtSeconds:)` (`be395da`)
-- [x] **Stats (SessionTracker local)** — wired `c627bbe`; Sideload green ([Actions 35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694)).
+- Quiet — no active P0. Josh confirmed ship: mini-player above tabs + podcast resume (`be395da`).
+- **When Josh asks:** mini-player −15 / +15 skip + podcast cover on mini-player (polish; not blocking).
+- **Later (do not start yet):** Podcast Index / Find shows; optional cross-device Stats sync.
 
-**Next:** Josh smoke both P0s. Do not start Podcast Index / cross-device Stats ahead of smoke.
+**Board is clear until Josh picks polish or Later.**
 
 ---
 
@@ -48,10 +48,10 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] Shared Now Playing + playback speed (`66fadcd` + `3639b67`) — Josh smoke-tested / shipped (one `PlaybackRateButton`)
 - [x] Shelf auto-prune for RSS downloads (`81cd134`) — Sideload **green**
 - [x] Audio | Video episode sheet (`e2e0de0` + `6cc51ba`) — Sideload green [Actions 34990644848](https://github.com/subarude15/storyteller-personal-reader/actions/runs/34990644848)
-- [x] **Podcast playhead resume** — `PodcastPlayheadStore` (UserDefaults / app group); seek on `openPodcast` (`be395da`)
+- [x] **Podcast playhead resume** — `PodcastPlayheadStore`; seek on `openPodcast` (`be395da`); Josh confirmed
 
 ### Shell polish
-- [x] **Mini-player above tab bar** — per-tab inset, not TabView overlay (`be395da`, Sideload [35008731469](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35008731469))
+- [x] **Mini-player above tab bar** — per-tab inset (`be395da`, Sideload [35008731469](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35008731469)); Josh confirmed
 
 ### Stats
 - [x] **SessionTracker local** — ebook / audiobook / readaloud / podcast → Home + Stats tab (`c627bbe`, Sideload [35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694))
@@ -74,8 +74,8 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Later / ideas (not blocking)
 
-- Mini-player −15 / +15 skip (beside play/pause)
-- Podcast cover art on mini-player when available (fallback book icon)
+- **Next polish (when Josh asks):** Mini-player −15 / +15 skip + podcast cover art on mini-player
+- Optional cross-device Stats sync (shared store; footer → Synced; merge by day)
 - Silence-trim spike
 - AI sponsored/ad strip (async post-download; on-device / NAS / OmniRoute)
 - Glance / Watch tile: now-playing + Continue deep-link
