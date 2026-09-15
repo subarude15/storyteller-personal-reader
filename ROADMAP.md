@@ -17,10 +17,12 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **Stats** — hook local `SessionTracker` to reader/player events first; optional cross-device sync later
-- [x] Home mixed Continue / Up next (`5245ed2` + `5babd3a`) — Sideload **green**
+- [ ] **P0 Home mixed last-touched** — Continue / Up next must sort by real last activity (book progress + podcast play), not a stale/random pick. Josh smoke on `bf2aaf5` showed wrong order after listening to a book + podcast. Local Cursor on NUC only.
+- [ ] **Build identity stamp** — Settings or About shows `MMDDYY.HHmm` in America/New_York (e.g. `091526.1317`) so AltStore IPAs are distinguishable. Same cut as last-touched or immediately after.
+- [ ] **Stats** — hook local `SessionTracker` to reader/player events first; optional cross-device sync later (blocked until last-touched is green)
+- [x] Home mixed Continue / Up next shell (`5245ed2` + `5babd3a`) — Sideload green on `bf2aaf5`; sort still broken → P0 above
 
-**Do not start Podcast Index / iTunes search ahead of Stats.**
+**Do not start Stats or Podcast Index / iTunes search ahead of last-touched P0.**
 
 ---
 
@@ -38,7 +40,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] M1 shell: Home · Library · Shelf · Podcasts · Stats
 - [x] Shelf downloads-only + mini-player
 - [x] Home Continue + sync chip (PR 4 / `937ef9a`)
-- [x] **Home mixed Continue / Up next** — books + podcasts, last-touched (`5245ed2` / `5babd3a`)
+- [x] **Home mixed Continue / Up next** shell — books + podcasts (`5245ed2` / `5babd3a`); last-touched sort still P0
 - [x] ink+amp display name + twin-pages AppIcon (keep `com.punkrally.reader`)
 - [x] Settings half of PR 6
 - [x] CI: Builtin/StoryAlign / Xcode pin / Sideload unsigned IPA pipeline
