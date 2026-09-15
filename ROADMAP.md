@@ -48,7 +48,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] Audio | Video episode sheet (`e2e0de0` + `6cc51ba`) — Sideload green [Actions 34990644848](https://github.com/subarude15/storyteller-personal-reader/actions/runs/34990644848)
 - [x] **Podcast playhead resume** — `PodcastPlayheadStore`; seek on `openPodcast` (`be395da`); Josh confirmed
 - [x] **Find shows** — Apple iTunes Search API → Subscribe → `PodcastSubscriptionStore` (`a0fc4e4`, Sideload [35013733091](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35013733091)); Josh confirmed
-- [x] **Ad-strip download / queue UX (v1 = UX + hooks + stub)** — Download sheet Original vs Clean (per-show last choice); Keep/queue → Clean pending; chips Original | Cleaning… | Clean; `PodcastAdStripPipeline` + `StubPodcastAdStripPipeline` (no-op copy Original → `audio.clean.*` sibling after ~1.2s; soft-fail → Original); player prefers Clean when chip == Clean; Original never deleted
+- [x] **Ad-strip download / queue UX (v1 = UX + hooks + stub)** — tip `60a211b` (`c93deac` + shelf chip fix); Download sheet Original vs Clean (per-show last choice); Keep/queue → Clean pending; chips Original | Cleaning… | Clean; `PodcastAdStripPipeline` + `StubPodcastAdStripPipeline` (no-op copy Original → `audio.clean.*` sibling after ~1.2s; soft-fail → Original); player prefers Clean when chip == Clean; Original never deleted; Sideload green [35019916837](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35019916837)
 
 ### Shell polish
 - [x] **Mini-player above tab bar** — per-tab inset (`be395da`, Sideload [35008731469](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35008731469)); Josh confirmed
