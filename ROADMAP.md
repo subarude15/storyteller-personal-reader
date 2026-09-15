@@ -17,13 +17,13 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **Ad-strip download / queue UX** — tip ≥ `eeeaf1d`. Local Cursor on NUC. Board lock: **ad-strip ahead of queue reorder** (Josh preference + Ui stamp).
+- [ ] **Ad-strip download / queue UX (v1 = UX + hooks + stub only)** — tip ≥ `a1c29fe`. Local Cursor on NUC. Board lock: **ad-strip ahead of queue reorder**. Cursor paste locked (Smokey): **no real strip pipeline in this cut**.
   1. Episode sheet: **Download now (Original)** vs **Strip ads then download (Clean)**; default = last used **per show**.
-  2. Queue add always **Clean pending** — chip states: Original / Cleaning… / Clean; keep Original if Clean fails.
-  3. Do **not** force strip on every manual download — only auto-strip on **queue add**.
-  4. Engineering owns strip pipeline (NAS / OmniRoute); this cut may ship **UX contract + hooks first** if the pipeline isn’t ready yet.
+  2. Queue add always **Clean pending** — chip states: Original / Cleaning… / Clean; keep Original if Clean fails (stub can flip to Clean after a short delay or leave Cleaning… until hooks exist — match paste).
+  3. Do **not** force strip on every manual download — only auto-strip intent on **queue add**.
+  4. Stub the Clean path (hooks + chip states). Real strip worker (NAS / OmniRoute free-first) is **Later / engineering** — not this IPA.
 
-**Do not start queue play-next/play-last + reorder ahead of this ad-strip UX cut.**
+**Do not start queue play-next/play-last + reorder ahead of this v1 UX+stub cut.**
 
 ---
 
@@ -80,7 +80,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ## Later / ideas (not blocking)
 
 - Silence-trim spike
-- AI ad-strip **pipeline** (NAS / OmniRoute) — engineering; app UX cut is **Now**
+- AI ad-strip **pipeline** (NAS / OmniRoute free-first via `/v1`) — Later / engineering; app **v1 UX+hooks+stub** is **Now**
 - Podcast queue (after ad-strip if Josh gates it)
 - Cross-device Stats sync (shared store; footer Synced; merge by day)
 - **In-app YouTube** (not RSS Audio|Video enclosures) — separate from dual-enclosure A|V sheet
