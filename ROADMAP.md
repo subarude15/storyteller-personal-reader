@@ -17,11 +17,13 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- Quiet — no active P0. **Find shows** shipped (`a0fc4e4`, Josh confirmed).
-- **When Josh picks next:** either **AI ad-strip** first (gates queue) **or** **Podcast queue** directly. Do not start both until he chooses.
-- **Later after that:** cross-device Stats; in-app YouTube stays separate Later.
+- [ ] **Ad-strip download / queue UX** — tip ≥ `eeeaf1d`. Local Cursor on NUC. Board lock: **ad-strip ahead of queue reorder** (Josh preference + Ui stamp).
+  1. Episode sheet: **Download now (Original)** vs **Strip ads then download (Clean)**; default = last used **per show**.
+  2. Queue add always **Clean pending** — chip states: Original / Cleaning… / Clean; keep Original if Clean fails.
+  3. Do **not** force strip on every manual download — only auto-strip on **queue add**.
+  4. Engineering owns strip pipeline (NAS / OmniRoute); this cut may ship **UX contract + hooks first** if the pipeline isn’t ready yet.
 
-**Board is clear until Josh picks queue vs ad-strip.**
+**Do not start queue play-next/play-last + reorder ahead of this ad-strip UX cut.**
 
 ---
 
@@ -62,12 +64,13 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-### When Josh picks
+### After ad-strip UX
 1. ~~Find shows~~ → **Shipped**
-2. **AI ad-strip** *or* **Podcast queue** — Josh chooses; if ad-strip gates queue, do strip first
-3. **Cross-device Stats sync** — shared store; footer → “Synced across your devices”; merge by day (no double-count)
+2. ~~Ad-strip download / queue UX~~ → **Now**
+3. **Podcast queue** — play-next / play-last + reorder (after ad-strip UX)
+4. **Cross-device Stats sync** — shared store; footer → “Synced across your devices”; merge by day (no double-count)
 
-### UX polish (anytime)
+### UX polish (anytime after ad-strip UX)
 - Separate **Couldn’t save server** copy (≠ “Connection failed”)
 - Empty state when URL prefilled but no saved Storyteller source
 - Missing Storyteller covers (cosmetic; not a blocker)
@@ -77,7 +80,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ## Later / ideas (not blocking)
 
 - Silence-trim spike
-- AI sponsored/ad strip (async post-download; on-device / NAS / OmniRoute) — may gate podcast queue
+- AI ad-strip **pipeline** (NAS / OmniRoute) — engineering; app UX cut is **Now**
 - Podcast queue (after ad-strip if Josh gates it)
 - Cross-device Stats sync (shared store; footer Synced; merge by day)
 - **In-app YouTube** (not RSS Audio|Video enclosures) — separate from dual-enclosure A|V sheet
