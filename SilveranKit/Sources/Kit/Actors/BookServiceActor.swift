@@ -1401,6 +1401,35 @@ public actor BookServiceActor {
         return await storyteller.fetchCollections()
     }
 
+    // MARK: - ink+amp Stats sync (first Storyteller source)
+
+    /// Primary configured Storyteller source (same account as place sync).
+    public func primaryStorytellerSourceID() async -> BookSourceID? {
+        await ensureSourceRegistryLoaded()
+        return sourceRecords.first(where: { $0.kind == .storyteller })?.id
+    }
+
+    public func canReachStorytellerForStatsSync() async -> Bool {
+        guard let storyteller = await primaryStorytellerActor() else { return false }
+        return await storyteller.canReachStorytellerForStatsSync()
+    }
+
+    public func fetchInkampStatsDocument() async -> StorytellerActor.InkampStatsFetchResult {
+        guard let storyteller = await primaryStorytellerActor() else { return .unavailable }
+        return await storyteller.fetchInkampStatsDocument()
+    }
+
+    @discardableResult
+    public func pushInkampStatsDocument(_ document: InkampStatsSyncDocument) async -> Bool {
+        guard let storyteller = await primaryStorytellerActor() else { return false }
+        return await storyteller.pushInkampStatsDocument(document)
+    }
+
+    private func primaryStorytellerActor() async -> StorytellerActor? {
+        await ensureSourceRegistryLoaded()
+        return storytellerActors().first
+    }
+
     public func createCollection(
         _ payload: StorytellerCollectionCreatePayload,
         sourceID: BookSourceID,

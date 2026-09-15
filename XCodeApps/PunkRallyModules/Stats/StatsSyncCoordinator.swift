@@ -85,7 +85,7 @@ final class StatsSyncCoordinator {
         status = .syncing
         revision &+= 1
 
-        let canReach = await StorytellerActor.shared.canReachStorytellerForStatsSync()
+        let canReach = await BookServiceActor.shared.canReachStorytellerForStatsSync()
         guard canReach else {
             status = .offlineLocalOnly
             revision &+= 1
@@ -93,7 +93,7 @@ final class StatsSyncCoordinator {
         }
 
         let localDoc = SessionTracker.shared.exportSyncDocument()
-        let fetch = await StorytellerActor.shared.fetchInkampStatsDocument()
+        let fetch = await BookServiceActor.shared.fetchInkampStatsDocument()
 
         let merged: InkampStatsSyncDocument
         switch fetch {
@@ -109,7 +109,7 @@ final class StatsSyncCoordinator {
 
         SessionTracker.shared.applyMergedSyncDocument(merged)
 
-        let pushed = await StorytellerActor.shared.pushInkampStatsDocument(merged)
+        let pushed = await BookServiceActor.shared.pushInkampStatsDocument(merged)
         if pushed {
             let now = Date()
             lastSuccessfulSyncAt = now
