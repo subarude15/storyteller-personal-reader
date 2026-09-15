@@ -17,10 +17,10 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **Home mixed Continue / Up next** — in progress on tip (await Sideload IPA green)
-- Quiet until Sideload green (`punkrally-sideload-unsigned-ipa`)
+- [ ] **Stats** — hook local `SessionTracker` to reader/player events first; optional cross-device sync later
+- [x] Home mixed Continue / Up next (`5245ed2` + `5babd3a`) — Sideload **green**
 
-**Do not start Stats / SessionTracker until Home mixed Sideload is green.**
+**Do not start Podcast Index / iTunes search ahead of Stats.**
 
 ---
 
@@ -38,6 +38,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] M1 shell: Home · Library · Shelf · Podcasts · Stats
 - [x] Shelf downloads-only + mini-player
 - [x] Home Continue + sync chip (PR 4 / `937ef9a`)
+- [x] **Home mixed Continue / Up next** — books + podcasts, last-touched (`5245ed2` / `5babd3a`)
 - [x] ink+amp display name + twin-pages AppIcon (keep `com.punkrally.reader`)
 - [x] Settings half of PR 6
 - [x] CI: Builtin/StoryAlign / Xcode pin / Sideload unsigned IPA pipeline
@@ -54,7 +55,6 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ### 1. Stats
 1. Hook local `SessionTracker` to reader/player events (zeros today are expected — M1 never wired this)
 2. Optional later: cross-device Stats sync (single phone+iPad number via shared store; footer flips from “stay on this iPhone” to “Synced across your devices”; merge by day — no double-count)
-- After Home mixed Sideload green
 
 ### UX polish (anytime after Now, not ahead of Stats)
 - Separate **Couldn’t save server** copy (≠ “Connection failed”)
