@@ -133,6 +133,7 @@ public struct PunkRallyTabView: View {
                         name: .punkRallyHomeQueueDidChange,
                         object: nil
                     )
+                    Task { await StatsSyncCoordinator.shared.syncNow(reason: "appActive") }
                 } else if phase == .background {
                     Task {
                         await PodcastPlayerPresenter.persistPodcastProgress(markFinished: false)

@@ -163,11 +163,23 @@ public struct StorytellerCollectionCreatePayload: Codable, Sendable {
     }
 }
 
-struct StorytellerCollectionUpdatePayload: Codable, Sendable {
-    var name: String?
-    var description: String?
-    var isPublic: Bool?
-    var users: [String]?
+public struct StorytellerCollectionUpdatePayload: Codable, Sendable {
+    public var name: String?
+    public var description: String?
+    public var isPublic: Bool?
+    public var users: [String]?
+
+    public init(
+        name: String? = nil,
+        description: String? = nil,
+        isPublic: Bool? = nil,
+        users: [String]? = nil
+    ) {
+        self.name = name
+        self.description = description
+        self.isPublic = isPublic
+        self.users = users
+    }
 
     private enum CodingKeys: String, CodingKey {
         case name

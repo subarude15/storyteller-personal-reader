@@ -12,9 +12,11 @@
 
 import Foundation
 import Observation
+import SilveranKit
 
 /// Tracks reading/listening sessions locally and computes home/Stats aggregates.
-/// Data lives on-device only — matches the ink+amp privacy stance.
+/// Local recording always works offline; `StatsSyncCoordinator` merges a shared
+/// Storyteller blob (same account as place sync) so phone ↔ iPad share totals.
 @MainActor
 @Observable
 final class SessionTracker {
@@ -91,6 +93,7 @@ final class SessionTracker {
         }
         revision &+= 1
         scheduleSave()
+        StatsSyncCoordinator.shared.scheduleSyncAfterLocalChange()
     }
 
     /// Title for an in-flight or recent session (podcast finish labeling).
@@ -107,6 +110,24 @@ final class SessionTracker {
         finished.append(PRFinishedBook(mediaID: mediaID, mediaTitle: mediaTitle, finishedAt: Date()))
         revision &+= 1
         scheduleSave()
+        StatsSyncCoordinator.shared.scheduleSyncAfterLocalChange()
+    }
+
+    /// Export local ledger for Storyteller Stats blob.
+    func exportSyncDocument() -> InkampStatsSyncDocument {
+        InkampStatsSyncDocument(
+            updatedAt: Date(),
+            sessions: sessions.map(Self.toSyncSession),
+            finished: finished.map(Self.toSyncFinished)
+        )
+    }
+
+    /// Apply merged remote∪local document. Caller already ran StatsSyncMerge.
+    func applyMergedSyncDocument(_ document: InkampStatsSyncDocument) {
+        sessions = document.sessions.map(Self.fromSyncSession)
+        finished = document.finished.map(Self.fromSyncFinished)
+        revision &+= 1
+        persist()
     }
 
     /// Prune sessions older than 1 year to keep storage small.
@@ -263,5 +284,47 @@ final class SessionTracker {
     private func closeActiveIfNeeded() {
         guard activeSession != nil else { return }
         endSession()
+    }
+
+    private static func toSyncSession(_ session: PRMediaSession) -> InkampStatsSessionRecord {
+        InkampStatsSessionRecord(
+            id: session.id,
+            kind: session.kind == .reading ? .reading : .listening,
+            mediaID: session.mediaID,
+            mediaTitle: session.mediaTitle,
+            startedAt: session.startedAt,
+            endedAt: session.endedAt,
+            durationSeconds: session.durationSeconds,
+            endProgress: session.endProgress
+        )
+    }
+
+    private static func fromSyncSession(_ record: InkampStatsSessionRecord) -> PRMediaSession {
+        PRMediaSession(
+            id: record.id,
+            kind: record.kind == .reading ? .reading : .listening,
+            mediaID: record.mediaID,
+            mediaTitle: record.mediaTitle,
+            startedAt: record.startedAt,
+            endedAt: record.endedAt,
+            durationSeconds: record.durationSeconds,
+            endProgress: record.endProgress
+        )
+    }
+
+    private static func toSyncFinished(_ book: PRFinishedBook) -> InkampStatsFinishedRecord {
+        InkampStatsFinishedRecord(
+            mediaID: book.mediaID,
+            mediaTitle: book.mediaTitle,
+            finishedAt: book.finishedAt
+        )
+    }
+
+    private static func fromSyncFinished(_ record: InkampStatsFinishedRecord) -> PRFinishedBook {
+        PRFinishedBook(
+            mediaID: record.mediaID,
+            mediaTitle: record.mediaTitle,
+            finishedAt: record.finishedAt
+        )
     }
 }

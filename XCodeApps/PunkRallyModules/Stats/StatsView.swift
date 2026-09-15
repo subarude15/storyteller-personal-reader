@@ -5,7 +5,7 @@
 //  Ported from Enve Book Player (AGPL-3.0-only):
 //  https://github.com/opisaac9001/Enve-Book-Player
 //  Original: ios/enve/Screens/Journal/JournalScreen.swift + JournalStatsComponents.swift
-//  Modifications: local aggregates only; ink+amp tokens; 7-day bar chart.
+//  Modifications: SessionTracker + Storyteller Stats sync footer states.
 //
 //  SPDX-License-Identifier: AGPL-3.0-only
 
@@ -14,7 +14,9 @@ import SwiftUI
 /// Stats tab — reading/listening time, streak, finished count, average session.
 struct StatsView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @State private var tracker = SessionTracker.shared
+    @State private var sync = StatsSyncCoordinator.shared
     @State private var tick = 0
 
     private var chrome: PunkRallyTheme.Chrome {
@@ -23,6 +25,7 @@ struct StatsView: View {
 
     var body: some View {
         let _ = tracker.revision
+        let _ = sync.revision
         let _ = tick
         NavigationStack {
             ScrollView {
@@ -30,7 +33,7 @@ struct StatsView: View {
                     heroCard
                     streakAndFinishedRow
                     weekChart
-                    privacyFooter
+                    syncFooter
                 }
                 .padding(.horizontal, PunkRallyTheme.Metric.screenInset)
                 .padding(.vertical, 12)
@@ -40,6 +43,12 @@ struct StatsView: View {
         }
         .task {
             tracker.pruneOldSessions()
+            await sync.syncNow(reason: "statsAppear")
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                Task { await sync.syncNow(reason: "foreground") }
+            }
         }
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in
             // Live active-session seconds — revision may be unchanged while elapsed grows.
@@ -218,17 +227,33 @@ struct StatsView: View {
 
     // MARK: - Footer
 
-    private var privacyFooter: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "lock.shield.fill")
-                .foregroundStyle(chrome.textFaint)
-            Text("Stats stay on this iPhone")
-                .font(.caption)
-                .foregroundStyle(chrome.textFaint)
+    private var syncFooter: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: sync.status.footerSymbol)
+                    .foregroundStyle(chrome.textFaint)
+                Text(sync.status.footerLabel)
+                    .font(.caption)
+                    .foregroundStyle(chrome.textFaint)
+            }
+            if let last = sync.lastSuccessfulSyncAt {
+                Text("Last Stats sync · \(Self.syncTimeFormatter.string(from: last))")
+                    .font(.caption2)
+                    .foregroundStyle(chrome.textFaint.opacity(0.85))
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(sync.status.footerLabel)
     }
+
+    private static let syncTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .short
+        f.timeStyle = .short
+        return f
+    }()
 
     private func legendDot(color: Color, label: String) -> some View {
         HStack(spacing: 4) {

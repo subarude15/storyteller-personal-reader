@@ -1,6 +1,7 @@
 #if os(iOS) || os(macOS)
 import SwiftUI
 import UniformTypeIdentifiers
+import SilveranKit
 
 #if os(macOS)
 import AppKit
@@ -392,6 +393,16 @@ extension SettingsView {
                 }
 
                 Section {
+                    StatsLastSyncSettingsRow()
+                } header: {
+                    Text("Stats")
+                } footer: {
+                    Text(
+                        "Minutes sync across your devices when Storyteller is signed in (same account as place sync)."
+                    )
+                }
+
+                Section {
                     NavigationLink {
                         IOSDebugLogView()
                     } label: {
@@ -409,6 +420,44 @@ extension SettingsView {
         }
     }
 }
+
+#if os(iOS)
+private struct StatsLastSyncSettingsRow: View {
+    @State private var lastSync: Date?
+    @State private var tick = 0
+
+    var body: some View {
+        let _ = tick
+        LabeledContent("Last Stats sync") {
+            Text(lastSyncLabel)
+                .foregroundStyle(.secondary)
+        }
+        .onAppear { reload() }
+        .onReceive(Timer.publish(every: 15, on: .main, in: .common).autoconnect()) { _ in
+            reload()
+            tick &+= 1
+        }
+    }
+
+    private var lastSyncLabel: String {
+        guard let lastSync else { return "Not yet" }
+        return Self.formatter.string(from: lastSync)
+    }
+
+    private func reload() {
+        lastSync = UserDefaults.standard.object(
+            forKey: InkampStatsSyncDefaults.lastSuccessfulSyncAtKey
+        ) as? Date
+    }
+
+    private static let formatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f
+    }()
+}
+#endif
 
 private struct IOSDebugLogView: View {
     @State private var logText: String = ""

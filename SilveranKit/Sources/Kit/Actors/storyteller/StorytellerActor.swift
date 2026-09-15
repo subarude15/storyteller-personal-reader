@@ -2258,10 +2258,85 @@ public actor StorytellerActor {
         }
     }
 
+    // MARK: - ink+amp Stats sync (private collection blob)
+
+    public enum InkampStatsFetchResult: Sendable {
+        /// Auth / network / collections list failed — do not push local-only.
+        case unavailable
+        /// No collection yet (first sync).
+        case empty
+        case document(InkampStatsSyncDocument)
+    }
+
+    /// Fetches the Stats sync document from a private Storyteller collection
+    /// (same auth as place sync).
+    public func fetchInkampStatsDocument() async -> InkampStatsFetchResult {
+        guard await ensureAuthentication() != nil else { return .unavailable }
+        guard let collections = await fetchCollections() else { return .unavailable }
+        guard let collection = collections.first(where: {
+            $0.name == InkampStatsSyncDocument.collectionName
+        }) else {
+            return .empty
+        }
+        guard let description = collection.description, !description.isEmpty else {
+            return .empty
+        }
+        guard description.hasPrefix("{") else {
+            return .empty
+        }
+        guard let doc = try? StatsSyncMerge.decodeDescription(description) else {
+            return .empty
+        }
+        return .document(doc)
+    }
+
+    /// Upserts the Stats sync document onto the private Storyteller collection.
+    @discardableResult
+    public func pushInkampStatsDocument(_ document: InkampStatsSyncDocument) async -> Bool {
+        guard await ensureAuthentication() != nil else { return false }
+        let encoded: String
+        do {
+            encoded = try StatsSyncMerge.encodeDescription(document)
+        } catch {
+            logStorytellerError("pushInkampStatsDocument encode", error: error)
+            return false
+        }
+
+        if let existing = await inkampStatsCollection() {
+            let updated = await updateCollection(
+                uuid: existing.uuid,
+                payload: StorytellerCollectionUpdatePayload(
+                    description: encoded,
+                    isPublic: false
+                )
+            )
+            return updated != nil
+        }
+
+        let created = await createCollection(
+            StorytellerCollectionCreatePayload(
+                name: InkampStatsSyncDocument.collectionName,
+                description: encoded,
+                isPublic: false,
+                users: nil
+            )
+        )
+        return created != nil
+    }
+
+    /// True when Storyteller credentials can authenticate (shared with place sync).
+    public func canReachStorytellerForStatsSync() async -> Bool {
+        await ensureAuthentication() != nil
+    }
+
+    private func inkampStatsCollection() async -> StorytellerCollection? {
+        guard let collections = await fetchCollections() else { return nil }
+        return collections.first { $0.name == InkampStatsSyncDocument.collectionName }
+    }
+
     /// Updates collection metadata via `/api/v2/collections/{uuid}`.
     /// Server implementation: `storyteller/web/src/app/api/v2/collections/[uuid]/route.ts` (PUT handler).
-    /// TODO: UNTESTED
-    func updateCollection(
+    public func updateCollection(
         uuid: String,
         payload: StorytellerCollectionUpdatePayload,
     ) async -> StorytellerCollection? {
