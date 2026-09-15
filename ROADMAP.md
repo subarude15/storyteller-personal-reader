@@ -17,9 +17,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **Stats (SessionTracker local)** — in progress on tip; wait Sideload green then Josh smoke (Home Today/week leave 0m after a few minutes read/listen). Local only — footer still “Stats stay on this iPhone”.
+- [x] **Stats (SessionTracker local)** — wired `c627bbe`; Sideload **green** ([Actions 35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694)). Home Today / week / streak + Stats tab use real sessions. Footer still “Stats stay on this iPhone”.
+- [ ] **Josh smoke** — read or listen a few minutes; confirm Home “Today” leaves 0m and Stats chart moves.
+- [ ] **Next cut** — optional cross-device Stats sync (Later until smoke). Do not start Podcast Index yet.
 
-**Do not start Podcast Index / iTunes search or cross-device Stats sync ahead of this Sideload green.**
+**Do not start Podcast Index / iTunes search ahead of Josh Stats smoke.**
 
 ---
 
@@ -47,13 +49,16 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] Shelf auto-prune for RSS downloads (`81cd134`) — Sideload **green**
 - [x] Audio | Video episode sheet (`e2e0de0` + `6cc51ba`) — Sideload green [Actions 34990644848](https://github.com/subarude15/storyteller-personal-reader/actions/runs/34990644848)
 
+### Stats
+- [x] **SessionTracker local** — ebook / audiobook / readaloud / podcast → Home + Stats tab (`c627bbe`, Sideload [35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694))
+
 ---
 
 ## Next (strict order — do not reorder)
 
-### 1. Stats follow-ups (after SessionTracker Sideload green)
-1. ~~Hook local SessionTracker~~ → **Now / this tip**
-2. Optional later: cross-device Stats sync (single phone+iPad number via shared store; footer flips from “stay on this iPhone” to “Synced across your devices”; merge by day — no double-count)
+### 1. Stats follow-ups
+1. ~~Hook local SessionTracker~~ → **Shipped**
+2. Optional: cross-device Stats sync (shared store; footer → “Synced across your devices”; merge by day — no double-count)
 3. Then Later: Podcast Index / Find shows
 
 ### UX polish (anytime after Now, not ahead of Stats)
