@@ -17,7 +17,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **P0 Podcast playback stall** — tip ≥ `c5791ec`. Josh: podcast sits **Paused at 0:00** / won’t play (or stalls after open). Fix shared-player / podcast open path so play starts and advances. Local Cursor on NUC.
+- [ ] **P0 Podcast resume / Home Continue stall** — tip ≥ `c5791ec` (docs tip `579ef08` is **not** the fix). Fresh start from Podcasts tab works; **reopen same episode / Home Continue** shows Pause at `0:00` with no audio. Fix early-return when card already thinks it’s that ep; Loading until playhead advances. Local Cursor on NUC — wait for real fix push + Sideload (skip docs-only IPAs).
 - Cross-device Stats sync Sideload is green (`c5791ec`) but **Josh smoke parked** until this P0 Sideload is green again.
 
 **Do not start NAS `AD_STRIP_URL` / silence-trim / YouTube ahead of this P0.**
