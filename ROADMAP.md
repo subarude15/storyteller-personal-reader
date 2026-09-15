@@ -17,11 +17,12 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- Quiet — no active P0. Josh confirmed ship: mini-player above tabs + podcast resume (`be395da`).
-- **When Josh asks:** mini-player −15 / +15 skip + podcast cover on mini-player (polish; not blocking).
-- **Later (do not start yet):** Podcast Index / Find shows; optional cross-device Stats sync.
+- [ ] **Mini / full player polish** — tip ≥ `3f460e5`. Local Cursor on NUC.
+  - −15 / +15 skip on mini-player (and full player if controls live there)
+  - Podcast cover art when available (fallback book icon)
+  - Elapsed | scrub | remaining on **both** mini-player and full player
 
-**Board is clear until Josh picks polish or Later.**
+**Do not start Find shows / podcast queue / cross-device Stats / in-app YouTube ahead of this polish.**
 
 ---
 
@@ -60,12 +61,12 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-### 1. Stats follow-ups
-1. ~~Hook local SessionTracker~~ → **Shipped**
-2. Optional: cross-device Stats sync (shared store; footer → “Synced across your devices”; merge by day — no double-count)
-3. Then Later: Podcast Index / Find shows
+### After player polish
+1. **Find shows** — Podcasts tab → iTunes / Podcast Index lookup → art + Subscribe (resolves RSS); paste-URL stays fallback
+2. **Podcast queue** — after AI ad-strip if Josh gates that first
+3. **Cross-device Stats sync** — shared store; footer → “Synced across your devices”; merge by day (no double-count)
 
-### UX polish (anytime after Now, not ahead of Stats)
+### UX polish (anytime after Now player polish)
 - Separate **Couldn’t save server** copy (≠ “Connection failed”)
 - Empty state when URL prefilled but no saved Storyteller source
 - Missing Storyteller covers (cosmetic; not a blocker)
@@ -74,16 +75,16 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Later / ideas (not blocking)
 
-- **Next polish (when Josh asks):** Mini-player −15 / +15 skip + podcast cover art on mini-player
-- Optional cross-device Stats sync (shared store; footer → Synced; merge by day)
 - Silence-trim spike
-- AI sponsored/ad strip (async post-download; on-device / NAS / OmniRoute)
+- AI sponsored/ad strip (async post-download; on-device / NAS / OmniRoute) — may gate podcast queue
+- Podcast queue (after ad-strip if Josh gates it)
+- Find shows — Podcasts tab → iTunes / Podcast Index → art + Subscribe; paste-URL fallback
+- Cross-device Stats sync (shared store; footer Synced; merge by day)
+- **In-app YouTube** (not RSS Audio|Video enclosures) — separate from dual-enclosure A|V sheet
 - Glance / Watch tile: now-playing + Continue deep-link
 - One-tap LAN failover: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
 - CarPlay (out of current build scope)
-- Podcast search — Podcasts tab Find shows → iTunes/Podcast Index lookup → art + Subscribe (resolves RSS); paste-URL stays as fallback. After Home mixed + Stats.
 
----
 
 ## Constraints
 
