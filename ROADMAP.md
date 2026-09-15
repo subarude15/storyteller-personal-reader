@@ -17,11 +17,12 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **Audio | Video episode sheet** — when an episode has dual enclosures, picker remembers preference **per show**; video plays in **full** shared Now Playing with **one** PlaybackRateButton (no second dial)
-- [x] Shelf auto-prune for podcast downloads (81cd134) — Sideload green [Actions 34986767250](https://github.com/subarude15/storyteller-personal-reader/actions/runs/34986767250) → punkrally-sideload-unsigned-ipa
-- [x] Shared Now Playing + speed (66fadcd + 3639b67) — Josh smoke-tested
+- [ ] **Home mixed Continue / Up next** — one rail: books **and** podcasts, last-touched first; podcast cards get **POD** badge + show art; books keep cover + READ/LISTEN/SYNC; real covers (no empty book icons); do **not** split into two Home rails
+- [x] Audio | Video episode sheet (e2e0de0 + compile fix 6cc51ba) — Sideload green [Actions 34990644848](https://github.com/subarude15/storyteller-personal-reader/actions/runs/34990644848); Josh confirmed play/speed; audio-only feeds skip the sheet
+- [x] Shelf auto-prune (81cd134) — Sideload green
+- [x] Shared Now Playing + speed (66fadcd / 3639b67) — Josh smoke-tested
 
-**Do not start Home mixed queue / Stats until Audio|Video lands.**
+**Do not start Stats / SessionTracker until Home mixed lands.**
 ---
 
 ## Shipped
