@@ -2158,11 +2158,44 @@ public actor StorytellerActor {
                 return nil
             }
 
-            return try decoder.decode([StorytellerCollection].self, from: response.data)
+            return try decodeCollectionsList(from: response.data)
         } catch {
             logStorytellerError("fetchCollections", error: error)
             return nil
         }
+    }
+
+    /// Decodes the collections array, skipping individual bad elements so one
+    /// malformed collection cannot wipe Stats sync / library collection UI.
+    private func decodeCollectionsList(from data: Data) throws -> [StorytellerCollection] {
+        if let all = try? decoder.decode([StorytellerCollection].self, from: data) {
+            return all
+        }
+
+        let root = try JSONSerialization.jsonObject(with: data)
+        guard let items = root as? [Any] else {
+            throw DecodingError.dataCorrupted(
+                .init(codingPath: [], debugDescription: "collections root is not an array")
+            )
+        }
+
+        var decoded: [StorytellerCollection] = []
+        for (index, item) in items.enumerated() {
+            guard JSONSerialization.isValidJSONObject(item),
+                let itemData = try? JSONSerialization.data(withJSONObject: item),
+                let collection = try? decoder.decode(StorytellerCollection.self, from: itemData)
+            else {
+                debugLog(
+                    "[StorytellerActor] fetchCollections skipped index=\(index) (element decode failed)"
+                )
+                continue
+            }
+            decoded.append(collection)
+        }
+        debugLog(
+            "[StorytellerActor] fetchCollections tolerant decode kept=\(decoded.count)/\(items.count)"
+        )
+        return decoded
     }
 
     /// Retrieves details for a specific collection via `/api/v2/collections/{uuid}`.
@@ -2250,7 +2283,13 @@ public actor StorytellerActor {
                 return try decoder.decode(StorytellerCollection.self, from: response.data)
             } catch {
                 logStorytellerError("createCollection decode", error: error)
-                return nil
+                let uuid = Self.peekCollectionUUID(from: response.data) ?? "pending"
+                return StorytellerCollection(
+                    uuid: uuid,
+                    name: payload.name,
+                    description: payload.description,
+                    isPublic: payload.isPublic
+                )
             }
         } catch {
             logStorytellerError("createCollection", error: error)
@@ -2261,23 +2300,56 @@ public actor StorytellerActor {
     // MARK: - ink+amp Stats sync (private collection blob)
 
     public enum InkampStatsFetchResult: Sendable {
-        /// Auth / network / collections list failed — do not push local-only.
-        case unavailable
+        /// Auth / network / collections list failed — do not wipe local.
+        case unavailable(reason: String)
         /// No collection yet (first sync).
         case empty
         case document(InkampStatsSyncDocument)
     }
 
+    public enum InkampStatsPushResult: Sendable, Equatable {
+        case success
+        case failure(reason: String)
+    }
+
+    private static let inkampStatsCollectionUUIDKey = "punkRally.stats.collectionUUID.v1"
+
     /// Fetches the Stats sync document from a private Storyteller collection
-    /// (same auth as place sync).
+    /// (same auth as place sync). Tolerates unrelated collections that fail to
+    /// decode — Stats only needs `.inkamp.stats.v1`.
     public func fetchInkampStatsDocument() async -> InkampStatsFetchResult {
-        guard await ensureAuthentication() != nil else { return .unavailable }
-        guard let collections = await fetchCollections() else { return .unavailable }
-        guard let collection = collections.first(where: {
-            $0.name == InkampStatsSyncDocument.collectionName
-        }) else {
-            return .empty
+        guard await ensureAuthentication() != nil else {
+            return .unavailable(reason: "auth failed")
         }
+
+        let collections = await fetchCollections()
+        if let collections {
+            if let collection = collections.first(where: {
+                $0.name == InkampStatsSyncDocument.collectionName
+            }) {
+                rememberInkampStatsCollectionUUID(collection.uuid)
+                return Self.statsDocument(from: collection)
+            }
+        } else {
+            // List failed — try remembered UUID before declaring unavailable.
+            if let remembered = rememberedInkampStatsCollectionUUID(),
+                let collection = await fetchCollection(uuid: remembered)
+            {
+                return Self.statsDocument(from: collection)
+            }
+            return .unavailable(reason: "fetchCollections failed")
+        }
+
+        if let remembered = rememberedInkampStatsCollectionUUID(),
+            let collection = await fetchCollection(uuid: remembered)
+        {
+            return Self.statsDocument(from: collection)
+        }
+
+        return .empty
+    }
+
+    private static func statsDocument(from collection: StorytellerCollection) -> InkampStatsFetchResult {
         guard let description = collection.description, !description.isEmpty else {
             return .empty
         }
@@ -2291,18 +2363,22 @@ public actor StorytellerActor {
     }
 
     /// Upserts the Stats sync document onto the private Storyteller collection.
-    @discardableResult
-    public func pushInkampStatsDocument(_ document: InkampStatsSyncDocument) async -> Bool {
-        guard await ensureAuthentication() != nil else { return false }
+    public func pushInkampStatsDocument(_ document: InkampStatsSyncDocument) async
+        -> InkampStatsPushResult
+    {
+        guard await ensureAuthentication() != nil else {
+            return .failure(reason: "auth failed")
+        }
         let encoded: String
         do {
             encoded = try StatsSyncMerge.encodeDescription(document)
         } catch {
             logStorytellerError("pushInkampStatsDocument encode", error: error)
-            return false
+            return .failure(reason: "encode failed")
         }
 
         if let existing = await inkampStatsCollection() {
+            rememberInkampStatsCollectionUUID(existing.uuid)
             let updated = await updateCollection(
                 uuid: existing.uuid,
                 payload: StorytellerCollectionUpdatePayload(
@@ -2310,7 +2386,10 @@ public actor StorytellerActor {
                     isPublic: false
                 )
             )
-            return updated != nil
+            if updated != nil {
+                return .success
+            }
+            return .failure(reason: "updateCollection failed uuid=\(existing.uuid)")
         }
 
         let created = await createCollection(
@@ -2321,7 +2400,13 @@ public actor StorytellerActor {
                 users: nil
             )
         )
-        return created != nil
+        if let created {
+            if created.uuid != "pending" {
+                rememberInkampStatsCollectionUUID(created.uuid)
+            }
+            return .success
+        }
+        return .failure(reason: "createCollection failed name=\(InkampStatsSyncDocument.collectionName)")
     }
 
     /// True when Storyteller credentials can authenticate (shared with place sync).
@@ -2330,8 +2415,39 @@ public actor StorytellerActor {
     }
 
     private func inkampStatsCollection() async -> StorytellerCollection? {
-        guard let collections = await fetchCollections() else { return nil }
-        return collections.first { $0.name == InkampStatsSyncDocument.collectionName }
+        if let collections = await fetchCollections(),
+            let found = collections.first(where: {
+                $0.name == InkampStatsSyncDocument.collectionName
+            })
+        {
+            rememberInkampStatsCollectionUUID(found.uuid)
+            return found
+        }
+        if let uuid = rememberedInkampStatsCollectionUUID(),
+            let collection = await fetchCollection(uuid: uuid)
+        {
+            return collection
+        }
+        return nil
+    }
+
+    private func rememberInkampStatsCollectionUUID(_ uuid: String) {
+        guard uuid != "pending", !uuid.isEmpty else { return }
+        UserDefaults.standard.set(uuid, forKey: Self.inkampStatsCollectionUUIDKey)
+    }
+
+    private func rememberedInkampStatsCollectionUUID() -> String? {
+        UserDefaults.standard.string(forKey: Self.inkampStatsCollectionUUIDKey)
+    }
+
+    private static func peekCollectionUUID(from data: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let uuid = object["uuid"] as? String,
+            !uuid.isEmpty
+        else {
+            return nil
+        }
+        return uuid
     }
 
     /// Updates collection metadata via `/api/v2/collections/{uuid}`.
@@ -2388,7 +2504,13 @@ public actor StorytellerActor {
                 return try decoder.decode(StorytellerCollection.self, from: response.data)
             } catch {
                 logStorytellerError("updateCollection decode", error: error)
-                return nil
+                // Write landed; response shape mismatch must not fail Stats push.
+                return StorytellerCollection(
+                    uuid: uuid,
+                    name: payload.name ?? "",
+                    description: payload.description,
+                    isPublic: payload.isPublic ?? false
+                )
             }
         } catch {
             logStorytellerError("updateCollection", error: error)

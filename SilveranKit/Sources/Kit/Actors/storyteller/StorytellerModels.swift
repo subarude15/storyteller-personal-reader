@@ -16,6 +16,9 @@ public struct StorytellerCollectionUser: Codable, Sendable {
     public let username: String?
 }
 
+/// Storyteller sometimes returns `description` as a String and sometimes as a
+/// JSON object/array (e.g. parsed metadata). Always surface a String so one
+/// odd collection cannot fail the whole `/collections` list decode.
 public struct StorytellerCollection: Decodable, Sendable {
     public let uuid: String
     public let name: String
@@ -25,6 +28,26 @@ public struct StorytellerCollection: Decodable, Sendable {
     public let createdAt: String?
     public let updatedAt: String?
     public let users: [StorytellerCollectionUser]?
+
+    public init(
+        uuid: String,
+        name: String,
+        description: String? = nil,
+        isPublic: Bool = false,
+        importPath: String? = nil,
+        createdAt: String? = nil,
+        updatedAt: String? = nil,
+        users: [StorytellerCollectionUser]? = nil
+    ) {
+        self.uuid = uuid
+        self.name = name
+        self.description = description
+        self.isPublic = isPublic
+        self.importPath = importPath
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.users = users
+    }
 
     private enum CodingKeys: String, CodingKey {
         case uuid
@@ -36,7 +59,121 @@ public struct StorytellerCollection: Decodable, Sendable {
         case updatedAt
         case users
     }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        uuid = try container.decode(String.self, forKey: .uuid)
+        name = try container.decode(String.self, forKey: .name)
+        description = try Self.decodeFlexibleDescription(from: container)
+        isPublic = try container.decodeIfPresent(Bool.self, forKey: .isPublic) ?? false
+        importPath = try container.decodeIfPresent(String.self, forKey: .importPath)
+        createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt)
+        users = try container.decodeIfPresent([StorytellerCollectionUser].self, forKey: .users)
+    }
+
+    private static func decodeFlexibleDescription(
+        from container: KeyedDecodingContainer<CodingKeys>
+    ) throws -> String? {
+        guard container.contains(.description) else { return nil }
+        if try container.decodeNil(forKey: .description) { return nil }
+        if let string = try? container.decode(String.self, forKey: .description) {
+            return string
+        }
+        let json = try container.decode(StorytellerJSONValue.self, forKey: .description)
+        return json.compactJSONString
+    }
 }
+
+/// Minimal JSON tree so collection `description` objects can be re-stringified.
+enum StorytellerJSONValue: Decodable, Sendable, Equatable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case object([String: StorytellerJSONValue])
+    case array([StorytellerJSONValue])
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+            return
+        }
+        if let bool = try? container.decode(Bool.self) {
+            self = .bool(bool)
+            return
+        }
+        if let number = try? container.decode(Double.self) {
+            self = .number(number)
+            return
+        }
+        if let string = try? container.decode(String.self) {
+            self = .string(string)
+            return
+        }
+        if let array = try? container.decode([StorytellerJSONValue].self) {
+            self = .array(array)
+            return
+        }
+        if let object = try? container.decode([String: StorytellerJSONValue].self) {
+            self = .object(object)
+            return
+        }
+        throw DecodingError.dataCorruptedError(
+            in: container,
+            debugDescription: "Unsupported JSON value for StorytellerJSONValue"
+        )
+    }
+
+    var compactJSONString: String {
+        switch self {
+            case .string(let value):
+                return value
+            case .bool(let value):
+                return value ? "true" : "false"
+            case .number(let value):
+                if value.rounded() == value, let int = Int(exactly: value) {
+                    return String(int)
+                }
+                return String(value)
+            case .null:
+                return "null"
+            case .object(let value):
+                return Self.stringifyJSONObject(value.mapValues(\.jsonObject))
+            case .array(let value):
+                return Self.stringifyJSONObject(value.map(\.jsonObject))
+        }
+    }
+
+    private var jsonObject: Any {
+        switch self {
+            case .string(let value):
+                return value
+            case .number(let value):
+                return value
+            case .bool(let value):
+                return value
+            case .object(let value):
+                return value.mapValues(\.jsonObject)
+            case .array(let value):
+                return value.map(\.jsonObject)
+            case .null:
+                return NSNull()
+        }
+    }
+
+    private static func stringifyJSONObject(_ object: Any) -> String {
+        guard JSONSerialization.isValidJSONObject(object),
+            let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+            let string = String(data: data, encoding: .utf8)
+        else {
+            return "{}"
+        }
+        return string
+    }
+}
+
 
 public struct StorytellerCoverUpload: Sendable {
     public let filename: String

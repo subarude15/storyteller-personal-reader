@@ -104,7 +104,7 @@ final class StatsSyncCoordinator {
             status = .offlineLocalOnly
             revision &+= 1
             publishUI()
-            debugLog("[StatsSync] reason=\(reason) overallTimeout")
+            debugLog("[StatsSync] reason=\(reason) pushed=false detail=overallTimeout")
             return
         }
 
@@ -118,17 +118,17 @@ final class StatsSyncCoordinator {
                 debugLog(
                     "[StatsSync] reason=\(reason) pushed=true sessions=\(sessionCount)"
                 )
-            case .offline:
+            case .offline(let detail):
                 status = .offlineLocalOnly
                 revision &+= 1
                 publishUI()
-                debugLog("[StatsSync] reason=\(reason) pushed=false")
+                debugLog("[StatsSync] reason=\(reason) pushed=false detail=\(detail)")
         }
     }
 
     private enum SyncOutcome: Sendable {
         case synced(Date, sessionCount: Int)
-        case offline
+        case offline(String)
     }
 
     /// Network body isolated from MainActor so timeouts can cancel cleanly.
@@ -136,8 +136,13 @@ final class StatsSyncCoordinator {
         let canReach =
             await withTimeout(seconds: networkTimeoutSeconds) {
                 await BookServiceActor.shared.canReachStorytellerForStatsSync()
-            } ?? false
-        guard canReach else { return .offline }
+            }
+        guard let canReach else {
+            return .offline("reach timeout")
+        }
+        guard canReach else {
+            return .offline("auth/unreachable")
+        }
 
         let localDoc = await MainActor.run {
             SessionTracker.shared.exportSyncDocument()
@@ -145,12 +150,15 @@ final class StatsSyncCoordinator {
         let fetch =
             await withTimeout(seconds: networkTimeoutSeconds) {
                 await BookServiceActor.shared.fetchInkampStatsDocument()
-            } ?? .unavailable
+            }
+        guard let fetch else {
+            return .offline("fetch timeout")
+        }
 
         let merged: InkampStatsSyncDocument
         switch fetch {
-            case .unavailable:
-                return .offline
+            case .unavailable(let detail):
+                return .offline("fetch unavailable: \(detail)")
             case .empty:
                 merged = localDoc
             case .document(let remoteDoc):
@@ -161,14 +169,19 @@ final class StatsSyncCoordinator {
             SessionTracker.shared.applyMergedSyncDocument(merged)
         }
 
-        let pushed =
+        let push =
             await withTimeout(seconds: networkTimeoutSeconds) {
                 await BookServiceActor.shared.pushInkampStatsDocument(merged)
-            } ?? false
-        if pushed {
-            return .synced(Date(), sessionCount: merged.sessions.count)
+            }
+        guard let push else {
+            return .offline("push timeout")
         }
-        return .offline
+        switch push {
+            case .success:
+                return .synced(Date(), sessionCount: merged.sessions.count)
+            case .failure(let detail):
+                return .offline(detail)
+        }
     }
 
     private func publishUI() {

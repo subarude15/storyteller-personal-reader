@@ -1415,13 +1415,18 @@ public actor BookServiceActor {
     }
 
     public func fetchInkampStatsDocument() async -> StorytellerActor.InkampStatsFetchResult {
-        guard let storyteller = await primaryStorytellerActor() else { return .unavailable }
+        guard let storyteller = await primaryStorytellerActor() else {
+            return .unavailable(reason: "no Storyteller source")
+        }
         return await storyteller.fetchInkampStatsDocument()
     }
 
-    @discardableResult
-    public func pushInkampStatsDocument(_ document: InkampStatsSyncDocument) async -> Bool {
-        guard let storyteller = await primaryStorytellerActor() else { return false }
+    public func pushInkampStatsDocument(_ document: InkampStatsSyncDocument) async
+        -> StorytellerActor.InkampStatsPushResult
+    {
+        guard let storyteller = await primaryStorytellerActor() else {
+            return .failure(reason: "no Storyteller source")
+        }
         return await storyteller.pushInkampStatsDocument(document)
     }
 
