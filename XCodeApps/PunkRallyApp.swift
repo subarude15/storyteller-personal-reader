@@ -95,9 +95,15 @@ public struct PunkRallyTabView: View {
                 NotificationCenter.default.publisher(
                     for: Notification.Name("punkRallyPodcastDidFinish")
                 )
-            ) { _ in
+            ) { note in
                 Task {
                     await PodcastPlayerPresenter.persistPodcastProgress(markFinished: true)
+                    if let episodeID = note.userInfo?["episodeID"] as? String {
+                        PodcastRecentStore.shared.updateProgress(
+                            episodeID: episodeID,
+                            progress: 1
+                        )
+                    }
                 }
             }
             .onChange(of: scenePhase) { _, phase in
@@ -106,6 +112,14 @@ public struct PunkRallyTabView: View {
                 } else if phase == .background {
                     Task {
                         await PodcastPlayerPresenter.persistPodcastProgress(markFinished: false)
+                        if let progress = await AudioSessionActor.shared.podcastPlaybackProgress() {
+                            PodcastRecentStore.shared.updateProgress(
+                                episodeID: progress.episodeID,
+                                progress: progress.duration > 0
+                                    ? progress.position / progress.duration
+                                    : 0
+                            )
+                        }
                     }
                 }
             }
@@ -161,13 +175,34 @@ public struct PunkRallyTabView: View {
             let audioURL = userInfo["audioURL"] as? URL
         else { return }
         let mediaKind = (userInfo["mediaKind"] as? String).flatMap(PRPodcastMediaKind.init(rawValue:))
+            ?? .audio
+        let showTitle = userInfo["showTitle"] as? String
+        let duration = userInfo["durationSeconds"] as? TimeInterval
+        let coverURL = userInfo["coverURL"] as? URL
+        let feedURL = userInfo["feedURL"] as? URL
+
+        PodcastRecentStore.shared.record(
+            PodcastRecentEntry(
+                episodeID: episodeID,
+                title: title,
+                showTitle: showTitle,
+                coverURL: coverURL,
+                audioURL: audioURL,
+                durationSeconds: duration,
+                feedURL: feedURL,
+                mediaKind: mediaKind,
+                lastTouched: Date(),
+                progress: PodcastDownloadStore.shared.record(for: episodeID)?.progress ?? 0
+            )
+        )
+
         let episode = PodcastPlayerPresenter.Episode(
             id: episodeID,
             title: title,
-            showTitle: userInfo["showTitle"] as? String,
+            showTitle: showTitle,
             summary: userInfo["summary"] as? String,
             audioURL: audioURL,
-            duration: userInfo["durationSeconds"] as? TimeInterval,
+            duration: duration,
             isVideo: mediaKind == .video
         )
         Task { await podcastPresenter.play(episode) }
@@ -193,17 +228,28 @@ private struct HomeTabView: View {
     @Environment(MediaViewModel.self) private var mediaViewModel: MediaViewModel?
     @State private var showSettings = false
     @State private var showOfflineSheet = false
+    @State private var podcastStore = PodcastDownloadStore.shared
+    @State private var queueTick = 0
 
     private var chrome: PunkRallyTheme.Chrome {
         PunkRallyTheme.Chrome(scheme: colorScheme)
     }
 
-    private var currentBook: BookMetadata? {
-        guard let vm = mediaViewModel else { return nil }
-        if let pendingID = vm.pendingOpenBookID {
-            return vm.library.bookMetaData.first(where: { $0.id == pendingID })
-        }
-        return vm.library.bookMetaData.first(where: { $0.progress > 0 }) ?? vm.library.bookMetaData.first
+    private var mixedQueue: (continueItem: HomeMixedItem?, upNext: [HomeMixedItem]) {
+        let _ = queueTick
+        let vm = mediaViewModel
+        let books = vm?.library.bookMetaData ?? []
+        let progress = vm?.bookProgressCache ?? [:]
+        return HomeMixedQueue.build(
+            books: books,
+            progress: progress,
+            preferredCategory: { book in
+                vm?.preferredDownloadedCategory(for: book)
+            },
+            podcastRecents: PodcastRecentStore.shared.all(),
+            podcastDownloads: podcastStore.allDownloads(),
+            upNextLimit: 5
+        )
     }
 
     private var syncState: SyncChipView.SyncState {
@@ -256,6 +302,12 @@ private struct HomeTabView: View {
                     }
                 }
             }
+            .onAppear { queueTick &+= 1 }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyPlayPodcastEpisode)
+            ) { _ in
+                queueTick &+= 1
+            }
         }
         .punkRallySheets(
             showSettings: $showSettings,
@@ -283,34 +335,39 @@ private struct HomeTabView: View {
     }
 
     private var continueHero: some View {
-        Button {
-            Task {
-                await PunkRallyContinueAction.openLastOrCurrentBook(mediaViewModel: mediaViewModel)
-            }
+        let item = mixedQueue.continueItem
+        return Button {
+            Task { await openMixedItem(item) }
         } label: {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(chrome.surface2)
-                        .frame(width: 72, height: 108)
-                        .overlay(
-                            Image(systemName: "book.closed.fill")
-                                .foregroundStyle(chrome.textFaint)
-                        )
+                    HomeMixedCoverView(item: item, width: 72, height: 108, chrome: chrome)
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Continue")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(PunkRallyTheme.Accent.primary)
-                        Text(currentBook?.title ?? "No book in progress")
+                        HStack(spacing: 8) {
+                            Text("Continue")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(PunkRallyTheme.Accent.primary)
+                            if let item {
+                                KindBadgeView(kind: item.badge, scheme: colorScheme)
+                            }
+                        }
+                        Text(item?.title ?? "Nothing in progress")
                             .font(.headline)
                             .foregroundStyle(chrome.text)
                             .lineLimit(2)
-                        Text(currentBook?.authors?.first?.name ?? "Browse your library to pick up where you left off.")
-                            .font(.subheadline)
-                            .foregroundStyle(chrome.textMuted)
-                            .lineLimit(1)
+                        Text(
+                            item?.subtitle
+                                ?? "Browse Library or Podcasts to pick up where you left off."
+                        )
+                        .font(.subheadline)
+                        .foregroundStyle(chrome.textMuted)
+                        .lineLimit(1)
+                        if let item, item.progress > 0 {
+                            ProgressView(value: item.progress)
+                                .tint(PunkRallyTheme.Accent.primary)
+                        }
                     }
-                    Spacer()
+                    Spacer(minLength: 0)
                 }
             }
             .padding(PunkRallyTheme.Metric.cardPadding)
@@ -322,27 +379,42 @@ private struct HomeTabView: View {
             )
         }
         .buttonStyle(.plain)
+        .disabled(item == nil)
     }
 
     private var upNextRow: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let items = mixedQueue.upNext
+        return VStack(alignment: .leading, spacing: 12) {
             Text("Up next")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(chrome.text)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(0..<3, id: \.self) { _ in
-                        VStack(alignment: .leading, spacing: 6) {
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(chrome.surface2)
-                                .frame(width: 96, height: 144)
-                                .overlay(
-                                    Image(systemName: "books.vertical")
-                                        .foregroundStyle(chrome.textFaint)
-                                )
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(chrome.surface2)
-                                .frame(width: 90, height: 10)
+            if items.isEmpty {
+                Text("Titles you touch next will show up here — books and podcasts together.")
+                    .font(.caption)
+                    .foregroundStyle(chrome.textMuted)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(items) { item in
+                            Button {
+                                Task { await openMixedItem(item) }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HomeMixedCoverView(
+                                        item: item,
+                                        width: 96,
+                                        height: 144,
+                                        chrome: chrome
+                                    )
+                                    KindBadgeView(kind: item.badge, scheme: colorScheme)
+                                    Text(item.title)
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(chrome.text)
+                                        .lineLimit(2)
+                                        .frame(width: 96, alignment: .leading)
+                                }
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -371,6 +443,124 @@ private struct HomeTabView: View {
         .padding(.vertical, 12)
         .background(chrome.surface)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    @MainActor
+    private func openMixedItem(_ item: HomeMixedItem?) async {
+        guard let item else { return }
+        switch item {
+            case .book(let book, _, _, _):
+                guard let vm = mediaViewModel else { return }
+                if PunkRallyPlayerHost.shouldOpenPlayer(for: book, mediaViewModel: vm) {
+                    await PunkRallyPlayerHost.open(book, mediaViewModel: vm)
+                } else {
+                    vm.pendingOpenBookID = book.id
+                    NotificationCenter.default.post(name: .silveranShowLibrary, object: nil)
+                }
+            case .podcast(let entry):
+                var userInfo: [String: Any] = [
+                    "episodeID": entry.episodeID,
+                    "title": entry.title,
+                    "audioURL": entry.audioURL,
+                    "mediaKind": entry.mediaKind.rawValue,
+                ]
+                userInfo["showTitle"] = entry.showTitle
+                if let duration = entry.durationSeconds {
+                    userInfo["durationSeconds"] = duration
+                }
+                if let cover = entry.coverURL {
+                    userInfo["coverURL"] = cover
+                }
+                if let feed = entry.feedURL {
+                    userInfo["feedURL"] = feed
+                }
+                NotificationCenter.default.post(
+                    name: .punkRallyPlayPodcastEpisode,
+                    object: nil,
+                    userInfo: userInfo
+                )
+        }
+    }
+}
+
+/// Cover for a mixed Home item — Storyteller cover via MediaViewModel, or podcast artwork URL.
+private struct HomeMixedCoverView: View {
+    let item: HomeMixedItem?
+    let width: CGFloat
+    let height: CGFloat
+    let chrome: PunkRallyTheme.Chrome
+    @Environment(MediaViewModel.self) private var mediaViewModel: MediaViewModel?
+    @State private var bookImage: Image?
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(chrome.surface2)
+            switch item {
+                case .book(let book, _, _, _):
+                    bookCover(book)
+                case .podcast(let entry):
+                    podcastCover(entry)
+                case nil:
+                    Image(systemName: "books.vertical")
+                        .foregroundStyle(chrome.textFaint)
+            }
+        }
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private func bookCover(_ book: BookMetadata) -> some View {
+        if let bookImage {
+            bookImage
+                .resizable()
+                .scaledToFill()
+                .frame(width: width, height: height)
+                .clipped()
+        } else {
+            Image(systemName: "book.closed.fill")
+                .foregroundStyle(chrome.textFaint)
+                .task(id: book.id) {
+                    await loadBookCover(book)
+                }
+        }
+    }
+
+    private func loadBookCover(_ book: BookMetadata) async {
+        guard let vm = mediaViewModel else { return }
+        vm.ensureCoverLoaded(for: book, debugSource: "HomeMixed")
+        vm.ensureCoverLoaded(for: book, variant: .audioSquare, debugSource: "HomeMixed")
+        for _ in 0..<25 {
+            if let image = vm.coverImage(for: book)
+                ?? vm.coverImage(for: book, variant: .audioSquare)
+                ?? vm.coverImage(for: book, variant: .standard)
+            {
+                bookImage = image
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+    }
+
+    @ViewBuilder
+    private func podcastCover(_ entry: PodcastRecentEntry) -> some View {
+        if let url = entry.coverURL {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    default:
+                        Image(systemName: "mic.fill")
+                            .foregroundStyle(chrome.textFaint)
+                }
+            }
+            .frame(width: width, height: height)
+            .clipped()
+        } else {
+            Image(systemName: "mic.fill")
+                .foregroundStyle(chrome.textFaint)
+        }
     }
 }
 

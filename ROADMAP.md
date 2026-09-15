@@ -17,12 +17,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **Home mixed Continue / Up next** — one rail: books **and** podcasts, last-touched first; podcast cards get **POD** badge + show art; books keep cover + READ/LISTEN/SYNC; real covers (no empty book icons); do **not** split into two Home rails
-- [x] Audio | Video episode sheet (e2e0de0 + compile fix 6cc51ba) — Sideload green [Actions 34990644848](https://github.com/subarude15/storyteller-personal-reader/actions/runs/34990644848); Josh confirmed play/speed; audio-only feeds skip the sheet
-- [x] Shelf auto-prune (81cd134) — Sideload green
-- [x] Shared Now Playing + speed (66fadcd / 3639b67) — Josh smoke-tested
+- [ ] **Home mixed Continue / Up next** — in progress on tip (await Sideload IPA green)
+- Quiet until Sideload green (`punkrally-sideload-unsigned-ipa`)
 
-**Do not start Stats / SessionTracker until Home mixed lands.**
+**Do not start Stats / SessionTracker until Home mixed Sideload is green.**
+
 ---
 
 ## Shipped
@@ -45,24 +44,19 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ### Podcasts
 - [x] Shared Now Playing + playback speed (`66fadcd` + `3639b67`) — Josh smoke-tested / shipped (one `PlaybackRateButton`)
-- [x] Shelf auto-prune for RSS downloads (`81cd134`) — Sideload **green** ([run 34986767250](https://github.com/subarude15/storyteller-personal-reader/actions/runs/34986767250))
+- [x] Shelf auto-prune for RSS downloads (`81cd134`) — Sideload **green**
+- [x] Audio | Video episode sheet (`e2e0de0` + `6cc51ba`) — Sideload green [Actions 34990644848](https://github.com/subarude15/storyteller-personal-reader/actions/runs/34990644848)
 
 ---
 
 ## Next (strict order — do not reorder)
 
-### 1. Home mixed Continue / Up next
-- One mixed queue: books **and** podcasts, last-touched first
-- Podcast cards: **POD** badge + show art; books keep cover + READ/LISTEN/SYNC
-- Do **not** split into two Home rails
-- Also: real covers on Continue / Up next (not empty book icons)
-- After A|V Sideload green
-
-### 2. Stats
+### 1. Stats
 1. Hook local `SessionTracker` to reader/player events (zeros today are expected — M1 never wired this)
 2. Optional later: cross-device Stats sync (single phone+iPad number via shared store; footer flips from “stay on this iPhone” to “Synced across your devices”; merge by day — no double-count)
+- After Home mixed Sideload green
 
-### UX polish (anytime after Now, not ahead of Home/Stats order)
+### UX polish (anytime after Now, not ahead of Stats)
 - Separate **Couldn’t save server** copy (≠ “Connection failed”)
 - Empty state when URL prefilled but no saved Storyteller source
 - Missing Storyteller covers (cosmetic; not a blocker)
@@ -76,6 +70,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - Glance / Watch tile: now-playing + Continue deep-link
 - One-tap LAN failover: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
 - CarPlay (out of current build scope)
+- Podcast Index / iTunes search
 
 ---
 

@@ -144,6 +144,28 @@ final class PodcastsViewModel {
         if let duration = episode.durationSeconds {
             userInfo["durationSeconds"] = duration
         }
+        if let cover = episode.coverURL {
+            userInfo["coverURL"] = cover
+        }
+        if let feedURL {
+            userInfo["feedURL"] = feedURL
+        }
+
+        PodcastRecentStore.shared.record(
+            PodcastRecentEntry(
+                episodeID: episode.id,
+                title: episode.title,
+                showTitle: episode.showTitle,
+                coverURL: episode.coverURL,
+                audioURL: playURL,
+                durationSeconds: episode.durationSeconds,
+                feedURL: feedURL,
+                mediaKind: mediaKind,
+                lastTouched: Date(),
+                progress: PodcastDownloadStore.shared.record(for: episode.id)?.progress ?? 0
+            )
+        )
+
         NotificationCenter.default.post(
             name: Notification.Name("punkRallyPlayPodcastEpisode"),
             object: nil,
