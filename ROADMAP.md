@@ -17,11 +17,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [x] **Stats (SessionTracker local)** — wired `c627bbe`; Sideload **green** ([Actions 35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694)). Home Today / week / streak + Stats tab use real sessions. Footer still “Stats stay on this iPhone”.
-- [ ] **Josh smoke** — read or listen a few minutes; confirm Home “Today” leaves 0m and Stats chart moves.
-- [ ] **Next cut** — optional cross-device Stats sync (Later until smoke). Do not start Podcast Index yet.
+- [ ] **P0 Mini-player above tab bar** — `safeAreaInset(edge: .bottom)` (or ~56pt) when GlobalMiniPlayerBar is visible; tab bar full-width and tappable underneath. Tip ≥ `4d303dd`. Local Cursor only.
+- [ ] **P0 Podcast resume position** — persist RSS episode playhead; reopen resumes near last spot (not 0:00). Same spirit as audiobook progress.
+- [x] **Stats (SessionTracker local)** — wired `c627bbe`; Sideload green ([Actions 35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694)).
 
-**Do not start Podcast Index / iTunes search ahead of Josh Stats smoke.**
+**Do not start Podcast Index / cross-device Stats / −15/+15 / mini-player cover art ahead of these P0s.**
 
 ---
 
@@ -70,6 +70,8 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Later / ideas (not blocking)
 
+- Mini-player −15 / +15 skip (beside play/pause)
+- Podcast cover art on mini-player when available (fallback book icon)
 - Silence-trim spike
 - AI sponsored/ad strip (async post-download; on-device / NAS / OmniRoute)
 - Glance / Watch tile: now-playing + Continue deep-link
