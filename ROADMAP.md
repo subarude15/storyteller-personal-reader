@@ -8,7 +8,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 | **Branch** | `punk-rally-ios` |
 | **Bundle ID** | `com.punkrally.reader` (do not change) |
 | **NUC workspace** | `C:\Users\imalo\dev\silveran-ios\silveran-reader` |
-| **Docs beside repo** | `C:\Users\imalo\dev\silveran-ios\` (mirrors; in-tree copies at repo root) |
+| **Docs beside repo** | `C:\Users\imalo\dev\silveran-ios\` (`PODCASTS-SHELF-PRUNE.md`, `UX-SHELL.md`, `UX-BACKLOG.md`, `DESIGN.md`) |
 | **Policy in repo** | `PODCASTS-SHELF-PRUNE.md` |
 
 **Product gate (proven 2026-09-15):** Storyteller place sync phone ↔ iPad — same spot after listen/read. That is the core reason for ink+amp.
@@ -17,11 +17,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [x] **Josh:** Sideload tip **`3639b67`** shared Now Playing + one speed chip — smoke-tested / **shipped**
-- [x] **Shelf auto-prune (podcast downloads only)** — implemented this cut (await Sideload IPA)
+- [ ] **Audio | Video episode sheet** — when an episode has dual enclosures, picker remembers preference **per show**; video plays in **full** shared Now Playing with **one** PlaybackRateButton (no second dial)
+- [x] Shelf auto-prune for podcast downloads (81cd134) — Sideload green [Actions 34986767250](https://github.com/subarude15/storyteller-personal-reader/actions/runs/34986767250) → punkrally-sideload-unsigned-ipa
+- [x] Shared Now Playing + speed (66fadcd + 3639b67) — Josh smoke-tested
 
-**Next up after Sideload green:** Audio | Video episode sheet. Do not retouch player/speed.
-
+**Do not start Home mixed queue / Stats until Audio|Video lands.**
 ---
 
 ## Shipped
@@ -43,38 +43,25 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] CI: Builtin/StoryAlign / Xcode pin / Sideload unsigned IPA pipeline
 
 ### Podcasts
-- [x] Shared Now Playing + playback speed (`66fadcd` + compile fix `3639b67`) — Josh smoke-tested / **shipped** (one speed chip only)
-- [x] Shelf auto-prune for podcast downloads (Settings → Podcasts → Downloads; podcasts-only ledger)
+- [x] Shared Now Playing + playback speed (`66fadcd` + `3639b67`) — Josh smoke-tested / shipped (one `PlaybackRateButton`)
+- [x] Shelf auto-prune for RSS downloads (`81cd134`) — Sideload **green** ([run 34986767250](https://github.com/subarude15/storyteller-personal-reader/actions/runs/34986767250))
 
 ---
 
 ## Next (strict order — do not reorder)
 
-### 1. Shelf auto-prune (podcast downloads only) — **SHIPPED (this PR)**
-**Owner:** Smokey / Hermes / Cursor · **Policy:** `PODCASTS-SHELF-PRUNE.md`
-
-- [x] Settings → Podcasts → Downloads: Auto-clean (default On), Remove when finished (On), Max age (30d), Max downloads (50), Protect if played ≥10%, Pin/Keep, Clean now + preview
-- [x] First time Auto-clean turns On → one-time explainer sheet (then silent overnight prune)
-- [x] Podcasts-only — never touch ebook / audiobook / readaloud Shelf or Storyteller local media
-- [x] Optional Shelf footer: `Pruned N episodes · Settings`
-- [x] Acceptance covered by `PodcastShelfPrunePolicyTests`
-- Do **not** retouch Keychain, player/speed wiring, or add a second speed dial
-
-### 2. Audio | Video episode sheet
-- When an episode has dual enclosures, picker remembers preference **per show**
-- After prune; before Home mixed queue / Stats sync
-
-### 3. Home mixed Continue / Up next
+### 1. Home mixed Continue / Up next
 - One mixed queue: books **and** podcasts, last-touched first
 - Podcast cards: **POD** badge + show art; books keep cover + READ/LISTEN/SYNC
 - Do **not** split into two Home rails
 - Also: real covers on Continue / Up next (not empty book icons)
+- After A|V Sideload green
 
-### 4. Stats
+### 2. Stats
 1. Hook local `SessionTracker` to reader/player events (zeros today are expected — M1 never wired this)
 2. Optional later: cross-device Stats sync (single phone+iPad number via shared store; footer flips from “stay on this iPhone” to “Synced across your devices”; merge by day — no double-count)
 
-### UX polish (anytime after Now, not ahead of 1–2)
+### UX polish (anytime after Now, not ahead of Home/Stats order)
 - Separate **Couldn’t save server** copy (≠ “Connection failed”)
 - Empty state when URL prefilled but no saved Storyteller source
 - Missing Storyteller covers (cosmetic; not a blocker)
