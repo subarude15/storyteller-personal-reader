@@ -17,12 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **Mini / full player polish** — tip ≥ `3f460e5`. Local Cursor on NUC.
-  - −15 / +15 skip on mini-player (and full player if controls live there)
-  - Podcast cover art when available (fallback book icon)
-  - Elapsed | scrub | remaining on **both** mini-player and full player
+- [ ] **Mini / full player polish** — in progress on tip (−15/+15, scrub elapsed/remaining, podcast cover on mini). Wait Sideload green; Next = Find shows.
 
-**Do not start Find shows / podcast queue / cross-device Stats / in-app YouTube ahead of this polish.**
+**Do not start Find shows / podcast queue / cross-device Stats / in-app YouTube ahead of this polish Sideload green.**
 
 ---
 

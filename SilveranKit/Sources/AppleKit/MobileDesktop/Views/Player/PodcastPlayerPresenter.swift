@@ -21,6 +21,7 @@ public final class PodcastPlayerPresenter {
         public let duration: TimeInterval?
         /// True when the chosen enclosure is video (full Now Playing card; shared player).
         public let isVideo: Bool
+        public let coverURL: URL?
 
         public init(
             id: String,
@@ -29,7 +30,8 @@ public final class PodcastPlayerPresenter {
             summary: String? = nil,
             audioURL: URL,
             duration: TimeInterval? = nil,
-            isVideo: Bool = false
+            isVideo: Bool = false,
+            coverURL: URL? = nil
         ) {
             self.id = id
             self.title = title
@@ -38,10 +40,16 @@ public final class PodcastPlayerPresenter {
             self.audioURL = audioURL
             self.duration = duration
             self.isVideo = isVideo
+            self.coverURL = coverURL
         }
     }
 
     public private(set) var episode: Episode?
+
+    /// Artwork URL for the live podcast session (card or mini-player).
+    public var artworkURL: URL? {
+        (episode ?? activeEpisode)?.coverURL
+    }
 
     /// The episode still holding the shared audio session after its card has
     /// been dismissed (playback continues in the mini player). Cleared when the
@@ -76,6 +84,9 @@ public final class PodcastPlayerPresenter {
             PlayerPresenter.shared.dismissCard()
         }
         let resumeAt = Self.resumePositionSeconds(for: episode.id)
+        // Retain episode before open so mini/NP can resolve artworkURL while
+        // the audio session starts publishing snapshots.
+        activeEpisode = episode
         do {
             try await AudioSessionActor.shared.openPodcast(
                 episodeID: episode.id,
@@ -87,9 +98,9 @@ public final class PodcastPlayerPresenter {
             )
         } catch {
             debugLog("[PodcastPlayerPresenter] Failed to open episode: \(error)")
+            activeEpisode = nil
             return false
         }
-        activeEpisode = episode
         // Always present the full card (video must not start as mini-bar only).
         self.episode = nil
         self.episode = episode

@@ -6,7 +6,7 @@ import SwiftUI
 /// Deliberately thin: it renders the same session snapshot the mini player
 /// and Now Playing use, and reuses the shared `PlaybackRateButton` so
 /// podcasts get the identical speed control as audiobooks/readaloud — no
-/// second speed UI.
+/// second speed UI. −15 / play / +15 and elapsed|scrub|remaining match the mini.
 public struct PodcastPlayerView: View {
     @Environment(\.colorScheme) private var colorScheme
     private let episode: PodcastPlayerPresenter.Episode
@@ -14,6 +14,8 @@ public struct PodcastPlayerView: View {
 
     @State private var monitor = AudioSessionMonitor.shared
     @State private var errorMessage: String?
+    @State private var scrubFraction: Double = 0
+    @State private var isScrubbing = false
 
     public init(episode: PodcastPlayerPresenter.Episode, onClose: @escaping () -> Void) {
         self.episode = episode
@@ -24,11 +26,9 @@ public struct PodcastPlayerView: View {
         VStack(spacing: 24) {
             Spacer(minLength: 0)
 
-            VStack(spacing: 8) {
-                Image(systemName: episode.isVideo ? "play.rectangle.fill" : "mic.fill")
-                    .font(.system(size: 44))
-                    .foregroundStyle(.secondary)
+            artworkBlock
 
+            VStack(spacing: 8) {
                 if episode.isVideo {
                     Text("VIDEO")
                         .font(.caption2.weight(.bold))
@@ -58,8 +58,10 @@ public struct PodcastPlayerView: View {
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxHeight: 160)
+                .frame(maxHeight: 120)
             }
+
+            scrubber
 
             Spacer(minLength: 0)
 
@@ -72,7 +74,13 @@ public struct PodcastPlayerView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(uiColor: .systemBackground))
         .toolbar(.hidden, for: .tabBar)
-        .onAppear { monitor.start() }
+        .onAppear {
+            monitor.start()
+            scrubFraction = monitor.snapshot?.bookProgress ?? 0
+        }
+        .onChange(of: monitor.snapshot?.bookProgress ?? 0) { _, newValue in
+            if !isScrubbing { scrubFraction = newValue }
+        }
         .alert("Podcast Error", isPresented: .constant(errorMessage != nil)) {
             Button("OK") { errorMessage = nil }
         } message: {
@@ -98,11 +106,83 @@ public struct PodcastPlayerView: View {
         monitor.snapshot?.playbackRate ?? 1.0
     }
 
+    private var snapshot: AudioSessionSnapshot? {
+        monitor.snapshot
+    }
+
+    @ViewBuilder
+    private var artworkBlock: some View {
+        Group {
+            if let cover = monitor.coverImage {
+                Image(uiImage: cover)
+                    .resizable()
+                    .scaledToFill()
+            } else if let url = episode.coverURL {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        default:
+                            placeholderArt
+                    }
+                }
+            } else {
+                placeholderArt
+            }
+        }
+        .frame(width: 220, height: 220)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+    }
+
+    private var placeholderArt: some View {
+        ZStack {
+            Color.secondary.opacity(0.12)
+            Image(systemName: episode.isVideo ? "play.rectangle.fill" : "mic.fill")
+                .font(.system(size: 44))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var scrubber: some View {
+        let elapsed = isScrubbing
+            ? (snapshot?.durationSeconds ?? 0) * scrubFraction
+            : (snapshot?.elapsedSeconds ?? 0)
+        let remaining = max(0, (snapshot?.durationSeconds ?? 0) - elapsed)
+        let fraction = isScrubbing ? scrubFraction : (snapshot?.bookProgress ?? 0)
+
+        return VStack(spacing: 8) {
+            Slider(
+                value: Binding(
+                    get: { fraction },
+                    set: { scrubFraction = $0 }
+                ),
+                in: 0...1
+            ) { editing in
+                isScrubbing = editing
+                if !editing {
+                    let target = scrubFraction
+                    Task { await AudioSessionActor.shared.seekPlayback(toFraction: target) }
+                }
+            }
+
+            HStack {
+                Text(GlobalMiniPlayerBar.formatClock(elapsed))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("−\(GlobalMiniPlayerBar.formatClock(remaining))")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private var transportRow: some View {
         VStack(spacing: 16) {
             HStack(spacing: 40) {
                 Button {
-                    Task { await AudioSessionActor.shared.skipPodcast(by: -15) }
+                    Task { await AudioSessionActor.shared.skipPlayback(by: -15) }
                 } label: {
                     Image(systemName: "gobackward.15")
                         .font(.title2)
@@ -120,7 +200,7 @@ public struct PodcastPlayerView: View {
                 .accessibilityLabel(isPlaying ? "Pause" : "Play")
 
                 Button {
-                    Task { await AudioSessionActor.shared.skipPodcast(by: 15) }
+                    Task { await AudioSessionActor.shared.skipPlayback(by: 15) }
                 } label: {
                     Image(systemName: "goforward.15")
                         .font(.title2)

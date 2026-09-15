@@ -124,6 +124,36 @@ public struct AudioSessionSnapshot: Sendable {
     public let chapterLabel: String?
     public let bookProgress: Double
     public let playbackRate: Double
+    /// Absolute position within the current item (episode / book / SMIL book).
+    public let elapsedSeconds: TimeInterval
+    /// Total duration of the current item; 0 when unknown.
+    public let durationSeconds: TimeInterval
+
+    public init(
+        kind: AudioSessionKind,
+        title: String?,
+        author: String?,
+        isPlaying: Bool,
+        chapterLabel: String?,
+        bookProgress: Double,
+        playbackRate: Double,
+        elapsedSeconds: TimeInterval = 0,
+        durationSeconds: TimeInterval = 0
+    ) {
+        self.kind = kind
+        self.title = title
+        self.author = author
+        self.isPlaying = isPlaying
+        self.chapterLabel = chapterLabel
+        self.bookProgress = bookProgress
+        self.playbackRate = playbackRate
+        self.elapsedSeconds = elapsedSeconds
+        self.durationSeconds = durationSeconds
+    }
+
+    public var remainingSeconds: TimeInterval {
+        max(0, durationSeconds - elapsedSeconds)
+    }
 }
 
 public enum AudioSessionTransportCommand: Sendable {
@@ -347,6 +377,8 @@ public actor AudioSessionActor {
             chapterLabel: nil,
             bookProgress: total > 0 ? min(max(current / total, 0), 1) : 0,
             playbackRate: podcastRate,
+            elapsedSeconds: current,
+            durationSeconds: total
         )
     }
 
@@ -359,6 +391,55 @@ public actor AudioSessionActor {
             : max(current + seconds, 0)
         await player.seek(to: target)
         await publishPodcastState()
+    }
+
+    /// −15 / +15 (and any interval) for the active shared session.
+    public func skipPlayback(by seconds: TimeInterval) async {
+        switch currentKind {
+            case .podcast:
+                await skipPodcast(by: seconds)
+            case .audiobook:
+                if seconds >= 0 {
+                    await AudiobookActor.shared.skipForward(seconds)
+                } else {
+                    await AudiobookActor.shared.skipBackward(-seconds)
+                }
+                notifySnapshotObservers(await currentSnapshot())
+            case .readaloud:
+                if seconds >= 0 {
+                    await SMILPlayerActor.shared.skipForward(seconds: seconds)
+                } else {
+                    await SMILPlayerActor.shared.skipBackward(seconds: -seconds)
+                }
+                notifySnapshotObservers(await currentSnapshot())
+            case nil:
+                break
+        }
+    }
+
+    /// Scrub to a 0...1 fraction of the current item.
+    public func seekPlayback(toFraction fraction: Double) async {
+        let clamped = min(max(fraction, 0), 1)
+        switch currentKind {
+            case .podcast:
+                guard podcastDuration > 0, let player = podcastPlayer else { return }
+                await player.seek(to: podcastDuration * clamped)
+                await publishPodcastState()
+            case .audiobook:
+                await AudiobookActor.shared.seekToFraction(clamped)
+                notifySnapshotObservers(await currentSnapshot())
+            case .readaloud:
+                // SMIL uses book-relative progress via MediaOverlay; skip if no seek API.
+                if let state = await SMILPlayerActor.shared.getCurrentState(),
+                    state.bookTotal > 0
+                {
+                    // No public seek-to-fraction on SMIL in this tree — leave progress visual only.
+                    _ = state
+                }
+                notifySnapshotObservers(await currentSnapshot())
+            case nil:
+                break
+        }
     }
 
     private func podcastNowPlaying() async -> NowPlayingInfo? {
@@ -777,6 +858,8 @@ public actor AudioSessionActor {
             chapterLabel: state.chapterLabel,
             bookProgress: state.bookTotal > 0 ? state.bookElapsed / state.bookTotal : 0,
             playbackRate: state.playbackRate,
+            elapsedSeconds: state.bookElapsed,
+            durationSeconds: state.bookTotal
         )
     }
 
@@ -791,6 +874,8 @@ public actor AudioSessionActor {
             chapterLabel: chapter?.title,
             bookProgress: state.bookProgress,
             playbackRate: state.playbackRate,
+            elapsedSeconds: state.currentTime,
+            durationSeconds: state.duration
         )
     }
 

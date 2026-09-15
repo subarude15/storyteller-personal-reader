@@ -224,7 +224,8 @@ public struct PunkRallyTabView: View {
             summary: userInfo["summary"] as? String,
             audioURL: audioURL,
             duration: duration,
-            isVideo: mediaKind == .video
+            isVideo: mediaKind == .video,
+            coverURL: coverURL
         )
         Task { await podcastPresenter.play(episode) }
     }
