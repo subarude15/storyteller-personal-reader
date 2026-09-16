@@ -17,7 +17,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **P0 Still blank after crash-proof isolate** (Josh stamp ~0712 on `62dd085`; tap opens book; tile blank) — tip >= `62dd085`. Leaner `SideloadContinueWidget`: SwiftUI+WidgetKit only (no `SilveranAppleWidgets`); kind `inkamp.continue.v3`; full-bleed charcoal + white **Open ink+amp** / **Tap to continue**; inline `punkrally://continue`; zero AppIntents / App Group. Soft polish anytime.
+- **P0 Still blank after crash-proof isolate** (Josh stamp ~0712 on `62dd085`; tap opens book; tile blank) — tip `b50d34a` (`inkamp.continue.v3` lean paint; await Sideload green). Leaner `SideloadContinueWidget`: SwiftUI+WidgetKit only (no `SilveranAppleWidgets`); kind `inkamp.continue.v3`; full-bleed charcoal + white **Open ink+amp** / **Tap to continue**; inline `punkrally://continue`; zero AppIntents / App Group. **Do not mark Shipped until Josh verifies charcoal tile.** Soft polish anytime.
 
 **Do not start CarPlay / Watch / paid-team App Group chase / GLM App Group mismatch paste unless Josh reorders.**
 ## Shipped
