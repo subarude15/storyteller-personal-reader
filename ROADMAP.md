@@ -17,9 +17,13 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **One-tap LAN failover** — tip >= Glance `257e44e`. Optional **LAN URL** on Storyteller source (default `http://192.168.1.2:1800`); short probe on home Wi‑Fi → prefer LAN for Storyteller API + downloads; soft fall back to public on failure. Settings status **Using LAN** / **Using public**. Same credentials both URLs. Soft polish anytime.
+- **One-tap LAN failover** — tip ≥ Glance Sideload `257e44e` (Josh confirmed Glance). Optional **LAN URL** on Storyteller source (default `http://192.168.1.2:1800`); short probe on home Wi‑Fi → prefer LAN for Storyteller API + downloads; soft fall back to public on failure. Settings status **Using LAN** / **Using public**. Same credentials both URLs. Soft polish anytime.
 
 **Do not start Invidious/ad-strip URL changes / SponsorBlock / StoryAlign / widgets / CarPlay unless Josh reorders.**
+
+**Ship note (Glance):** tip `257e44e` ([PR 13](https://github.com/subarude15/storyteller-personal-reader/pull/13)) — Sideload green [35157502050](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35157502050). Josh confirmed Lock Screen / Control Center.
+
+**Ship note (YouTube playhead local):** tip `fc82893` ([PR 12](https://github.com/subarude15/storyteller-personal-reader/pull/12)) — Sideload green [35156077127](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35156077127).
 ## Shipped
 
 ### Product / sync
@@ -56,7 +60,10 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **Episode status cluster + show filters + Josh UI stamps** — tip `b719921`; download glyph · Clean chip (incl. Clean failed) · Xm left/Played; show filters All|Downloaded|In progress|Clean pending; Shelf POD chrome; mini-player cover+title+play/pause(+close) only (scrub/−15/+15 stay on full Now Playing); Home/Library finishability text via `PlaybackFinishabilityCopy`; Sideload green [35023934089](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35023934089)
 - [x] **Podcast play queue** — tip `2f7deb4`; Play Next / Play Last in episode menus; `PodcastPlaybackQueueStore` + editable `PodcastPlaybackQueueView` (drag reorder, remove, clear finished); auto-advance on finish via shared player; persisted upcoming order; Sideload green [35025614228](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35025614228)
 - [x] **P0 Podcast resume / Home Continue stall** — tip `7eb0a9e`; Josh confirmed; Loading until playhead advances; Pause only when truly playing; Sideload green [35031138576](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35031138576)
-
+- [x] **In-app YouTube v1** — tip `bd32690`; Settings resolve URL → Invidious/Piped → shared AVPlayer video path; soft timeout; toast + Watch on YouTube handoff
+- [x] **P0 YouTube extract video-id only** — channel / @handle no longer fake-Play; first valid watch URL wins; chips gated on `videoID`; Resolving… then toast/handoff
+- [x] **Match on YouTube v1** — tip `0cb8155` / `a0722eb` ([PR 11](https://github.com/subarude15/storyteller-personal-reader/pull/11)); search + confirm + persist; Sideload green
+- [x] **YouTube playhead persist (local)** — tip `fc82893` ([PR 12](https://github.com/subarude15/storyteller-personal-reader/pull/12)); video-id `YouTubePlayheadStore`; Sideload green [35156077127](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35156077127); await Josh smoke (Cult of Shrek scrub/leave/reopen)
 ### Shell polish
 - [x] **Mini-player above tab bar** — per-tab inset (`be395da`, Sideload [35008731469](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35008731469)); Josh confirmed
 - [x] **Mini / full player polish** — −15/+15, elapsed|scrub|remaining, podcast cover on mini (`b8c85f9` / tip ≥ `70866b7`, Sideload [35011914260](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35011914260)); Josh ready for next
@@ -82,6 +89,10 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 5. ~~Continue widget scaffold~~ → landed; **Parked on free AltStore** (no Sideload appex); revisit paid/SideStore
 6. ~~Silence-trim~~ → **Shipped** (`d8af263`; Josh verified)
 7. ~~In-app YouTube / Match~~ → **Shipped** (`a0722eb`; Josh confirmed)
+8. ~~YouTube playhead local~~ → **Shipped** (`fc82893`; await Josh smoke)
+9. ~~Glance / system Now Playing~~ → **Shipped** (`257e44e`; Josh confirmed)
+10. **One-tap LAN failover** → **Now** (Storyteller public ↔ `192.168.1.2:1800`)
+11. **YouTube playhead sync** — Storyteller blob (Next after LAN)
 
 ### Soft UX polish (anytime)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
@@ -99,7 +110,7 @@ Strict order (Smokey / Nas-ty):
 2. ~~Silence-trim~~ → **Shipped** (`d8af263`; Josh verified)
 3. ~~Full in-app YouTube embed/SDK~~ → **superseded** by hybrid + in-app YouTube v1 + Match
 4. ~~Match on YouTube~~ → **Shipped** (`a0722eb`; Josh confirmed)
-5. ~~YouTube playhead persist (local)~~ → **Shipped** (Josh confirmed resume)
+5. ~~YouTube playhead persist (local)~~ → **Shipped** (`fc82893`; Josh confirmed resume)
 6. ~~Glance / Lock Screen~~ → **Shipped** (`257e44e`; Josh confirmed)
 7. ~~LAN failover~~ → **Now** (Storyteller public ↔ `192.168.1.2:1800`)
 8. **YouTube playhead sync** — Storyteller blob after local resume is solid

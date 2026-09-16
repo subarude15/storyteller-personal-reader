@@ -95,6 +95,8 @@ final class AudioSessionMonitor {
             let (data, _) = try await URLSession.shared.data(from: url)
             guard podcastCoverURL == url else { return }
             coverImage = UIImage(data: data)
+            // Keep system Now Playing art in sync with the mini-player cover.
+            await AudioSessionActor.shared.setSessionArtwork(data)
         } catch {
             // Keep placeholder.
         }
