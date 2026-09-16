@@ -41,7 +41,7 @@ public struct PunkRallyTabView: View {
 
     public var body: some View {
         rootShell
-            .modifier(PunkRallyShellToastModifier(showToast: showShellToast))
+            .modifier(PunkRallyShellToastModifier(showToast: { showShellToast($0) }))
             .modifier(
                 PunkRallyPodcastBridgeModifier(
                     playPodcast: { playPodcast(from: $0) },
