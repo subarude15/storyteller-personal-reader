@@ -17,7 +17,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Park Home Screen widgets on free AltStore** — tip `7a05012`. Sideload IPA embeds **no** Widgets appex (blank+tappable worse than none). Sources stay in-tree; revisit on paid Apple ID / SideStore. `punkrally://continue` deep link unchanged for in-app / Shortcuts.
+- **Park Home Screen widgets on free AltStore** — tip `7a05012` (docs `afaa28e`). Sideload IPA embeds **no** Widgets appex — verified no `PlugIns/*.appex` on [Actions 35100387902](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35100387902). Sources stay in-tree; revisit on paid Apple ID / SideStore. `punkrally://continue` deep link unchanged for in-app / Shortcuts.
 - **Next board (strict):** silence-trim → Glance/Watch → LAN failover — unless Josh reorders.
 
 **Do not start CarPlay / Watch companion / paid App Groups / Home Screen widgets on free AltStore unless Josh reorders.**
