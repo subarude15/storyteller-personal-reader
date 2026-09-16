@@ -17,11 +17,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **In-app YouTube playback v1** — code on tip (see `docs/YOUTUBE_INAPP.md`). Settings Invidious/Piped-style resolve URL + Test → progressive/HLS on existing `PodcastVideoSurfaceView` / shared AVPlayer (RSS video path). Keep **Watch on YouTube** as external fallback. Soft ~20s resolve timeout. Soft polish anytime. **Await Josh Sideload smoke** before flipping Shipped.
+- **P0 Play in ink+amp channel handoff** (Josh: no Resolving…; opens channel not episode) — tip >= `bd32690`. `PodcastYouTubeURL.extract` must only accept URLs with a real video id (watch / youtu.be / embed / shorts / live); skip channel / @handle / /user/ /c/. Prefer first valid video URL when scanning feed. Chips only when `videoID != nil`. Play shows **Resolving…** until done; then toast + handoff. Invidious: `http://192.168.1.2:20130`. Soft polish anytime.
 
-**SponsorBlock-style skip is Later** (additive seek — do not implement now). Widgets stay parked (no Sideload appex).
+**SponsorBlock is Later. Widgets stay parked.**
 
-**Do not start CarPlay / Watch companion / paid App Groups / Home Screen widgets / SponsorBlock / Glance / LAN unless Josh reorders.**
+**Do not start CarPlay / Watch / paid App Groups / SponsorBlock unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
