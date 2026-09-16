@@ -17,10 +17,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Silence-trim on NAS AD_STRIP worker** — code/docs on `punk-rally-ios` (leading + trailing edge trim in Clean dumb pipeline; Alpine compose). **Await Josh redeploy + smoke** on PrincessDonut `:20129` before flipping Shipped. Widgets stay parked (no Sideload appex).
-- **Next after Josh verifies silence-trim:** Glance/Watch → LAN failover — unless Josh reorders.
+- **In-app YouTube playback v1** — tip >= `d8af263`. Resolve playable media URL from YouTube video id (Settings Invidious/Piped-style base URL + Test, like Ad strip); play on existing `PodcastVideoSurfaceView` / shared AVPlayer (reuse RSS video path). Keep **Watch on YouTube** as external fallback. Soft timeout on resolve. Soft polish anytime.
 
-**Do not start CarPlay / Watch companion / paid App Groups / Home Screen widgets on free AltStore unless Josh reorders.**
+**SponsorBlock-style skip is Later** (additive seek — do not implement now). Widgets stay parked (no Sideload appex).
+
+**Do not start CarPlay / Watch companion / paid App Groups / Home Screen widgets / SponsorBlock unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
@@ -48,6 +49,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **Find shows** — Apple iTunes Search API → Subscribe → `PodcastSubscriptionStore` (`a0fc4e4`, Sideload [35013733091](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35013733091)); Josh confirmed
 - [x] **Ad-strip download / queue UX (v1 = UX + hooks + stub)** — tip `130c877` (prior `60a211b` / `c93deac`); Download sheet Original vs Clean (per-show last choice); Keep/queue → Clean pending; chips Original | Cleaning… | Clean; `StubPodcastAdStripPipeline`; Sideload green [35019916837](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35019916837)
 - [x] **NAS `AD_STRIP_URL` full cut (option 2)** — tip `e00d800`; Settings **Ad strip URL** + **Test**; dumb ffmpeg worker `:20129`; upload Original → poll → Clean sibling (never delete Original); Josh confirmed Clean ad-free (`e00d800` + `:20129`); Sideload green [35038255753](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35038255753)
+- [x] **Silence-trim on NAS AD_STRIP** — tip `d8af263`; leading+trailing edge trim in Clean dumb pipeline; Josh verified health + job JSON on PrincessDonut `:20129`
 - [x] **Hybrid RSS video + Watch on YouTube** — tip `87b56cd`; video surface in full Now Playing for dual enclosures; Watch on YouTube chip (episode sheet + full NP, not mini); Sideload green; Josh confirmed
 - [x] **Episode status cluster + show filters + Josh UI stamps** — tip `b719921`; download glyph · Clean chip (incl. Clean failed) · Xm left/Played; show filters All|Downloaded|In progress|Clean pending; Shelf POD chrome; mini-player cover+title+play/pause(+close) only (scrub/−15/+15 stay on full Now Playing); Home/Library finishability text via `PlaybackFinishabilityCopy`; Sideload green [35023934089](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35023934089)
 - [x] **Podcast play queue** — tip `2f7deb4`; Play Next / Play Last in episode menus; `PodcastPlaybackQueueStore` + editable `PodcastPlaybackQueueView` (drag reorder, remove, clear finished); auto-advance on finish via shared player; persisted upcoming order; Sideload green [35025614228](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35025614228)
@@ -76,6 +78,8 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 3. ~~NAS `AD_STRIP_URL` worker~~ → **Shipped** (`e00d800` + `:20129`; Josh confirmed Clean ad-free)
 4. ~~Hybrid video~~ → **Shipped** (`87b56cd`; Josh confirmed)
 5. ~~Continue widget scaffold~~ → landed; **Parked on free AltStore** (no Sideload appex); revisit paid/SideStore
+6. ~~Silence-trim~~ → **Shipped** (`d8af263`; Josh verified)
+7. ~~In-app YouTube~~ → **Now** (playback-first; SponsorBlock Later)
 
 ### Soft UX polish (anytime)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
@@ -88,15 +92,16 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ---
 ## Later / ideas (not blocking)
 
-Strict order (Smokey / Nas-ty) — **Next board after widget park:**
+Strict order (Smokey / Nas-ty):
 1. ~~NAS `AD_STRIP_URL` worker~~ → **Shipped** (`e00d800` + `:20129`)
-2. **Silence-trim** — with that worker (same pipeline family) ← **Now** (code shipped; Josh redeploy/smoke before Shipped flip)
-3. ~~Full in-app YouTube embed/SDK~~ → **superseded** by hybrid (`87b56cd`)
-4. **Glance / Watch tile** — Lock Screen / system Now Playing first; Home Screen widgets parked until paid/SideStore ← **Next after silence-trim verified**
-5. **One-tap LAN failover**: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
-6. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
+2. ~~Silence-trim~~ → **Shipped** (`d8af263`; Josh verified)
+3. **In-app YouTube playback v1** → **Now** (Settings resolve URL + shared AVPlayer; Watch on YouTube fallback)
+4. **SponsorBlock-style skip** — additive seek over community segments after in-app YouTube plays; no new NAS worker required for v1 (public API OK; self-host optional later)
+5. **Glance / Watch tile** — Lock Screen / system Now Playing first; Home Screen widgets parked until paid/SideStore
+6. **One-tap LAN failover**: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
+7. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
 
-**P1000 (Later, not ahead of silence-trim / Glance / LAN):** **Podcast cross-device sync** — subscriptions + playheads only (same Storyteller account pair as place sync / Stats). **Downloads stay per-device** (no cross-device file sync).
+**P1000 (Later, not ahead of in-app YouTube / SponsorBlock / Glance / LAN):** **Podcast cross-device sync** — subscriptions + playheads only (same Storyteller account pair as place sync / Stats). **Downloads stay per-device** (no cross-device file sync).
 ## Constraints
 
 - Keep `SilveranKit`; do not merge Enve tree (modules + AGPL only)
