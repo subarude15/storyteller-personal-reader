@@ -83,11 +83,19 @@ To provide a flawless 1-click install on free Apple IDs, the **Silveran Reader S
 | **Background Audio & Fetch** | **Kept** | Standard background playback and sync refresh. |
 | **Home Continue Hero & Sync Chip** | **Kept** | Dynamic resume from library/shelf. |
 | **Bundle ID** | Clean `com.punkrally.reader` | Single bundle ID, avoids split identifier confusion. |
+| **Continue Widget Extension** | **Kept** | Embedded in Sideload IPA (`com.punkrally.reader.widgets`). Burns a second App ID — intentional for Home Screen Continue. |
+| **App Group** | `group.com.punkrally.reader` | Shared by app + widgets for Continue snapshot / recent stores. **Not** a Keychain access group. |
 | **CarPlay Entitlement & Scene** | **Removed** | Free developer accounts cannot sign `com.apple.developer.carplay-audio` or CarPlay scenes. |
-| **Widget Extension** | **Excluded** | Embedding extensions burns 2 App IDs (`.reader` and `.reader.widgets`). |
 | **watchOS Companion** | **Excluded** | Companion apps burn additional App IDs on personal teams. |
-| **Widget App Groups** | **Excluded** | Cross-process app groups are not required for the standalone app. |
-| **Keychain Access Groups** | Fallback to default | Single app uses default app keychain without team group errors. |
+| **Keychain Access Groups** | Fallback to default | Single app uses default app keychain without team group errors. Never reintroduce `KEYCHAIN_ACCESS_GROUP` on Sideload. |
+
+### Continue widget + AltStore notes
+
+- **App Group id:** `group.com.punkrally.reader` (`APP_GROUP_ID` / `SILVERAN_WIDGET_APP_GROUP`).
+- AltStore resigns the app **and** the widgets extension; expect two App IDs (`.reader` + `.reader.widgets`) plus the App Group registration.
+- Home Screen: Add Widget → **Continue** (cover + title + play/pause). Tap opens `punkrally://continue` → Now Playing / Home Continue.
+- Play/pause uses `AudioPlaybackIntent` + Darwin/App Group bridge while audio is running. If remote pause fails after resign, use **system Lock Screen Now Playing** (already wired) or open the app.
+- Lock Screen WidgetKit accessory tiles are optional; system Now Playing remains the primary Lock Screen control surface.
 
 ---
 

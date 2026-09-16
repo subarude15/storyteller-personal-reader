@@ -184,6 +184,8 @@ targets:
         # shared $(AppIdentifierPrefix) group; SecurityKeychainStore falls back
         # to the default (app-keyed) access group when this Info key is absent.
         KEYCHAIN_SERVICE: "$(KEYCHAIN_SERVICE)"
+        # App Group for Continue widget + Podcast*/Book recent stores (AltStore-friendly).
+        SILVERAN_WIDGET_APP_GROUP: "$(APP_GROUP_ID)"
         LSApplicationCategoryType: "public.app-category.books"
         NSLocalNetworkUsageDescription: "ink+amp needs local network access to connect to your Storyteller server and ad-strip worker."
         NSAppTransportSecurity:
@@ -221,6 +223,8 @@ targets:
         product: SilveranAppleKit
       - package: Silveran
         product: SilveranReadaloud
+      - target: "Silveran Reader Widgets (iOS)"
+        embed: true
   Silveran Reader Widgets (iOS):
     type: app-extension
     platform: iOS
@@ -410,6 +414,7 @@ schemes:
     build:
       targets:
         "Silveran Reader Sideload (iOS)": all
+        "Silveran Reader Widgets (iOS)": all
     run:
       config: Debug
       executable: "Silveran Reader Sideload (iOS)"

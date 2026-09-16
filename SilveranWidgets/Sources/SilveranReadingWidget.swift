@@ -240,7 +240,7 @@ struct SilveranReadingWidget: Widget {
         ) { entry in
             SilveranReadingWidgetView(entry: entry)
         }
-        .configurationDisplayName("Silveran Reader")
+        .configurationDisplayName("Library")
         .description("Track current books and reading progress.")
         .supportedFamilies(Self.supportedFamilies)
         .contentMarginsDisabled()
@@ -263,6 +263,7 @@ struct SilveranReadingWidget: Widget {
 @main
 struct SilveranReaderWidgets: WidgetBundle {
     var body: some Widget {
+        ContinueWidget()
         SilveranReadingWidget()
     }
 }

@@ -4,7 +4,8 @@ import SilveranKit
 public enum SilveranBookLink {
     public static func url(for bookID: BookID) -> URL? {
         var components = URLComponents()
-        components.scheme = "silveran"
+        // ink+amp registers `punkrally` (not legacy `silveran`).
+        components.scheme = "punkrally"
         components.host = "book"
         components.queryItems = [
             URLQueryItem(name: "source", value: bookID.sourceID),
@@ -14,7 +15,9 @@ public enum SilveranBookLink {
     }
 
     public static func bookID(from url: URL) -> BookID? {
-        guard url.scheme == "silveran", url.host() == "book",
+        let scheme = url.scheme
+        guard scheme == "punkrally" || scheme == "silveran",
+            url.host() == "book" || url.host == "book",
             let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
             let sourceID = queryItems.first(where: { $0.name == "source" })?.value,
             let uuid = queryItems.first(where: { $0.name == "uuid" })?.value

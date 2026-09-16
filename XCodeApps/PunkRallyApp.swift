@@ -15,6 +15,8 @@
 #if os(iOS)
 import SwiftUI
 import SilveranAppleKit
+import SilveranAppleWidgets
+import SilveranKit
 
 /// ink+amp five-tab shell. Library/Shelf reuse Silveran's own views when
 /// MediaViewModel is available in the environment (SilveranReaderApp injects it);
@@ -79,6 +81,8 @@ public struct PunkRallyTabView: View {
             .preferredColorScheme(nil) // follow system appearance
             .onAppear {
                 SessionTrackerWiring.install()
+                ContinueWidgetPublisher.install()
+                ContinueWidgetPublisher.consumePendingWidgetCommands()
             }
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowShelf)) { _ in
                 selectedTab = .shelf
@@ -88,6 +92,10 @@ public struct PunkRallyTabView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowStats)) { _ in
                 selectedTab = .stats
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .punkRallyOpenContinue)) { _ in
+                selectedTab = .home
+                NotificationCenter.default.post(name: .punkRallyPerformContinue, object: nil)
             }
             .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyRetryStatsSync)
@@ -144,6 +152,7 @@ public struct PunkRallyTabView: View {
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
                     _ = PodcastDownloadStore.shared.runOvernightPruneIfDue()
+                    ContinueWidgetPublisher.consumePendingWidgetCommands()
                     NotificationCenter.default.post(
                         name: .punkRallyHomeQueueDidChange,
                         object: nil
@@ -366,6 +375,7 @@ private struct HomeTabView: View {
                 queueTick &+= 1
                 statsTick &+= 1
                 Task { await mediaViewModel?.refreshMetadata(source: "HomeMixed") }
+                Task { await publishContinueWidget() }
             }
             .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyPlayPodcastEpisode)
@@ -378,6 +388,12 @@ private struct HomeTabView: View {
                 queueTick &+= 1
                 statsTick &+= 1
                 Task { await mediaViewModel?.refreshMetadata(source: "HomeMixedQueue") }
+                Task { await publishContinueWidget() }
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyPerformContinue)
+            ) { _ in
+                Task { await performContinueFromWidget() }
             }
             .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyStatsSessionStart)
@@ -574,6 +590,68 @@ private struct HomeTabView: View {
                     userInfo: userInfo
                 )
         }
+    }
+
+    /// Widget / deep link: expand Now Playing if live, else open Home Continue.
+    @MainActor
+    private func performContinueFromWidget() async {
+        if await AudioSessionActor.shared.currentSnapshot() != nil {
+            if case .podcast = await AudioSessionActor.shared.currentSnapshot()?.kind {
+                PodcastPlayerPresenter.shared.expandFromMiniPlayer()
+                return
+            }
+            // Book / readaloud — re-present the player card when possible.
+            if let bookData = await LastOpenBookStore.loadPlayerBookData() {
+                PlayerPresenter.shared.present(bookData)
+                return
+            }
+        }
+        await openMixedItem(mixedQueue.continueItem)
+    }
+
+    @MainActor
+    private func publishContinueWidget() async {
+        let item = mixedQueue.continueItem
+        guard let item else {
+            ContinueWidgetPublisher.publishHomeContinue(
+                title: nil,
+                subtitle: nil,
+                kind: nil,
+                coverData: nil,
+            )
+            return
+        }
+
+        let kind: ContinueWidgetKindTag
+        var coverData: Data?
+        switch item {
+            case .book(let book, _, _, let badge):
+                switch badge {
+                    case .ebook: kind = .ebook
+                    case .audiobook: kind = .audiobook
+                    case .readaloud: kind = .readaloud
+                    case .podcast: kind = .podcast
+                }
+                coverData = await BookServiceActor.shared.cachedCoverData(for: book.id, audio: true)
+                if coverData == nil {
+                    coverData = await BookServiceActor.shared.cachedCoverData(
+                        for: book.id,
+                        audio: false,
+                    )
+                }
+            case .podcast(let entry):
+                kind = .podcast
+                if let url = entry.coverURL {
+                    coverData = try? await URLSession.shared.data(from: url).0
+                }
+        }
+
+        ContinueWidgetPublisher.publishHomeContinue(
+            title: item.title,
+            subtitle: item.subtitle,
+            kind: kind,
+            coverData: coverData,
+        )
     }
 }
 

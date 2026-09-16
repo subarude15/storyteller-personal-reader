@@ -8,8 +8,10 @@ import WidgetKit
 
 public enum SilveranWidgetConstants {
     public static let appGroupInfoKey = "SILVERAN_WIDGET_APP_GROUP"
-    public static let fallbackAppGroupIdentifier = "group.com.kyonifer.SilveranReader"
+    /// Prefer Info.plist override; Sideload + ink+amp use group.com.punkrally.reader.
+    public static let fallbackAppGroupIdentifier = "group.com.punkrally.reader"
     public static let readingWidgetKind = "SilveranReadingWidget"
+    public static let continueWidgetKind = "InkAmpContinueWidget"
 }
 
 public enum SilveranWidgetReadingKind: String, Codable, Sendable, Hashable {
@@ -387,6 +389,7 @@ public enum SilveranWidgetSnapshotStore {
     private static func reloadWidgetTimelines() {
         #if canImport(WidgetKit) && (os(iOS) || os(macOS))
         WidgetCenter.shared.reloadTimelines(ofKind: SilveranWidgetConstants.readingWidgetKind)
+        WidgetCenter.shared.reloadTimelines(ofKind: SilveranWidgetConstants.continueWidgetKind)
         #endif
     }
 }
