@@ -146,6 +146,11 @@ public struct PunkRallyTabView: View {
             ) { _ in
                 Task { await StatsSyncCoordinator.shared.syncNow(reason: "settingsRetry") }
             }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyRetryYouTubePlayheadSync)
+            ) { _ in
+                Task { await YouTubePlayheadSyncCoordinator.shared.syncNow(reason: "settingsRetry") }
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
                     _ = PodcastDownloadStore.shared.runOvernightPruneIfDue()
@@ -155,6 +160,7 @@ public struct PunkRallyTabView: View {
                         object: nil
                     )
                     Task { await StatsSyncCoordinator.shared.syncNow(reason: "appActive") }
+                    Task { await YouTubePlayheadSyncCoordinator.shared.syncNow(reason: "appActive") }
                 } else if phase == .background {
                     Task {
                         await AudioSessionActor.shared.refreshNowPlaying()
@@ -171,6 +177,7 @@ public struct PunkRallyTabView: View {
                                 object: nil
                             )
                         }
+                        YouTubePlayheadSyncCoordinator.shared.scheduleSyncAfterLocalChange()
                     }
                 }
             }
@@ -218,7 +225,13 @@ public struct PunkRallyTabView: View {
             coverURL: coverURL,
             youtubeURL: youtubeURL
         )
-        Task { await podcastPresenter.play(episode) }
+        Task {
+            // Pull remote YouTube playhead before resume (soft timeout; offline keeps local).
+            if episode.youtubeVideoID != nil {
+                await YouTubePlayheadSyncCoordinator.shared.syncNow(reason: "beforePlay")
+            }
+            await podcastPresenter.play(episode)
+        }
     }
 
     /// Home Continue last-touched + progress (shared by play bridge and session-start).
@@ -863,6 +876,11 @@ private struct PunkRallyShellToastModifier: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyStatsSyncFailed)) { _ in
                 showToast("Couldn't sync Stats · try again")
             }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyYouTubePlayheadSyncFailed)
+            ) { _ in
+                showToast("Couldn't sync YouTube playheads · try again")
+            }
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyAdStripFailed)) { _ in
                 showToast("Clean failed · try again")
             }
@@ -895,7 +913,10 @@ private struct PunkRallyPodcastBridgeModifier: ViewModifier {
             .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyPodcastShouldPersistProgress)
             ) { _ in
-                Task { await PodcastPlayerPresenter.persistPodcastProgress(markFinished: false) }
+                Task {
+                    await PodcastPlayerPresenter.persistPodcastProgress(markFinished: false)
+                    YouTubePlayheadSyncCoordinator.shared.scheduleSyncAfterLocalChange()
+                }
             }
             .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyPodcastProgressDidPersist)
@@ -906,6 +927,7 @@ private struct PunkRallyPodcastBridgeModifier: ViewModifier {
                 else { return }
                 PodcastRecentStore.shared.updateProgress(episodeID: episodeID, progress: progress)
                 NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
+                YouTubePlayheadSyncCoordinator.shared.scheduleSyncAfterLocalChange()
             }
             .onReceive(
                 NotificationCenter.default.publisher(
@@ -914,6 +936,7 @@ private struct PunkRallyPodcastBridgeModifier: ViewModifier {
             ) { note in
                 Task {
                     await PodcastPlayerPresenter.persistPodcastProgress(markFinished: true)
+                    YouTubePlayheadSyncCoordinator.shared.scheduleSyncAfterLocalChange()
                     if let episodeID = note.userInfo?["episodeID"] as? String {
                         PodcastRecentStore.shared.updateProgress(
                             episodeID: episodeID,

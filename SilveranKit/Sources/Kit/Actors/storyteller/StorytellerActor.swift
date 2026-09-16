@@ -2536,6 +2536,146 @@ public actor StorytellerActor {
         UserDefaults.standard.string(forKey: Self.inkampStatsCollectionUUIDKey)
     }
 
+    // MARK: - ink+amp YouTube playhead sync (private collection blob)
+
+    public enum InkampYouTubePlayheadFetchResult: Sendable {
+        case unavailable(reason: String)
+        case empty
+        case document(InkampYouTubePlayheadSyncDocument)
+    }
+
+    public enum InkampYouTubePlayheadPushResult: Sendable, Equatable {
+        case success
+        case failure(reason: String)
+    }
+
+    private static let inkampYouTubePlayheadCollectionUUIDKey =
+        "punkRally.youtubePlayheads.collectionUUID.v1"
+
+    /// Fetches YouTube playheads from a private Storyteller collection
+    /// (same auth as Stats / place sync).
+    public func fetchInkampYouTubePlayheadsDocument() async -> InkampYouTubePlayheadFetchResult {
+        guard await ensureAuthentication() != nil else {
+            return .unavailable(reason: "auth failed")
+        }
+
+        let collections = await fetchCollections()
+        if let collections {
+            if let collection = collections.first(where: {
+                $0.name == InkampYouTubePlayheadSyncDocument.collectionName
+            }) {
+                rememberInkampYouTubePlayheadCollectionUUID(collection.uuid)
+                return Self.youTubePlayheadsDocument(from: collection)
+            }
+        } else {
+            if let remembered = rememberedInkampYouTubePlayheadCollectionUUID(),
+                let collection = await fetchCollection(uuid: remembered)
+            {
+                return Self.youTubePlayheadsDocument(from: collection)
+            }
+            return .unavailable(reason: "fetchCollections failed")
+        }
+
+        if let remembered = rememberedInkampYouTubePlayheadCollectionUUID(),
+            let collection = await fetchCollection(uuid: remembered)
+        {
+            return Self.youTubePlayheadsDocument(from: collection)
+        }
+
+        return .empty
+    }
+
+    private static func youTubePlayheadsDocument(from collection: StorytellerCollection)
+        -> InkampYouTubePlayheadFetchResult
+    {
+        guard let description = collection.description, !description.isEmpty else {
+            return .empty
+        }
+        guard description.hasPrefix("{") else {
+            return .empty
+        }
+        guard let doc = try? YouTubePlayheadSyncMerge.decodeDescription(description) else {
+            return .empty
+        }
+        return .document(doc)
+    }
+
+    /// Upserts the YouTube playhead sync document onto a private Storyteller collection.
+    public func pushInkampYouTubePlayheadsDocument(_ document: InkampYouTubePlayheadSyncDocument)
+        async -> InkampYouTubePlayheadPushResult
+    {
+        guard await ensureAuthentication() != nil else {
+            return .failure(reason: "auth failed")
+        }
+        let encoded: String
+        do {
+            encoded = try YouTubePlayheadSyncMerge.encodeDescription(document)
+        } catch {
+            logStorytellerError("pushInkampYouTubePlayheadsDocument encode", error: error)
+            return .failure(reason: "encode failed")
+        }
+
+        if let existing = await inkampYouTubePlayheadCollection() {
+            rememberInkampYouTubePlayheadCollectionUUID(existing.uuid)
+            let updated = await updateCollection(
+                uuid: existing.uuid,
+                payload: StorytellerCollectionUpdatePayload(
+                    description: encoded,
+                    isPublic: false
+                )
+            )
+            if updated != nil {
+                return .success
+            }
+            return .failure(reason: "updateCollection failed uuid=\(existing.uuid)")
+        }
+
+        let created = await createCollection(
+            StorytellerCollectionCreatePayload(
+                name: InkampYouTubePlayheadSyncDocument.collectionName,
+                description: encoded,
+                isPublic: false,
+                users: nil
+            )
+        )
+        if let created {
+            if created.uuid != "pending" {
+                rememberInkampYouTubePlayheadCollectionUUID(created.uuid)
+            }
+            return .success
+        }
+        return .failure(
+            reason:
+                "createCollection failed name=\(InkampYouTubePlayheadSyncDocument.collectionName)"
+        )
+    }
+
+    private func inkampYouTubePlayheadCollection() async -> StorytellerCollection? {
+        if let collections = await fetchCollections(),
+            let found = collections.first(where: {
+                $0.name == InkampYouTubePlayheadSyncDocument.collectionName
+            })
+        {
+            rememberInkampYouTubePlayheadCollectionUUID(found.uuid)
+            return found
+        }
+        if let uuid = rememberedInkampYouTubePlayheadCollectionUUID(),
+            let collection = await fetchCollection(uuid: uuid)
+        {
+            return collection
+        }
+        return nil
+    }
+
+    private func rememberInkampYouTubePlayheadCollectionUUID(_ uuid: String) {
+        guard uuid != "pending", !uuid.isEmpty else { return }
+        UserDefaults.standard.set(uuid, forKey: Self.inkampYouTubePlayheadCollectionUUIDKey)
+    }
+
+    private func rememberedInkampYouTubePlayheadCollectionUUID() -> String? {
+        UserDefaults.standard.string(forKey: Self.inkampYouTubePlayheadCollectionUUIDKey)
+    }
+
     private static func peekCollectionUUID(from data: Data) -> String? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let uuid = object["uuid"] as? String,

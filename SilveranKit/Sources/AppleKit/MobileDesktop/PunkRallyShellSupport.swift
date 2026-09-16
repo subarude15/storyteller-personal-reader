@@ -40,6 +40,19 @@ extension Notification.Name {
     )
     /// Stats sync landed Offline after Syncing… — host shows a short toast.
     public static let punkRallyStatsSyncFailed = Notification.Name("punkRallyStatsSyncFailed")
+    /// Settings: request an immediate YouTube playhead sync retry.
+    public static let punkRallyRetryYouTubePlayheadSync = Notification.Name(
+        "punkRallyRetryYouTubePlayheadSync"
+    )
+    /// YouTubePlayheadSyncCoordinator published UI (Settings row).
+    /// userInfo: isSyncing (Bool), lastSuccessfulSyncAt (Date?), footerLabel (String)
+    public static let punkRallyYouTubePlayheadSyncUIDidChange = Notification.Name(
+        "punkRallyYouTubePlayheadSyncUIDidChange"
+    )
+    /// YouTube playhead sync landed Offline after Settings retry — host toast.
+    public static let punkRallyYouTubePlayheadSyncFailed = Notification.Name(
+        "punkRallyYouTubePlayheadSyncFailed"
+    )
     /// Clean-path ad strip failed / timed out — host shows a short toast.
     public static let punkRallyAdStripFailed = Notification.Name("punkRallyAdStripFailed")
     /// YouTube in-app resolve failed / timed out — host toast; caller may hand off to Safari.

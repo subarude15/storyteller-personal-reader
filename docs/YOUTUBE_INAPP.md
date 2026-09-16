@@ -83,16 +83,17 @@ Toast copy:
 - Downloading YouTube to Shelf
 - Official iframe SDK / Google account
 - CarPlay / widgets / App Groups
-- Cross-device YouTube playhead sync (Later — local resume ships first)
+- SponsorBlock-style skip
 
-## Playhead (local)
+## Playhead (local + Storyteller sync)
 
 In-app YouTube (feed watch URL or Match) persists playhead keyed by **video id** (`YouTubePlayheadStore`), sibling of `PodcastPlayheadStore`:
 
 - Persist periodically (~15s while playing) + on pause / interrupt / scrub / background / card dismiss / end
-- Near-end (≥95%) clears like podcasts (next open starts fresh / Continue drops)
+- Near-end (≥95%) writes a cleared tombstone (next open starts fresh / Continue drops; sync won’t resurrect older mid-episode)
 - Reopen / Play in ink+amp / Home Continue seeks to saved playhead (Loading… until playhead advances)
-- Episode / show title remembered on the entry for Continue rails; no Storyteller sync this cut
+- Episode / show title remembered on the entry for Continue rails
+- **Cross-device:** private Storyteller collection `.inkamp.youtubePlayheads.v1` (same auth as Stats); LWW per video id; pull on foreground / before Play; push after persist; Settings → YouTube playheads last-sync. Offline Continue still uses local.
 
 ## Smoke (Josh)
 
@@ -102,4 +103,5 @@ In-app YouTube (feed watch URL or Match) persists playhead keyed by **video id**
 4. Channel-only / Vergecast-style episode → **Match on YouTube** (no Play / Watch until confirm).
 5. Match → confirm a hit (e.g. Shrek / a Vergecast ep) → Play in ink+amp + Watch on YouTube; reopen shows chips without re-search.
 6. **Playhead:** scrub Cult of Shrek / leave / reopen → resumes near leave point; Home Continue shows Xm left and continues correctly.
-7. Kill Wi‑Fi or point URL at a dead host → toast; Match does not hang.
+7. **Playhead sync:** leave mid-episode on phone; open same matched ep on iPad (or reinstall) after sync → resumes near that playhead. Settings → YouTube playheads shows Synced / Offline · local only.
+8. Kill Wi‑Fi or point URL at a dead host → toast; Match does not hang.
