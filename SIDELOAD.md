@@ -83,33 +83,30 @@ To provide a flawless 1-click install on free Apple IDs, the **Silveran Reader S
 | **Background Audio & Fetch** | **Kept** | Standard background playback and sync refresh. |
 | **Home Continue Hero & Sync Chip** | **Kept** | Dynamic resume from library/shelf. |
 | **Bundle ID** | Clean `com.punkrally.reader` | Single bundle ID, avoids split identifier confusion. |
-| **Continue Widget Extension** | **Kept (honest)** | Embedded in Sideload IPA (`com.punkrally.reader.widgets`). Burns a second App ID. Gallery kind **`inkamp.continue.v4`** named **ink+amp Continue**. Wipe old tiles after install; v4 is opaque charcoal `containerBackground` + white static deep-link (`punkrally://continue`). Live cover/title need App Groups (paid / SideStore). |
-| **Library shelf widget** | **Omitted from Sideload extension** | Old `ContinueWidget.swift` / `SilveranReadingWidget.swift` are **not compiled** into the Sideload iOS widgets target. `@main` lives in `SideloadContinueWidget.swift` only (zero AppIntents). Re-enable for paid Apple Developer / SideStore. |
-| **App Group** | `group.com.punkrally.reader` (literal) | Baked into Sideload + widgets entitlements / `SILVERAN_WIDGET_APP_GROUP`. **Free AltStore typically does not grant App Groups** (Josh confirmed) — live Continue cover/title and Library shelf require **paid Apple Developer** or **SideStore**. **Not** a Keychain access group. Never ship unexpanded `$(APP_GROUP_ID)`. |
+| **Continue Widget Extension** | **Parked (Sideload)** | Not embedded in Sideload IPA — no `PlugIns/*.appex`. Blank+tappable tiles on free AltStore were worse than none (Josh+crew). Sources stay in-tree (`SideloadContinueWidget.swift` / Widgets target) for paid Apple ID or SideStore. In-app / Shortcuts deep link `punkrally://continue` unchanged. |
+| **Library shelf widget** | **Parked with Continue** | Sources on disk; not compiled into Sideload. Re-enable with paid Apple Developer / SideStore App Groups. |
+| **App Group** | `group.com.punkrally.reader` (literal) | Still baked into Sideload entitlements / `SILVERAN_WIDGET_APP_GROUP` for when widgets return. **Free AltStore typically does not grant App Groups** (Josh confirmed). **Not** a Keychain access group. Never ship unexpanded `$(APP_GROUP_ID)`. |
 | **CarPlay Entitlement & Scene** | **Removed** | Free developer accounts cannot sign `com.apple.developer.carplay-audio` or CarPlay scenes. |
 | **watchOS Companion** | **Excluded** | Companion apps burn additional App IDs on personal teams. |
 | **Keychain Access Groups** | Fallback to default | Single app uses default app keychain without team group errors. Never reintroduce `KEYCHAIN_ACCESS_GROUP` on Sideload. |
 
 ### Continue widget + AltStore notes
 
-**Honest free-AltStore contract (Josh-verified):** free AltStore resign does **not** grant App Groups. After installing a Sideload IPA that includes kind `inkamp.continue.v4`:
+**Parked on free AltStore (Josh+crew decision):** Home Screen widgets are **not** shipped in the Sideload IPA (no widget extension / no `PlugIns/*.appex`). App Groups + WidgetKit render proved unreliable on free AltStore resign — blank+tappable tiles worse than none.
 
-1. **Remove all old ink+amp widgets** from Home / Lock Screen (blank Library tiles and the previous Continue kinds). iOS keeps dead kinds until you delete them.
-2. Add Widget → **ink+amp Continue** only. Do not re-add Library or the old Continue entry.
-3. Free AltStore = deep-link tile: opaque charcoal `containerBackground` + white **Open ink+amp** / **Tap to continue**. Tap opens `punkrally://continue` → Now Playing / Home Continue. No Edit / configure “no books” path.
-4. Live cover + title + play/pause, and a Library shelf widget with book picker, require **paid Apple Developer** or **SideStore** App Groups.
+**Path back:** paid Apple Developer team or SideStore (App Groups granted) → re-embed `Silveran Reader Widgets (iOS)` into Sideload / ship Continue. Widget sources (`SideloadContinueWidget.swift`, kind `inkamp.continue.v4`, etc.) stay in-tree.
 
-**Blank tile but tap still works:** wipe old tiles after install; v4 paints charcoal via opaque `containerBackground` (never `Color.clear`) — `SideloadContinueWidget.swift` alone, SwiftUI+WidgetKit only, zero AppIntents / App Group reads.
+**Still works without a Home Screen tile:**
+- In-app Home Continue
+- Deep link `punkrally://continue` (Shortcuts / URL schemes) → Now Playing / Home Continue
 
-Details still baked for when groups work:
+Details still baked for when groups/widgets return:
 
 - **App Group id (baked literal):** `group.com.punkrally.reader`
   - Sideload entitlements (`SilveranReaderSideload.entitlements`) and widgets entitlements (`SilveranReaderWidgets.entitlements`) embed this string **literally** — never `$(APP_GROUP_ID)` in the Sideload IPA (unsigned `package-ipa` does not expand entitlement placeholders).
-  - Sideload + widgets Info keys `SILVERAN_WIDGET_APP_GROUP` are also the literal `group.com.punkrally.reader`.
+  - Sideload Info key `SILVERAN_WIDGET_APP_GROUP` is also the literal `group.com.punkrally.reader`.
   - Paid/Automatic Xcode iOS target may still use `$(APP_GROUP_ID)` from xcconfig; Sideload path must not.
-- Console probe: `[ContinueWidget] publish|timeline appGroup=… container=ok|nil`. `container=nil` on free AltStore is expected; deep-link Continue still works.
-- Play/pause on the Sideload tile is **not** shipped (no `AudioPlaybackIntent` in the extension). Prefer **system Lock Screen Now Playing** for transport on free AltStore. Paid/SideStore can re-enable interactive Continue later.
-- Do **not** mark Continue widget fully Shipped in `ROADMAP.md` until Josh verifies this honest UX.
+- Prefer **system Lock Screen Now Playing** for transport on free AltStore.
 
 ---
 

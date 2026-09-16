@@ -17,9 +17,10 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **P0 `inkamp.continue.v4` opaque containerBackground** — tip `3cf76da` (await Josh smoke). Charcoal is the `containerBackground` fill (never `Color.clear`); white **Open ink+amp** / **Tap to continue**; SwiftUI+WidgetKit only; inline `punkrally://continue`. AltStore delete → reinstall → wipe old tiles → add ink+amp Continue only. Soft polish anytime.
+- **Park Home Screen widgets on free AltStore** — tip pending. Sideload IPA embeds **no** Widgets appex (blank+tappable worse than none). Sources stay in-tree; revisit on paid Apple ID / SideStore. `punkrally://continue` deep link unchanged for in-app / Shortcuts.
+- **Next board (strict):** silence-trim → Glance/Watch → LAN failover — unless Josh reorders.
 
-**Do not start CarPlay / Watch / paid App Groups / GLM mismatch paste unless Josh reorders.**
+**Do not start CarPlay / Watch companion / paid App Groups / Home Screen widgets on free AltStore unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
@@ -58,7 +59,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **Mini-player slim** — scrub + −15/+15 removed from mini (status-cluster cut)
 
 ### Widgets
-- [~] **Continue home widget** — tip `9cfdfc2` / bake `212c11d`; kind **`inkamp.continue.v2`** (not old Library/Continue). Honest Sideload UX — **Now**; do not flip to Shipped until Josh verifies.
+- [~] **Continue home widget** — **Parked on free AltStore** (Josh+crew). Code in-tree through `inkamp.continue.v4` (`3cf76da`); Sideload does **not** embed the appex. Revisit when paid Apple ID or SideStore grants App Groups + reliable WidgetKit. Deep link `punkrally://continue` stays for in-app / Shortcuts.
 ### Stats
 - [x] **SessionTracker local** — ebook / audiobook / readaloud / podcast → Home + Stats tab (`c627bbe`, Sideload [35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694))
 - [x] **Cross-device Stats sync** — tip `c5791ec` (`a5226d6` + BookServiceActor fix); private Storyteller collection `.inkamp.stats.v1` blob (same auth as place sync); session-id LWW merge (no double-count / no drop); footer Synced / Syncing… / Offline · local only; Settings last sync time; Sideload green [35028364424](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35028364424)
@@ -74,7 +75,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 2. ~~Cross-device Stats sync~~ → **Shipped** (`c5791ec`)
 3. ~~NAS `AD_STRIP_URL` worker~~ → **Shipped** (`e00d800` + `:20129`; Josh confirmed Clean ad-free)
 4. ~~Hybrid video~~ → **Shipped** (`87b56cd`; Josh confirmed)
-5. ~~Continue widget scaffold~~ → landed (`9cfdfc2`+`212c11d`); **P0 `inkamp.continue.v2` Sideload Continue** → **Now** (Josh verify; do not mark Shipped yet)
+5. ~~Continue widget scaffold~~ → landed; **Parked on free AltStore** (no Sideload appex); revisit paid/SideStore
 
 ### Soft UX polish (anytime)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
@@ -87,15 +88,15 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ---
 ## Later / ideas (not blocking)
 
-Strict order (Smokey / Nas-ty):
+Strict order (Smokey / Nas-ty) — **Next board after widget park:**
 1. ~~NAS `AD_STRIP_URL` worker~~ → **Shipped** (`e00d800` + `:20129`)
-2. **Silence-trim** — with that worker (same pipeline family)
+2. **Silence-trim** — with that worker (same pipeline family) ← **Next**
 3. ~~Full in-app YouTube embed/SDK~~ → **superseded** by hybrid (`87b56cd`)
-4. ~~Glance / Watch tile~~ → Continue scaffold landed; **P0 blank UI** harden tip >= `21b1fc3` (system Now Playing first for Lock Screen)
+4. **Glance / Watch tile** — Lock Screen / system Now Playing first; Home Screen widgets parked until paid/SideStore
 5. **One-tap LAN failover**: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
 6. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
 
-**P1000 (Later, not ahead of Continue widget):** **Podcast cross-device sync** — subscriptions + playheads only (same Storyteller account pair as place sync / Stats). **Downloads stay per-device** (no cross-device file sync).
+**P1000 (Later, not ahead of silence-trim / Glance / LAN):** **Podcast cross-device sync** — subscriptions + playheads only (same Storyteller account pair as place sync / Stats). **Downloads stay per-device** (no cross-device file sync).
 ## Constraints
 
 - Keep `SilveranKit`; do not merge Enve tree (modules + AGPL only)

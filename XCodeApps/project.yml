@@ -224,8 +224,9 @@ targets:
         product: SilveranAppleKit
       - package: Silveran
         product: SilveranReadaloud
-      - target: "Silveran Reader Widgets (iOS)"
-        embed: true
+      # Home Screen widgets parked on free AltStore (Josh+crew): blank+tappable
+      # tiles worse than none. Do not embed/register an appex on Sideload.
+      # Widget sources stay in-tree; paid Apple ID / SideStore re-links later.
   Silveran Reader Widgets (iOS):
     type: app-extension
     platform: iOS
@@ -417,7 +418,6 @@ schemes:
     build:
       targets:
         "Silveran Reader Sideload (iOS)": all
-        "Silveran Reader Widgets (iOS)": all
     run:
       config: Debug
       executable: "Silveran Reader Sideload (iOS)"
