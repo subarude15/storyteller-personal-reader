@@ -17,7 +17,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **One-tap LAN failover** — tip >= Glance `257e44e`. Optional **LAN URL** on Storyteller source (default `http://192.168.1.2:1800`); short probe on home Wi‑Fi → prefer LAN for Storyteller API + downloads; soft fall back to public on failure. Settings status **Using LAN** / **Using public**. Same credentials both URLs. Soft polish anytime.
+- **YouTube playhead sync** — tip ≥ LAN failover `4f9d27d` / `6423bae` (Josh verified Using LAN / Using public). Keep local store by video id; sync via private Storyteller collection (same auth as Stats / place; e.g. `.inkamp.youtubePlayheads.v1`); LWW / session-id merge per video id; push on pause/background/meaningful seek; pull on launch / foreground / before Play in ink+amp; soft timeouts + Offline · local only (Stats pattern). Home Continue stays offline-local. Soft polish anytime.
 
 **Do not start Invidious/ad-strip URL changes / SponsorBlock / StoryAlign / widgets / CarPlay unless Josh reorders.**
 ## Shipped
@@ -29,6 +29,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] Library/Shelf: undownloaded tap → book detail (`84a07a7`); downloaded open path
 - [x] Dead-tap fix for downloaded titles (`fde181c`)
 - [x] **Phone ↔ iPad place sync proven** (Continue + Synced chip)
+- [x] **One-tap LAN failover** — tip `4f9d27d` (not docs `1294bae`); optional LAN URL on Storyteller source (default `http://192.168.1.2:1800`); Using LAN / Using public; Josh confirmed Sideload [35162431083](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35162431083)
 
 ### Shell / branding
 - [x] M1 shell: Home · Library · Shelf · Podcasts · Stats
@@ -74,14 +75,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-### After Stats sync
-1. ~~Podcast queue~~ → **Shipped** (`2f7deb4`)
-2. ~~Cross-device Stats sync~~ → **Shipped** (`c5791ec`)
-3. ~~NAS `AD_STRIP_URL` worker~~ → **Shipped** (`e00d800` + `:20129`; Josh confirmed Clean ad-free)
-4. ~~Hybrid video~~ → **Shipped** (`87b56cd`; Josh confirmed)
-5. ~~Continue widget scaffold~~ → landed; **Parked on free AltStore** (no Sideload appex); revisit paid/SideStore
-6. ~~Silence-trim~~ → **Shipped** (`d8af263`; Josh verified)
-7. ~~In-app YouTube / Match~~ → **Shipped** (`a0722eb`; Josh confirmed)
+### After YouTube playhead sync
+1. **Phone import → StoryAlign read-aloud** — Library Import → Storyteller upload → align → refresh
+2. Soft UX polish (anytime) — see below
 
 ### Soft UX polish (anytime)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
@@ -101,10 +97,10 @@ Strict order (Smokey / Nas-ty):
 4. ~~Match on YouTube~~ → **Shipped** (`a0722eb`; Josh confirmed)
 5. ~~YouTube playhead persist (local)~~ → **Shipped** (Josh confirmed resume)
 6. ~~Glance / Lock Screen~~ → **Shipped** (`257e44e`; Josh confirmed)
-7. ~~LAN failover~~ → **Now** (Storyteller public ↔ `192.168.1.2:1800`)
-8. **YouTube playhead sync** — Storyteller blob after local resume is solid
+7. ~~LAN failover~~ → **Shipped** (`4f9d27d`; Josh confirmed Using LAN / Using public)
+8. ~~YouTube playhead sync~~ → **Now** (Storyteller blob; phone↔iPad)
 9. **SponsorBlock-style skip** — additive seek on in-app YouTube (not podcast Clean)
-10. **Phone import → StoryAlign read-aloud** — Library Import → Storyteller upload → align → refresh
+10. **Phone import → StoryAlign read-aloud** — Library Import → Storyteller upload → align → refresh (**board Next** after playhead sync)
 11. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
 
 **P1000 (Later, not ahead of StoryAlign / YouTube playhead sync):** **Podcast cross-device sync** — subscriptions + playheads only. **Downloads stay per-device**.
