@@ -260,7 +260,10 @@ targets:
         # Literal — must match Sideload + widgets entitlements for AltStore.
         SILVERAN_WIDGET_APP_GROUP: group.com.punkrally.reader
     sources:
-      - path: SilveranWidgets/Sources
+      # Crash-proof Sideload path: only SideloadContinueWidget.swift (no AppIntents).
+      # Old ContinueWidget + Library stay on disk for paid/SideStore; compiling them
+      # into this extension pulls AudioPlaybackIntent metadata AltStore can't sign.
+      - path: SilveranWidgets/Sources/SideloadContinueWidget.swift
     dependencies:
       - package: Silveran
         product: SilveranAppleWidgets

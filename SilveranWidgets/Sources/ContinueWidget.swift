@@ -1,4 +1,3 @@
-import AppIntents
 import SilveranAppleWidgets
 import SwiftUI
 import WidgetKit
@@ -171,20 +170,12 @@ private struct ContinueWidgetView: View {
     }
     #endif
 
-    @ViewBuilder
+    /// Deep-link toggle only — no AppIntents / AudioPlaybackIntent (AltStore).
     private var playPauseButton: some View {
-        #if os(iOS)
-        Button(intent: ContinueTogglePlaybackIntent()) {
-            playPauseLabel
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(entry.snapshot.isPlaying ? "Pause" : "Play")
-        #else
         Link(destination: InkAmpContinueLink.toggleURL) {
             playPauseLabel
         }
         .accessibilityLabel(entry.snapshot.isPlaying ? "Pause" : "Play")
-        #endif
     }
 
     private var playPauseLabel: some View {
@@ -298,109 +289,4 @@ private enum ContinuePalette {
         startPoint: .topLeading,
         endPoint: .bottomTrailing,
     )
-}
-
-/// Sideload-only Continue tile. Fresh kind so iOS cannot keep dead Library/Continue widgets.
-struct SideloadContinueWidget: Widget {
-    var body: some WidgetConfiguration {
-        StaticConfiguration(
-            kind: SilveranWidgetConstants.sideloadContinueWidgetKind,
-            provider: SideloadContinueTimelineProvider(),
-        ) { _ in
-            SideloadContinueWidgetView()
-        }
-        .configurationDisplayName("ink+amp Continue")
-        .description("Opens Continue in ink+amp. Live cover/title need App Groups.")
-        .supportedFamilies([.systemSmall, .systemMedium])
-        .contentMarginsDisabled()
-    }
-}
-
-private struct SideloadContinueEntry: TimelineEntry {
-    let date: Date
-}
-
-private struct SideloadContinueTimelineProvider: TimelineProvider {
-    func placeholder(in context: Context) -> SideloadContinueEntry {
-        SideloadContinueEntry(date: Date())
-    }
-
-    func getSnapshot(in context: Context, completion: @escaping (SideloadContinueEntry) -> Void) {
-        SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "sideload-timeline")
-        completion(SideloadContinueEntry(date: Date()))
-    }
-
-    func getTimeline(in context: Context, completion: @escaping (Timeline<SideloadContinueEntry>) -> Void) {
-        SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "sideload-timeline")
-        completion(
-            Timeline(
-                entries: [SideloadContinueEntry(date: Date())],
-                policy: .after(Date().addingTimeInterval(15 * 60)),
-            )
-        )
-    }
-}
-
-/// Always-readable deep-link tile. No AppIntent configure sheet; no play/pause.
-private struct SideloadContinueWidgetView: View {
-    @Environment(\.widgetFamily) private var family
-
-    var body: some View {
-        Group {
-            if family == .systemSmall {
-                smallBody
-            } else {
-                mediumBody
-            }
-        }
-        .containerBackground(for: .widget) {
-            ContinuePalette.background
-        }
-        .widgetURL(InkAmpContinueLink.continueURL)
-    }
-
-    private var smallBody: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            cover(size: 52)
-            titleBlock
-            Spacer(minLength: 0)
-        }
-        .padding(12)
-    }
-
-    private var mediumBody: some View {
-        HStack(spacing: 14) {
-            cover(size: 72)
-            VStack(alignment: .leading, spacing: 4) {
-                titleBlock
-                Spacer(minLength: 0)
-            }
-        }
-        .padding(14)
-    }
-
-    private var titleBlock: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Open ink+amp")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(ContinuePalette.primary)
-                .lineLimit(2)
-            Text("Tap to continue")
-                .font(.caption)
-                .foregroundStyle(ContinuePalette.secondary)
-                .lineLimit(1)
-        }
-    }
-
-    private func cover(size: CGFloat) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(ContinuePalette.coverFallback)
-            Image(systemName: "book.closed.fill")
-                .font(.system(size: size * 0.32, weight: .semibold))
-                .foregroundStyle(ContinuePalette.secondary)
-        }
-        .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
 }

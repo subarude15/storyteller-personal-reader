@@ -260,15 +260,9 @@ struct SilveranReadingWidget: Widget {
     }
 }
 
-@main
-struct SilveranReaderWidgets: WidgetBundle {
-    var body: some Widget {
-        // Sideload: new Continue kind only. Old Library (`SilveranReadingWidget`) and
-        // Continue (`InkAmpContinueWidget`) stay compiled for paid / SideStore later —
-        // registering them lets iOS resurrect blank / Edit “no books” tiles.
-        SideloadContinueWidget()
-    }
-}
+// @main WidgetBundle lives in SideloadContinueWidget.swift (registers only
+// SideloadContinueWidget). This Library widget stays in-tree for paid /
+// SideStore later — do not compile it into the Sideload iOS extension.
 
 private struct SilveranReadingWidgetView: View {
     let entry: SilveranReadingEntry

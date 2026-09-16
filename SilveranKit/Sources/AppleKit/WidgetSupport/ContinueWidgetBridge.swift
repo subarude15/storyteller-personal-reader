@@ -1,15 +1,12 @@
 import Foundation
 import SilveranKit
 
-#if canImport(AppIntents) && os(iOS)
-import AppIntents
-#endif
-
 /// Cross-process Continue widget → app bridge.
 ///
 /// App Group holds the snapshot; Darwin notifications poke the running app
-/// for play/pause when the widget intent cannot reach `AudioSessionActor`
-/// in-process (extension process / AltStore edge cases).
+/// for play/pause. Sideload widget path must not ship AppIntents /
+/// AudioPlaybackIntent — free AltStore cannot honor them and WidgetKit
+/// snapshot then kills the extension (blank tappable tile).
 public enum ContinueWidgetBridge {
     public static let toggleDarwinName = "com.punkrally.reader.continueToggle"
     public static let openDarwinName = "com.punkrally.reader.continueOpen"
@@ -101,28 +98,3 @@ public enum ContinueWidgetBridge {
         }
     }
 }
-
-#if canImport(AppIntents) && os(iOS)
-/// Interactive Continue play/pause. Prefers in-process audio session; falls
-/// back to Darwin/App Group so AltStore can still poke a backgrounded player.
-@available(iOS 17.0, *)
-public struct ContinueTogglePlaybackIntent: AudioPlaybackIntent {
-    public static let title: LocalizedStringResource = "Play or Pause"
-    public static let description = IntentDescription(
-        "Toggle ink+amp Continue playback from the Home Screen widget."
-    )
-
-    public init() {}
-
-    public func perform() async throws -> some IntentResult {
-        if await AudioSessionActor.shared.currentSnapshot() != nil {
-            try? await AudioSessionActor.shared.transport(.togglePlayPause)
-        } else {
-            // No live session in this process — ask the host app (may need open).
-            ContinueWidgetBridge.postToggle()
-            ContinueWidgetBridge.postOpenContinue()
-        }
-        return .result()
-    }
-}
-#endif
