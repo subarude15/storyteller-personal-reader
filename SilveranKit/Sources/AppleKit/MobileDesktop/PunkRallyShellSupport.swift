@@ -46,6 +46,14 @@ extension Notification.Name {
     public static let punkRallyYouTubeResolveFailed = Notification.Name(
         "punkRallyYouTubeResolveFailed"
     )
+    /// Match on YouTube search failed / timed out — host toast (no hang).
+    public static let punkRallyYouTubeSearchFailed = Notification.Name(
+        "punkRallyYouTubeSearchFailed"
+    )
+    /// Match on YouTube returned zero hits — host toast “No matches”.
+    public static let punkRallyYouTubeNoMatches = Notification.Name(
+        "punkRallyYouTubeNoMatches"
+    )
     /// Continue widget / `punkrally://continue` — open Home Continue / Now Playing.
     public static let punkRallyOpenContinue = Notification.Name("punkRallyOpenContinue")
     /// Host selected Home after OpenContinue — HomeTabView opens the Continue item.
