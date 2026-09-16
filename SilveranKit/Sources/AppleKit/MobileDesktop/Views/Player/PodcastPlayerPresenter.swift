@@ -163,7 +163,19 @@ public final class PodcastPlayerPresenter {
             object: nil,
             userInfo: startInfo
         )
+        Task { await Self.publishCoverArtwork(from: episode.coverURL) }
         return true
+    }
+
+    /// Feed Lock Screen / Control Center artwork from the episode cover URL.
+    private static func publishCoverArtwork(from coverURL: URL?) async {
+        guard let coverURL else { return }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: coverURL)
+            await AudioSessionActor.shared.setSessionArtwork(data)
+        } catch {
+            // Keep Now Playing without art; mini-player may still load later.
+        }
     }
 
     /// Clears a transient start error after the user dismisses it.

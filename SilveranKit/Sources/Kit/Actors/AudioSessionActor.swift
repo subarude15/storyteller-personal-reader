@@ -185,6 +185,9 @@ public actor AudioSessionActor {
         0.75, 1.0, 1.1, 1.2, 1.3, 1.5, 2.0, 5.0,
     ]
 
+    /// Shared −/+ skip used by in-app podcast controls and Lock Screen / CC.
+    public static let podcastSkipInterval: TimeInterval = 15
+
     private var currentKind: AudioSessionKind?
     private var artworkData: Data?
     private var readaloudTitle: String?
@@ -232,6 +235,8 @@ public actor AudioSessionActor {
     /// When set, this podcast arm is in-app YouTube (playhead keyed by video id).
     private var podcastYouTubeVideoID: String?
     private var youtubePlayheadTask: Task<Void, Never>?
+    /// Keeps MPNowPlayingInfoCenter elapsed/rate fresh while a podcast/YouTube session is live.
+    private var podcastNowPlayingTask: Task<Void, Never>?
 
     private init() {}
 
@@ -327,12 +332,14 @@ public actor AudioSessionActor {
         }
 
         await configureNowPlayingCommands(for: .podcast(episodeID))
+        await publishPodcastState()
         await player.play()
         guard await waitForPodcastTimeProgress(timeout: 5.0) else {
             podcastIsPlaying = false
             await publishPodcastState()
             throw AudiobookSessionError.podcastStartFailed(episodeID)
         }
+        startPodcastNowPlayingTicker()
         startYouTubePlayheadTickerIfNeeded()
     }
 
@@ -383,6 +390,8 @@ public actor AudioSessionActor {
         guard case .podcast = currentKind else { return }
         youtubePlayheadTask?.cancel()
         youtubePlayheadTask = nil
+        podcastNowPlayingTask?.cancel()
+        podcastNowPlayingTask = nil
         await podcastPlayer?.stop()
         podcastPlayer = nil
         podcastEpisodeID = nil
@@ -466,6 +475,21 @@ public actor AudioSessionActor {
                     name: Notification.Name("punkRallyPodcastShouldPersistProgress"),
                     object: nil
                 )
+            }
+        }
+    }
+
+    /// Push elapsed/rate to the system Now Playing center while podcast/YouTube plays
+    /// (Lock Screen scrubber freezes without this — mini-player polls separately).
+    private func startPodcastNowPlayingTicker() {
+        podcastNowPlayingTask?.cancel()
+        podcastNowPlayingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, let self else { return }
+                guard case .podcast = await self.currentKind else { return }
+                guard await self.podcastIsPlaying else { continue }
+                await self.publishPodcastState()
             }
         }
     }
@@ -689,16 +713,19 @@ public actor AudioSessionActor {
     public func setSessionCover(_ data: Data?, for bookID: BookID) async {
         guard let currentKind, currentKind.bookID == bookID else { return }
         artworkData = data
-        switch currentKind {
-            case .audiobook:
-                await updateNowPlaying(audiobookNowPlaying(from: await makeState()))
-            case .readaloud:
-                await updateNowPlaying(
-                    readaloudNowPlaying(from: await SMILPlayerActor.shared.getCurrentState())
-                )
-            case .podcast:
-                await publishPodcastState()
-        }
+        await refreshNowPlayingForCurrentKind()
+    }
+
+    /// Artwork for the live session (podcast/YouTube cover or book cover) → Lock Screen.
+    public func setSessionArtwork(_ data: Data?) async {
+        guard currentKind != nil else { return }
+        artworkData = data
+        await refreshNowPlayingForCurrentKind()
+    }
+
+    /// Re-publish Now Playing (e.g. on background so Lock Screen shows fresh elapsed).
+    public func refreshNowPlaying() async {
+        await refreshNowPlayingForCurrentKind()
     }
 
     public func closeAudiobook() async {
@@ -788,6 +815,9 @@ public actor AudioSessionActor {
                         let advanced = await waitForPodcastTimeProgress(timeout: 1.6)
                         podcastIsPlaying = advanced
                         await publishPodcastState()
+                        if advanced {
+                            startPodcastNowPlayingTicker()
+                        }
                     case .pause:
                         await podcastPlayer?.pause()
                         podcastIsPlaying = false
@@ -1420,16 +1450,16 @@ public actor AudioSessionActor {
     private func configureNowPlayingCommands(for kind: AudioSessionKind) async {
         guard let presenter = SilveranPlatform.nowPlaying else { return }
         let supportsChangePlaybackPosition: Bool
-        if case .audiobook = kind {
-            supportsChangePlaybackPosition = true
-        } else if case .podcast = kind {
-            supportsChangePlaybackPosition = true
-        } else {
-            supportsChangePlaybackPosition = false
+        switch kind {
+            case .audiobook, .podcast:
+                supportsChangePlaybackPosition = true
+            case .readaloud:
+                supportsChangePlaybackPosition = false
         }
+        let skip = Self.podcastSkipInterval
         await presenter.configureCommands(
-            skipForwardInterval: 15,
-            skipBackwardInterval: 15,
+            skipForwardInterval: skip,
+            skipBackwardInterval: skip,
             supportsChangePlaybackPosition: supportsChangePlaybackPosition,
             supportsChangePlaybackRate: false,
         ) { command in
@@ -1452,9 +1482,26 @@ public actor AudioSessionActor {
         }
     }
 
+    private func refreshNowPlayingForCurrentKind() async {
+        switch currentKind {
+            case .podcast:
+                await updateNowPlaying(await podcastNowPlaying())
+            case .audiobook:
+                await updateNowPlaying(audiobookNowPlaying(from: await makeState()))
+            case .readaloud:
+                await updateNowPlaying(
+                    readaloudNowPlaying(from: await SMILPlayerActor.shared.getCurrentState())
+                )
+            case nil:
+                await updateNowPlaying(nil)
+        }
+    }
+
     private func handleRemoteCommand(_ command: RemoteCommand) async {
         switch command {
-            case .play, .togglePlayPause:
+            case .play:
+                try? await transport(.play)
+            case .togglePlayPause:
                 try? await transport(.togglePlayPause)
             case .pause:
                 try? await transport(.pause)
@@ -1462,6 +1509,7 @@ public actor AudioSessionActor {
                 switch currentKind {
                     case .audiobook:
                         await AudiobookActor.shared.skipForward(interval)
+                        await publishState()
                     case .readaloud:
                         await SMILPlayerActor.shared.skipForward(seconds: interval)
                     case .podcast:
@@ -1473,6 +1521,7 @@ public actor AudioSessionActor {
                 switch currentKind {
                     case .audiobook:
                         await AudiobookActor.shared.skipBackward(interval)
+                        await publishState()
                     case .readaloud:
                         await SMILPlayerActor.shared.skipBackward(seconds: interval)
                     case .podcast:
@@ -1483,9 +1532,16 @@ public actor AudioSessionActor {
             case .changePlaybackPosition(let position):
                 if case .audiobook = currentKind {
                     await AudiobookActor.shared.seekWithinCurrentChapter(to: position)
+                    await publishState()
                 } else if case .podcast = currentKind {
                     await podcastPlayer?.seek(to: position)
                     await publishPodcastState()
+                    if podcastYouTubeVideoID != nil {
+                        NotificationCenter.default.post(
+                            name: Notification.Name("punkRallyPodcastShouldPersistProgress"),
+                            object: nil
+                        )
+                    }
                 }
             case .changePlaybackRate(let rate):
                 await setPlaybackRate(rate)

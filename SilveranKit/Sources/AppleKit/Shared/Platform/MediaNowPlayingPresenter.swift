@@ -45,7 +45,9 @@ public final class MediaNowPlayingPresenter: NowPlayingPresenting {
     }
 
     public func clear() {
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        let center = MPNowPlayingInfoCenter.default()
+        center.nowPlayingInfo = nil
+        center.playbackState = .stopped
     }
 
     public func configureCommands(

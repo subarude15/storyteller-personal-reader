@@ -319,7 +319,11 @@ public struct PodcastPlayerView: View {
         VStack(spacing: 16) {
             HStack(spacing: 40) {
                 Button {
-                    Task { await AudioSessionActor.shared.skipPlayback(by: -15) }
+                    Task {
+                        await AudioSessionActor.shared.skipPlayback(
+                            by: -AudioSessionActor.podcastSkipInterval
+                        )
+                    }
                 } label: {
                     Image(systemName: "gobackward.15")
                         .font(.title2)
@@ -351,7 +355,11 @@ public struct PodcastPlayerView: View {
                 .accessibilityLabel(isOpening ? "Loading" : (isPlaying ? "Pause" : "Play"))
 
                 Button {
-                    Task { await AudioSessionActor.shared.skipPlayback(by: 15) }
+                    Task {
+                        await AudioSessionActor.shared.skipPlayback(
+                            by: AudioSessionActor.podcastSkipInterval
+                        )
+                    }
                 } label: {
                     Image(systemName: "goforward.15")
                         .font(.title2)
