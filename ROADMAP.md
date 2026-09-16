@@ -21,7 +21,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 **Now: Glance / system Now Playing** — Lock Screen + Control Center via existing `MediaNowPlayingPresenter` / `NowPlayingPresenting` (title, show/artist, artwork, duration, elapsed, rate, play/pause/±skip/scrub). Podcasts + matched YouTube + books on the shared player. No Home Screen widgets / CarPlay / Watch.
 
-**Await Josh smoke after Sideload green:** play a podcast or matched YouTube → lock phone → sees title/art → pause/skip from Lock Screen / Control Center.
+**Ship note (Glance):** tip `257e44e` ([PR 13](https://github.com/subarude15/storyteller-personal-reader/pull/13)) — Sideload green [35157502050](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35157502050). **Await Josh smoke:** play a podcast or matched YouTube → lock phone → sees title/art → pause/skip from Lock Screen / Control Center. After Josh verifies → move Glance to Shipped.
 
 **Next after Josh verifies Glance:** YouTube playhead sync (Storyteller blob) — or LAN failover if Josh reorders.
 
@@ -92,7 +92,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 6. ~~Silence-trim~~ → **Shipped** (`d8af263`; Josh verified)
 7. ~~In-app YouTube / Match~~ → **Shipped** (`a0722eb`; Josh confirmed)
 8. ~~YouTube playhead local~~ → **Shipped** (`fc82893`; await Josh smoke)
-9. **Glance / system Now Playing** → **Now** (this cut; await Sideload + Josh Lock Screen smoke)
+9. **Glance / system Now Playing** → **Now** (tip `257e44e`; Sideload green [35157502050](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35157502050); await Josh Lock Screen smoke)
 10. **YouTube playhead sync** — Storyteller blob (Next after Josh verifies Glance)
 11. **One-tap LAN failover**: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
 
@@ -113,7 +113,7 @@ Strict order (Smokey / Nas-ty):
 3. ~~Full in-app YouTube embed/SDK~~ → **superseded** by hybrid + in-app YouTube v1 + Match
 4. ~~Match on YouTube~~ → **Shipped** (`a0722eb`; Josh confirmed)
 5. ~~YouTube playhead persist (local)~~ → **Shipped** (`fc82893`; await Josh smoke) — Storyteller sync Later
-6. **Glance / Lock Screen** → **Now** (system Now Playing; widgets parked until paid/SideStore)
+6. **Glance / Lock Screen** → **Now** (tip `257e44e` Sideload green; await Josh; widgets parked until paid/SideStore)
 7. **YouTube playhead sync** — Storyteller blob after Glance verified (Next)
 8. **SponsorBlock-style skip** — additive seek on in-app YouTube (not podcast Clean)
 9. **One-tap LAN failover**: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
