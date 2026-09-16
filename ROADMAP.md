@@ -17,9 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **P0 Continue widget blank (tap works)** — App Group snapshot harden tip >= `21b1fc3`. Cover/title/play-pause must render on Home Screen Continue widget (tap deep-link already OK). Confirm `ContinueWidgetSnapshotStore` / App Group write+read on Sideload; re-publish snapshot on launch / Continue / playback changes. Soft polish anytime (Cleaning… vs episode time-left).
+- **P0 Free AltStore App Groups blocked** (Josh: stamp `11d` + clean reinstall; Continue blank + Library “no books”) — tip >= `212c11d`. Sideload: honest Continue = deep-link `punkrally://continue` + never-blank **Open ink+amp** (no live App Group shelf). Hide/drop Library configure picker on Sideload. Document in `SIDELOAD.md` (paid Apple ID / SideStore for live shelf). Same cut: Home podcast tiles never white-on-white (`coverURL: nil` → dark charcoal + POD). Soft polish anytime.
 
-**Do not start silence-trim / CarPlay / Watch app / fancy Island unless Josh reorders.**
+**Do not start CarPlay / Watch / paid-team App Group chase unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
@@ -58,7 +58,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **Mini-player slim** — scrub + −15/+15 removed from mini (status-cluster cut)
 
 ### Widgets
-- [~] **Continue home widget + Sideload App Group** — tip `9cfdfc2` / harden `e944b58` / `21b1fc3`; widgets extension in Sideload IPA; App Group shared; tap deep-link works; **P0 blank UI** (cover/title/controls) — see Now
+- [~] **Continue home widget + Sideload App Group** — tip `9cfdfc2` / bake `212c11d`; tap deep-link works; **free AltStore does not grant App Groups** (Josh confirmed) — see Now for honest Sideload UX
 ### Stats
 - [x] **SessionTracker local** — ebook / audiobook / readaloud / podcast → Home + Stats tab (`c627bbe`, Sideload [35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694))
 - [x] **Cross-device Stats sync** — tip `c5791ec` (`a5226d6` + BookServiceActor fix); private Storyteller collection `.inkamp.stats.v1` blob (same auth as place sync); session-id LWW merge (no double-count / no drop); footer Synced / Syncing… / Offline · local only; Settings last sync time; Sideload green [35028364424](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35028364424)
@@ -74,7 +74,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 2. ~~Cross-device Stats sync~~ → **Shipped** (`c5791ec`)
 3. ~~NAS `AD_STRIP_URL` worker~~ → **Shipped** (`e00d800` + `:20129`; Josh confirmed Clean ad-free)
 4. ~~Hybrid video~~ → **Shipped** (`87b56cd`; Josh confirmed)
-5. ~~Continue widget scaffold~~ → landed (`9cfdfc2`+`21b1fc3`); **P0 blank widget UI** → **Now** (App Group snapshot harden tip >= `21b1fc3`)
+5. ~~Continue widget scaffold~~ → landed (`9cfdfc2`+`212c11d`); **P0 free AltStore App Groups** → **Now** (honest deep-link Continue + POD dark placeholders tip >= `212c11d`)
 
 ### Soft UX polish (anytime)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
