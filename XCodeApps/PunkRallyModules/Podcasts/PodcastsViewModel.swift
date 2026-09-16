@@ -198,6 +198,9 @@ final class PodcastsViewModel {
         if let feedURL {
             userInfo["feedURL"] = feedURL
         }
+        if let youtube = episode.watchOnYouTubeURL {
+            userInfo["youtubeURL"] = youtube
+        }
 
         PodcastRecentStore.shared.record(
             PodcastRecentEntry(
@@ -228,7 +231,8 @@ final class PodcastsViewModel {
     ) -> PRPodcastMediaKind {
         if let override { return override }
         if episode.hasAudioAndVideo, let feedURL {
-            return PodcastMediaPreferenceStore.shared.preference(for: feedURL) ?? .audio
+            // Prefer Video when the show has no saved A|V choice yet.
+            return PodcastMediaPreferenceStore.shared.preference(for: feedURL) ?? .video
         }
         if episode.videoURL != nil, episode.audioURL == nil { return .video }
         return .audio
@@ -266,7 +270,8 @@ final class PodcastsViewModel {
             durationSeconds: episode.durationSeconds,
             coverURL: episode.coverURL,
             feedURL: feedURL,
-            mediaKindRaw: mediaKind.rawValue
+            mediaKindRaw: mediaKind.rawValue,
+            youtubeURL: episode.watchOnYouTubeURL
         )
     }
 

@@ -22,6 +22,8 @@ public final class PodcastPlayerPresenter {
         /// True when the chosen enclosure is video (full Now Playing card; shared player).
         public let isVideo: Bool
         public let coverURL: URL?
+        /// External YouTube handoff when there is no RSS video enclosure (full NP only).
+        public let youtubeURL: URL?
 
         public init(
             id: String,
@@ -31,7 +33,8 @@ public final class PodcastPlayerPresenter {
             audioURL: URL,
             duration: TimeInterval? = nil,
             isVideo: Bool = false,
-            coverURL: URL? = nil
+            coverURL: URL? = nil,
+            youtubeURL: URL? = nil
         ) {
             self.id = id
             self.title = title
@@ -41,6 +44,7 @@ public final class PodcastPlayerPresenter {
             self.duration = duration
             self.isVideo = isVideo
             self.coverURL = coverURL
+            self.youtubeURL = youtubeURL
         }
     }
 

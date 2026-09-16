@@ -57,6 +57,9 @@ public struct PRPodcastEpisode: Identifiable, Equatable, Sendable {
     public let summary: String?
     public let audioURL: URL?
     public let videoURL: URL?
+    /// YouTube watch URL from link / show notes / iTunes text when present.
+    /// Handoff only — never treated as an in-app video enclosure.
+    public let youtubeURL: URL?
     public let durationSeconds: TimeInterval?
     public let publishedAt: Date?
     public let episodeNumber: Int?
@@ -69,6 +72,7 @@ public struct PRPodcastEpisode: Identifiable, Equatable, Sendable {
         summary: String? = nil,
         audioURL: URL? = nil,
         videoURL: URL? = nil,
+        youtubeURL: URL? = nil,
         durationSeconds: TimeInterval? = nil,
         publishedAt: Date? = nil,
         episodeNumber: Int? = nil,
@@ -80,6 +84,7 @@ public struct PRPodcastEpisode: Identifiable, Equatable, Sendable {
         self.summary = summary
         self.audioURL = audioURL
         self.videoURL = videoURL
+        self.youtubeURL = youtubeURL
         self.durationSeconds = durationSeconds
         self.publishedAt = publishedAt
         self.episodeNumber = episodeNumber
@@ -90,6 +95,12 @@ public struct PRPodcastEpisode: Identifiable, Equatable, Sendable {
     /// True when the feed published both an audio and a video enclosure.
     public var hasAudioAndVideo: Bool {
         audioURL != nil && videoURL != nil
+    }
+
+    /// External YouTube handoff when there is no RSS video enclosure to play in-app.
+    public var watchOnYouTubeURL: URL? {
+        guard videoURL == nil else { return nil }
+        return youtubeURL
     }
 
     public var isFileRecentlyAdded: Bool {
