@@ -88,7 +88,16 @@ public enum ContinueWidgetPublisher {
 
     private static func publishSession(_ snapshot: AudioSessionSnapshot?) async {
         guard let snapshot else {
-            // Cleared session — leave last Home Continue publish to HomeTabView.
+            // Session ended — keep title/cover, clear playing so the tile isn't stuck.
+            let last = ContinueWidgetSnapshotStore.loadSnapshot()
+            guard last.isPlaying else { return }
+            ContinueWidgetSnapshotStore.publish(
+                title: last.title,
+                subtitle: last.subtitle,
+                isPlaying: false,
+                kind: last.kind,
+                coverData: nil,
+            )
             return
         }
 
