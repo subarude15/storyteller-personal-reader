@@ -17,9 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Match on YouTube v1** — tip >= `cca28ec` (extract video-id P0). Episodes with no watch URL in RSS (Sounds Like A Cult channel-only, Vergecast none): explicit **Match on YouTube** on episode sheet / full NP (not mini). Invidious search `{YOUTUBE_RESOLVE_URL}/api/v1/search` (`http://192.168.1.2:20130`) → confirm sheet (top ~5: title + channel + duration) → pick → reuse resolve + Play in ink+amp; persist chosen watch URL per episode. Soft timeout; never auto-pick. Soft polish anytime.
+- Soft polish anytime. **SponsorBlock / Glance / LAN stay Later. Widgets stay parked.**
 
-**SponsorBlock / Glance / LAN stay Later. Widgets stay parked.**
+**Ship note (Match on YouTube v1):** tip on this PR — episodes with no watch URL (Sounds Like A Cult channel-only, Vergecast none) show **Match on YouTube** on episode sheet / full NP; Invidious search → confirm top ~5 → persist + Play in ink+amp. Await Josh smoke on home Wi‑Fi (`http://192.168.1.2:20130`).
 
 **Do not start CarPlay / Watch / paid App Groups / SponsorBlock / auto-match unless Josh reorders.**
 ## Shipped
@@ -57,6 +57,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **P0 Podcast resume / Home Continue stall** — tip `7eb0a9e`; Josh confirmed; Loading until playhead advances; Pause only when truly playing; Sideload green [35031138576](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35031138576)
 - [x] **In-app YouTube v1** — tip `bd32690`; Settings resolve URL → Invidious/Piped → shared AVPlayer video path; soft timeout; toast + Watch on YouTube handoff
 - [x] **P0 YouTube extract video-id only** — channel / @handle no longer fake-Play; first valid watch URL wins; chips gated on `videoID`; Resolving… then toast/handoff
+- [x] **Match on YouTube v1** — tip on this PR; search + confirm + persist; Sideload CI + Josh smoke pending
 ### Shell polish
 - [x] **Mini-player above tab bar** — per-tab inset (`be395da`, Sideload [35008731469](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35008731469)); Josh confirmed
 - [x] **Mini / full player polish** — −15/+15, elapsed|scrub|remaining, podcast cover on mini (`b8c85f9` / tip ≥ `70866b7`, Sideload [35011914260](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35011914260)); Josh ready for next

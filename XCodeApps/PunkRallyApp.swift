@@ -123,6 +123,16 @@ public struct PunkRallyTabView: View {
                 showShellToast("Couldn't play YouTube · opening app")
             }
             .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyYouTubeSearchFailed)
+            ) { _ in
+                showShellToast("Couldn't search YouTube")
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyYouTubeNoMatches)
+            ) { _ in
+                showShellToast("No matches")
+            }
+            .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyPlayPodcastEpisode)
             ) { note in
                 playPodcast(from: note.userInfo)

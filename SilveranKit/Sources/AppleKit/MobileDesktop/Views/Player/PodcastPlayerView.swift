@@ -24,6 +24,8 @@ public struct PodcastPlayerView: View {
     @State private var showPlaybackQueue = false
     @State private var videoPlayer: AVPlayer?
     @State private var isResolvingYouTube = false
+    @State private var showYouTubeMatch = false
+    @State private var matchEpoch = 0
 
     public init(episode: PodcastPlayerPresenter.Episode, onClose: @escaping () -> Void) {
         self.episode = episode
@@ -36,6 +38,19 @@ public struct PodcastPlayerView: View {
             return current
         }
         return episode
+    }
+
+    /// Confirmed watch URL: live presenter, else Match store / feed id.
+    private var effectiveYouTubeURL: URL? {
+        _ = matchEpoch
+        if let url = live.youtubeURL, PodcastYouTubeURL.videoID(from: url) != nil {
+            return url
+        }
+        return PodcastMatchedYouTubeStore.shared.watchURL(for: live.id)
+    }
+
+    private var showsMatchOnYouTube: Bool {
+        !live.isVideo && effectiveYouTubeURL == nil
     }
 
     public var body: some View {
@@ -65,9 +80,7 @@ public struct PodcastPlayerView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if let youtubeURL = live.youtubeURL,
-                    PodcastYouTubeURL.videoID(from: youtubeURL) != nil
-                {
+                if let youtubeURL = effectiveYouTubeURL {
                     VStack(spacing: 8) {
                         if !live.isVideo {
                             Button {
@@ -94,6 +107,15 @@ public struct PodcastPlayerView: View {
                         .buttonStyle(.bordered)
                         .accessibilityHint("Opens YouTube in Safari or the YouTube app")
                     }
+                } else if showsMatchOnYouTube {
+                    Button {
+                        showYouTubeMatch = true
+                    } label: {
+                        Label("Match on YouTube", systemImage: "magnifyingglass")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityHint("Search YouTube and confirm the matching video")
                 }
             }
 
@@ -173,6 +195,20 @@ public struct PodcastPlayerView: View {
         }
         .sheet(isPresented: $showPlaybackQueue) {
             PodcastPlaybackQueueView()
+        }
+        .sheet(isPresented: $showYouTubeMatch) {
+            PodcastYouTubeMatchSheet(
+                showTitle: live.showTitle,
+                episodeTitle: live.title,
+                onPick: { hit in
+                    showYouTubeMatch = false
+                    PodcastMatchedYouTubeStore.shared.save(watchURL: hit.watchURL, for: live.id)
+                    matchEpoch += 1
+                    Task { await playYouTubeInApp(watchURL: hit.watchURL) }
+                },
+                onCancel: { showYouTubeMatch = false }
+            )
+            .presentationDetents([.medium, .large])
         }
         .navigationBarBackButtonHidden(true)
     }
