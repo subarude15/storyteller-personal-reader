@@ -84,16 +84,20 @@ To provide a flawless 1-click install on free Apple IDs, the **Silveran Reader S
 | **Home Continue Hero & Sync Chip** | **Kept** | Dynamic resume from library/shelf. |
 | **Bundle ID** | Clean `com.punkrally.reader` | Single bundle ID, avoids split identifier confusion. |
 | **Continue Widget Extension** | **Kept** | Embedded in Sideload IPA (`com.punkrally.reader.widgets`). Burns a second App ID — intentional for Home Screen Continue. |
-| **App Group** | `group.com.punkrally.reader` | Shared by app + widgets for Continue snapshot / recent stores. **Not** a Keychain access group. |
+| **App Group** | `group.com.punkrally.reader` (literal in Sideload + widgets entitlements / `SILVERAN_WIDGET_APP_GROUP`) | Shared by app + widgets for Continue snapshot / recent stores. **Not** a Keychain access group. Never ship unexpanded `$(APP_GROUP_ID)` in the Sideload IPA. |
 | **CarPlay Entitlement & Scene** | **Removed** | Free developer accounts cannot sign `com.apple.developer.carplay-audio` or CarPlay scenes. |
 | **watchOS Companion** | **Excluded** | Companion apps burn additional App IDs on personal teams. |
 | **Keychain Access Groups** | Fallback to default | Single app uses default app keychain without team group errors. Never reintroduce `KEYCHAIN_ACCESS_GROUP` on Sideload. |
 
 ### Continue widget + AltStore notes
 
-- **App Group id:** `group.com.punkrally.reader` (`APP_GROUP_ID` / `SILVERAN_WIDGET_APP_GROUP`).
+- **App Group id (baked literal):** `group.com.punkrally.reader`
+  - Sideload entitlements (`SilveranReaderSideload.entitlements`) and widgets entitlements (`SilveranReaderWidgets.entitlements`) embed this string **literally** — never `$(APP_GROUP_ID)` in the Sideload IPA (unsigned `package-ipa` does not expand entitlement placeholders; AltStore would resign a broken group).
+  - Sideload + widgets Info keys `SILVERAN_WIDGET_APP_GROUP` are also the literal `group.com.punkrally.reader` (same reason).
+  - Paid/Automatic Xcode iOS target may still use `$(APP_GROUP_ID)` from xcconfig; Sideload path must not.
 - AltStore resigns the app **and** the widgets extension; expect two App IDs (`.reader` + `.reader.widgets`) plus the App Group registration.
-- Home Screen: Add Widget → **Continue** (cover + title + play/pause). Tap opens `punkrally://continue` → Now Playing / Home Continue.
+- Free-team caveat: if Continue stays empty after install, Console should show `[ContinueWidget] appGroup=… container=nil` — AltStore free resign sometimes drops application-groups. Fix: delete app → reinstall IPA → open ink+amp once (publishes snapshot) → re-add widget. If container stays nil after that, the free profile blocked the group.
+- Home Screen: Add Widget → **Continue** (cover + title + play/pause; empty state shows **Open ink+amp**, never a blank tile). Tap opens `punkrally://continue` → Now Playing / Home Continue.
 - Play/pause uses `AudioPlaybackIntent` + Darwin/App Group bridge while audio is running. If remote pause fails after resign, use **system Lock Screen Now Playing** (already wired) or open the app.
 - Lock Screen WidgetKit accessory tiles are optional; system Now Playing remains the primary Lock Screen control surface.
 

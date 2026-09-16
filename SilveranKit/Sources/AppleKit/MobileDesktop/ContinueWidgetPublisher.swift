@@ -45,7 +45,9 @@ public enum ContinueWidgetPublisher {
         }
     }
 
-    /// Refresh from Home Continue when nothing is on the shared session.
+    /// Refresh from Home Continue. Live audio session always wins (books via
+    /// cachedCoverData); otherwise write the Home continueItem even when cover
+    /// bytes are nil. Never silently no-op when `title` is non-nil.
     public static func publishHomeContinue(
         title: String?,
         subtitle: String?,
@@ -55,7 +57,7 @@ public enum ContinueWidgetPublisher {
         Task { @MainActor in
             let session = await AudioSessionActor.shared.currentSnapshot()
             if session != nil {
-                // Live session wins over Home queue.
+                await publishSession(session)
                 return
             }
             ContinueWidgetSnapshotStore.publish(

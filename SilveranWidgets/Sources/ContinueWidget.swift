@@ -29,12 +29,14 @@ struct ContinueTimelineProvider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (ContinueEntry) -> Void) {
+        SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "timeline")
         completion(
             ContinueEntry(date: Date(), snapshot: ContinueWidgetSnapshotStore.loadSnapshot())
         )
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<ContinueEntry>) -> Void) {
+        SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "timeline")
         let entry = ContinueEntry(
             date: Date(),
             snapshot: ContinueWidgetSnapshotStore.loadSnapshot(),
@@ -99,7 +101,9 @@ private struct ContinueWidgetView: View {
             HStack(alignment: .top, spacing: 8) {
                 cover(size: 52)
                 Spacer(minLength: 0)
-                playPauseButton
+                if entry.snapshot.hasItem {
+                    playPauseButton
+                }
             }
             titleBlock(lineLimit: 2)
             Spacer(minLength: 0)
@@ -123,7 +127,9 @@ private struct ContinueWidgetView: View {
                             .foregroundStyle(ContinuePalette.secondary)
                     }
                     Spacer(minLength: 0)
-                    playPauseButton
+                    if entry.snapshot.hasItem {
+                        playPauseButton
+                    }
                 }
             }
         }
@@ -134,23 +140,27 @@ private struct ContinueWidgetView: View {
     private var accessoryRectangular: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(entry.snapshot.title ?? "Continue")
+                Text(displayTitle)
                     .font(.headline)
                     .lineLimit(1)
-                Text(entry.snapshot.subtitle ?? "ink+amp")
+                Text(displaySubtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
-            playPauseButton
+            if entry.snapshot.hasItem {
+                playPauseButton
+            }
         }
     }
 
     private var accessoryCircular: some View {
         ZStack {
             AccessoryWidgetBackground()
-            Image(systemName: entry.snapshot.isPlaying ? "pause.fill" : "play.fill")
+            Image(systemName: entry.snapshot.hasItem
+                ? (entry.snapshot.isPlaying ? "pause.fill" : "play.fill")
+                : "book.fill")
                 .font(.title3.weight(.semibold))
         }
     }
@@ -158,20 +168,18 @@ private struct ContinueWidgetView: View {
 
     @ViewBuilder
     private var playPauseButton: some View {
-        if entry.snapshot.hasItem {
-            #if os(iOS)
-            Button(intent: ContinueTogglePlaybackIntent()) {
-                playPauseLabel
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(entry.snapshot.isPlaying ? "Pause" : "Play")
-            #else
-            Link(destination: InkAmpContinueLink.toggleURL) {
-                playPauseLabel
-            }
-            .accessibilityLabel(entry.snapshot.isPlaying ? "Pause" : "Play")
-            #endif
+        #if os(iOS)
+        Button(intent: ContinueTogglePlaybackIntent()) {
+            playPauseLabel
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(entry.snapshot.isPlaying ? "Pause" : "Play")
+        #else
+        Link(destination: InkAmpContinueLink.toggleURL) {
+            playPauseLabel
+        }
+        .accessibilityLabel(entry.snapshot.isPlaying ? "Pause" : "Play")
+        #endif
     }
 
     private var playPauseLabel: some View {
@@ -184,17 +192,36 @@ private struct ContinueWidgetView: View {
 
     private func titleBlock(lineLimit: Int) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(entry.snapshot.title ?? "Nothing in progress")
+            Text(displayTitle)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(ContinuePalette.primary)
                 .lineLimit(lineLimit)
-            if let subtitle = entry.snapshot.subtitle {
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(ContinuePalette.secondary)
-                    .lineLimit(1)
-            }
+            Text(displaySubtitle)
+                .font(.caption)
+                .foregroundStyle(ContinuePalette.secondary)
+                .lineLimit(1)
         }
+    }
+
+    /// Never-blank: live title, else last remembered title, else invite to open.
+    private var displayTitle: String {
+        if let title = entry.snapshot.title, !title.isEmpty {
+            return title
+        }
+        if let fallback = ContinueWidgetSnapshotStore.lastTitleFallback() {
+            return fallback
+        }
+        return "Open ink+amp"
+    }
+
+    private var displaySubtitle: String {
+        if entry.snapshot.hasItem {
+            return entry.snapshot.subtitle ?? "ink+amp"
+        }
+        if entry.snapshot.title == nil, ContinueWidgetSnapshotStore.lastTitleFallback() != nil {
+            return "Open ink+amp"
+        }
+        return "Tap to continue"
     }
 
     private func cover(size: CGFloat) -> some View {

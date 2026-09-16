@@ -26,6 +26,6 @@
 		<string>com.apple.widgetkit-extension</string>
 	</dict>
 	<key>SILVERAN_WIDGET_APP_GROUP</key>
-	<string>$(APP_GROUP_ID)</string>
+	<string>group.com.punkrally.reader</string>
 </dict>
 </plist>

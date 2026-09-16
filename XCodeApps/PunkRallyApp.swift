@@ -377,6 +377,9 @@ private struct HomeTabView: View {
                 Task { await mediaViewModel?.refreshMetadata(source: "HomeMixed") }
                 Task { await publishContinueWidget() }
             }
+            .onChange(of: mixedQueue.continueItem?.id) { _, _ in
+                Task { await publishContinueWidget() }
+            }
             .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyPlayPodcastEpisode)
             ) { _ in

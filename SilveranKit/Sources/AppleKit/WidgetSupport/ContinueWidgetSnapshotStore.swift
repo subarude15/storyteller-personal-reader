@@ -63,7 +63,27 @@ public enum ContinueWidgetSnapshotStore {
         }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode(ContinueWidgetSnapshot.self, from: data)) ?? .empty
+        let snapshot = (try? decoder.decode(ContinueWidgetSnapshot.self, from: data)) ?? .empty
+        // Widget-extension local memory: survives empty reloads if App Group blips.
+        rememberLastTitle(snapshot.title)
+        return snapshot
+    }
+
+    /// Widget-extension local fallback when App Group snapshot is empty.
+    private static let lastTitleDefaultsKey = "inkamp.continueWidget.lastTitle"
+
+    public static func rememberLastTitle(_ title: String?) {
+        let defaults = UserDefaults.standard
+        if let title, !title.isEmpty {
+            defaults.set(title, forKey: lastTitleDefaultsKey)
+        }
+    }
+
+    public static func lastTitleFallback() -> String? {
+        let value = UserDefaults.standard.string(forKey: lastTitleDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value, !value.isEmpty else { return nil }
+        return value
     }
 
     public static func coverURL(for filename: String, bundle: Bundle = .main) -> URL? {
@@ -73,7 +93,8 @@ public enum ContinueWidgetSnapshotStore {
     }
 
     /// Publish the Continue / Now Playing tile. Pass `coverData` when available;
-    /// nil keeps the previous cover file when title matches.
+    /// nil keeps the previous cover file when title matches. Title-only writes are OK
+    /// (cover bytes may be nil for ebook / uncached covers).
     public static func publish(
         title: String?,
         subtitle: String?,
@@ -82,8 +103,9 @@ public enum ContinueWidgetSnapshotStore {
         coverData: Data?,
         deepLink: String = InkAmpContinueLink.continueURL.absoluteString,
     ) {
+        SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "publish")
         guard let container = SilveranWidgetSnapshotStore.sharedContainerURL() else {
-            debugLog("[ContinueWidgetSnapshotStore] App group container unavailable")
+            print("[ContinueWidget] publish skipped — App group container unavailable")
             return
         }
 
@@ -125,9 +147,10 @@ public enum ContinueWidgetSnapshotStore {
             encoder.outputFormatting = [.sortedKeys]
             let data = try encoder.encode(snapshot)
             try data.write(to: snapshotURL(in: container), options: [.atomic])
+            rememberLastTitle(title)
             reloadTimelines()
         } catch {
-            debugLog("[ContinueWidgetSnapshotStore] Failed to publish: \(error)")
+            print("[ContinueWidget] publish failed: \(error)")
         }
     }
 

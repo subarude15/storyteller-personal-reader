@@ -22,4 +22,10 @@ struct ContinueWidgetLinkTests {
         )
         #expect(SilveranWidgetConstants.continueWidgetKind == "InkAmpContinueWidget")
     }
+
+    @Test func appGroupIdentifierNeverUnexpanded() {
+        let id = SilveranWidgetSnapshotStore.appGroupIdentifier(bundle: .main)
+        #expect(!id.contains("$("))
+        #expect(!id.isEmpty)
+    }
 }

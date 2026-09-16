@@ -184,8 +184,9 @@ targets:
         # shared $(AppIdentifierPrefix) group; SecurityKeychainStore falls back
         # to the default (app-keyed) access group when this Info key is absent.
         KEYCHAIN_SERVICE: "$(KEYCHAIN_SERVICE)"
-        # App Group for Continue widget + Podcast*/Book recent stores (AltStore-friendly).
-        SILVERAN_WIDGET_APP_GROUP: "$(APP_GROUP_ID)"
+        # Literal App Group (not $(APP_GROUP_ID)): unsigned IPA must not ship
+        # unexpanded build-setting placeholders into Info / AltStore resign.
+        SILVERAN_WIDGET_APP_GROUP: group.com.punkrally.reader
         LSApplicationCategoryType: "public.app-category.books"
         NSLocalNetworkUsageDescription: "ink+amp needs local network access to connect to your Storyteller server and ad-strip worker."
         NSAppTransportSecurity:
@@ -256,7 +257,8 @@ targets:
         CFBundleExecutable: "$(EXECUTABLE_NAME)"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
-        SILVERAN_WIDGET_APP_GROUP: "$(APP_GROUP_ID)"
+        # Literal — must match Sideload + widgets entitlements for AltStore.
+        SILVERAN_WIDGET_APP_GROUP: group.com.punkrally.reader
     sources:
       - path: SilveranWidgets/Sources
     dependencies:

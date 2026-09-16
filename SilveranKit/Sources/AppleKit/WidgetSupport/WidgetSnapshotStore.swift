@@ -128,10 +128,13 @@ public enum SilveranWidgetSnapshotStore {
     public static func appGroupIdentifier(bundle: Bundle = .main) -> String {
         if let identifier = bundle.object(
             forInfoDictionaryKey: SilveranWidgetConstants.appGroupInfoKey
-        ) as? String,
-            !identifier.isEmpty
+        ) as? String
         {
-            return identifier
+            let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Reject empty / unexpanded build settings left in unsigned IPAs.
+            if !trimmed.isEmpty, !trimmed.contains("$(") {
+                return trimmed
+            }
         }
         return SilveranWidgetConstants.fallbackAppGroupIdentifier
     }
@@ -140,6 +143,16 @@ public enum SilveranWidgetSnapshotStore {
         FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: appGroupIdentifier(bundle: bundle)
         )
+    }
+
+    /// One-line Console probe: App Group id + whether the container URL resolved.
+    public static func logAppGroupAvailability(
+        source: String,
+        bundle: Bundle = .main,
+    ) {
+        let id = appGroupIdentifier(bundle: bundle)
+        let available = sharedContainerURL(bundle: bundle) != nil
+        print("[ContinueWidget] \(source) appGroup=\(id) container=\(available ? "ok" : "nil")")
     }
 
     public static func loadSnapshot(bundle: Bundle = .main) -> SilveranWidgetSnapshot {
