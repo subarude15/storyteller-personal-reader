@@ -17,11 +17,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **P0 Play in ink+amp channel handoff** (Josh: no Resolving…; opens channel not episode) — tip >= `bd32690`. `PodcastYouTubeURL.extract` must only accept URLs with a real video id (watch / youtu.be / embed / shorts / live); skip channel / @handle / /user/ /c/. Prefer first valid video URL when scanning feed. Chips only when `videoID != nil`. Play shows **Resolving…** until done; then toast + handoff. Invidious: `http://192.168.1.2:20130`. Soft polish anytime.
+- **Match on YouTube v1** — tip >= `cca28ec` (extract video-id P0). Episodes with no watch URL in RSS (Sounds Like A Cult channel-only, Vergecast none): explicit **Match on YouTube** on episode sheet / full NP (not mini). Invidious search `{YOUTUBE_RESOLVE_URL}/api/v1/search` (`http://192.168.1.2:20130`) → confirm sheet (top ~5: title + channel + duration) → pick → reuse resolve + Play in ink+amp; persist chosen watch URL per episode. Soft timeout; never auto-pick. Soft polish anytime.
 
-**SponsorBlock is Later. Widgets stay parked.**
+**SponsorBlock / Glance / LAN stay Later. Widgets stay parked.**
 
-**Do not start CarPlay / Watch / paid App Groups / SponsorBlock unless Josh reorders.**
+**Do not start CarPlay / Watch / paid App Groups / SponsorBlock / auto-match unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
@@ -51,6 +51,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **NAS `AD_STRIP_URL` full cut (option 2)** — tip `e00d800`; Settings **Ad strip URL** + **Test**; dumb ffmpeg worker `:20129`; upload Original → poll → Clean sibling (never delete Original); Josh confirmed Clean ad-free (`e00d800` + `:20129`); Sideload green [35038255753](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35038255753)
 - [x] **Silence-trim on NAS AD_STRIP** — tip `d8af263`; leading+trailing edge trim in Clean dumb pipeline; Josh verified health + job JSON on PrincessDonut `:20129`
 - [x] **Hybrid RSS video + Watch on YouTube** — tip `87b56cd`; video surface in full Now Playing for dual enclosures; Watch on YouTube chip (episode sheet + full NP, not mini); Sideload green; Josh confirmed
+- [x] **YouTube extract video-id only** — tip `cca28ec`; chips only when feed has real watch URL (channel/@handle skipped)
 - [x] **Episode status cluster + show filters + Josh UI stamps** — tip `b719921`; download glyph · Clean chip (incl. Clean failed) · Xm left/Played; show filters All|Downloaded|In progress|Clean pending; Shelf POD chrome; mini-player cover+title+play/pause(+close) only (scrub/−15/+15 stay on full Now Playing); Home/Library finishability text via `PlaybackFinishabilityCopy`; Sideload green [35023934089](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35023934089)
 - [x] **Podcast play queue** — tip `2f7deb4`; Play Next / Play Last in episode menus; `PodcastPlaybackQueueStore` + editable `PodcastPlaybackQueueView` (drag reorder, remove, clear finished); auto-advance on finish via shared player; persisted upcoming order; Sideload green [35025614228](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35025614228)
 - [x] **P0 Podcast resume / Home Continue stall** — tip `7eb0a9e`; Josh confirmed; Loading until playhead advances; Pause only when truly playing; Sideload green [35031138576](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35031138576)
