@@ -17,7 +17,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **P0 `inkamp.continue.v4` opaque containerBackground** — tip pending Josh smoke. Charcoal is the `containerBackground` fill (never `Color.clear`); white **Open ink+amp** / **Tap to continue**; SwiftUI+WidgetKit only; inline `punkrally://continue`. AltStore delete → reinstall → wipe old tiles → add ink+amp Continue only. Soft polish anytime.
+- **P0 `inkamp.continue.v4` opaque containerBackground** — tip `3cf76da` (await Josh smoke). Charcoal is the `containerBackground` fill (never `Color.clear`); white **Open ink+amp** / **Tap to continue**; SwiftUI+WidgetKit only; inline `punkrally://continue`. AltStore delete → reinstall → wipe old tiles → add ink+amp Continue only. Soft polish anytime.
 
 **Do not start CarPlay / Watch / paid App Groups / GLM mismatch paste unless Josh reorders.**
 ## Shipped
