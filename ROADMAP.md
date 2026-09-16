@@ -17,17 +17,19 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **One-tap LAN failover** — tip ≥ Glance Sideload `257e44e` (Josh confirmed Glance). Optional **LAN URL** on Storyteller source (default `http://192.168.1.2:1800`); short probe on home Wi‑Fi → prefer LAN for Storyteller API + downloads; soft fall back to public on failure. Settings status **Using LAN** / **Using public**. Same credentials both URLs. Soft polish anytime.
+- Soft polish anytime. **SponsorBlock / StoryAlign / widgets stay Later until Josh verifies LAN failover.**
 
-**Await Josh smoke after Sideload green:** on home Wi‑Fi library hits `192.168.1.2:1800`; off Wi‑Fi (or LAN down) still works via public URL.
+**Now: One-tap LAN failover** — tip `6423bae` ([PR 14](https://github.com/subarude15/storyteller-personal-reader/pull/14)) — Sideload green [35161811290](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35161811290). Optional **LAN URL** (default `http://192.168.1.2:1800`); probe → prefer LAN for Storyteller API + downloads; soft fall back to public. Settings **Using LAN** / **Using public**. Same credentials both URLs.
+
+**Await Josh smoke:** on home Wi‑Fi library hits `192.168.1.2:1800`; off Wi‑Fi (or LAN down) still works via public URL. After Josh verifies → move LAN to Shipped.
+
+**Next after Josh verifies LAN:** YouTube playhead sync (Storyteller blob) / StoryAlign phone import — per Later board.
 
 **Do not start Invidious/ad-strip URL changes / SponsorBlock / StoryAlign / widgets / CarPlay unless Josh reorders.**
 
 **Ship note (Glance):** tip `257e44e` ([PR 13](https://github.com/subarude15/storyteller-personal-reader/pull/13)) — Sideload green [35157502050](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35157502050). Josh confirmed Lock Screen / Control Center.
 
 **Ship note (YouTube playhead local):** tip `fc82893` ([PR 12](https://github.com/subarude15/storyteller-personal-reader/pull/12)) — Sideload green [35156077127](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35156077127).
-
-**Next after LAN:** YouTube playhead sync (Storyteller blob) / StoryAlign phone import — per Later board.
 ## Shipped
 
 ### Product / sync
@@ -95,7 +97,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 7. ~~In-app YouTube / Match~~ → **Shipped** (`a0722eb`; Josh confirmed)
 8. ~~YouTube playhead local~~ → **Shipped** (`fc82893`; await Josh smoke)
 9. ~~Glance / system Now Playing~~ → **Shipped** (`257e44e`; Josh confirmed)
-10. **One-tap LAN failover** → **Now** (Storyteller public ↔ `192.168.1.2:1800`)
+10. **One-tap LAN failover** → **Now** (tip `6423bae`; Sideload green [35161811290](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35161811290); await Josh smoke)
 11. **YouTube playhead sync** — Storyteller blob (Next after LAN)
 
 ### Soft UX polish (anytime)
@@ -116,8 +118,8 @@ Strict order (Smokey / Nas-ty):
 4. ~~Match on YouTube~~ → **Shipped** (`a0722eb`; Josh confirmed)
 5. ~~YouTube playhead persist (local)~~ → **Shipped** (`fc82893`; Josh confirmed resume)
 6. ~~Glance / Lock Screen~~ → **Shipped** (`257e44e`; Josh confirmed)
-7. ~~LAN failover~~ → **Now** (Storyteller public ↔ `192.168.1.2:1800`)
-8. **YouTube playhead sync** — Storyteller blob after local resume is solid
+7. **LAN failover** → **Now** (tip `6423bae` Sideload green; await Josh; Storyteller public ↔ `192.168.1.2:1800`)
+8. **YouTube playhead sync** — Storyteller blob after LAN verified (Next)
 9. **SponsorBlock-style skip** — additive seek on in-app YouTube (not podcast Clean)
 10. **Phone import → StoryAlign read-aloud** — Library Import → Storyteller upload → align → refresh
 11. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
