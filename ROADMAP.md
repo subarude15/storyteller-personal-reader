@@ -17,9 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **P0 Still blank after crash-proof isolate** (Josh stamp ~0712 on `62dd085`; tap opens book; tile blank) — tip `b50d34a` (`inkamp.continue.v3` lean paint; await Sideload green). Leaner `SideloadContinueWidget`: SwiftUI+WidgetKit only (no `SilveranAppleWidgets`); kind `inkamp.continue.v3`; full-bleed charcoal + white **Open ink+amp** / **Tap to continue**; inline `punkrally://continue`; zero AppIntents / App Group. **Do not mark Shipped until Josh verifies charcoal tile.** Soft polish anytime.
+- **P0 v3 still blank** (Josh: new kind, same blank+tap; IPA embeds `.appex` + `inkamp.continue.v3`) — tip >= `b50d34a` / `4c1fb6e`. Root cause candidate: `.containerBackground { Color.clear }` blanks the tile on iOS 17+. Cut `inkamp.continue.v4`: opaque charcoal as `containerBackground` fill (never clear); white **Open ink+amp** / **Tap to continue**; SwiftUI+WidgetKit only; inline `punkrally://continue`. Soft polish anytime.
 
-**Do not start CarPlay / Watch / paid-team App Group chase / GLM App Group mismatch paste unless Josh reorders.**
+**Do not start CarPlay / Watch / paid App Groups / GLM mismatch paste unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
