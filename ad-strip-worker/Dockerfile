@@ -1,8 +1,7 @@
-FROM python:3.12-slim
+# Prefer Alpine + apk (Synology Docker: debian apt-get has hung in the past).
+FROM python:3.12-alpine
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends ffmpeg curl \
-  && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache ffmpeg curl
 
 WORKDIR /app
 COPY requirements.txt .

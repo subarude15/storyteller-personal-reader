@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ink+amp ad-strip worker (dumb cut).
+ink+amp ad-strip worker (dumb cut + edge silence-trim).
 
 HTTP contract expected by PodcastAdStripHTTPPipeline:
   GET  /health
@@ -8,8 +8,8 @@ HTTP contract expected by PodcastAdStripHTTPPipeline:
   GET  /v1/jobs/{id}
   GET  /v1/jobs/{id}/audio
 
-Dumb cut = ffmpeg silence heuristics (leading ad-shaped block + edge silence).
-OmniRoute / LLM segment detect is Later — keep free-first when that lands.
+Dumb cut = ffmpeg silence heuristics (leading ad-shaped block) then leading +
+trailing edge silence trim. OmniRoute / LLM segment detect is Later.
 """
 
 from __future__ import annotations
@@ -36,9 +36,22 @@ MIN_AD_SECONDS = float(os.environ.get("AD_STRIP_MIN_AD", "5"))
 MAX_AD_SECONDS = float(os.environ.get("AD_STRIP_MAX_AD", "120"))
 SILENCE_NOISE = os.environ.get("AD_STRIP_SILENCE_NOISE", "-35dB")
 SILENCE_DURATION = float(os.environ.get("AD_STRIP_SILENCE_DURATION", "0.55"))
+# Cap how much quiet to shave from each edge after the ad cut (quiet intros/outros).
+MAX_EDGE_TRIM = float(os.environ.get("AD_STRIP_MAX_EDGE_TRIM", "8"))
+# Default on — set AD_STRIP_EDGE_TRIM=0 to skip edge trim (ad cut still runs).
+EDGE_TRIM = os.environ.get("AD_STRIP_EDGE_TRIM", "1").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
 
 app = Flask(__name__)
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    # Local selfcheck / non-root may point AD_STRIP_DATA elsewhere before jobs run.
+    pass
 
 _lock = threading.Lock()
 _jobs: dict[str, "Job"] = {}
@@ -55,6 +68,8 @@ class Job:
     output_path: Path | None = None
     source_name: str = "audio.mp3"
     cut_seconds: float | None = None
+    lead_trim_seconds: float | None = None
+    trail_trim_seconds: float | None = None
 
     def touch(self) -> None:
         self.updated_at = time.time()
@@ -70,6 +85,10 @@ class Job:
             out["error"] = self.error
         if self.cut_seconds is not None:
             out["cut_seconds"] = self.cut_seconds
+        if self.lead_trim_seconds is not None:
+            out["lead_trim_seconds"] = self.lead_trim_seconds
+        if self.trail_trim_seconds is not None:
+            out["trail_trim_seconds"] = self.trail_trim_seconds
         if self.status == "done":
             out["audio_url"] = f"/v1/jobs/{self.id}/audio"
         return out
@@ -104,8 +123,12 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _silence_ends(input_path: Path) -> list[float]:
-    """Return silence_end timestamps from ffmpeg silencedetect."""
+def _silence_regions(input_path: Path) -> list[tuple[float, float]]:
+    """Return (silence_start, silence_end) pairs from ffmpeg silencedetect.
+
+    Open trailing silence (start with no end — common at EOF) is returned with
+    end = +inf so edge trim can still pull the outro back.
+    """
     cmd = [
         "ffmpeg",
         "-hide_banner",
@@ -119,10 +142,26 @@ def _silence_ends(input_path: Path) -> list[float]:
     ]
     proc = _run(cmd)
     text = (proc.stderr or "") + "\n" + (proc.stdout or "")
-    ends: list[float] = []
-    for match in re.finditer(r"silence_end:\s*([0-9.]+)", text):
-        ends.append(float(match.group(1)))
-    return ends
+    # Walk chronologically so unpaired EOF silence keeps its start.
+    events: list[tuple[str, float]] = []
+    for m in re.finditer(r"silence_(start|end):\s*([0-9.]+)", text):
+        events.append((m.group(1), float(m.group(2))))
+    regions: list[tuple[float, float]] = []
+    open_start: float | None = None
+    for kind, ts in events:
+        if kind == "start":
+            open_start = ts
+        elif kind == "end" and open_start is not None:
+            if ts >= open_start:
+                regions.append((open_start, ts))
+            open_start = None
+    if open_start is not None:
+        regions.append((open_start, float("inf")))
+    return regions
+
+
+def _silence_ends(input_path: Path) -> list[float]:
+    return [end for _, end in _silence_regions(input_path) if end != float("inf")]
 
 
 def _duration_seconds(input_path: Path) -> float | None:
@@ -145,22 +184,89 @@ def _duration_seconds(input_path: Path) -> float | None:
         return None
 
 
-def _dumb_cut(input_path: Path, output_path: Path) -> float:
+def _ad_cut_seconds(regions: list[tuple[float, float]]) -> float:
+    """Cut after the first opening silence gap if the preceding block looks ad-sized.
+
+    Preceding length ≈ silence_start (content from t=0 until the first gap).
+    Only the first gap counts — later silence_end values must not look like ads
+    (quiet-intro + trailing silence used to false-trigger on EOF).
+    """
+    if not regions:
+        return 0.0
+    start, end = regions[0]
+    if start > AD_WINDOW_SECONDS:
+        return 0.0
+    if not (MIN_AD_SECONDS <= start <= MAX_AD_SECONDS):
+        return 0.0
+    if end == float("inf"):
+        return min(start + SILENCE_DURATION, AD_WINDOW_SECONDS)
+    if end > AD_WINDOW_SECONDS:
+        return start
+    return end
+
+
+def _edge_bounds(
+    regions: list[tuple[float, float]],
+    duration: float | None,
+    content_start: float,
+) -> tuple[float, float | None, float, float]:
+    """
+    Leading + trailing silence trim relative to content after the ad cut.
+    Returns (ss, to_or_none, lead_trimmed, trail_trimmed).
+    """
+    ss = content_start
+    lead = 0.0
+    trail = 0.0
+    to: float | None = None
+
+    if not EDGE_TRIM or MAX_EDGE_TRIM <= 0:
+        return ss, to, lead, trail
+
+    # Leading: silence that begins at/near content_start → advance to silence_end (capped).
+    for start, end in regions:
+        if start > content_start + 0.2:
+            break
+        if end <= content_start:
+            continue
+        # Silence overlaps the content start (typical quiet intro after cut / at file start).
+        trim_to = min(end, content_start + MAX_EDGE_TRIM)
+        if trim_to > content_start + 0.05:
+            lead = trim_to - content_start
+            ss = trim_to
+        break
+
+    if duration is None or duration <= ss + 0.25:
+        return ss, to, lead, trail
+
+    # Trailing: silence that reaches (near) EOF → pull end back (capped).
+    for start, end in reversed(regions):
+        if start >= duration:
+            continue
+        touches_eof = end == float("inf") or end >= duration - 0.35
+        if not touches_eof:
+            break
+        floor = max(ss + 0.25, duration - MAX_EDGE_TRIM)
+        new_to = max(floor, start)
+        if new_to < duration - 0.05:
+            trail = duration - new_to
+            to = new_to
+        break
+
+    return ss, to, lead, trail
+
+
+def _dumb_cut(input_path: Path, output_path: Path) -> tuple[float, float, float]:
     """
     Heuristic:
     1) Find first silence_end in the ad window whose preceding segment looks ad-sized.
-    2) Cut from that point and re-encode to mp3 for a stable Clean sibling.
-    3) If no ad-shaped gap, still re-encode so Clean is a real processed file.
-    Returns seconds cut from the start (0 if none).
+    2) Trim leading + trailing edge silence (capped) so quiet intros start at speech.
+    3) Re-encode to mp3 for a stable Clean sibling.
+    Returns (ad_cut_seconds, lead_trim, trail_trim).
     """
-    ends = _silence_ends(input_path)
-    cut_at = 0.0
-    for end in ends:
-        if end > AD_WINDOW_SECONDS:
-            break
-        if MIN_AD_SECONDS <= end <= MAX_AD_SECONDS:
-            cut_at = end
-            break
+    regions = _silence_regions(input_path)
+    duration = _duration_seconds(input_path)
+    cut_at = _ad_cut_seconds(regions)
+    ss, to, lead, trail = _edge_bounds(regions, duration, cut_at)
 
     cmd = [
         "ffmpeg",
@@ -169,8 +275,11 @@ def _dumb_cut(input_path: Path, output_path: Path) -> float:
         "-i",
         str(input_path),
     ]
-    if cut_at > 0:
-        cmd += ["-ss", f"{cut_at:.3f}"]
+    if ss > 0:
+        cmd += ["-ss", f"{ss:.3f}"]
+    if to is not None and to > ss:
+        # -t (duration) is less ambiguous than -to when combined with output -ss.
+        cmd += ["-t", f"{(to - ss):.3f}"]
     cmd += [
         "-c:a",
         "libmp3lame",
@@ -180,7 +289,7 @@ def _dumb_cut(input_path: Path, output_path: Path) -> float:
     ]
     proc = _run(cmd)
     if proc.returncode != 0 or not output_path.exists() or output_path.stat().st_size < 256:
-        # Fallback: stream-copy-ish re-encode without seek (still never delete Original).
+        # Fallback: re-encode without seek (still never delete Original).
         if output_path.exists():
             output_path.unlink(missing_ok=True)
         fallback = [
@@ -200,8 +309,8 @@ def _dumb_cut(input_path: Path, output_path: Path) -> float:
             raise RuntimeError(
                 f"ffmpeg failed (code={proc.returncode}): {(proc.stderr or '')[-800:]}"
             )
-        return 0.0
-    return cut_at
+        return 0.0, 0.0, 0.0
+    return cut_at, lead, trail
 
 
 def _download_url(url: str, dest: Path) -> None:
@@ -224,13 +333,15 @@ def _process_job(job_id: str) -> None:
     assert input_path is not None
     output_path = folder / "clean.mp3"
     try:
-        cut = _dumb_cut(input_path, output_path)
+        cut, lead, trail = _dumb_cut(input_path, output_path)
         with _lock:
             job = _jobs.get(job_id)
             if job is None:
                 return
             job.output_path = output_path
             job.cut_seconds = cut
+            job.lead_trim_seconds = lead
+            job.trail_trim_seconds = trail
             job.status = "done"
             job.touch()
     except Exception as exc:  # noqa: BLE001 — surface any strip failure to the client
@@ -259,6 +370,7 @@ def health() -> Any:
             "ok": ffmpeg_ok,
             "service": "inkamp-ad-strip",
             "mode": "dumb-cut",
+            "edge_trim": EDGE_TRIM,
             "ffmpeg": ffmpeg_ok,
         }
     )

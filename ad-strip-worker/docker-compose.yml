@@ -1,6 +1,7 @@
 # PrincessDonut (192.168.1.2) — ink+amp ad-strip worker
-# Deploy from this directory (or copy the folder onto the NAS):
+# Preferred NAS path: /volume1/docker/inkamp-ad-strip  (or repo ad-strip-worker/)
 #   docker compose up -d --build
+#   curl -fsS http://192.168.1.2:20129/health
 # App Settings → Ad strip URL: http://192.168.1.2:20129
 
 services:
@@ -14,12 +15,14 @@ services:
     environment:
       AD_STRIP_PORT: "20129"
       AD_STRIP_DATA: /data
-      # Optional knobs (defaults match dumb-cut heuristics):
+      # Optional knobs (defaults match dumb-cut + edge silence-trim):
       # AD_STRIP_AD_WINDOW: "180"
       # AD_STRIP_MIN_AD: "5"
       # AD_STRIP_MAX_AD: "120"
       # AD_STRIP_SILENCE_NOISE: "-35dB"
       # AD_STRIP_SILENCE_DURATION: "0.55"
+      # AD_STRIP_MAX_EDGE_TRIM: "8"   # max seconds trimmed from each edge
+      # AD_STRIP_EDGE_TRIM: "1"       # set 0 to disable edge trim (ad cut still runs)
     volumes:
       - ad_strip_data:/data
 

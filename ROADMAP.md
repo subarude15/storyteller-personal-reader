@@ -17,8 +17,8 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Park Home Screen widgets on free AltStore** — tip `7a05012` (docs `afaa28e`). Sideload IPA embeds **no** Widgets appex — verified no `PlugIns/*.appex` on [Actions 35100387902](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35100387902). Sources stay in-tree; revisit on paid Apple ID / SideStore. `punkrally://continue` deep link unchanged for in-app / Shortcuts.
-- **Next board (strict):** silence-trim → Glance/Watch → LAN failover — unless Josh reorders.
+- **Silence-trim on NAS AD_STRIP worker** — code/docs on `punk-rally-ios` (leading + trailing edge trim in Clean dumb pipeline; Alpine compose). **Await Josh redeploy + smoke** on PrincessDonut `:20129` before flipping Shipped. Widgets stay parked (no Sideload appex).
+- **Next after Josh verifies silence-trim:** Glance/Watch → LAN failover — unless Josh reorders.
 
 **Do not start CarPlay / Watch companion / paid App Groups / Home Screen widgets on free AltStore unless Josh reorders.**
 ## Shipped
@@ -80,7 +80,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ### Soft UX polish (anytime)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
 - ~~Stats push / description decode~~ → **Shipped** (`cf5c663`) — Josh confirmed
-- Cleaning… chip must not look like episode remaining (job ETA or plain Cleaning…; keep Xm left on progress separately)
+- Cleaning… chip must not look like episode remaining (job ETA or plain Cleaning…; keep Xm left on progress separately) — status cluster already separates job chip from Xm left
 - Separate **Couldn't save server** copy (≠ “Connection failed”)
 - Empty state when URL prefilled but no saved Storyteller source
 - Missing Storyteller covers (cosmetic; not a blocker)
@@ -90,9 +90,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 Strict order (Smokey / Nas-ty) — **Next board after widget park:**
 1. ~~NAS `AD_STRIP_URL` worker~~ → **Shipped** (`e00d800` + `:20129`)
-2. **Silence-trim** — with that worker (same pipeline family) ← **Next**
+2. **Silence-trim** — with that worker (same pipeline family) ← **Now** (code shipped; Josh redeploy/smoke before Shipped flip)
 3. ~~Full in-app YouTube embed/SDK~~ → **superseded** by hybrid (`87b56cd`)
-4. **Glance / Watch tile** — Lock Screen / system Now Playing first; Home Screen widgets parked until paid/SideStore
+4. **Glance / Watch tile** — Lock Screen / system Now Playing first; Home Screen widgets parked until paid/SideStore ← **Next after silence-trim verified**
 5. **One-tap LAN failover**: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
 6. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
 

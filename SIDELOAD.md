@@ -78,7 +78,7 @@ To provide a flawless 1-click install on free Apple IDs, the **Silveran Reader S
 |-----------|--------|------------------|
 | **Core Reader & EPUB/SMIL engine** | **Kept** | Full SilveranKit Storyteller reading and playback. |
 | **Storyteller Sync & Shelf** | **Kept** | Progress sync, server connect, and offline downloads. |
-| **Podcasts (RSS)** | **Kept** | Integrated 5-tab shell module. |
+| **Podcasts (RSS)** | **Kept** | Integrated 5-tab shell module. Clean downloads poll NAS AD_STRIP worker `:20129` (dumb cut + silence-trim); Original never deleted. No Sideload appex for this. |
 | **Reading Stats** | **Kept** | Local session analytics and stats strip. |
 | **Background Audio & Fetch** | **Kept** | Standard background playback and sync refresh. |
 | **Home Continue Hero & Sync Chip** | **Kept** | Dynamic resume from library/shelf. |
