@@ -80,8 +80,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
    - **Pre-subscribe show page** — title, art, author, full description readable without Subscribe; Subscribe stays primary CTA
    - **Subscribed chrome** — left text **Unsubscribe** (or Subscribed ▾); right **Done**; drop checkmark-as-unsubscribe
    - **Back → mini** — dismiss full Now Playing → slim `GlobalMiniPlayerBar` keeps playing (podcasts + in-app YouTube/RSS video); tap mini → expand; reuse existing mini host, don’t invent a second chrome
-2. **Phone import → StoryAlign read-aloud** — Library Import → Storyteller upload → align → refresh
-3. Soft UX polish (anytime) — see below
+2. **Browse podcasts (Apple charts/genres)** — Find empty state → Top charts + genre chips + cover grid (free Apple RSS charts, same stack as iTunes Search; no Podcast Index keys); tap → pre-subscribe show page; search field stays above
+3. **Phone import → StoryAlign read-aloud** — Library Import → Storyteller upload → align → refresh
+4. Soft UX polish (anytime) — see below
 
 ### Soft UX polish (anytime)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
@@ -103,9 +104,10 @@ Strict order (Smokey / Nas-ty):
 6. ~~Glance / Lock Screen~~ → **Shipped** (`257e44e`; Josh confirmed)
 7. ~~LAN failover~~ → **Shipped** (`4f9d27d`; Josh confirmed Using LAN / Using public)
 8. ~~YouTube playhead sync~~ → **Now** (Storyteller blob; phone↔iPad)
-9. **SponsorBlock-style skip** — additive seek on in-app YouTube (not podcast Clean)
-10. **Phone import → StoryAlign read-aloud** — Library Import → Storyteller upload → align → refresh (**board Next** after playhead sync)
-11. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
+9. **Browse podcasts (Apple charts/genres)** — Find empty → charts/genres grid (board Next after UX polish)
+10. **SponsorBlock-style skip** — additive seek on in-app YouTube (not podcast Clean)
+11. **Phone import → StoryAlign read-aloud** — Library Import → Storyteller upload → align → refresh (**board Next** after playhead sync)
+12. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
 
 **P1000 (Later, not ahead of StoryAlign / YouTube playhead sync):** **Podcast cross-device sync** — subscriptions + playheads only. **Downloads stay per-device**.
 ## Constraints
