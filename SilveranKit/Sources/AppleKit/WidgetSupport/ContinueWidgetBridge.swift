@@ -1,7 +1,7 @@
 import Foundation
 import SilveranKit
 
-#if canImport(AppIntents)
+#if canImport(AppIntents) && os(iOS)
 import AppIntents
 #endif
 
@@ -11,8 +11,8 @@ import AppIntents
 /// for play/pause when the widget intent cannot reach `AudioSessionActor`
 /// in-process (extension process / AltStore edge cases).
 public enum ContinueWidgetBridge {
-    public static let toggleDarwinName = "com.punkrally.reader.continueToggle" as CFString
-    public static let openDarwinName = "com.punkrally.reader.continueOpen" as CFString
+    public static let toggleDarwinName = "com.punkrally.reader.continueToggle"
+    public static let openDarwinName = "com.punkrally.reader.continueOpen"
     private static let defaultsToggleKey = "continue.widget.pendingToggle"
     private static let defaultsOpenKey = "continue.widget.pendingOpen"
 
@@ -25,7 +25,7 @@ public enum ContinueWidgetBridge {
         suite?.synchronize()
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName(toggleDarwinName),
+            CFNotificationName(toggleDarwinName as CFString),
             nil,
             nil,
             true,
@@ -37,7 +37,7 @@ public enum ContinueWidgetBridge {
         suite?.synchronize()
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName(openDarwinName),
+            CFNotificationName(openDarwinName as CFString),
             nil,
             nil,
             true,
@@ -78,7 +78,7 @@ public enum ContinueWidgetBridge {
             CFNotificationCenterGetDarwinNotifyCenter(),
             retained.toOpaque(),
             toggleCallback,
-            toggleDarwinName,
+            toggleDarwinName as CFString,
             nil,
             .deliverImmediately,
         )
@@ -86,7 +86,7 @@ public enum ContinueWidgetBridge {
             CFNotificationCenterGetDarwinNotifyCenter(),
             retained.toOpaque(),
             openCallback,
-            openDarwinName,
+            openDarwinName as CFString,
             nil,
             .deliverImmediately,
         )
@@ -107,8 +107,8 @@ public enum ContinueWidgetBridge {
 /// back to Darwin/App Group so AltStore can still poke a backgrounded player.
 @available(iOS 17.0, *)
 public struct ContinueTogglePlaybackIntent: AudioPlaybackIntent {
-    public static var title: LocalizedStringResource = "Play or Pause"
-    public static var description = IntentDescription(
+    public static let title: LocalizedStringResource = "Play or Pause"
+    public static let description = IntentDescription(
         "Toggle ink+amp Continue playback from the Home Screen widget."
     )
 
