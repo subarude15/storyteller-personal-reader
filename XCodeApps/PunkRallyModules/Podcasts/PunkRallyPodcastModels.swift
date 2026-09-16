@@ -10,6 +10,7 @@
 //  SPDX-License-Identifier: AGPL-3.0-only
 
 import Foundation
+import SilveranKit
 
 /// A podcast show sourced from an RSS feed. Covers only Storyteller-free RSS podcasts
 /// (podcasts are NOT Storyteller OPDS in the ink+amp model).
@@ -99,8 +100,11 @@ public struct PRPodcastEpisode: Identifiable, Equatable, Sendable {
 
     /// YouTube affordances when there is no RSS video enclosure (hybrid RSS video
     /// already plays in-app — keep YouTube for audio-only / notes-only episodes).
+    /// Only when we have a real video id — channel / @handle URLs must not show chips.
     public var watchOnYouTubeURL: URL? {
         guard videoURL == nil else { return nil }
+        guard let youtubeURL else { return nil }
+        guard PodcastYouTubeURL.videoID(from: youtubeURL) != nil else { return nil }
         return youtubeURL
     }
 

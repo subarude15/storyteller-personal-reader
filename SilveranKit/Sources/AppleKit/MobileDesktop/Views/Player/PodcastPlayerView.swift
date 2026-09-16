@@ -65,7 +65,9 @@ public struct PodcastPlayerView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if let youtubeURL = live.youtubeURL {
+                if let youtubeURL = live.youtubeURL,
+                    PodcastYouTubeURL.videoID(from: youtubeURL) != nil
+                {
                     VStack(spacing: 8) {
                         if !live.isVideo {
                             Button {
@@ -90,7 +92,6 @@ public struct PodcastPlayerView: View {
                                 .font(.subheadline.weight(.semibold))
                         }
                         .buttonStyle(.bordered)
-                        .disabled(isResolvingYouTube)
                         .accessibilityHint("Opens YouTube in Safari or the YouTube app")
                     }
                 }

@@ -55,7 +55,8 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **Episode status cluster + show filters + Josh UI stamps** — tip `b719921`; download glyph · Clean chip (incl. Clean failed) · Xm left/Played; show filters All|Downloaded|In progress|Clean pending; Shelf POD chrome; mini-player cover+title+play/pause(+close) only (scrub/−15/+15 stay on full Now Playing); Home/Library finishability text via `PlaybackFinishabilityCopy`; Sideload green [35023934089](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35023934089)
 - [x] **Podcast play queue** — tip `2f7deb4`; Play Next / Play Last in episode menus; `PodcastPlaybackQueueStore` + editable `PodcastPlaybackQueueView` (drag reorder, remove, clear finished); auto-advance on finish via shared player; persisted upcoming order; Sideload green [35025614228](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35025614228)
 - [x] **P0 Podcast resume / Home Continue stall** — tip `7eb0a9e`; Josh confirmed; Loading until playhead advances; Pause only when truly playing; Sideload green [35031138576](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35031138576)
-
+- [x] **In-app YouTube v1** — tip `bd32690`; Settings resolve URL → Invidious/Piped → shared AVPlayer video path; soft timeout; toast + Watch on YouTube handoff
+- [x] **P0 YouTube extract video-id only** — channel / @handle no longer fake-Play; first valid watch URL wins; chips gated on `videoID`; Resolving… then toast/handoff
 ### Shell polish
 - [x] **Mini-player above tab bar** — per-tab inset (`be395da`, Sideload [35008731469](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35008731469)); Josh confirmed
 - [x] **Mini / full player polish** — −15/+15, elapsed|scrub|remaining, podcast cover on mini (`b8c85f9` / tip ≥ `70866b7`, Sideload [35011914260](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35011914260)); Josh ready for next
@@ -80,7 +81,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 4. ~~Hybrid video~~ → **Shipped** (`87b56cd`; Josh confirmed)
 5. ~~Continue widget scaffold~~ → landed; **Parked on free AltStore** (no Sideload appex); revisit paid/SideStore
 6. ~~Silence-trim~~ → **Shipped** (`d8af263`; Josh verified)
-7. ~~In-app YouTube~~ → **Now** (playback-first on tip; SponsorBlock Later; await Josh smoke)
+7. ~~In-app YouTube~~ → **Shipped** (`bd32690`); P0 extract video-id only on this PR — await Josh smoke
 
 ### Soft UX polish (anytime)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
