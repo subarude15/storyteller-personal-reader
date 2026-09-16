@@ -76,8 +76,12 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ## Next (strict order — do not reorder)
 
 ### After YouTube playhead sync
-1. **Phone import → StoryAlign read-aloud** — Library Import → Storyteller upload → align → refresh
-2. Soft UX polish (anytime) — see below
+1. **Podcast / player UX polish (Josh 2026-09-16)** — one Sideload PR:
+   - **Pre-subscribe show page** — title, art, author, full description readable without Subscribe; Subscribe stays primary CTA
+   - **Subscribed chrome** — left text **Unsubscribe** (or Subscribed ▾); right **Done**; drop checkmark-as-unsubscribe
+   - **Back → mini** — dismiss full Now Playing → slim `GlobalMiniPlayerBar` keeps playing (podcasts + in-app YouTube/RSS video); tap mini → expand; reuse existing mini host, don’t invent a second chrome
+2. **Phone import → StoryAlign read-aloud** — Library Import → Storyteller upload → align → refresh
+3. Soft UX polish (anytime) — see below
 
 ### Soft UX polish (anytime)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
