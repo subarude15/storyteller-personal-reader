@@ -194,7 +194,8 @@ public struct PodcastAdStripHTTPPipeline: PodcastAdStripPipeline {
     private func createJob(base: URL, originalURL: URL) async throws -> String {
         guard let url = Self.endpoint(base, "v1/jobs") else {
             throw PodcastAdStripError.badResponse("jobs URL")
-        }        let boundary = "Boundary-\(UUID().uuidString)"
+        }
+        let boundary = "Boundary-\(UUID().uuidString)"
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue(
