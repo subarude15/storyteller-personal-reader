@@ -266,7 +266,8 @@ public struct PodcastAdStripHTTPPipeline: PodcastAdStripPipeline {
     private func downloadAudio(base: URL, jobID: String, cleanURL: URL) async throws {
         guard let audioURL = Self.endpoint(base, "v1/jobs/\(jobID)/audio") else {
             throw PodcastAdStripError.badResponse("audio URL")
-        }        var request = URLRequest(url: audioURL)
+        }
+        var request = URLRequest(url: audioURL)
         request.timeoutInterval = max(requestTimeoutSeconds, 60)
         let (tempURL, response) = try await URLSession.shared.download(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
