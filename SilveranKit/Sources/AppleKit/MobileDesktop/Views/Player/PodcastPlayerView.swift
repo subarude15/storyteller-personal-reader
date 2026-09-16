@@ -8,7 +8,8 @@ import SwiftUI
 /// and Now Playing use, and reuses the shared `PlaybackRateButton` so
 /// podcasts get the identical speed control as audiobooks/readaloud — no
 /// second speed UI. −15 / play / +15 and elapsed|scrub|remaining match the mini.
-/// Video enclosures use a shared AVPlayer surface; YouTube is handoff-only.
+/// Video enclosures and in-app YouTube use a shared AVPlayer surface;
+/// Watch on YouTube remains the external fallback.
 public struct PodcastPlayerView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
@@ -22,10 +23,19 @@ public struct PodcastPlayerView: View {
     @State private var isScrubbing = false
     @State private var showPlaybackQueue = false
     @State private var videoPlayer: AVPlayer?
+    @State private var isResolvingYouTube = false
 
     public init(episode: PodcastPlayerPresenter.Episode, onClose: @escaping () -> Void) {
         self.episode = episode
         self.onClose = onClose
+    }
+
+    /// Prefer the live presenter episode so Play in ink+amp can flip audio → video surface.
+    private var live: PodcastPlayerPresenter.Episode {
+        if let current = presenter.episode, current.id == episode.id {
+            return current
+        }
+        return episode
     }
 
     public var body: some View {
@@ -35,7 +45,7 @@ public struct PodcastPlayerView: View {
             artworkBlock
 
             VStack(spacing: 8) {
-                if episode.isVideo {
+                if live.isVideo {
                     Text("VIDEO")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.secondary)
@@ -45,29 +55,48 @@ public struct PodcastPlayerView: View {
                         .clipShape(Capsule())
                 }
 
-                Text(episode.title)
+                Text(live.title)
                     .font(.title3.weight(.semibold))
                     .multilineTextAlignment(.center)
 
-                if let showTitle = episode.showTitle {
+                if let showTitle = live.showTitle {
                     Text(showTitle)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
 
-                if let youtubeURL = episode.youtubeURL, !episode.isVideo {
-                    Button {
-                        openURL(youtubeURL)
-                    } label: {
-                        Label("Watch on YouTube", systemImage: "play.rectangle.on.rectangle")
-                            .font(.subheadline.weight(.semibold))
+                if let youtubeURL = live.youtubeURL {
+                    VStack(spacing: 8) {
+                        if !live.isVideo {
+                            Button {
+                                Task { await playYouTubeInApp(watchURL: youtubeURL) }
+                            } label: {
+                                if isResolvingYouTube {
+                                    Label("Resolving…", systemImage: "hourglass")
+                                        .font(.subheadline.weight(.semibold))
+                                } else {
+                                    Label("Play in ink+amp", systemImage: "play.rectangle.fill")
+                                        .font(.subheadline.weight(.semibold))
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(isResolvingYouTube)
+                            .accessibilityHint("Resolves a stream and plays in the app")
+                        }
+                        Button {
+                            openURL(youtubeURL)
+                        } label: {
+                            Label("Watch on YouTube", systemImage: "play.rectangle.on.rectangle")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(isResolvingYouTube)
+                        .accessibilityHint("Opens YouTube in Safari or the YouTube app")
                     }
-                    .buttonStyle(.bordered)
-                    .accessibilityHint("Opens YouTube in Safari or the YouTube app")
                 }
             }
 
-            if let summary = episode.summary {
+            if let summary = live.summary {
                 ScrollView {
                     Text(summary)
                         .font(.footnote)
@@ -91,7 +120,7 @@ public struct PodcastPlayerView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(uiColor: .systemBackground))
         .toolbar(.hidden, for: .tabBar)
-        .task(id: episode.id) {
+        .task(id: "\(live.id)-\(live.isVideo)-\(live.audioURL.absoluteString)") {
             await refreshVideoPlayer()
         }
         .onChange(of: presenter.isOpening) { _, opening in
@@ -166,7 +195,7 @@ public struct PodcastPlayerView: View {
 
     @ViewBuilder
     private var artworkBlock: some View {
-        if episode.isVideo {
+        if live.isVideo {
             ZStack {
                 Color.black
                 if let videoPlayer {
@@ -187,7 +216,7 @@ public struct PodcastPlayerView: View {
                     Image(uiImage: cover)
                         .resizable()
                         .scaledToFill()
-                } else if let url = episode.coverURL {
+                } else if let url = live.coverURL {
                     AsyncImage(url: url) { phase in
                         switch phase {
                             case .success(let image):
@@ -209,7 +238,7 @@ public struct PodcastPlayerView: View {
     private var placeholderArt: some View {
         ZStack {
             Color.secondary.opacity(0.12)
-            Image(systemName: episode.isVideo ? "play.rectangle.fill" : "mic.fill")
+            Image(systemName: live.isVideo ? "play.rectangle.fill" : "mic.fill")
                 .font(.system(size: 44))
                 .foregroundStyle(.secondary)
         }
@@ -309,11 +338,37 @@ public struct PodcastPlayerView: View {
     }
 
     private func refreshVideoPlayer() async {
-        guard episode.isVideo else {
+        guard live.isVideo else {
             videoPlayer = nil
             return
         }
         videoPlayer = await AudioSessionActor.shared.podcastAVPlayer()
+    }
+
+    /// Resolve via Settings YouTube URL → same openPodcast + video surface as RSS video.
+    private func playYouTubeInApp(watchURL: URL) async {
+        guard !isResolvingYouTube else { return }
+        isResolvingYouTube = true
+        defer { isResolvingYouTube = false }
+        do {
+            let pick = try await PodcastYouTubeResolver.shared.resolve(watchURL: watchURL)
+            let videoEpisode = PodcastPlayerPresenter.Episode(
+                id: live.id,
+                title: live.title,
+                showTitle: live.showTitle,
+                summary: live.summary,
+                audioURL: pick.url,
+                duration: live.duration,
+                isVideo: true,
+                coverURL: live.coverURL,
+                youtubeURL: watchURL
+            )
+            _ = await presenter.play(videoEpisode)
+            await refreshVideoPlayer()
+        } catch {
+            NotificationCenter.default.post(name: .punkRallyYouTubeResolveFailed, object: nil)
+            openURL(watchURL)
+        }
     }
 }
 #endif

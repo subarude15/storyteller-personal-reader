@@ -17,11 +17,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **In-app YouTube playback v1** — tip >= `d8af263`. Resolve playable media URL from YouTube video id (Settings Invidious/Piped-style base URL + Test, like Ad strip); play on existing `PodcastVideoSurfaceView` / shared AVPlayer (reuse RSS video path). Keep **Watch on YouTube** as external fallback. Soft timeout on resolve. Soft polish anytime.
+- **In-app YouTube playback v1** — code on tip (see `docs/YOUTUBE_INAPP.md`). Settings Invidious/Piped-style resolve URL + Test → progressive/HLS on existing `PodcastVideoSurfaceView` / shared AVPlayer (RSS video path). Keep **Watch on YouTube** as external fallback. Soft ~20s resolve timeout. Soft polish anytime. **Await Josh Sideload smoke** before flipping Shipped.
 
 **SponsorBlock-style skip is Later** (additive seek — do not implement now). Widgets stay parked (no Sideload appex).
 
-**Do not start CarPlay / Watch companion / paid App Groups / Home Screen widgets / SponsorBlock unless Josh reorders.**
+**Do not start CarPlay / Watch companion / paid App Groups / Home Screen widgets / SponsorBlock / Glance / LAN unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
@@ -79,7 +79,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 4. ~~Hybrid video~~ → **Shipped** (`87b56cd`; Josh confirmed)
 5. ~~Continue widget scaffold~~ → landed; **Parked on free AltStore** (no Sideload appex); revisit paid/SideStore
 6. ~~Silence-trim~~ → **Shipped** (`d8af263`; Josh verified)
-7. ~~In-app YouTube~~ → **Now** (playback-first; SponsorBlock Later)
+7. ~~In-app YouTube~~ → **Now** (playback-first on tip; SponsorBlock Later; await Josh smoke)
 
 ### Soft UX polish (anytime)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
@@ -92,16 +92,16 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ---
 ## Later / ideas (not blocking)
 
-Strict order (Smokey / Nas-ty):
+Strict order (Smokey / Nas-ty) — **Next board after Josh ships in-app YouTube smoke:**
 1. ~~NAS `AD_STRIP_URL` worker~~ → **Shipped** (`e00d800` + `:20129`)
 2. ~~Silence-trim~~ → **Shipped** (`d8af263`; Josh verified)
-3. **In-app YouTube playback v1** → **Now** (Settings resolve URL + shared AVPlayer; Watch on YouTube fallback)
-4. **SponsorBlock-style skip** — additive seek over community segments after in-app YouTube plays; no new NAS worker required for v1 (public API OK; self-host optional later)
-5. **Glance / Watch tile** — Lock Screen / system Now Playing first; Home Screen widgets parked until paid/SideStore
+3. ~~Full in-app YouTube embed/SDK~~ → **superseded** by hybrid (`87b56cd`) + in-app YouTube v1 (resolve URL, no official SDK)
+4. **SponsorBlock-style skip** — Later only; additive seek; keep player seekable (do not implement now)
+5. **Glance / Watch tile** — Lock Screen / system Now Playing first; Home Screen widgets parked until paid/SideStore ← **after in-app YouTube Shipped**
 6. **One-tap LAN failover**: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
 7. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
 
-**P1000 (Later, not ahead of in-app YouTube / SponsorBlock / Glance / LAN):** **Podcast cross-device sync** — subscriptions + playheads only (same Storyteller account pair as place sync / Stats). **Downloads stay per-device** (no cross-device file sync).
+**P1000 (Later, not ahead of SponsorBlock / Glance / LAN):** **Podcast cross-device sync** — subscriptions + playheads only (same Storyteller account pair as place sync / Stats). **Downloads stay per-device** (no cross-device file sync).
 ## Constraints
 
 - Keep `SilveranKit`; do not merge Enve tree (modules + AGPL only)

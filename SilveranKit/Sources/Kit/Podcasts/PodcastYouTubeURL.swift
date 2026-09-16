@@ -3,7 +3,9 @@
 //  SilveranKit
 //
 //  Detect YouTube watch URLs in RSS link / show notes / iTunes text.
-//  Handoff only — never treat as in-app video enclosure.
+//  Extract/normalize video id for in-app resolve (Settings → YouTube resolve URL)
+//  or external Watch on YouTube handoff. Never treat the watch page itself as an
+//  RSS video enclosure — resolve to a progressive/HLS URL first.
 //
 //  SPDX-License-Identifier: AGPL-3.0-only
 
@@ -11,7 +13,7 @@ import Foundation
 
 /// Finds the first YouTube watch/share URL in free-form feed text or HTML.
 public enum PodcastYouTubeURL: Sendable {
-    /// Hosts we treat as YouTube (open externally via Safari / YouTube app).
+    /// Hosts we treat as YouTube (resolve in-app or open via Safari / YouTube app).
     private static let hosts: Set<String> = [
         "youtube.com",
         "www.youtube.com",

@@ -529,6 +529,7 @@ struct EpisodeRow: View {
     @Environment(\.openURL) private var openURL
     @State private var downloadStore = PodcastDownloadStore.shared
     @State private var showMediaPicker = false
+    @State private var isResolvingYouTube = false
 
     private var isDownloaded: Bool {
         downloadStore.isDownloaded(episode.id)
@@ -581,16 +582,35 @@ struct EpisodeRow: View {
                 }
                 statusCluster
                 if let youtubeURL = episode.watchOnYouTubeURL {
-                    Button {
-                        openURL(youtubeURL)
-                    } label: {
-                        Label("Watch on YouTube", systemImage: "play.rectangle.on.rectangle")
-                            .font(.caption.weight(.semibold))
+                    VStack(alignment: .leading, spacing: 6) {
+                        Button {
+                            Task { await playYouTubeInApp(watchURL: youtubeURL) }
+                        } label: {
+                            if isResolvingYouTube {
+                                Label("Resolving…", systemImage: "hourglass")
+                                    .font(.caption.weight(.semibold))
+                            } else {
+                                Label("Play in ink+amp", systemImage: "play.rectangle.fill")
+                                    .font(.caption.weight(.semibold))
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(isResolvingYouTube)
+                        .accessibilityHint("Resolves a stream and plays in the app")
+
+                        Button {
+                            openURL(youtubeURL)
+                        } label: {
+                            Label("Watch on YouTube", systemImage: "play.rectangle.on.rectangle")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(isResolvingYouTube)
+                        .accessibilityHint("Opens YouTube in Safari or the YouTube app")
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
                     .padding(.top, 2)
-                    .accessibilityHint("Opens YouTube in Safari or the YouTube app")
                 }
             }
             Spacer(minLength: 0)
@@ -799,6 +819,21 @@ struct EpisodeRow: View {
             viewModel.play(episode: episode, mediaKind: .video, feedURL: showFeedURL)
         } else {
             viewModel.play(episode: episode, mediaKind: .audio, feedURL: showFeedURL)
+        }
+    }
+
+    /// Resolve YouTube → shared AVPlayer video path (same as RSS video).
+    private func playYouTubeInApp(watchURL: URL) async {
+        guard !isResolvingYouTube else { return }
+        isResolvingYouTube = true
+        defer { isResolvingYouTube = false }
+        let ok = await viewModel.playYouTubeInApp(
+            episode: episode,
+            watchURL: watchURL,
+            feedURL: showFeedURL
+        )
+        if !ok {
+            openURL(watchURL)
         }
     }
 }

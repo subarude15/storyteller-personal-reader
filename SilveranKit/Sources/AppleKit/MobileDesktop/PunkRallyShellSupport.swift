@@ -42,6 +42,10 @@ extension Notification.Name {
     public static let punkRallyStatsSyncFailed = Notification.Name("punkRallyStatsSyncFailed")
     /// Clean-path ad strip failed / timed out — host shows a short toast.
     public static let punkRallyAdStripFailed = Notification.Name("punkRallyAdStripFailed")
+    /// YouTube in-app resolve failed / timed out — host toast; caller may hand off to Safari.
+    public static let punkRallyYouTubeResolveFailed = Notification.Name(
+        "punkRallyYouTubeResolveFailed"
+    )
     /// Continue widget / `punkrally://continue` — open Home Continue / Now Playing.
     public static let punkRallyOpenContinue = Notification.Name("punkRallyOpenContinue")
     /// Host selected Home after OpenContinue — HomeTabView opens the Continue item.

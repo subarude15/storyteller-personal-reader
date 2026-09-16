@@ -12,6 +12,9 @@ public struct PodcastDownloadsSettingsView: View {
     @State private var adStripURLText = PodcastAdStripSettings.urlString
     @State private var adStripTestStatus: AdStripTestStatus = .idle
     @State private var adStripTestTask: Task<Void, Never>?
+    @State private var youtubeResolveURLText = PodcastYouTubeResolveSettings.urlString
+    @State private var youtubeResolveTestStatus: AdStripTestStatus = .idle
+    @State private var youtubeResolveTestTask: Task<Void, Never>?
 
     public init() {}
 
@@ -72,6 +75,52 @@ public struct PodcastDownloadsSettingsView: View {
                 Text("Ad strip URL")
             } footer: {
                 Text(adStripFooterText)
+            }
+
+            Section {
+                TextField("http://192.168.1.2:3000", text: $youtubeResolveURLText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                    .onChange(of: youtubeResolveURLText) { _, newValue in
+                        PodcastYouTubeResolveSettings.urlString = newValue
+                        if case .ok = youtubeResolveTestStatus { youtubeResolveTestStatus = .idle }
+                        if case .failed = youtubeResolveTestStatus { youtubeResolveTestStatus = .idle }
+                    }
+                Button {
+                    youtubeResolveTestTask?.cancel()
+                    youtubeResolveTestTask = Task { await runYouTubeResolveTest() }
+                } label: {
+                    HStack {
+                        Text("Test")
+                        Spacer()
+                        switch youtubeResolveTestStatus {
+                            case .idle:
+                                EmptyView()
+                            case .testing:
+                                ProgressView()
+                                    .controlSize(.small)
+                            case .ok(let detail):
+                                Text(detail)
+                                    .font(.caption)
+                                    .foregroundStyle(.green)
+                            case .failed(let detail):
+                                Text(detail)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.trailing)
+                        }
+                    }
+                }
+                .disabled({
+                    if case .testing = youtubeResolveTestStatus { return true }
+                    return false
+                }())
+            } header: {
+                Text("YouTube resolve URL")
+            } footer: {
+                Text(youtubeResolveFooterText)
             }
 
             Section {
@@ -154,12 +203,14 @@ public struct PodcastDownloadsSettingsView: View {
         }
         .onAppear {
             adStripURLText = PodcastAdStripSettings.urlString
+            youtubeResolveURLText = PodcastYouTubeResolveSettings.urlString
             if settings.autoCleanEnabled && !settings.hasSeenAutoCleanExplainer {
                 showExplainer = true
             }
         }
         .onDisappear {
             adStripTestTask?.cancel()
+            youtubeResolveTestTask?.cancel()
         }
     }
 
@@ -167,6 +218,15 @@ public struct PodcastDownloadsSettingsView: View {
         var text =
             "PrincessDonut worker base URL (no trailing path). Clean downloads upload Original, poll the job, then save a Clean sibling — Original is never deleted."
         if let err = PodcastAdStripSettings.lastReachError {
+            text += " Last error: \(err)."
+        }
+        return text
+    }
+
+    private var youtubeResolveFooterText: String {
+        var text =
+            "Invidious / Piped-style base URL (no trailing path). Play in ink+amp calls /api/v1/videos/{id} (or Piped /streams/{id}) and plays a progressive/HLS URL on the shared player. Soft timeout ~20s; failure toasts and opens Watch on YouTube."
+        if let err = PodcastYouTubeResolveSettings.lastReachError {
             text += " Last error: \(err)."
         }
         return text
@@ -204,6 +264,44 @@ public struct PodcastDownloadsSettingsView: View {
                     }
                     PodcastAdStripSettings.markUnreachable(message)
                     adStripTestStatus = .failed(message)
+            }
+        }
+    }
+
+    private func runYouTubeResolveTest() async {
+        await MainActor.run { youtubeResolveTestStatus = .testing }
+        PodcastYouTubeResolveSettings.urlString = youtubeResolveURLText
+        guard let base = PodcastYouTubeResolveSettings.baseURL else {
+            await MainActor.run {
+                youtubeResolveTestStatus = .failed("Enter a URL")
+                PodcastYouTubeResolveSettings.markUnreachable("empty URL")
+            }
+            return
+        }
+        let result = await PodcastYouTubeResolver.shared.testReachability(baseURL: base)
+        await MainActor.run {
+            switch result {
+                case .success(let label):
+                    PodcastYouTubeResolveSettings.clearOfflineState()
+                    youtubeResolveTestStatus = .ok(label)
+                case .failure(let error):
+                    let message: String
+                    switch error {
+                        case .timedOut:
+                            message = "Timed out"
+                        case .missingURL:
+                            message = "Enter a URL"
+                        case .missingVideoID:
+                            message = "Bad video id"
+                        case .unreachable(let detail):
+                            message = detail.isEmpty ? "Unreachable" : String(detail.prefix(80))
+                        case .badResponse(let detail):
+                            message = String(detail.prefix(80))
+                        case .noStream:
+                            message = "No stream"
+                    }
+                    PodcastYouTubeResolveSettings.markUnreachable(message)
+                    youtubeResolveTestStatus = .failed(message)
             }
         }
     }

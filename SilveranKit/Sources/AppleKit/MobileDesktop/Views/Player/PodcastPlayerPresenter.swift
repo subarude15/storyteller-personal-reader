@@ -22,7 +22,7 @@ public final class PodcastPlayerPresenter {
         /// True when the chosen enclosure is video (full Now Playing card; shared player).
         public let isVideo: Bool
         public let coverURL: URL?
-        /// External YouTube handoff when there is no RSS video enclosure (full NP only).
+        /// YouTube watch URL for in-app resolve and/or Watch on YouTube handoff (full NP).
         public let youtubeURL: URL?
 
         public init(

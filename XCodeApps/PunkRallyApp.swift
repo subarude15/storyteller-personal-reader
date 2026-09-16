@@ -118,6 +118,11 @@ public struct PunkRallyTabView: View {
                 showShellToast("Clean failed · try again")
             }
             .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyYouTubeResolveFailed)
+            ) { _ in
+                showShellToast("Couldn't play YouTube · opening app")
+            }
+            .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyPlayPodcastEpisode)
             ) { note in
                 playPodcast(from: note.userInfo)

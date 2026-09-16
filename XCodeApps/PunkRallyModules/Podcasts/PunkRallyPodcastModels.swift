@@ -58,7 +58,7 @@ public struct PRPodcastEpisode: Identifiable, Equatable, Sendable {
     public let audioURL: URL?
     public let videoURL: URL?
     /// YouTube watch URL from link / show notes / iTunes text when present.
-    /// Handoff only — never treated as an in-app video enclosure.
+    /// Play in ink+amp resolves a stream via Settings URL; Watch on YouTube hands off.
     public let youtubeURL: URL?
     public let durationSeconds: TimeInterval?
     public let publishedAt: Date?
@@ -97,7 +97,8 @@ public struct PRPodcastEpisode: Identifiable, Equatable, Sendable {
         audioURL != nil && videoURL != nil
     }
 
-    /// External YouTube handoff when there is no RSS video enclosure to play in-app.
+    /// YouTube affordances when there is no RSS video enclosure (hybrid RSS video
+    /// already plays in-app — keep YouTube for audio-only / notes-only episodes).
     public var watchOnYouTubeURL: URL? {
         guard videoURL == nil else { return nil }
         return youtubeURL
