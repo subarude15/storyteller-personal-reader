@@ -17,9 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Glance / system Now Playing** — tip >= YouTube playhead Sideload when green (e.g. `fc82893`+) / Match `a0722eb`. Finish `MediaNowPlayingPresenter` / `NowPlayingPresenting` for Lock Screen + Control Center: title, show/artist, artwork, duration, elapsed, rate; remote play/pause/toggle/±skip/scrub into shared player. Must cover podcasts + matched YouTube + Storyteller audio/read-aloud (not books-only). Soft polish anytime.
+- **One-tap LAN failover** — tip >= Glance `257e44e`. Optional **LAN URL** on Storyteller source (default `http://192.168.1.2:1800`); short probe on home Wi‑Fi → prefer LAN for Storyteller API + downloads; soft fall back to public on failure. Settings status **Using LAN** / **Using public**. Same credentials both URLs. Soft polish anytime.
 
-**Do not start Home Screen widgets / CarPlay / Watch / SponsorBlock / LAN / StoryAlign unless Josh reorders.**
+**Do not start Invidious/ad-strip URL changes / SponsorBlock / StoryAlign / widgets / CarPlay unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
@@ -52,6 +52,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **YouTube extract video-id only** — tip `cca28ec`; chips only when feed has real watch URL (channel/@handle skipped)
 - [x] **Match on YouTube** — tip `a0722eb`; Josh confirmed Match → confirm → Play in ink+amp (Invidious `http://192.168.1.2:20130`)
 - [x] **YouTube playhead persist (local)** — Josh confirmed scrub/leave/reopen resumes near leave point
+- [x] **Glance / system Now Playing** — tip `257e44e`; Josh confirmed Lock Screen / Control Center title + pause/skip
 - [x] **Episode status cluster + show filters + Josh UI stamps** — tip `b719921`; download glyph · Clean chip (incl. Clean failed) · Xm left/Played; show filters All|Downloaded|In progress|Clean pending; Shelf POD chrome; mini-player cover+title+play/pause(+close) only (scrub/−15/+15 stay on full Now Playing); Home/Library finishability text via `PlaybackFinishabilityCopy`; Sideload green [35023934089](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35023934089)
 - [x] **Podcast play queue** — tip `2f7deb4`; Play Next / Play Last in episode menus; `PodcastPlaybackQueueStore` + editable `PodcastPlaybackQueueView` (drag reorder, remove, clear finished); auto-advance on finish via shared player; persisted upcoming order; Sideload green [35025614228](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35025614228)
 - [x] **P0 Podcast resume / Home Continue stall** — tip `7eb0a9e`; Josh confirmed; Loading until playhead advances; Pause only when truly playing; Sideload green [35031138576](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35031138576)
@@ -99,14 +100,14 @@ Strict order (Smokey / Nas-ty):
 3. ~~Full in-app YouTube embed/SDK~~ → **superseded** by hybrid + in-app YouTube v1 + Match
 4. ~~Match on YouTube~~ → **Shipped** (`a0722eb`; Josh confirmed)
 5. ~~YouTube playhead persist (local)~~ → **Shipped** (Josh confirmed resume)
-6. ~~Glance / Lock Screen~~ → **Now** (system Now Playing; widgets parked)
-7. **YouTube playhead sync** — Storyteller blob after local resume is solid
-8. **SponsorBlock-style skip** — additive seek on in-app YouTube (not podcast Clean)
-9. **One-tap LAN failover**: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
+6. ~~Glance / Lock Screen~~ → **Shipped** (`257e44e`; Josh confirmed)
+7. ~~LAN failover~~ → **Now** (Storyteller public ↔ `192.168.1.2:1800`)
+8. **YouTube playhead sync** — Storyteller blob after local resume is solid
+9. **SponsorBlock-style skip** — additive seek on in-app YouTube (not podcast Clean)
 10. **Phone import → StoryAlign read-aloud** — Library Import → Storyteller upload → align → refresh
 11. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
 
-**P1000 (Later, not ahead of LAN / StoryAlign / YouTube playhead sync):** **Podcast cross-device sync** — subscriptions + playheads only. **Downloads stay per-device**.
+**P1000 (Later, not ahead of StoryAlign / YouTube playhead sync):** **Podcast cross-device sync** — subscriptions + playheads only. **Downloads stay per-device**.
 ## Constraints
 
 - Keep `SilveranKit`; do not merge Enve tree (modules + AGPL only)
