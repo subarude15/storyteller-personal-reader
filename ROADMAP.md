@@ -17,9 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **AD_STRIP deploy smoke** — app Sideload tip `e00d800` (Josh stamp …800). Nas-ty: bring up worker on PrincessDonut (compose `ad-strip-worker/`, `http://192.168.1.2:20129`, `GET /health`). Josh: Settings Test + Queue for Clean after Nas-ty confirms health. Soft polish anytime.
+- **Hybrid video** — default to **RSS video playback** in full Now Playing when a video enclosure exists; otherwise show a **Watch on YouTube** chip (handoff / open URL — **not** a full in-app YouTube embed/SDK). Episode sheet + full Now Playing (not mini-player). Tip base ≥ `e00d800` (AD_STRIP shipped). Soft polish anytime.
 
-**Do not start hybrid video / silence-trim / Glance until AD_STRIP Test + Clean land.**
+**Do not start silence-trim / Glance / CarPlay unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
@@ -46,7 +46,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **Podcast playhead resume** — `PodcastPlayheadStore`; seek on `openPodcast` (`be395da`); Josh confirmed
 - [x] **Find shows** — Apple iTunes Search API → Subscribe → `PodcastSubscriptionStore` (`a0fc4e4`, Sideload [35013733091](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35013733091)); Josh confirmed
 - [x] **Ad-strip download / queue UX (v1 = UX + hooks + stub)** — tip `130c877` (prior `60a211b` / `c93deac`); Download sheet Original vs Clean (per-show last choice); Keep/queue → Clean pending; chips Original | Cleaning… | Clean; `StubPodcastAdStripPipeline`; Sideload green [35019916837](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35019916837)
-- [x] **NAS `AD_STRIP_URL` full cut (option 2)** — tip `e00d800`; Settings **Ad strip URL** + **Test**; dumb ffmpeg worker `:20129`; upload Original → poll → Clean sibling (never delete Original); Josh AltStore stamp …800 confirmed; NAS `/health` + Settings Test still pending; Sideload green [35038255753](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35038255753)
+- [x] **NAS `AD_STRIP_URL` full cut (option 2)** — tip `e00d800`; Settings **Ad strip URL** + **Test**; dumb ffmpeg worker `:20129`; upload Original → poll → Clean sibling (never delete Original); Josh confirmed Clean ad-free (`e00d800` + `:20129`); Sideload green [35038255753](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35038255753)
 - [x] **Episode status cluster + show filters + Josh UI stamps** — tip `b719921`; download glyph · Clean chip (incl. Clean failed) · Xm left/Played; show filters All|Downloaded|In progress|Clean pending; Shelf POD chrome; mini-player cover+title+play/pause(+close) only (scrub/−15/+15 stay on full Now Playing); Home/Library finishability text via `PlaybackFinishabilityCopy`; Sideload green [35023934089](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35023934089)
 - [x] **Podcast play queue** — tip `2f7deb4`; Play Next / Play Last in episode menus; `PodcastPlaybackQueueStore` + editable `PodcastPlaybackQueueView` (drag reorder, remove, clear finished); auto-advance on finish via shared player; persisted upcoming order; Sideload green [35025614228](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35025614228)
 - [x] **P0 Podcast resume / Home Continue stall** — tip `7eb0a9e`; Josh confirmed; Loading until playhead advances; Pause only when truly playing; Sideload green [35031138576](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35031138576)
@@ -67,14 +67,14 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ## Next (strict order — do not reorder)
 
 ### After Stats sync
-1. ~~Podcast queue~~ → **Shipped** (`2f7deb4`)
-2. ~~Cross-device Stats sync~~ → **Shipped** (`c5791ec`)
-3. ~~NAS `AD_STRIP_URL` worker~~ → **App Sideload** (`e00d800` stamp …800); Nas-ty `/health` + Josh Test pending
-4. **Hybrid video** (after AD_STRIP Test + Clean) — RSS video when enclosure exists + Watch on YouTube chip (not full embed)
+1. ~~Podcast queue~~ → **Shipped** (2f7deb4)
+2. ~~Cross-device Stats sync~~ → **Shipped** (c5791ec)
+3. ~~NAS AD_STRIP_URL worker~~ → **Shipped** (e00d800 + :20129; Josh confirmed Clean ad-free)
+4. ~~Hybrid video~~ → **Now** (RSS video when enclosure exists + Watch on YouTube chip)
 
 ### Soft UX polish (anytime)
-- ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
-- ~~Stats push / description decode~~ → **Shipped** (`cf5c663`) — Josh confirmed
+- ~~Stats Retry sync~~ → **Shipped** (db5560)
+- ~~Stats push / description decode~~ → **Shipped** (cf5c663) — Josh confirmed
 - Separate **Couldn't save server** copy (≠ “Connection failed”)
 - Empty state when URL prefilled but no saved Storyteller source
 - Missing Storyteller covers (cosmetic; not a blocker)
@@ -83,15 +83,14 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ## Later / ideas (not blocking)
 
 Strict order (Smokey / Nas-ty):
-1. ~~NAS `AD_STRIP_URL` worker~~ → **App Sideload** (`e00d800`); NAS deploy pending
+1. ~~NAS AD_STRIP_URL worker~~ → **Shipped** (e00d800 + :20129)
 2. **Silence-trim** — with that worker (same pipeline family)
-3. ~~Full in-app YouTube embed/SDK~~ → **superseded** by Josh hybrid: RSS video default when enclosure exists + **Watch on YouTube** chip (not full embed) — see **Next** after AD_STRIP verified
+3. ~~Full in-app YouTube embed/SDK~~ → **superseded** by Josh hybrid: RSS video default when enclosure exists + **Watch on YouTube** chip (not full embed) — see **Now**
 4. **Glance / Watch** tile: now-playing + Continue deep-link
-5. **One-tap LAN failover**: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
+5. **One-tap LAN failover**: public URL → http://192.168.1.2:1800 on home Wi‑Fi
 6. **CarPlay** (out of current build scope)
 
 **P1000 (Later, not ahead of hybrid video):** **Podcast cross-device sync** — subscriptions + playheads only (same Storyteller account pair as place sync / Stats). **Downloads stay per-device** (no cross-device file sync).
-
 ## Constraints
 
 - Keep `SilveranKit`; do not merge Enve tree (modules + AGPL only)
