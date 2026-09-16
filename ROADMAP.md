@@ -17,7 +17,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **P0 v3 still blank** (Josh: new kind, same blank+tap; IPA embeds `.appex` + `inkamp.continue.v3`) — tip >= `b50d34a` / `4c1fb6e`. Root cause candidate: `.containerBackground { Color.clear }` blanks the tile on iOS 17+. Cut `inkamp.continue.v4`: opaque charcoal as `containerBackground` fill (never clear); white **Open ink+amp** / **Tap to continue**; SwiftUI+WidgetKit only; inline `punkrally://continue`. Soft polish anytime.
+- **P0 `inkamp.continue.v4` opaque containerBackground** — tip pending Josh smoke. Charcoal is the `containerBackground` fill (never `Color.clear`); white **Open ink+amp** / **Tap to continue**; SwiftUI+WidgetKit only; inline `punkrally://continue`. AltStore delete → reinstall → wipe old tiles → add ink+amp Continue only. Soft polish anytime.
 
 **Do not start CarPlay / Watch / paid App Groups / GLM mismatch paste unless Josh reorders.**
 ## Shipped
