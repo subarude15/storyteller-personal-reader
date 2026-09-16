@@ -40,6 +40,50 @@ public struct PunkRallyTabView: View {
     }
 
     public var body: some View {
+        rootShell
+            .modifier(PunkRallyShellToastModifier(showToast: showShellToast))
+            .modifier(
+                PunkRallyPodcastBridgeModifier(
+                    playPodcast: { playPodcast(from: $0) },
+                    recordRecent: { recordPodcastRecent(from: $0) }
+                )
+            )
+            .overlay(alignment: .top) {
+                if let shellToastMessage {
+                    Label(
+                        shellToastMessage,
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        Capsule()
+                            .fill(Color.black.opacity(0.82))
+                    )
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .accessibilityLabel(shellToastMessage)
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: shellToastMessage)
+            // Podcast card is a separate presentation source (the book card above
+            // lives on the inner TabView); two fullScreenCovers on one view would
+            // collide, so this one attaches to the ZStack.
+            .fullScreenCover(item: podcastPresenter.episodeItemBinding) { episode in
+                NavigationStack {
+                    PodcastPlayerView(
+                        episode: episode,
+                        onClose: { podcastPresenter.dismiss() }
+                    )
+                }
+            }
+    }
+
+    /// Tab chrome + book card + scene lifecycle (split from body for the type checker).
+    @ViewBuilder
+    private var rootShell: some View {
         ZStack {
             TabView(selection: $selectedTab) {
                 HomeTabView()
@@ -102,88 +146,6 @@ public struct PunkRallyTabView: View {
             ) { _ in
                 Task { await StatsSyncCoordinator.shared.syncNow(reason: "settingsRetry") }
             }
-            .onReceive(
-                NotificationCenter.default.publisher(for: .punkRallyOpenPlayerFailed)
-            ) { _ in
-                showShellToast("Can't open yet · try again")
-            }
-            .onReceive(
-                NotificationCenter.default.publisher(for: .punkRallyStatsSyncFailed)
-            ) { _ in
-                showShellToast("Couldn't sync Stats · try again")
-            }
-            .onReceive(
-                NotificationCenter.default.publisher(for: .punkRallyAdStripFailed)
-            ) { _ in
-                showShellToast("Clean failed · try again")
-            }
-            .onReceive(
-                NotificationCenter.default.publisher(for: .punkRallyYouTubeResolveFailed)
-            ) { _ in
-                showShellToast("Couldn't play YouTube · opening app")
-            }
-            .onReceive(
-                NotificationCenter.default.publisher(for: .punkRallyYouTubeSearchFailed)
-            ) { _ in
-                showShellToast("Couldn't search YouTube")
-            }
-            .onReceive(
-                NotificationCenter.default.publisher(for: .punkRallyYouTubeNoMatches)
-            ) { _ in
-                showShellToast("No matches")
-            }
-            .onReceive(
-                NotificationCenter.default.publisher(for: .punkRallyPlayPodcastEpisode)
-            ) { note in
-                playPodcast(from: note.userInfo)
-            }
-            .onReceive(
-                NotificationCenter.default.publisher(for: .punkRallyPodcastSessionDidStart)
-            ) { note in
-                recordPodcastRecent(from: note.userInfo)
-            }
-            .onReceive(
-                NotificationCenter.default.publisher(for: .punkRallyPodcastShouldPersistProgress)
-            ) { _ in
-                Task { await PodcastPlayerPresenter.persistPodcastProgress(markFinished: false) }
-            }
-            .onReceive(
-                NotificationCenter.default.publisher(for: .punkRallyPodcastProgressDidPersist)
-            ) { note in
-                guard
-                    let episodeID = note.userInfo?["episodeID"] as? String,
-                    let progress = note.userInfo?["progress"] as? Double
-                else { return }
-                PodcastRecentStore.shared.updateProgress(episodeID: episodeID, progress: progress)
-                NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
-            }
-            .onReceive(
-                NotificationCenter.default.publisher(
-                    for: Notification.Name("punkRallyPodcastDidFinish")
-                )
-            ) { note in
-                Task {
-                    await PodcastPlayerPresenter.persistPodcastProgress(markFinished: true)
-                    if let episodeID = note.userInfo?["episodeID"] as? String {
-                        PodcastRecentStore.shared.updateProgress(
-                            episodeID: episodeID,
-                            progress: 1
-                        )
-                        NotificationCenter.default.post(
-                            name: .punkRallyHomeQueueDidChange,
-                            object: nil
-                        )
-                    }
-                    if let next = PodcastPlaybackQueueStore.shared.consumeNext() {
-                        let info = next.playNotificationUserInfo(fromQueueAdvance: true)
-                        NotificationCenter.default.post(
-                            name: .punkRallyPlayPodcastEpisode,
-                            object: nil,
-                            userInfo: info
-                        )
-                    }
-                }
-            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
                     _ = PodcastDownloadStore.shared.runOvernightPruneIfDue()
@@ -220,37 +182,6 @@ public struct PunkRallyTabView: View {
                 }
             }
         }
-        .overlay(alignment: .top) {
-            if let shellToastMessage {
-                Label(
-                    shellToastMessage,
-                    systemImage: "exclamationmark.triangle.fill"
-                )
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(
-                    Capsule()
-                        .fill(Color.black.opacity(0.82))
-                )
-                .padding(.top, 8)
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .accessibilityLabel(shellToastMessage)
-            }
-        }
-        .animation(.easeInOut(duration: 0.2), value: shellToastMessage)
-        // Podcast card is a separate presentation source (the book card above
-        // lives on the inner TabView); two fullScreenCovers on one view would
-        // collide, so this one attaches to the ZStack.
-        .fullScreenCover(item: podcastPresenter.episodeItemBinding) { episode in
-            NavigationStack {
-                PodcastPlayerView(
-                    episode: episode,
-                    onClose: { podcastPresenter.dismiss() }
-                )
-            }
-        }
     }
 
     /// Builds an episode from the `punkRallyPlayPodcastEpisode` userInfo posted
@@ -271,7 +202,6 @@ public struct PunkRallyTabView: View {
         let showTitle = userInfo["showTitle"] as? String
         let duration = userInfo["durationSeconds"] as? TimeInterval
         let coverURL = userInfo["coverURL"] as? URL
-        let feedURL = userInfo["feedURL"] as? URL
         let youtubeURL = userInfo["youtubeURL"] as? URL
 
         recordPodcastRecent(from: userInfo)
@@ -916,6 +846,93 @@ public struct SyncChipView: View {
         .background(color.opacity(0.12))
         .clipShape(Capsule())
         .accessibilityLabel(Text(label))
+    }
+}
+
+// MARK: - Shell notification bridges (keep PunkRallyTabView.body type-checkable)
+
+private struct PunkRallyShellToastModifier: ViewModifier {
+    let showToast: (String) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .punkRallyOpenPlayerFailed)) { _ in
+                showToast("Can't open yet · try again")
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .punkRallyStatsSyncFailed)) { _ in
+                showToast("Couldn't sync Stats · try again")
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .punkRallyAdStripFailed)) { _ in
+                showToast("Clean failed · try again")
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .punkRallyYouTubeResolveFailed)) { _ in
+                showToast("Couldn't play YouTube · opening app")
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .punkRallyYouTubeSearchFailed)) { _ in
+                showToast("Couldn't search YouTube")
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .punkRallyYouTubeNoMatches)) { _ in
+                showToast("No matches")
+            }
+    }
+}
+
+private struct PunkRallyPodcastBridgeModifier: ViewModifier {
+    let playPodcast: ([AnyHashable: Any]?) -> Void
+    let recordRecent: ([AnyHashable: Any]?) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .punkRallyPlayPodcastEpisode)) {
+                note in
+                playPodcast(note.userInfo)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .punkRallyPodcastSessionDidStart)) {
+                note in
+                recordRecent(note.userInfo)
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyPodcastShouldPersistProgress)
+            ) { _ in
+                Task { await PodcastPlayerPresenter.persistPodcastProgress(markFinished: false) }
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyPodcastProgressDidPersist)
+            ) { note in
+                guard
+                    let episodeID = note.userInfo?["episodeID"] as? String,
+                    let progress = note.userInfo?["progress"] as? Double
+                else { return }
+                PodcastRecentStore.shared.updateProgress(episodeID: episodeID, progress: progress)
+                NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(
+                    for: Notification.Name("punkRallyPodcastDidFinish")
+                )
+            ) { note in
+                Task {
+                    await PodcastPlayerPresenter.persistPodcastProgress(markFinished: true)
+                    if let episodeID = note.userInfo?["episodeID"] as? String {
+                        PodcastRecentStore.shared.updateProgress(
+                            episodeID: episodeID,
+                            progress: 1
+                        )
+                        NotificationCenter.default.post(
+                            name: .punkRallyHomeQueueDidChange,
+                            object: nil
+                        )
+                    }
+                    if let next = PodcastPlaybackQueueStore.shared.consumeNext() {
+                        let info = next.playNotificationUserInfo(fromQueueAdvance: true)
+                        NotificationCenter.default.post(
+                            name: .punkRallyPlayPodcastEpisode,
+                            object: nil,
+                            userInfo: info
+                        )
+                    }
+                }
+            }
     }
 }
 
