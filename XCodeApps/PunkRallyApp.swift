@@ -138,6 +138,26 @@ public struct PunkRallyTabView: View {
                 playPodcast(from: note.userInfo)
             }
             .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyPodcastSessionDidStart)
+            ) { note in
+                recordPodcastRecent(from: note.userInfo)
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyPodcastShouldPersistProgress)
+            ) { _ in
+                Task { await PodcastPlayerPresenter.persistPodcastProgress(markFinished: false) }
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyPodcastProgressDidPersist)
+            ) { note in
+                guard
+                    let episodeID = note.userInfo?["episodeID"] as? String,
+                    let progress = note.userInfo?["progress"] as? Double
+                else { return }
+                PodcastRecentStore.shared.updateProgress(episodeID: episodeID, progress: progress)
+                NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
+            }
+            .onReceive(
                 NotificationCenter.default.publisher(
                     for: Notification.Name("punkRallyPodcastDidFinish")
                 )
@@ -252,6 +272,52 @@ public struct PunkRallyTabView: View {
         let duration = userInfo["durationSeconds"] as? TimeInterval
         let coverURL = userInfo["coverURL"] as? URL
         let feedURL = userInfo["feedURL"] as? URL
+        let youtubeURL = userInfo["youtubeURL"] as? URL
+
+        recordPodcastRecent(from: userInfo)
+
+        let episode = PodcastPlayerPresenter.Episode(
+            id: episodeID,
+            title: title,
+            showTitle: showTitle,
+            summary: userInfo["summary"] as? String,
+            audioURL: audioURL,
+            duration: duration,
+            isVideo: mediaKind == .video,
+            coverURL: coverURL,
+            youtubeURL: youtubeURL
+        )
+        Task { await podcastPresenter.play(episode) }
+    }
+
+    /// Home Continue last-touched + progress (shared by play bridge and session-start).
+    private func recordPodcastRecent(from userInfo: [AnyHashable: Any]?) {
+        guard
+            let userInfo,
+            let episodeID = userInfo["episodeID"] as? String,
+            let title = userInfo["title"] as? String,
+            let audioURL = userInfo["audioURL"] as? URL
+        else { return }
+        let mediaKind = (userInfo["mediaKind"] as? String).flatMap(PRPodcastMediaKind.init(rawValue:))
+            ?? .audio
+        let showTitle = userInfo["showTitle"] as? String
+        let duration = userInfo["durationSeconds"] as? TimeInterval
+        let coverURL = userInfo["coverURL"] as? URL
+        let feedURL = userInfo["feedURL"] as? URL
+        let youtubeURL = userInfo["youtubeURL"] as? URL
+
+        let progress: Double = {
+            if let youtubeURL,
+                let videoID = PodcastYouTubeURL.videoID(from: youtubeURL),
+                let entry = YouTubePlayheadStore.shared.entry(for: videoID)
+            {
+                return entry.progress
+            }
+            if let playhead = PodcastPlayheadStore.shared.entry(for: episodeID) {
+                return playhead.progress
+            }
+            return PodcastDownloadStore.shared.record(for: episodeID)?.progress ?? 0
+        }()
 
         PodcastRecentStore.shared.record(
             PodcastRecentEntry(
@@ -264,23 +330,11 @@ public struct PunkRallyTabView: View {
                 feedURL: feedURL,
                 mediaKind: mediaKind,
                 lastTouched: Date(),
-                progress: PodcastDownloadStore.shared.record(for: episodeID)?.progress ?? 0
+                progress: progress,
+                youtubeURL: youtubeURL
             )
         )
         NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
-
-        let episode = PodcastPlayerPresenter.Episode(
-            id: episodeID,
-            title: title,
-            showTitle: showTitle,
-            summary: userInfo["summary"] as? String,
-            audioURL: audioURL,
-            duration: duration,
-            isVideo: mediaKind == .video,
-            coverURL: coverURL,
-            youtubeURL: userInfo["youtubeURL"] as? URL
-        )
-        Task { await podcastPresenter.play(episode) }
     }
 
     private func showShellToast(_ message: String) {
@@ -586,6 +640,44 @@ private struct HomeTabView: View {
                     NotificationCenter.default.post(name: .silveranShowLibrary, object: nil)
                 }
             case .podcast(let entry):
+                let watchURL =
+                    entry.youtubeURL
+                    ?? PodcastMatchedYouTubeStore.shared.watchURL(for: entry.episodeID)
+                if let watchURL {
+                    do {
+                        let pick = try await PodcastYouTubeResolver.shared.resolve(
+                            watchURL: watchURL
+                        )
+                        var userInfo: [String: Any] = [
+                            "episodeID": entry.episodeID,
+                            "title": entry.title,
+                            "audioURL": pick.url,
+                            "mediaKind": PRPodcastMediaKind.video.rawValue,
+                            "youtubeURL": watchURL,
+                        ]
+                        userInfo["showTitle"] = entry.showTitle
+                        if let duration = entry.durationSeconds {
+                            userInfo["durationSeconds"] = duration
+                        }
+                        if let cover = entry.coverURL {
+                            userInfo["coverURL"] = cover
+                        }
+                        if let feed = entry.feedURL {
+                            userInfo["feedURL"] = feed
+                        }
+                        NotificationCenter.default.post(
+                            name: .punkRallyPlayPodcastEpisode,
+                            object: nil,
+                            userInfo: userInfo
+                        )
+                    } catch {
+                        NotificationCenter.default.post(
+                            name: .punkRallyYouTubeResolveFailed,
+                            object: nil
+                        )
+                    }
+                    return
+                }
                 var userInfo: [String: Any] = [
                     "episodeID": entry.episodeID,
                     "title": entry.title,

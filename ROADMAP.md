@@ -17,15 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-<<<<<<< HEAD
-- **YouTube playhead persist (local)** — tip >= `a0722eb` (Match shipped; merge PRs 10+11 onto `punk-rally-ios` if still open). Key by YouTube video id; reuse podcast playhead/resume pattern. Persist on play/pause/background; reopen seeks near leave point; Home Continue respects last-touched YouTube. Local only — no Storyteller sync this cut. Soft polish anytime.
+- **YouTube playhead persist (local)** — this tip. Key by YouTube video id (`YouTubePlayheadStore`); persist periodically + pause/background/end; reopen / Continue seek near leave point. Local only — no Storyteller sync. Soft polish anytime.
 
 **Next after Josh verifies resume:** Glance / system Now Playing.
-=======
-- Soft polish anytime. **SponsorBlock / Glance / LAN stay Later. Widgets stay parked.**
-
-**Ship note (Match on YouTube v1):** tip `0cb8155` ([PR 11](https://github.com/subarude15/storyteller-personal-reader/pull/11)) — Sideload green [35151364803](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35151364803). Await Josh smoke: Match → confirm → play Shrek / a Vergecast ep in-app on home Wi‑Fi (`http://192.168.1.2:20130`).
->>>>>>> a0722eb6e2654390a88988a9da4e74091689ccf4
 
 **Do not start SponsorBlock / LAN / StoryAlign / CarPlay / paid App Groups unless Josh reorders.**
 ## Shipped
@@ -89,11 +83,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 4. ~~Hybrid video~~ → **Shipped** (`87b56cd`; Josh confirmed)
 5. ~~Continue widget scaffold~~ → landed; **Parked on free AltStore** (no Sideload appex); revisit paid/SideStore
 6. ~~Silence-trim~~ → **Shipped** (`d8af263`; Josh verified)
-<<<<<<< HEAD
 7. ~~In-app YouTube / Match~~ → **Shipped** (`a0722eb`; Josh confirmed)
-=======
-7. ~~In-app YouTube~~ → **Shipped** (`bd32690`); P0 extract video-id only on this PR — await Josh smoke
->>>>>>> a0722eb6e2654390a88988a9da4e74091689ccf4
 
 ### Soft UX polish (anytime)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)

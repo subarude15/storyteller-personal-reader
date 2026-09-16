@@ -54,6 +54,20 @@ extension Notification.Name {
     public static let punkRallyYouTubeNoMatches = Notification.Name(
         "punkRallyYouTubeNoMatches"
     )
+    /// Podcast / YouTube playhead just persisted — host updates Continue progress.
+    /// userInfo: episodeID (String), progress (Double 0...1)
+    public static let punkRallyPodcastProgressDidPersist = Notification.Name(
+        "punkRallyPodcastProgressDidPersist"
+    )
+    /// Pause / periodic / interrupt — host should call persistPodcastProgress.
+    public static let punkRallyPodcastShouldPersistProgress = Notification.Name(
+        "punkRallyPodcastShouldPersistProgress"
+    )
+    /// Shared player opened a podcast/YouTube session — host records Home Continue.
+    /// userInfo mirrors punkRallyPlayPodcastEpisode (no second play).
+    public static let punkRallyPodcastSessionDidStart = Notification.Name(
+        "punkRallyPodcastSessionDidStart"
+    )
     /// Continue widget / `punkrally://continue` — open Home Continue / Now Playing.
     public static let punkRallyOpenContinue = Notification.Name("punkRallyOpenContinue")
     /// Host selected Home after OpenContinue — HomeTabView opens the Continue item.

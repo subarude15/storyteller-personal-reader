@@ -83,6 +83,16 @@ Toast copy:
 - Downloading YouTube to Shelf
 - Official iframe SDK / Google account
 - CarPlay / widgets / App Groups
+- Cross-device YouTube playhead sync (Later — local resume ships first)
+
+## Playhead (local)
+
+In-app YouTube (feed watch URL or Match) persists playhead keyed by **video id** (`YouTubePlayheadStore`), sibling of `PodcastPlayheadStore`:
+
+- Persist periodically (~15s while playing) + on pause / interrupt / scrub / background / card dismiss / end
+- Near-end (≥95%) clears like podcasts (next open starts fresh / Continue drops)
+- Reopen / Play in ink+amp / Home Continue seeks to saved playhead (Loading… until playhead advances)
+- Episode / show title remembered on the entry for Continue rails; no Storyteller sync this cut
 
 ## Smoke (Josh)
 
@@ -91,4 +101,5 @@ Toast copy:
 3. **Play in ink+amp** → **Resolving…** then full NP video surface + seekable scrub (must **not** jump straight to the YouTube channel).
 4. Channel-only / Vergecast-style episode → **Match on YouTube** (no Play / Watch until confirm).
 5. Match → confirm a hit (e.g. Shrek / a Vergecast ep) → Play in ink+amp + Watch on YouTube; reopen shows chips without re-search.
-6. Kill Wi‑Fi or point URL at a dead host → toast; Match does not hang.
+6. **Playhead:** scrub Cult of Shrek / leave / reopen → resumes near leave point; Home Continue shows Xm left and continues correctly.
+7. Kill Wi‑Fi or point URL at a dead host → toast; Match does not hang.
