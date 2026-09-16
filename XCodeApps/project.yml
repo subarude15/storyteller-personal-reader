@@ -263,10 +263,8 @@ targets:
       # Crash-proof Sideload path: only SideloadContinueWidget.swift (no AppIntents).
       # Old ContinueWidget + Library stay on disk for paid/SideStore; compiling them
       # into this extension pulls AudioPlaybackIntent metadata AltStore can't sign.
+      # No SilveranAppleWidgets link — lean paint is SwiftUI+WidgetKit only.
       - path: SilveranWidgets/Sources/SideloadContinueWidget.swift
-    dependencies:
-      - package: Silveran
-        product: SilveranAppleWidgets
   Silveran Reader Widgets (macOS):
     type: app-extension
     platform: macOS

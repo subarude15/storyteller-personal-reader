@@ -1,12 +1,10 @@
-import SilveranAppleWidgets
 import SwiftUI
 import WidgetKit
 
 /// Crash-proof Sideload Continue tile for free AltStore.
 ///
-/// Own file, zero AppIntents / AudioPlaybackIntent. WidgetKit snapshots that
-/// hit unsigned AppIntent metadata silently kill the extension → blank tile
-/// that still taps through. Keep this path StaticConfiguration + solid colors.
+/// Lean paint path: SwiftUI + WidgetKit only — no SilveranAppleWidgets,
+/// no AppIntents, no App Group / timeline I/O. Kind bump drops dead v2 snapshots.
 @main
 struct SilveranReaderWidgets: WidgetBundle {
     var body: some Widget {
@@ -17,7 +15,7 @@ struct SilveranReaderWidgets: WidgetBundle {
 struct SideloadContinueWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(
-            kind: SilveranWidgetConstants.sideloadContinueWidgetKind,
+            kind: "inkamp.continue.v3",
             provider: SideloadContinueTimelineProvider(),
         ) { _ in
             SideloadContinueWidgetView()
@@ -56,72 +54,29 @@ private struct SideloadContinueTimelineProvider: TimelineProvider {
 }
 
 private struct SideloadContinueWidgetView: View {
-    @Environment(\.widgetFamily) private var family
-
     var body: some View {
-        Group {
-            if family == .systemSmall {
-                smallBody
-            } else {
-                mediumBody
-            }
-        }
-        .containerBackground(for: .widget) {
-            SideloadContinuePalette.cream
-        }
-        .widgetURL(InkAmpContinueLink.continueURL)
-    }
-
-    private var smallBody: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            cover(size: 52)
-            titleBlock
-            Spacer(minLength: 0)
-        }
-        .padding(12)
-    }
-
-    private var mediumBody: some View {
-        HStack(spacing: 14) {
-            cover(size: 72)
-            VStack(alignment: .leading, spacing: 4) {
-                titleBlock
-                Spacer(minLength: 0)
-            }
-        }
-        .padding(14)
-    }
-
-    private var titleBlock: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Open ink+amp")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(SideloadContinuePalette.ink)
-                .lineLimit(2)
-            Text("Tap to continue")
-                .font(.caption)
-                .foregroundStyle(SideloadContinuePalette.secondary)
-                .lineLimit(1)
-        }
-    }
-
-    private func cover(size: CGFloat) -> some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(SideloadContinuePalette.charcoal)
-            Image(systemName: "book.closed.fill")
-                .font(.system(size: size * 0.32, weight: .semibold))
-                .foregroundStyle(SideloadContinuePalette.secondary)
+            Color(white: 0.18)
+            VStack(spacing: 8) {
+                Image(systemName: "book.closed.fill")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(Color(white: 0.95))
+                Text("Open ink+amp")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                Text("Tap to continue")
+                    .font(.caption)
+                    .foregroundStyle(Color(white: 0.9))
+                    .lineLimit(1)
+            }
+            .multilineTextAlignment(.center)
+            .padding(12)
         }
-        .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        // Visible fill is the ZStack charcoal — clear containerBackground for iOS 17+.
+        .containerBackground(for: .widget) {
+            Color.clear
+        }
+        .widgetURL(URL(string: "punkrally://continue")!)
     }
-}
-
-private enum SideloadContinuePalette {
-    // Hardcoded RGB — Color.primary can wash out on WidgetKit surfaces.
-    static let cream = Color(red: 0.97, green: 0.96, blue: 0.95)
-    static let charcoal = Color(white: 0.2)
-    static let ink = Color(red: 0.102, green: 0.094, blue: 0.078) // #1A1814
-    static let secondary = Color(red: 0.420, green: 0.396, blue: 0.376) // #6B6560
 }

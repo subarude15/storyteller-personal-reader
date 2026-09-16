@@ -14,7 +14,7 @@ public enum SilveranWidgetConstants {
     /// Paid / SideStore Continue widget (compiled, not registered on Sideload).
     public static let continueWidgetKind = "InkAmpContinueWidget"
     /// Sideload gallery kind. New string so iOS cannot resurrect blank Library/Continue tiles.
-    public static let sideloadContinueWidgetKind = "inkamp.continue.v2"
+    public static let sideloadContinueWidgetKind = "inkamp.continue.v3"
 }
 
 public enum SilveranWidgetReadingKind: String, Codable, Sendable, Hashable {
