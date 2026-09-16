@@ -17,11 +17,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Glance / Lock Screen** — lean on **system Now Playing** first; Home Screen widgets stay parked on free AltStore. Soft polish anytime.
+- **YouTube playhead persist (local)** — tip >= `a0722eb` (Match shipped; merge PRs 10+11 onto `punk-rally-ios` if still open). Key by YouTube video id; reuse podcast playhead/resume pattern. Persist on play/pause/background; reopen seeks near leave point; Home Continue respects last-touched YouTube. Local only — no Storyteller sync this cut. Soft polish anytime.
 
-**Josh picks reorder anytime:** LAN failover · YouTube playhead persist · SponsorBlock · StoryAlign phone import.
+**Next after Josh verifies resume:** Glance / system Now Playing.
 
-**Do not start CarPlay / Watch companion / paid App Groups / Home Screen widgets unless Josh reorders.**
+**Do not start SponsorBlock / LAN / StoryAlign / CarPlay / paid App Groups unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
@@ -99,14 +99,15 @@ Strict order (Smokey / Nas-ty):
 2. ~~Silence-trim~~ → **Shipped** (`d8af263`; Josh verified)
 3. ~~Full in-app YouTube embed/SDK~~ → **superseded** by hybrid + in-app YouTube v1 + Match
 4. ~~Match on YouTube~~ → **Shipped** (`a0722eb`; Josh confirmed)
-5. **YouTube playhead persist** — save resume per matched video id (local first, like podcast playheads; Storyteller sync only after local is solid). Separate from Clean/ad-strip.
-6. **SponsorBlock-style skip** — Later only; additive seek on in-app YouTube (not podcast Clean)
-7. **Glance / Watch tile** → **Now** (system Now Playing first; widgets parked until paid/SideStore)
-8. **One-tap LAN failover**: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
-9. **Phone import → StoryAlign read-aloud** — Library **Import** (EPUB and/or MP3) → upload to Storyteller on NAS → server align → ink+amp refreshes library / Continue
-10. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
+5. ~~YouTube playhead persist (local)~~ → **Now** (video-id key; Storyteller sync Later)
+6. **Glance / Lock Screen** → **Next after playhead** (system Now Playing first; widgets parked until paid/SideStore)
+7. **YouTube playhead sync** — Storyteller blob after local resume is solid
+8. **SponsorBlock-style skip** — additive seek on in-app YouTube (not podcast Clean)
+9. **One-tap LAN failover**: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
+10. **Phone import → StoryAlign read-aloud** — Library Import → Storyteller upload → align → refresh
+11. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
 
-**P1000 (Later, not ahead of Glance / LAN / StoryAlign / YouTube playhead):** **Podcast cross-device sync** — subscriptions + playheads only. **Downloads stay per-device**.
+**P1000 (Later, not ahead of Glance / LAN / StoryAlign / YouTube playhead sync):** **Podcast cross-device sync** — subscriptions + playheads only. **Downloads stay per-device**.
 ## Constraints
 
 - Keep `SilveranKit`; do not merge Enve tree (modules + AGPL only)
