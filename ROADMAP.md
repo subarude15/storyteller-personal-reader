@@ -93,16 +93,18 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ---
 ## Later / ideas (not blocking)
 
-Strict order (Smokey / Nas-ty) — **Next board after Josh ships in-app YouTube smoke:**
+Strict order (Smokey / Nas-ty) — **Match on YouTube is Now**; after that:
 1. ~~NAS `AD_STRIP_URL` worker~~ → **Shipped** (`e00d800` + `:20129`)
 2. ~~Silence-trim~~ → **Shipped** (`d8af263`; Josh verified)
 3. ~~Full in-app YouTube embed/SDK~~ → **superseded** by hybrid (`87b56cd`) + in-app YouTube v1 (resolve URL, no official SDK)
-4. **SponsorBlock-style skip** — Later only; additive seek; keep player seekable (do not implement now)
-5. **Glance / Watch tile** — Lock Screen / system Now Playing first; Home Screen widgets parked until paid/SideStore ← **after in-app YouTube Shipped**
-6. **One-tap LAN failover**: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
-7. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
+4. ~~Match on YouTube~~ → **Now** (Invidious search confirm when RSS has no watch URL)
+5. **SponsorBlock-style skip** — Later only; additive seek; keep player seekable (do not implement now)
+6. **Glance / Watch tile** — Lock Screen / system Now Playing first; Home Screen widgets parked until paid/SideStore
+7. **One-tap LAN failover**: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
+8. **Phone import → StoryAlign read-aloud** — Library **Import** (EPUB and/or MP3) → upload to Storyteller on NAS (same account as place sync) → server StoryAlign (or current align pipeline) produces read-aloud → ink+amp refreshes library / Continue (no second library). Server + app cut; behind Match / Glance / LAN unless Josh reorders.
+9. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
 
-**P1000 (Later, not ahead of SponsorBlock / Glance / LAN):** **Podcast cross-device sync** — subscriptions + playheads only (same Storyteller account pair as place sync / Stats). **Downloads stay per-device** (no cross-device file sync).
+**P1000 (Later, not ahead of SponsorBlock / Glance / LAN / StoryAlign import):** **Podcast cross-device sync** — subscriptions + playheads only (same Storyteller account pair as place sync / Stats). **Downloads stay per-device** (no cross-device file sync).
 ## Constraints
 
 - Keep `SilveranKit`; do not merge Enve tree (modules + AGPL only)
