@@ -11,7 +11,10 @@ public enum SilveranWidgetConstants {
     /// Prefer Info.plist override; Sideload + ink+amp use group.com.punkrally.reader.
     public static let fallbackAppGroupIdentifier = "group.com.punkrally.reader"
     public static let readingWidgetKind = "SilveranReadingWidget"
+    /// Paid / SideStore Continue widget (compiled, not registered on Sideload).
     public static let continueWidgetKind = "InkAmpContinueWidget"
+    /// Sideload gallery kind. New string so iOS cannot resurrect blank Library/Continue tiles.
+    public static let sideloadContinueWidgetKind = "inkamp.continue.v2"
 }
 
 public enum SilveranWidgetReadingKind: String, Codable, Sendable, Hashable {
@@ -403,6 +406,7 @@ public enum SilveranWidgetSnapshotStore {
         #if canImport(WidgetKit) && (os(iOS) || os(macOS))
         WidgetCenter.shared.reloadTimelines(ofKind: SilveranWidgetConstants.readingWidgetKind)
         WidgetCenter.shared.reloadTimelines(ofKind: SilveranWidgetConstants.continueWidgetKind)
+        WidgetCenter.shared.reloadTimelines(ofKind: SilveranWidgetConstants.sideloadContinueWidgetKind)
         #endif
     }
 }

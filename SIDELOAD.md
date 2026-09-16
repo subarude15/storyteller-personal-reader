@@ -83,8 +83,8 @@ To provide a flawless 1-click install on free Apple IDs, the **Silveran Reader S
 | **Background Audio & Fetch** | **Kept** | Standard background playback and sync refresh. |
 | **Home Continue Hero & Sync Chip** | **Kept** | Dynamic resume from library/shelf. |
 | **Bundle ID** | Clean `com.punkrally.reader` | Single bundle ID, avoids split identifier confusion. |
-| **Continue Widget Extension** | **Kept (honest)** | Embedded in Sideload IPA (`com.punkrally.reader.widgets`). Burns a second App ID. Free AltStore: deep-link **Continue** only (`punkrally://continue` + never-blank **Open ink+amp**). Live cover/title need App Groups. |
-| **Library shelf widget** | **Omitted from Sideload picker** | AppIntent book query needs a live App Group snapshot; free AltStore leaves a “no books” configure dead-end. Re-enable for paid Apple Developer / SideStore. |
+| **Continue Widget Extension** | **Kept (honest)** | Embedded in Sideload IPA (`com.punkrally.reader.widgets`). Burns a second App ID. Gallery kind **`inkamp.continue.v2`** named **ink+amp Continue**. Free AltStore: deep-link tile only (`punkrally://continue` + never-blank **Open ink+amp** / **Tap to continue**). Live cover/title need App Groups (paid / SideStore). |
+| **Library shelf widget** | **Omitted from Sideload picker** | Old kinds `SilveranReadingWidget` and `InkAmpContinueWidget` stay compiled but **unregistered**. Registering them lets iOS resurrect blank / Edit “no books” tiles. Re-enable for paid Apple Developer / SideStore. |
 | **App Group** | `group.com.punkrally.reader` (literal) | Baked into Sideload + widgets entitlements / `SILVERAN_WIDGET_APP_GROUP`. **Free AltStore typically does not grant App Groups** (Josh confirmed) — live Continue cover/title and Library shelf require **paid Apple Developer** or **SideStore**. **Not** a Keychain access group. Never ship unexpanded `$(APP_GROUP_ID)`. |
 | **CarPlay Entitlement & Scene** | **Removed** | Free developer accounts cannot sign `com.apple.developer.carplay-audio` or CarPlay scenes. |
 | **watchOS Companion** | **Excluded** | Companion apps burn additional App IDs on personal teams. |
@@ -92,12 +92,12 @@ To provide a flawless 1-click install on free Apple IDs, the **Silveran Reader S
 
 ### Continue widget + AltStore notes
 
-**Honest free-AltStore contract (Josh-verified):** free AltStore resign does **not** grant App Groups. Acceptance for Sideload is:
+**Honest free-AltStore contract (Josh-verified):** free AltStore resign does **not** grant App Groups. After installing a Sideload IPA that includes kind `inkamp.continue.v2`:
 
-1. Add Widget → **Continue** only (Library shelf widget is not offered).
-2. Tile always shows **Open ink+amp** (or last title if the extension once saw an App Group snapshot) — never a blank gray square.
-3. Tap opens `punkrally://continue` → Now Playing / Home Continue.
-4. Live cover + title + play/pause from App Group, and a Library shelf widget with book picker, require **paid Apple Developer** or **SideStore**.
+1. **Remove all old ink+amp widgets** from Home / Lock Screen (blank Library tiles and the previous Continue kind). iOS keeps dead kinds until you delete them.
+2. Add Widget → **ink+amp Continue** only. Do not re-add Library or the old Continue entry.
+3. Free AltStore = deep-link tile: always **Open ink+amp** + **Tap to continue** on a light cream card with charcoal cover. Tap opens `punkrally://continue` → Now Playing / Home Continue. No Edit / configure “no books” path.
+4. Live cover + title + play/pause, and a Library shelf widget with book picker, require **paid Apple Developer** or **SideStore** App Groups.
 
 Details still baked for when groups work:
 

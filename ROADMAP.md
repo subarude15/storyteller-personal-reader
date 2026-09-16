@@ -17,7 +17,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **P0 Honest AltStore Continue UX** — free AltStore cannot grant App Groups (Josh: stamp `11d`). Sideload tip: deep-link Continue + never-blank **Open ink+amp**; Library shelf widget omitted (no “no books” configure). `SIDELOAD.md` documents paid Apple ID / SideStore for live cover+title. Home podcast missing art → dark charcoal + POD. **Do not mark Continue Shipped until Josh verifies.** Soft polish anytime.
+- **P0 Honest AltStore Continue UX** — free AltStore cannot grant App Groups (Josh: stamp `11d`; old Library still editable / blanks). Sideload gallery kind **`inkamp.continue.v2`** (**ink+amp Continue**): StaticConfiguration deep-link tile, never-blank **Open ink+amp**. Old `SilveranReadingWidget` / `InkAmpContinueWidget` unregistered. After install: delete old widgets, add **ink+amp Continue** only. **Do not mark Continue Shipped until Josh verifies.** Soft polish anytime.
 
 **Do not start CarPlay / Watch / paid-team App Group chase unless Josh reorders.**
 ## Shipped
@@ -58,7 +58,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **Mini-player slim** — scrub + −15/+15 removed from mini (status-cluster cut)
 
 ### Widgets
-- [~] **Continue home widget** — tip `9cfdfc2` / bake `212c11d`; free AltStore **does not grant App Groups** (Josh). Honest Sideload UX (deep-link Continue, Library omitted) — **Now**; do not flip to Shipped until Josh verifies.
+- [~] **Continue home widget** — tip `9cfdfc2` / bake `212c11d`; kind **`inkamp.continue.v2`** (not old Library/Continue). Honest Sideload UX — **Now**; do not flip to Shipped until Josh verifies.
 ### Stats
 - [x] **SessionTracker local** — ebook / audiobook / readaloud / podcast → Home + Stats tab (`c627bbe`, Sideload [35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694))
 - [x] **Cross-device Stats sync** — tip `c5791ec` (`a5226d6` + BookServiceActor fix); private Storyteller collection `.inkamp.stats.v1` blob (same auth as place sync); session-id LWW merge (no double-count / no drop); footer Synced / Syncing… / Offline · local only; Settings last sync time; Sideload green [35028364424](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35028364424)
@@ -74,7 +74,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 2. ~~Cross-device Stats sync~~ → **Shipped** (`c5791ec`)
 3. ~~NAS `AD_STRIP_URL` worker~~ → **Shipped** (`e00d800` + `:20129`; Josh confirmed Clean ad-free)
 4. ~~Hybrid video~~ → **Shipped** (`87b56cd`; Josh confirmed)
-5. ~~Continue widget scaffold~~ → landed (`9cfdfc2`+`212c11d`); **P0 honest AltStore Continue** → **Now** (Josh verify; do not mark Shipped yet)
+5. ~~Continue widget scaffold~~ → landed (`9cfdfc2`+`212c11d`); **P0 `inkamp.continue.v2` Sideload Continue** → **Now** (Josh verify; do not mark Shipped yet)
 
 ### Soft UX polish (anytime)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)

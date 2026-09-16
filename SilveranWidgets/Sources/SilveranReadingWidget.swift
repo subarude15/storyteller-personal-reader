@@ -263,10 +263,10 @@ struct SilveranReadingWidget: Widget {
 @main
 struct SilveranReaderWidgets: WidgetBundle {
     var body: some Widget {
-        // Continue only. Library (AppIntent book query) stays compiled but unregistered:
-        // free AltStore App Groups are unavailable, so the configure picker is a dead-end.
-        // Re-add `SilveranReadingWidget()` when paid / SideStore App Groups are in play.
-        ContinueWidget()
+        // Sideload: new Continue kind only. Old Library (`SilveranReadingWidget`) and
+        // Continue (`InkAmpContinueWidget`) stay compiled for paid / SideStore later —
+        // registering them lets iOS resurrect blank / Edit “no books” tiles.
+        SideloadContinueWidget()
     }
 }
 
