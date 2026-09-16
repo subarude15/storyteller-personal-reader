@@ -17,9 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Continue widget** + Sideload-friendly App Group — embed widgets extension in Sideload IPA; Continue + cover + play/pause; deep-link Now Playing. Lock Screen: lean on **system Now Playing** first (optional WidgetKit Lock Screen tile only if App Group lands). Soft polish anytime (Cleaning… vs episode time-left).
+- **P0 Continue widget blank (tap works)** — App Group snapshot harden tip >= `21b1fc3`. Cover/title/play-pause must render on Home Screen Continue widget (tap deep-link already OK). Confirm `ContinueWidgetSnapshotStore` / App Group write+read on Sideload; re-publish snapshot on launch / Continue / playback changes. Soft polish anytime (Cleaning… vs episode time-left).
 
-**Do not start silence-trim / CarPlay / Watch app unless Josh reorders.**
+**Do not start silence-trim / CarPlay / Watch app / fancy Island unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
@@ -57,6 +57,8 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **Mini / full player polish** — −15/+15, elapsed|scrub|remaining, podcast cover on mini (`b8c85f9` / tip ≥ `70866b7`, Sideload [35011914260](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35011914260)); Josh ready for next
 - [x] **Mini-player slim** — scrub + −15/+15 removed from mini (status-cluster cut)
 
+### Widgets
+- [~] **Continue home widget + Sideload App Group** — tip `9cfdfc2` / harden `e944b58` / `21b1fc3`; widgets extension in Sideload IPA; App Group shared; tap deep-link works; **P0 blank UI** (cover/title/controls) — see Now
 ### Stats
 - [x] **SessionTracker local** — ebook / audiobook / readaloud / podcast → Home + Stats tab (`c627bbe`, Sideload [35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694))
 - [x] **Cross-device Stats sync** — tip `c5791ec` (`a5226d6` + BookServiceActor fix); private Storyteller collection `.inkamp.stats.v1` blob (same auth as place sync); session-id LWW merge (no double-count / no drop); footer Synced / Syncing… / Offline · local only; Settings last sync time; Sideload green [35028364424](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35028364424)
@@ -72,7 +74,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 2. ~~Cross-device Stats sync~~ → **Shipped** (`c5791ec`)
 3. ~~NAS `AD_STRIP_URL` worker~~ → **Shipped** (`e00d800` + `:20129`; Josh confirmed Clean ad-free)
 4. ~~Hybrid video~~ → **Shipped** (`87b56cd`; Josh confirmed)
-5. ~~Continue widget~~ → **Now** (widgets extension + Sideload App Group; system Now Playing first for Lock Screen)
+5. ~~Continue widget scaffold~~ → landed (`9cfdfc2`+`21b1fc3`); **P0 blank widget UI** → **Now** (App Group snapshot harden tip >= `21b1fc3`)
 
 ### Soft UX polish (anytime)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
@@ -89,7 +91,7 @@ Strict order (Smokey / Nas-ty):
 1. ~~NAS `AD_STRIP_URL` worker~~ → **Shipped** (`e00d800` + `:20129`)
 2. **Silence-trim** — with that worker (same pipeline family)
 3. ~~Full in-app YouTube embed/SDK~~ → **superseded** by hybrid (`87b56cd`)
-4. ~~Glance / Watch tile~~ → **Now** as Continue widget + Sideload App Group (system Now Playing first for Lock Screen)
+4. ~~Glance / Watch tile~~ → Continue scaffold landed; **P0 blank UI** harden tip >= `21b1fc3` (system Now Playing first for Lock Screen)
 5. **One-tap LAN failover**: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
 6. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
 
