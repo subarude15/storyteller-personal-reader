@@ -135,8 +135,10 @@ public actor BookServiceActor {
             guard let source = sourcesByID[record.id] else { continue }
             let status = await source.connectionStatus
             var netOpSucceeded: Bool? = nil
+            var networkRoute: StorytellerNetworkRoute? = nil
             if let storyteller = source as? StorytellerActor {
                 netOpSucceeded = await storyteller.lastNetworkOpSucceeded
+                networkRoute = await storyteller.networkRoute
             }
             result.append(
                 SourceConnectionInfo(
@@ -145,6 +147,7 @@ public actor BookServiceActor {
                     kind: record.kind,
                     status: status,
                     lastNetworkOpSucceeded: netOpSucceeded,
+                    networkRoute: networkRoute,
                 )
             )
         }
@@ -276,6 +279,7 @@ public actor BookServiceActor {
                 guard
                     await actor.configureCredentials(
                         baseURL: serverURL,
+                        lanURL: configuration.lanURL,
                         username: username,
                         password: password,
                     )
@@ -287,6 +291,7 @@ public actor BookServiceActor {
                 do {
                     try await AuthenticationActor.shared.saveCredentials(
                         url: serverURL,
+                        lanURL: configuration.lanURL,
                         username: username,
                         password: password,
                         sourceID: record.id,
@@ -370,6 +375,7 @@ public actor BookServiceActor {
                 guard
                     await actor.configureCredentials(
                         baseURL: serverURL,
+                        lanURL: configuration.lanURL,
                         username: username,
                         password: password,
                     )
@@ -380,6 +386,7 @@ public actor BookServiceActor {
                 do {
                     try await AuthenticationActor.shared.saveCredentials(
                         url: serverURL,
+                        lanURL: configuration.lanURL,
                         username: username,
                         password: password,
                         sourceID: sourceID,
@@ -426,6 +433,7 @@ public actor BookServiceActor {
 
         return await actor.setLogin(
             baseURL: credentials.url,
+            lanURL: credentials.lanURL,
             username: credentials.username,
             password: credentials.password,
         )
@@ -462,10 +470,13 @@ public actor BookServiceActor {
         return true
     }
 
-    public func credentials(for sourceID: BookSourceID) async
-        -> (url: String, username: String, password: String)?
-    {
+    public func credentials(for sourceID: BookSourceID) async -> StorytellerSourceCredentials? {
         try? await AuthenticationActor.shared.loadCredentials(sourceID: sourceID)
+    }
+
+    public func storytellerNetworkRoute(sourceID: BookSourceID) async -> StorytellerNetworkRoute? {
+        guard let actor = await storytellerActor(for: sourceID) else { return nil }
+        return await actor.networkRoute
     }
 
     public func checkBookUpdatePermission(
@@ -1498,6 +1509,7 @@ public actor BookServiceActor {
                     {
                         _ = await actor.configureCredentials(
                             baseURL: credentials.url,
+                            lanURL: credentials.lanURL,
                             username: credentials.username,
                             password: credentials.password,
                         )

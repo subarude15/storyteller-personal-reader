@@ -13,6 +13,8 @@ public struct SourceConnectionInfo: Sendable, Identifiable, Equatable {
     public let kind: BookSourceKind
     public let status: ConnectionStatus
     public let lastNetworkOpSucceeded: Bool?
+    /// Storyteller only: whether API calls currently prefer LAN or public.
+    public let networkRoute: StorytellerNetworkRoute?
 
     public init(
         id: BookSourceID,
@@ -20,12 +22,30 @@ public struct SourceConnectionInfo: Sendable, Identifiable, Equatable {
         kind: BookSourceKind,
         status: ConnectionStatus,
         lastNetworkOpSucceeded: Bool? = nil,
+        networkRoute: StorytellerNetworkRoute? = nil,
     ) {
         self.id = id
         self.name = name
         self.kind = kind
         self.status = status
         self.lastNetworkOpSucceeded = lastNetworkOpSucceeded
+        self.networkRoute = networkRoute
+    }
+}
+
+/// Per-source Storyteller credentials (Keychain).
+public struct StorytellerSourceCredentials: Sendable, Hashable {
+    public var url: String
+    /// Optional LAN URL. `nil` = never saved (routing uses default); empty = disabled.
+    public var lanURL: String?
+    public var username: String
+    public var password: String
+
+    public init(url: String, lanURL: String? = nil, username: String, password: String) {
+        self.url = url
+        self.lanURL = lanURL
+        self.username = username
+        self.password = password
     }
 }
 
@@ -88,6 +108,8 @@ public struct BookSourceConfiguration: Sendable, Hashable {
     public var kind: BookSourceKind
     public var name: String
     public var serverURL: String?
+    /// Optional home-LAN Storyteller URL (same credentials as `serverURL`).
+    public var lanURL: String?
     public var username: String?
     public var password: String?
     public var storagePath: String?
@@ -97,6 +119,7 @@ public struct BookSourceConfiguration: Sendable, Hashable {
             kind: BookSourceKind,
             name: String,
             serverURL: String? = nil,
+            lanURL: String? = nil,
             username: String? = nil,
             password: String? = nil,
             storagePath: String? = nil,
@@ -109,6 +132,9 @@ public struct BookSourceConfiguration: Sendable, Hashable {
             self.serverURL =
                 serverURL
                 ?? (kind == .storyteller ? kDefaultStorytellerServerURL : nil)
+            self.lanURL =
+                lanURL
+                ?? (kind == .storyteller ? kDefaultStorytellerLANURL : nil)
             self.username = username
             self.password = password
             self.storagePath = storagePath

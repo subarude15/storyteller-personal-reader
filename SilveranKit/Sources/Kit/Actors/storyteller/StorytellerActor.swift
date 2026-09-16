@@ -46,8 +46,13 @@ public actor StorytellerActor {
 
     private var username: String?
     private var password: String?
+    /// User-facing public Storyteller URL (primary).
+    private var publicServerURL: URL?
+    /// Optional LAN URL as stored (nil = use default; resolved via StorytellerLANRouting).
+    private var storedLANURL: String?
     private var apiBaseURL: URL?
     private var accessToken: AccessToken?
+    public private(set) var networkRoute: StorytellerNetworkRoute = .public
     private(set) public var libraryMetadata: [BookMetadata] = []
     public var lastUpdateBookError: String?
     private var cachedStatuses: [BookStatus] = []
@@ -188,6 +193,8 @@ public actor StorytellerActor {
         await ProgressSyncActor.shared.startPolling()
 
         guard networkAvailable else { return }
+
+        await refreshNetworkRoute(reauthenticateIfChanged: false)
 
         var reconnected = false
         if connectionStatus != .connected {
@@ -352,6 +359,7 @@ public actor StorytellerActor {
 
         guard isAppActive else { return }
         resetReconnectBackoff()
+        await refreshNetworkRoute(reauthenticateIfChanged: true)
         if connectionStatus == .connected {
             await verifyConnection()
         } else {
@@ -389,6 +397,10 @@ public actor StorytellerActor {
             return false
         }
 
+        if await fallbackFromLANToPublicIfNeeded() {
+            return true
+        }
+
         lastNetworkOpSucceeded = false
         switch connectionStatus {
             case .connected, .connecting:
@@ -401,12 +413,14 @@ public actor StorytellerActor {
 
     public func setLogin(
         baseURL baseURLString: String,
+        lanURL lanURLString: String? = nil,
         username: String,
         password: String,
     ) async -> Bool {
         guard
             await configureCredentials(
                 baseURL: baseURLString,
+                lanURL: lanURLString,
                 username: username,
                 password: password,
             )
@@ -482,18 +496,81 @@ public actor StorytellerActor {
 
     public func configureCredentials(
         baseURL baseURLString: String,
+        lanURL lanURLString: String? = nil,
         username: String,
         password: String,
     ) async -> Bool {
         self.username = username
         self.password = password
         self.accessToken = nil
+        self.storedLANURL = lanURLString
         guard let baseURL = URL(string: baseURLString) else {
             debugLog("[StorytellerActor] Invalid base URL: \(baseURLString)")
             await updateConnectionStatus(.error("Invalid server URL"))
             return false
         }
+        publicServerURL = baseURL
+        networkRoute = .public
         apiBaseURL = StorytellerActor.resolveAPIBaseURL(from: baseURL)
+        await refreshNetworkRoute(reauthenticateIfChanged: false)
+        startNetworkMonitoring()
+        return true
+    }
+
+    /// Probe optional LAN URL and prefer it when reachable; otherwise keep public.
+    public func refreshNetworkRoute(reauthenticateIfChanged: Bool) async {
+        let previous = networkRoute
+        let effectiveLAN = StorytellerLANRouting.effectiveLANURL(stored: storedLANURL)
+
+        var preferLAN = false
+        if let lanString = effectiveLAN, let lanURL = URL(string: lanString), lanURL.scheme != nil {
+            preferLAN = await StorytellerLANRouting.probeReachability(serverURL: lanURL)
+        }
+
+        let next: StorytellerNetworkRoute = preferLAN ? .lan : .public
+        applyNetworkRoute(next)
+
+        if previous != networkRoute {
+            debugLog(
+                "[StorytellerActor] network route \(previous.rawValue) -> \(networkRoute.rawValue)"
+            )
+            accessToken = nil
+            observers?()
+            if reauthenticateIfChanged, networkAvailable {
+                _ = await ensureAuthentication()
+            }
+        }
+    }
+
+    private func applyNetworkRoute(_ route: StorytellerNetworkRoute) {
+        networkRoute = route
+        switch route {
+            case .lan:
+                if let lanString = StorytellerLANRouting.effectiveLANURL(stored: storedLANURL),
+                    let lanURL = URL(string: lanString)
+                {
+                    apiBaseURL = StorytellerActor.resolveAPIBaseURL(from: lanURL)
+                    return
+                }
+                networkRoute = .public
+                fallthrough
+            case .public:
+                if let publicServerURL {
+                    apiBaseURL = StorytellerActor.resolveAPIBaseURL(from: publicServerURL)
+                }
+        }
+    }
+
+    /// Soft fail: LAN selected but unreachable mid-flight → flip to public once.
+    @discardableResult
+    private func fallbackFromLANToPublicIfNeeded() async -> Bool {
+        guard networkRoute == .lan, publicServerURL != nil else { return false }
+        debugLog("[StorytellerActor] LAN request failed; falling back to public")
+        accessToken = nil
+        applyNetworkRoute(.public)
+        resetReconnectBackoff()
+        lastNetworkOpSucceeded = nil
+        observers?()
         return true
     }
 
@@ -595,6 +672,14 @@ public actor StorytellerActor {
         if await authenticate(), let accessToken = accessToken, let apiBaseURL = apiBaseURL {
             await updateConnectionStatus(.connected)
             return (apiBaseURL, accessToken)
+        }
+
+        // Soft fail: auth against LAN failed → try public once.
+        if networkRoute == .lan, await fallbackFromLANToPublicIfNeeded() {
+            if await authenticate(), let accessToken = accessToken, let apiBaseURL = apiBaseURL {
+                await updateConnectionStatus(.connected)
+                return (apiBaseURL, accessToken)
+            }
         }
 
         return nil
@@ -726,6 +811,10 @@ public actor StorytellerActor {
     /// Fetches library metadata from `/api/v2/books`.
     /// Server implementation: `storyteller/web/src/app/api/v2/books/route.ts`.
     public func fetchLibraryInformation() async -> [BookMetadata]? {
+        await fetchLibraryInformation(allowLANFailover: true)
+    }
+
+    private func fetchLibraryInformation(allowLANFailover: Bool) async -> [BookMetadata]? {
         guard let (baseURL, token) = await ensureAuthentication() else { return nil }
         let booksURL = baseURL.appendingPathComponent("books")
 
@@ -792,6 +881,13 @@ public actor StorytellerActor {
             return libraryMetadata
         } catch {
             logStorytellerError("fetchLibraryInformation", error: error)
+            if allowLANFailover,
+                let urlError = error as? URLError,
+                isConnectivityError(urlError),
+                await fallbackFromLANToPublicIfNeeded()
+            {
+                return await fetchLibraryInformation(allowLANFailover: false)
+            }
             return nil
         }
     }
@@ -2695,6 +2791,9 @@ public actor StorytellerActor {
         accessToken = nil
         username = nil
         password = nil
+        publicServerURL = nil
+        storedLANURL = nil
+        networkRoute = .public
         self.apiBaseURL = nil
         libraryMetadata.removeAll()
         await updateConnectionStatus(.disconnected)

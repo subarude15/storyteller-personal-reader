@@ -19,11 +19,15 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 - **One-tap LAN failover** — tip ≥ Glance Sideload `257e44e` (Josh confirmed Glance). Optional **LAN URL** on Storyteller source (default `http://192.168.1.2:1800`); short probe on home Wi‑Fi → prefer LAN for Storyteller API + downloads; soft fall back to public on failure. Settings status **Using LAN** / **Using public**. Same credentials both URLs. Soft polish anytime.
 
+**Await Josh smoke after Sideload green:** on home Wi‑Fi library hits `192.168.1.2:1800`; off Wi‑Fi (or LAN down) still works via public URL.
+
 **Do not start Invidious/ad-strip URL changes / SponsorBlock / StoryAlign / widgets / CarPlay unless Josh reorders.**
 
 **Ship note (Glance):** tip `257e44e` ([PR 13](https://github.com/subarude15/storyteller-personal-reader/pull/13)) — Sideload green [35157502050](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35157502050). Josh confirmed Lock Screen / Control Center.
 
 **Ship note (YouTube playhead local):** tip `fc82893` ([PR 12](https://github.com/subarude15/storyteller-personal-reader/pull/12)) — Sideload green [35156077127](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35156077127).
+
+**Next after LAN:** YouTube playhead sync (Storyteller blob) / StoryAlign phone import — per Later board.
 ## Shipped
 
 ### Product / sync
