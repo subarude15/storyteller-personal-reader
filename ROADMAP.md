@@ -17,9 +17,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Smoke tip `87b56cd`** (hybrid RSS video + Watch on YouTube) — Sideload green. Bad Friends: **Watch on YouTube** on episode sheet + full Now Playing (never mini). Dual-enclosure shows: video in full NP with shared chrome. Soft polish anytime (Cleaning… vs episode time-left).
-
-**After Josh confirms hybrid:** Next locks to **Continue widget** + Sideload-friendly App Group (embed widgets extension). Lock Screen: lean on **system Now Playing** first — not fancy Dynamic Island expansions.
+- **Continue widget** + Sideload-friendly App Group — embed widgets extension in Sideload IPA; Continue + cover + play/pause; deep-link Now Playing. Lock Screen: lean on **system Now Playing** first (optional WidgetKit Lock Screen tile only if App Group lands). Soft polish anytime (Cleaning… vs episode time-left).
 
 **Do not start silence-trim / CarPlay / Watch app unless Josh reorders.**
 ## Shipped
@@ -49,7 +47,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **Find shows** — Apple iTunes Search API → Subscribe → `PodcastSubscriptionStore` (`a0fc4e4`, Sideload [35013733091](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35013733091)); Josh confirmed
 - [x] **Ad-strip download / queue UX (v1 = UX + hooks + stub)** — tip `130c877` (prior `60a211b` / `c93deac`); Download sheet Original vs Clean (per-show last choice); Keep/queue → Clean pending; chips Original | Cleaning… | Clean; `StubPodcastAdStripPipeline`; Sideload green [35019916837](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35019916837)
 - [x] **NAS `AD_STRIP_URL` full cut (option 2)** — tip `e00d800`; Settings **Ad strip URL** + **Test**; dumb ffmpeg worker `:20129`; upload Original → poll → Clean sibling (never delete Original); Josh confirmed Clean ad-free (`e00d800` + `:20129`); Sideload green [35038255753](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35038255753)
-- [x] **Hybrid RSS video + Watch on YouTube** — tip `87b56cd`; video surface in full Now Playing for dual enclosures; Watch on YouTube chip (episode sheet + full NP, not mini); Sideload green (awaiting Josh smoke)
+- [x] **Hybrid RSS video + Watch on YouTube** — tip `87b56cd`; video surface in full Now Playing for dual enclosures; Watch on YouTube chip (episode sheet + full NP, not mini); Sideload green; Josh confirmed
 - [x] **Episode status cluster + show filters + Josh UI stamps** — tip `b719921`; download glyph · Clean chip (incl. Clean failed) · Xm left/Played; show filters All|Downloaded|In progress|Clean pending; Shelf POD chrome; mini-player cover+title+play/pause(+close) only (scrub/−15/+15 stay on full Now Playing); Home/Library finishability text via `PlaybackFinishabilityCopy`; Sideload green [35023934089](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35023934089)
 - [x] **Podcast play queue** — tip `2f7deb4`; Play Next / Play Last in episode menus; `PodcastPlaybackQueueStore` + editable `PodcastPlaybackQueueView` (drag reorder, remove, clear finished); auto-advance on finish via shared player; persisted upcoming order; Sideload green [35025614228](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35025614228)
 - [x] **P0 Podcast resume / Home Continue stall** — tip `7eb0a9e`; Josh confirmed; Loading until playhead advances; Pause only when truly playing; Sideload green [35031138576](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35031138576)
@@ -73,8 +71,8 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 1. ~~Podcast queue~~ → **Shipped** (`2f7deb4`)
 2. ~~Cross-device Stats sync~~ → **Shipped** (`c5791ec`)
 3. ~~NAS `AD_STRIP_URL` worker~~ → **Shipped** (`e00d800` + `:20129`; Josh confirmed Clean ad-free)
-4. ~~Hybrid video~~ → **Sideload green** (`87b56cd`) — awaiting Josh smoke (Bad Friends YT chip)
-5. **After hybrid smoke (Josh locked):** **Continue widget** + Sideload-friendly App Group (ship widgets extension in Sideload IPA; Continue + cover + play/pause; deep-link Now Playing). Lock Screen: lean on system Now Playing first (defer fancy Dynamic Island).
+4. ~~Hybrid video~~ → **Shipped** (`87b56cd`; Josh confirmed)
+5. ~~Continue widget~~ → **Now** (widgets extension + Sideload App Group; system Now Playing first for Lock Screen)
 
 ### Soft UX polish (anytime)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
@@ -91,7 +89,7 @@ Strict order (Smokey / Nas-ty):
 1. ~~NAS `AD_STRIP_URL` worker~~ → **Shipped** (`e00d800` + `:20129`)
 2. **Silence-trim** — with that worker (same pipeline family)
 3. ~~Full in-app YouTube embed/SDK~~ → **superseded** by hybrid (`87b56cd`)
-4. ~~Glance / Watch tile~~ → **Next after hybrid smoke** as Continue widget + Sideload App Group (system Now Playing first for Lock Screen)
+4. ~~Glance / Watch tile~~ → **Now** as Continue widget + Sideload App Group (system Now Playing first for Lock Screen)
 5. **One-tap LAN failover**: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
 6. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
 
