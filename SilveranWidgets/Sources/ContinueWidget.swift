@@ -30,20 +30,25 @@ struct ContinueTimelineProvider: TimelineProvider {
 
     func getSnapshot(in context: Context, completion: @escaping (ContinueEntry) -> Void) {
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "timeline")
-        completion(
-            ContinueEntry(date: Date(), snapshot: ContinueWidgetSnapshotStore.loadSnapshot())
-        )
+        completion(ContinueEntry(date: Date(), snapshot: Self.honestSnapshot()))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<ContinueEntry>) -> Void) {
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "timeline")
-        let entry = ContinueEntry(
-            date: Date(),
-            snapshot: ContinueWidgetSnapshotStore.loadSnapshot(),
-        )
+        let snapshot = Self.honestSnapshot()
+        let entry = ContinueEntry(date: Date(), snapshot: snapshot)
         // Refresh often enough that play/pause state stays honest while playing.
         let next = Date().addingTimeInterval(entry.snapshot.isPlaying ? 60 : 15 * 60)
         completion(Timeline(entries: [entry], policy: .after(next)))
+    }
+
+    /// Always deep-linkable; never rely on App Group for a non-blank tile.
+    private static func honestSnapshot() -> ContinueWidgetSnapshot {
+        var snapshot = ContinueWidgetSnapshotStore.loadSnapshot()
+        if snapshot.deepLink == nil || snapshot.deepLink?.isEmpty == true {
+            snapshot.deepLink = InkAmpContinueLink.continueURL.absoluteString
+        }
+        return snapshot
     }
 }
 
@@ -56,7 +61,7 @@ struct ContinueWidget: Widget {
             ContinueWidgetView(entry: entry)
         }
         .configurationDisplayName("Continue")
-        .description("Cover, title, and play/pause for what you’re in the middle of.")
+        .description("Opens ink+amp Continue. Live cover/title need App Groups.")
         .supportedFamilies(Self.supportedFamilies)
         .contentMarginsDisabled()
     }
@@ -203,7 +208,8 @@ private struct ContinueWidgetView: View {
         }
     }
 
-    /// Never-blank: live title, else last remembered title, else invite to open.
+    /// Never-blank: live App Group title, else extension-local last title, else invite.
+    /// Free AltStore often has no App Group — still show “Open ink+amp”, never an empty tile.
     private var displayTitle: String {
         if let title = entry.snapshot.title, !title.isEmpty {
             return title
@@ -280,9 +286,10 @@ private struct ContinueWidgetView: View {
 
 private enum ContinuePalette {
     static let accent = Color(red: 0.91, green: 0.365, blue: 0.016) // #E85D04
-    static let primary = Color.primary
-    static let secondary = Color.secondary
-    static let coverFallback = Color.secondary.opacity(0.22)
+    // Explicit ink colors — Color.primary can wash out on some WidgetKit surfaces.
+    static let primary = Color(red: 0.102, green: 0.094, blue: 0.078) // #1A1814
+    static let secondary = Color(red: 0.420, green: 0.396, blue: 0.376) // #6B6560
+    static let coverFallback = Color(white: 0.2) // same dark charcoal as book placeholders
     static let background = LinearGradient(
         colors: [
             Color(red: 0.97, green: 0.96, blue: 0.95),

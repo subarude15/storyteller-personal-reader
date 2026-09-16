@@ -726,16 +726,24 @@ private struct HomeMixedCoverView: View {
                     case .success(let image):
                         image.resizable().scaledToFill()
                     default:
-                        Image(systemName: "mic.fill")
-                            .foregroundStyle(chrome.textFaint)
+                        podcastArtPlaceholder
                 }
             }
             .frame(width: width, height: height)
             .clipped()
         } else {
-            Image(systemName: "mic.fill")
-                .foregroundStyle(chrome.textFaint)
+            podcastArtPlaceholder
         }
+    }
+
+    /// Missing / failed podcast art: dark charcoal like book covers (never white-on-white).
+    private var podcastArtPlaceholder: some View {
+        ZStack {
+            Color(white: 0.2)
+            Image(systemName: "mic.fill")
+                .foregroundStyle(Color.white.opacity(0.72))
+        }
+        .frame(width: width, height: height)
     }
 }
 

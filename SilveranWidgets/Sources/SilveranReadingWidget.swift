@@ -263,8 +263,10 @@ struct SilveranReadingWidget: Widget {
 @main
 struct SilveranReaderWidgets: WidgetBundle {
     var body: some Widget {
+        // Continue only. Library (AppIntent book query) stays compiled but unregistered:
+        // free AltStore App Groups are unavailable, so the configure picker is a dead-end.
+        // Re-add `SilveranReadingWidget()` when paid / SideStore App Groups are in play.
         ContinueWidget()
-        SilveranReadingWidget()
     }
 }
 
@@ -836,16 +838,17 @@ private struct EmptyReadingWidgetView: View {
             Image(systemName: "book.closed")
                 .font(.title2)
                 .foregroundStyle(WidgetPalette.secondaryText)
-            Text("No books yet")
+            Text("Open ink+amp")
                 .font(.headline)
                 .foregroundStyle(WidgetPalette.primaryText)
-            Text("Add a book in Silveran Reader to see it here.")
+            Text("Library shelf needs App Groups (paid Apple ID or SideStore).")
                 .font(.caption)
                 .foregroundStyle(WidgetPalette.secondaryText)
                 .lineLimit(3)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .padding(18)
+        .widgetURL(InkAmpContinueLink.continueURL)
     }
 }
 

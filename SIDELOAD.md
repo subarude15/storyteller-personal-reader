@@ -83,23 +83,31 @@ To provide a flawless 1-click install on free Apple IDs, the **Silveran Reader S
 | **Background Audio & Fetch** | **Kept** | Standard background playback and sync refresh. |
 | **Home Continue Hero & Sync Chip** | **Kept** | Dynamic resume from library/shelf. |
 | **Bundle ID** | Clean `com.punkrally.reader` | Single bundle ID, avoids split identifier confusion. |
-| **Continue Widget Extension** | **Kept** | Embedded in Sideload IPA (`com.punkrally.reader.widgets`). Burns a second App ID — intentional for Home Screen Continue. |
-| **App Group** | `group.com.punkrally.reader` (literal in Sideload + widgets entitlements / `SILVERAN_WIDGET_APP_GROUP`) | Shared by app + widgets for Continue snapshot / recent stores. **Not** a Keychain access group. Never ship unexpanded `$(APP_GROUP_ID)` in the Sideload IPA. |
+| **Continue Widget Extension** | **Kept (honest)** | Embedded in Sideload IPA (`com.punkrally.reader.widgets`). Burns a second App ID. Free AltStore: deep-link **Continue** only (`punkrally://continue` + never-blank **Open ink+amp**). Live cover/title need App Groups. |
+| **Library shelf widget** | **Omitted from Sideload picker** | AppIntent book query needs a live App Group snapshot; free AltStore leaves a “no books” configure dead-end. Re-enable for paid Apple Developer / SideStore. |
+| **App Group** | `group.com.punkrally.reader` (literal) | Baked into Sideload + widgets entitlements / `SILVERAN_WIDGET_APP_GROUP`. **Free AltStore typically does not grant App Groups** (Josh confirmed) — live Continue cover/title and Library shelf require **paid Apple Developer** or **SideStore**. **Not** a Keychain access group. Never ship unexpanded `$(APP_GROUP_ID)`. |
 | **CarPlay Entitlement & Scene** | **Removed** | Free developer accounts cannot sign `com.apple.developer.carplay-audio` or CarPlay scenes. |
 | **watchOS Companion** | **Excluded** | Companion apps burn additional App IDs on personal teams. |
 | **Keychain Access Groups** | Fallback to default | Single app uses default app keychain without team group errors. Never reintroduce `KEYCHAIN_ACCESS_GROUP` on Sideload. |
 
 ### Continue widget + AltStore notes
 
+**Honest free-AltStore contract (Josh-verified):** free AltStore resign does **not** grant App Groups. Acceptance for Sideload is:
+
+1. Add Widget → **Continue** only (Library shelf widget is not offered).
+2. Tile always shows **Open ink+amp** (or last title if the extension once saw an App Group snapshot) — never a blank gray square.
+3. Tap opens `punkrally://continue` → Now Playing / Home Continue.
+4. Live cover + title + play/pause from App Group, and a Library shelf widget with book picker, require **paid Apple Developer** or **SideStore**.
+
+Details still baked for when groups work:
+
 - **App Group id (baked literal):** `group.com.punkrally.reader`
-  - Sideload entitlements (`SilveranReaderSideload.entitlements`) and widgets entitlements (`SilveranReaderWidgets.entitlements`) embed this string **literally** — never `$(APP_GROUP_ID)` in the Sideload IPA (unsigned `package-ipa` does not expand entitlement placeholders; AltStore would resign a broken group).
-  - Sideload + widgets Info keys `SILVERAN_WIDGET_APP_GROUP` are also the literal `group.com.punkrally.reader` (same reason).
+  - Sideload entitlements (`SilveranReaderSideload.entitlements`) and widgets entitlements (`SilveranReaderWidgets.entitlements`) embed this string **literally** — never `$(APP_GROUP_ID)` in the Sideload IPA (unsigned `package-ipa` does not expand entitlement placeholders).
+  - Sideload + widgets Info keys `SILVERAN_WIDGET_APP_GROUP` are also the literal `group.com.punkrally.reader`.
   - Paid/Automatic Xcode iOS target may still use `$(APP_GROUP_ID)` from xcconfig; Sideload path must not.
-- AltStore resigns the app **and** the widgets extension; expect two App IDs (`.reader` + `.reader.widgets`) plus the App Group registration.
-- Free-team caveat: if Continue stays empty after install, Console should show `[ContinueWidget] appGroup=… container=nil` — AltStore free resign sometimes drops application-groups. Fix: delete app → reinstall IPA → open ink+amp once (publishes snapshot) → re-add widget. If container stays nil after that, the free profile blocked the group.
-- Home Screen: Add Widget → **Continue** (cover + title + play/pause; empty state shows **Open ink+amp**, never a blank tile). Tap opens `punkrally://continue` → Now Playing / Home Continue.
-- Play/pause uses `AudioPlaybackIntent` + Darwin/App Group bridge while audio is running. If remote pause fails after resign, use **system Lock Screen Now Playing** (already wired) or open the app.
-- Lock Screen WidgetKit accessory tiles are optional; system Now Playing remains the primary Lock Screen control surface.
+- Console probe: `[ContinueWidget] publish|timeline appGroup=… container=ok|nil`. `container=nil` on free AltStore is expected; deep-link Continue still works.
+- Play/pause (`AudioPlaybackIntent` + Darwin/App Group) only appears when a live snapshot exists. Prefer **system Lock Screen Now Playing** for transport on free AltStore.
+- Do **not** mark Continue widget fully Shipped in `ROADMAP.md` until Josh verifies this honest UX.
 
 ---
 

@@ -28,4 +28,12 @@ struct ContinueWidgetLinkTests {
         #expect(!id.contains("$("))
         #expect(!id.isEmpty)
     }
+
+    @Test func emptySnapshotStillDeepLinksToContinue() {
+        let empty = ContinueWidgetSnapshot.empty
+        #expect(empty.title == nil)
+        #expect(!empty.hasItem)
+        // Widget view falls back to this URL when snapshot.deepLink is nil.
+        #expect(InkAmpContinueLink.continueURL.absoluteString == "punkrally://continue")
+    }
 }
