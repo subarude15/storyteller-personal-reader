@@ -70,7 +70,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 1. ~~Podcast queue~~ → **Shipped** (`2f7deb4`)
 2. ~~Cross-device Stats sync~~ → **Shipped** (`c5791ec`)
 3. ~~NAS `AD_STRIP_URL` worker~~ → **App Sideload** (`e00d800` stamp …800); Nas-ty `/health` + Josh Test pending
-4. ~~Hybrid video~~ → **Now** (RSS video when enclosure exists + Watch on YouTube chip)
+4. **Hybrid video** (after AD_STRIP Test + Clean) — RSS video when enclosure exists + Watch on YouTube chip (not full embed)
 
 ### Soft UX polish (anytime)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
@@ -85,7 +85,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 Strict order (Smokey / Nas-ty):
 1. ~~NAS `AD_STRIP_URL` worker~~ → **App Sideload** (`e00d800`); NAS deploy pending
 2. **Silence-trim** — with that worker (same pipeline family)
-3. ~~Full in-app YouTube embed/SDK~~ → **superseded** by Josh hybrid: RSS video default when enclosure exists + **Watch on YouTube** chip (not full embed) — see **Now**
+3. ~~Full in-app YouTube embed/SDK~~ → **superseded** by Josh hybrid: RSS video default when enclosure exists + **Watch on YouTube** chip (not full embed) — see **Next** after AD_STRIP verified
 4. **Glance / Watch** tile: now-playing + Continue deep-link
 5. **One-tap LAN failover**: public URL → `http://192.168.1.2:1800` on home Wi‑Fi
 6. **CarPlay** (out of current build scope)
