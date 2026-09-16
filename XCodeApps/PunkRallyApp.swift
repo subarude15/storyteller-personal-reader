@@ -253,7 +253,8 @@ public struct PunkRallyTabView: View {
             audioURL: audioURL,
             duration: duration,
             isVideo: mediaKind == .video,
-            coverURL: coverURL
+            coverURL: coverURL,
+            youtubeURL: userInfo["youtubeURL"] as? URL
         )
         Task { await podcastPresenter.play(episode) }
     }

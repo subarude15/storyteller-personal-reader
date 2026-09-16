@@ -159,6 +159,7 @@ public enum PodcastAdStripState: String, Codable, Sendable, Equatable {
     public var chipLabel: String {
         switch self {
             case .original: return "Original"
+            // Job chip only — never duration-looking copy (Xm left stays on progress).
             case .cleaning: return "Cleaning…"
             case .clean: return "Clean"
             case .failed: return "Clean failed"

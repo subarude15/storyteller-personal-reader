@@ -1,4 +1,5 @@
 #if os(iOS)
+import AVFoundation
 import SwiftUI
 
 /// Full-screen card for a streaming RSS podcast episode.
@@ -7,8 +8,10 @@ import SwiftUI
 /// and Now Playing use, and reuses the shared `PlaybackRateButton` so
 /// podcasts get the identical speed control as audiobooks/readaloud — no
 /// second speed UI. −15 / play / +15 and elapsed|scrub|remaining match the mini.
+/// Video enclosures use a shared AVPlayer surface; YouTube is handoff-only.
 public struct PodcastPlayerView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.openURL) private var openURL
     private let episode: PodcastPlayerPresenter.Episode
     private let onClose: () -> Void
 
@@ -18,6 +21,7 @@ public struct PodcastPlayerView: View {
     @State private var scrubFraction: Double = 0
     @State private var isScrubbing = false
     @State private var showPlaybackQueue = false
+    @State private var videoPlayer: AVPlayer?
 
     public init(episode: PodcastPlayerPresenter.Episode, onClose: @escaping () -> Void) {
         self.episode = episode
@@ -50,6 +54,17 @@ public struct PodcastPlayerView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
+
+                if let youtubeURL = episode.youtubeURL, !episode.isVideo {
+                    Button {
+                        openURL(youtubeURL)
+                    } label: {
+                        Label("Watch on YouTube", systemImage: "play.rectangle.on.rectangle")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityHint("Opens YouTube in Safari or the YouTube app")
+                }
             }
 
             if let summary = episode.summary {
@@ -76,6 +91,14 @@ public struct PodcastPlayerView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(uiColor: .systemBackground))
         .toolbar(.hidden, for: .tabBar)
+        .task(id: episode.id) {
+            await refreshVideoPlayer()
+        }
+        .onChange(of: presenter.isOpening) { _, opening in
+            if !opening {
+                Task { await refreshVideoPlayer() }
+            }
+        }
         .onAppear {
             monitor.start()
             scrubFraction = monitor.snapshot?.bookProgress ?? 0
@@ -143,27 +166,44 @@ public struct PodcastPlayerView: View {
 
     @ViewBuilder
     private var artworkBlock: some View {
-        Group {
-            if let cover = monitor.coverImage {
-                Image(uiImage: cover)
-                    .resizable()
-                    .scaledToFill()
-            } else if let url = episode.coverURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                        case .success(let image):
-                            image.resizable().scaledToFill()
-                        default:
-                            placeholderArt
-                    }
+        if episode.isVideo {
+            ZStack {
+                Color.black
+                if let videoPlayer {
+                    PodcastVideoSurfaceView(player: videoPlayer)
+                } else {
+                    ProgressView()
+                        .tint(.white)
                 }
-            } else {
-                placeholderArt
             }
+            .frame(maxWidth: .infinity)
+            .frame(height: 220)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+            .accessibilityLabel("Episode video")
+        } else {
+            Group {
+                if let cover = monitor.coverImage {
+                    Image(uiImage: cover)
+                        .resizable()
+                        .scaledToFill()
+                } else if let url = episode.coverURL {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                            case .success(let image):
+                                image.resizable().scaledToFill()
+                            default:
+                                placeholderArt
+                        }
+                    }
+                } else {
+                    placeholderArt
+                }
+            }
+            .frame(width: 220, height: 220)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
         }
-        .frame(width: 220, height: 220)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
     }
 
     private var placeholderArt: some View {
@@ -266,6 +306,14 @@ public struct PodcastPlayerView: View {
                 showLabel: true,
             )
         }
+    }
+
+    private func refreshVideoPlayer() async {
+        guard episode.isVideo else {
+            videoPlayer = nil
+            return
+        }
+        videoPlayer = await AudioSessionActor.shared.podcastAVPlayer()
     }
 }
 #endif

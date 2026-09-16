@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(AVFoundation)
+import AVFoundation
+#endif
 
 public struct AudiobookSessionChapter: Sendable, Codable, Hashable {
     public let id: String
@@ -381,6 +384,15 @@ public actor AudioSessionActor {
         await updateNowPlaying(nil)
         await teardownNowPlayingCommands()
     }
+
+    #if canImport(AVFoundation)
+    /// Shared AVPlayer for RSS video surface in full Now Playing (nil for audio-only).
+    public func podcastAVPlayer() async -> AVPlayer? {
+        guard case .podcast = currentKind else { return nil }
+        guard let provider = podcastPlayer as? any AVPlayerProvidingPlaying else { return nil }
+        return await provider.avPlayer()
+    }
+    #endif
 
     /// Progress snapshot for the podcast download ledger / Shelf prune.
     public func podcastPlaybackProgress() async -> (

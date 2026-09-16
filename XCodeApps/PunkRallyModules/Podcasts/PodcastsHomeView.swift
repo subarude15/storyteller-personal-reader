@@ -526,6 +526,7 @@ struct EpisodeRow: View {
     let viewModel: PodcastsViewModel
     var showFeedURL: URL? = nil
 
+    @Environment(\.openURL) private var openURL
     @State private var downloadStore = PodcastDownloadStore.shared
     @State private var showMediaPicker = false
 
@@ -539,6 +540,10 @@ struct EpisodeRow: View {
 
     private var adStripState: PodcastAdStripState? {
         downloadStore.adStripState(for: episode.id)
+    }
+
+    private var isCleaning: Bool {
+        downloadStore.isCleaning(episode.id)
     }
 
     private var playProgress: Double {
@@ -575,6 +580,18 @@ struct EpisodeRow: View {
                         .lineLimit(2)
                 }
                 statusCluster
+                if let youtubeURL = episode.watchOnYouTubeURL {
+                    Button {
+                        openURL(youtubeURL)
+                    } label: {
+                        Label("Watch on YouTube", systemImage: "play.rectangle.on.rectangle")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .padding(.top, 2)
+                    .accessibilityHint("Opens YouTube in Safari or the YouTube app")
+                }
             }
             Spacer(minLength: 0)
         }
@@ -585,7 +602,7 @@ struct EpisodeRow: View {
             PodcastAudioVideoPickerSheet(
                 episode: episode,
                 preferred: PodcastMediaPreferenceStore.shared.preference(for: showFeedURL)
-                    ?? .audio,
+                    ?? .video,
                 onSelect: { kind in
                     showMediaPicker = false
                     viewModel.play(episode: episode, mediaKind: kind, feedURL: showFeedURL)
@@ -598,13 +615,12 @@ struct EpisodeRow: View {
     }
 
     /// L→R: download glyph · Clean chip · played / Xm left.
+    /// Cleaning… stays a job chip (never duration-looking); Xm left stays on progress.
     private var statusCluster: some View {
         HStack(spacing: 8) {
             downloadGlyph
 
-            if isDownloaded || downloadStore.isCleaning(episode.id),
-                let state = adStripState
-            {
+            if isDownloaded || isCleaning, let state = adStripState {
                 Text(state.chipLabel)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(adStripChipColor(state))
@@ -612,6 +628,7 @@ struct EpisodeRow: View {
                     .padding(.vertical, 2)
                     .background(adStripChipColor(state).opacity(0.14))
                     .clipShape(Capsule())
+                    .accessibilityLabel(adStripAccessibilityLabel(state))
             }
 
             if let label = PlaybackFinishabilityCopy.label(
@@ -626,9 +643,11 @@ struct EpisodeRow: View {
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(Color.green)
                 } else {
-                    Text("· \(label)")
+                    // Keep episode remaining visually separate from Cleaning… job chip.
+                    Text(isCleaning ? label : "· \(label)")
                         .font(.caption2)
                         .foregroundStyle(chrome.textMuted)
+                        .accessibilityLabel("Episode \(label)")
                 }
             }
 
@@ -747,6 +766,15 @@ struct EpisodeRow: View {
             case .cleaning: return PunkRallyTheme.Accent.primary
             case .clean: return Color.green
             case .failed: return Color.orange
+        }
+    }
+
+    private func adStripAccessibilityLabel(_ state: PodcastAdStripState) -> String {
+        switch state {
+            case .original: return "Original download"
+            case .cleaning: return "Cleaning ads"
+            case .clean: return "Clean download"
+            case .failed: return "Clean failed"
         }
     }
 

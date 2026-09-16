@@ -21,6 +21,8 @@ public struct PodcastPlaybackQueueItem: Identifiable, Codable, Equatable, Sendab
     public var feedURL: URL?
     /// `PRPodcastMediaKind` raw value (`audio` / `video`).
     public var mediaKindRaw: String
+    /// External YouTube handoff when there is no RSS video enclosure.
+    public var youtubeURL: URL?
 
     public init(
         episodeID: String,
@@ -31,7 +33,8 @@ public struct PodcastPlaybackQueueItem: Identifiable, Codable, Equatable, Sendab
         durationSeconds: TimeInterval? = nil,
         coverURL: URL? = nil,
         feedURL: URL? = nil,
-        mediaKindRaw: String = "audio"
+        mediaKindRaw: String = "audio",
+        youtubeURL: URL? = nil
     ) {
         self.episodeID = episodeID
         self.title = title
@@ -42,6 +45,7 @@ public struct PodcastPlaybackQueueItem: Identifiable, Codable, Equatable, Sendab
         self.coverURL = coverURL
         self.feedURL = feedURL
         self.mediaKindRaw = mediaKindRaw
+        self.youtubeURL = youtubeURL
     }
 
     public var isVideo: Bool { mediaKindRaw == "video" }
@@ -59,6 +63,7 @@ public struct PodcastPlaybackQueueItem: Identifiable, Codable, Equatable, Sendab
         if let durationSeconds { info["durationSeconds"] = durationSeconds }
         if let coverURL { info["coverURL"] = coverURL }
         if let feedURL { info["feedURL"] = feedURL }
+        if let youtubeURL { info["youtubeURL"] = youtubeURL }
         if fromQueueAdvance { info["fromQueueAdvance"] = true }
         return info
     }

@@ -34,6 +34,15 @@ public protocol AudioPlaying: AnyObject, Sendable {
     func setEventHandler(_ handler: @escaping @Sendable (AudioPlayerEvent) -> Void) async
 }
 
+#if canImport(AVFoundation)
+import AVFoundation
+
+/// Optional: AVPlayer-backed players expose the instance for a video surface.
+public protocol AVPlayerProvidingPlaying: AudioPlaying {
+    func avPlayer() async -> AVPlayer?
+}
+#endif
+
 /// Factory plus audio-session lifecycle. Session state is process-wide on
 /// Apple platforms, so it lives here rather than on individual players.
 public protocol AudioPlayerFactory: Sendable {
