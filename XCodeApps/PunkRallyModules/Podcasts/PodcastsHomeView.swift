@@ -607,7 +607,6 @@ struct EpisodeRow: View {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .disabled(isResolvingYouTube)
                         .accessibilityHint("Opens YouTube in Safari or the YouTube app")
                     }
                     .padding(.top, 2)
