@@ -17,7 +17,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **P0 Honest AltStore Continue UX** — free AltStore cannot grant App Groups (Josh: stamp `11d`; old Library still editable / blanks). Sideload gallery kind **`inkamp.continue.v2`** (**ink+amp Continue**): StaticConfiguration deep-link tile, never-blank **Open ink+amp**. Old `SilveranReadingWidget` / `InkAmpContinueWidget` unregistered. After install: delete old widgets, add **ink+amp Continue** only. **Do not mark Continue Shipped until Josh verifies.** Soft polish anytime.
+- **P0 Blank tappable Sideload Continue** (Josh: full AltStore delete/reinstall on `9d63b36`; tap opens book; tile still blank) — tip >= `9d63b36`. Isolate crash-proof `SideloadContinueWidget` (own file; WidgetBundle registers ONLY that; zero AppIntents / audio intents). Static cream + charcoal + **Open ink+amp** / **Tap to continue** + `punkrally://continue`. No App Group reads on Sideload path. Soft polish anytime.
 
 **Do not start CarPlay / Watch / paid-team App Group chase unless Josh reorders.**
 ## Shipped
