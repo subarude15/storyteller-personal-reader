@@ -2,9 +2,9 @@ name: ink+amp iOS build
 
 on:
   push:
-    branches: [punk-rally-ios, "cursor/**"]
+    branches: [main, punk-rally-ios, "cursor/**"]
   pull_request:
-    branches: [punk-rally-ios]
+    branches: [main, punk-rally-ios]
   workflow_dispatch:
 
 concurrency:
