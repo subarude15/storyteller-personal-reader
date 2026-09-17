@@ -251,7 +251,10 @@ public struct PunkRallyMiniPlayerBar: View {
 }
 
 extension View {
-    /// Pads tab content and places the mini player above the tab bar.
+    /// Pads content and places GlobalMiniPlayerBar above the tab bar (or sheet
+    /// bottom). Use on every tab root **and** every sheet that can sit over
+    /// playback (Find, show, Import, Settings, …) so close/stop stay reachable.
+    /// Collapses to zero height when nothing is playing.
     public func punkRallyMiniPlayerInset() -> some View {
         safeAreaInset(edge: .bottom, spacing: 0) {
             PunkRallyMiniPlayerBar()
@@ -305,6 +308,7 @@ public struct PunkRallySheetsModifier: ViewModifier {
                             }
                         }
                 }
+                .punkRallyMiniPlayerInset()
             }
 
         if let showOfflineSheet {
@@ -651,6 +655,7 @@ public struct PunkRallyLibraryView: View {
                                 }
                             }
                     }
+                    .punkRallyMiniPlayerInset()
                 }
         }
         .punkRallySheets(

@@ -79,15 +79,19 @@ struct PodcastsHomeView: View {
                         showAddFeed = true
                     }
                 }
+                .punkRallyMiniPlayerInset()
             }
             .sheet(isPresented: $showAddFeed) {
                 AddPodcastFeedView(viewModel: viewModel)
+                    .punkRallyMiniPlayerInset()
             }
             .sheet(item: $selectedShow) { show in
                 PodcastShowView(viewModel: viewModel, show: show)
+                    .punkRallyMiniPlayerInset()
             }
             .sheet(isPresented: $showPlaybackQueue) {
                 PodcastPlaybackQueueView()
+                    .punkRallyMiniPlayerInset()
             }
         }
         .onReceive(
@@ -704,6 +708,7 @@ struct EpisodeRow: View {
                 onCancel: { showMediaPicker = false }
             )
             .presentationDetents([.height(280)])
+            .punkRallyMiniPlayerInset()
         }
         .sheet(isPresented: $showYouTubeMatch) {
             PodcastYouTubeMatchSheet(
@@ -718,6 +723,7 @@ struct EpisodeRow: View {
                 onCancel: { showYouTubeMatch = false }
             )
             .presentationDetents([.medium, .large])
+            .punkRallyMiniPlayerInset()
         }
         .contextMenu { episodeContextMenu }
     }

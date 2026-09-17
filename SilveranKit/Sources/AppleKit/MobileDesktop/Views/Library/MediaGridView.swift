@@ -627,6 +627,7 @@ struct MediaGridView: View {
                     }
                 }
             }
+            .punkRallyMiniPlayerInset()
         }
         #endif
     }

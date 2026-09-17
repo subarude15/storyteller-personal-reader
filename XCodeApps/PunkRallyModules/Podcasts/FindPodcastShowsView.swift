@@ -10,6 +10,7 @@
 
 #if os(iOS)
 import SwiftUI
+import SilveranAppleKit
 import SilveranKit
 
 /// Search Apple's podcast catalog; Subscribe resolves RSS into local subscriptions.
@@ -93,6 +94,7 @@ struct FindPodcastShowsView: View {
             }
             .sheet(item: $previewShow) { show in
                 PodcastShowView(viewModel: viewModel, show: show)
+                    .punkRallyMiniPlayerInset()
             }
             .overlay {
                 if loadingPreviewFeed != nil {
