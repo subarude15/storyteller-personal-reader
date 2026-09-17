@@ -17,7 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Phone import → StoryAlign read-aloud** — tip ≥ Browse `ae3990d` (Josh verified Find empty → charts/genres → pre-subscribe). Library **Import** → EPUB/MP3 upload to Storyteller → Aligning… → SYNC on refresh → read-aloud. Soft polish anytime.
+- **P0 Mini player inset / close** — tip ≥ Browse `ae3990d`. Screens overlap `GlobalMiniPlayerBar` and block stop/close. Every tab root + sheet needs bottom inset ≥ mini height when mini is visible; mini close/stop stays ≥44pt and above the tab bar. Reuse existing safeAreaInset / mini-height padding — don’t invent a second chrome.
+
+- **Next after hotfix:** **Phone import → StoryAlign read-aloud** (Library Import → EPUB+audio upload → Aligning… → SYNC). Soft polish anytime.
 
 **Do not start SponsorBlock / Invidious/ad-strip / widgets / CarPlay / Podcast Index keys unless Josh reorders.**
 ## Shipped
@@ -83,6 +85,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 2. Later ideas (SponsorBlock, CarPlay/Watch, podcast cross-device sync) — see Later
 
 ### Soft UX polish (anytime)
+- ~~Mini player inset / close~~ → **Now (P0)** — screens under GlobalMiniPlayerBar block stop/close
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
 - ~~Stats push / description decode~~ → **Shipped** (`cf5c663`) — Josh confirmed
 - Cleaning… chip must not look like episode remaining (job ETA or plain Cleaning…; keep Xm left on progress separately) — status cluster already separates job chip from Xm left
