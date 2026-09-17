@@ -237,7 +237,10 @@ struct StatsView: View {
                 HStack(spacing: 8) {
                     Image(systemName: sync.status.footerSymbol)
                         .foregroundStyle(chrome.textFaint)
-                    Text(sync.status.footerLabel)
+                    Text(
+                        sync.status == .offlineLocalOnly
+                            ? "Offline · Retry" : sync.status.footerLabel
+                    )
                         .font(.caption)
                         .foregroundStyle(chrome.textFaint)
                 }

@@ -88,7 +88,7 @@ struct CreateReadaloudRow: View {
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 20, height: 20)
                         .foregroundStyle(.green)
-                    Text("Creating Readaloud...")
+                    Text("Creating Readaloud…")
                         .foregroundStyle(.green)
                 }
                 .font(.body)

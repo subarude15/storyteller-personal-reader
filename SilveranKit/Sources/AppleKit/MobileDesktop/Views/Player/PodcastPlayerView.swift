@@ -280,10 +280,10 @@ public struct PodcastPlayerView: View {
 
     private var placeholderArt: some View {
         ZStack {
-            Color.secondary.opacity(0.12)
+            Color(white: 0.12)
             Image(systemName: live.isVideo ? "play.rectangle.fill" : "mic.fill")
                 .font(.system(size: 44))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.white.opacity(0.72))
         }
     }
 
@@ -418,7 +418,6 @@ public struct PodcastPlayerView: View {
             await refreshVideoPlayer()
         } catch {
             NotificationCenter.default.post(name: .punkRallyYouTubeResolveFailed, object: nil)
-            openURL(watchURL)
         }
     }
 }

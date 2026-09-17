@@ -211,10 +211,10 @@ struct FindPodcastShowsView: View {
                                     image.resizable().scaledToFill()
                                 default:
                                     RoundedRectangle(cornerRadius: 10)
-                                        .fill(chrome.surface2)
+                                        .fill(Color(white: 0.12))
                                         .overlay(
                                             Image(systemName: "mic.fill")
-                                                .foregroundStyle(chrome.textFaint)
+                                                .foregroundStyle(Color.white.opacity(0.72))
                                         )
                             }
                         }
@@ -323,6 +323,14 @@ struct FindPodcastShowsView: View {
                     .font(.subheadline.weight(.medium))
             }
             .padding(.top, 4)
+
+            if statusIsError {
+                Button("Retry search") {
+                    searchTask?.cancel()
+                    searchTask = Task { await runSearch(trimmedQuery) }
+                }
+                .buttonStyle(.bordered)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -475,10 +483,10 @@ private struct FindShowRow: View {
                                 image.resizable().scaledToFill()
                             default:
                                 RoundedRectangle(cornerRadius: 8)
-                                    .fill(chrome.surface2)
+                                    .fill(Color(white: 0.12))
                                     .overlay(
                                         Image(systemName: "mic.fill")
-                                            .foregroundStyle(chrome.textFaint)
+                                            .foregroundStyle(Color.white.opacity(0.72))
                                     )
                         }
                     }

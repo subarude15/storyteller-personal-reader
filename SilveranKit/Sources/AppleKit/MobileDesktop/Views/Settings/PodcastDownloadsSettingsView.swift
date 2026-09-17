@@ -257,7 +257,7 @@ public struct PodcastDownloadsSettingsView: View {
 
     private var youtubeResolveFooterText: String {
         var text =
-            "Invidious / Piped-style base URL (no trailing path). Play in ink+amp and Match on YouTube use this host — /api/v1/videos/{id}, /api/v1/search, or Piped /streams/{id}. Soft timeout ~20s; resolve failure toasts and opens Watch on YouTube."
+            "Invidious / Piped-style base URL (no trailing path). Play in ink+amp and Match on YouTube use this host — /api/v1/videos/{id}, /api/v1/search, or Piped /streams/{id}. Soft timeout ~20s; resolve failure shows a toast, then you can choose Watch on YouTube."
         if let err = PodcastYouTubeResolveSettings.lastReachError {
             text += " Last error: \(err)."
         }

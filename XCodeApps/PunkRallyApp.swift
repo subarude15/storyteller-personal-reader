@@ -729,7 +729,7 @@ private struct HomeMixedCoverView: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8)
-                .fill(chrome.surface2)
+                .fill(Color(white: 0.12))
             switch item {
                 case .book(let book, _, _, _):
                     bookCover(book)
@@ -737,7 +737,7 @@ private struct HomeMixedCoverView: View {
                     podcastCover(entry)
                 case nil:
                     Image(systemName: "books.vertical")
-                        .foregroundStyle(chrome.textFaint)
+                        .foregroundStyle(Color.white.opacity(0.72))
             }
         }
         .frame(width: width, height: height)
@@ -754,7 +754,7 @@ private struct HomeMixedCoverView: View {
                 .clipped()
         } else {
             Image(systemName: "book.closed.fill")
-                .foregroundStyle(chrome.textFaint)
+                .foregroundStyle(Color.white.opacity(0.72))
                 .task(id: book.id) {
                     await loadBookCover(book)
                 }

@@ -24,8 +24,10 @@ public struct PodcastPlaybackQueueView: View {
                 if let snapshot = monitor.snapshot, case .podcast = snapshot.kind {
                     Section("Now playing") {
                         HStack(spacing: 12) {
-                            Image(systemName: "waveform")
-                                .foregroundStyle(.secondary)
+                            queueArtwork(
+                                url: PodcastPlayerPresenter.shared.artworkURL,
+                                isVideo: false
+                            )
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(snapshot.title ?? "Podcast")
                                     .font(.subheadline.weight(.semibold))
@@ -47,22 +49,25 @@ public struct PodcastPlaybackQueueView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(store.upcoming) { item in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(item.title)
-                                    .font(.subheadline.weight(.medium))
-                                    .lineLimit(2)
-                                if let show = item.showTitle {
-                                    Text(show)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                if let label = PlaybackFinishabilityCopy.label(
-                                    progress: progress(for: item.episodeID),
-                                    durationSeconds: item.durationSeconds
-                                ) {
-                                    Text(label)
-                                        .font(.caption2)
-                                        .foregroundStyle(.tertiary)
+                            HStack(spacing: 12) {
+                                queueArtwork(url: item.coverURL, isVideo: item.isVideo)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(item.title)
+                                        .font(.subheadline.weight(.medium))
+                                        .lineLimit(2)
+                                    if let show = item.showTitle {
+                                        Text(show)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    if let label = PlaybackFinishabilityCopy.label(
+                                        progress: progress(for: item.episodeID),
+                                        durationSeconds: item.durationSeconds
+                                    ) {
+                                        Text(label)
+                                            .font(.caption2)
+                                            .foregroundStyle(.tertiary)
+                                    }
                                 }
                             }
                         }
@@ -105,6 +110,23 @@ public struct PodcastPlaybackQueueView: View {
             return record.progress
         }
         return PodcastPlayheadStore.shared.entry(for: episodeID)?.progress ?? 0
+    }
+
+    private func queueArtwork(url: URL?, isVideo: Bool) -> some View {
+        AsyncImage(url: url) { phase in
+            switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                default:
+                    ZStack {
+                        Color(white: 0.12)
+                        Image(systemName: isVideo ? "play.rectangle.fill" : "mic.fill")
+                            .foregroundStyle(Color.white.opacity(0.72))
+                    }
+            }
+        }
+        .frame(width: 44, height: 44)
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
 }
 #endif
