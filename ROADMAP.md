@@ -17,11 +17,13 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Smoke order:** (1) **More like this** `b8ca122` — series → author → tags. (2) **Explore catalogs** `c200401` — Standard Ebooks / OPDS → Add to Library. (3) **Continue widget restore** `cc910d9` (PR #26; `ALTAppGroups`) — wipe old blank tiles, add Continue; cover + title + tap → Continue. Sideload [35235074331](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35235074331).
+- **Await Josh smoke clear** — Continue widget `cc910d9` confirmed green. Still need yes/no on **More like this** `b8ca122` + **Explore** `c200401` (browse + Add to Library / Read now temp — never silent auto-ingest). Then paste **Finish tonight**.
 
-**Next after smokes:** Finish tonight → Story Timeline → soft Couldn't save server.
+**Shipped this cycle (pending board stamp):** widget restore PR #26 / `cc910d9`.
 
-**Do not start second player, CarPlay, DSM/SMB unless Josh reorders.**
+**Next:** Finish tonight → Story Timeline → soft Couldn't save server. Explore expansion (more OPDS / user links / wishlist metadata) Later — no Playtorio scrape / DRM strip / Audible login path.
+
+**Do not start second player, CarPlay, DSM/SMB, pirate indexes, or DRM strip unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
@@ -81,7 +83,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **Mini-player slim** — scrub + −15/+15 removed from mini (status-cluster cut)
 
 ### Widgets
-- [~] **Continue home widget** — restore on tip `cc910d9` (PR #26 Arena `ALTAppGroups` resolve). Smoke pending. Prior PR #23 stayed closed; this is the clean reopen.
+- [x] **Continue home widget** — tip `cc910d9` (PR #26; Arena `ALTAppGroups` resolve); Josh confirmed green. Wipe old blank tiles on install.
 
 ### Stats
 - [x] **SessionTracker local** — ebook / audiobook / readaloud / podcast → Home + Stats tab (`c627bbe`, Sideload [35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694))
