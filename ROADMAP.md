@@ -17,7 +17,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Podcast / player UX polish (Josh stamps 1–5)** — tip ≥ YouTube playhead sync `0a4da30` (Josh verified phone↔iPad resume). One Sideload: (1) pre-subscribe show page with full description; (2) Unsubscribe left / Done right; (3) back → GlobalMiniPlayerBar keeps playing; (4) scrub seeks shared AVPlayer for YouTube/RSS video; (5) iPad full NP video aspect-fits the available video region (not phone-width). Soft polish anytime.
+- **Podcast / player UX polish (Josh stamps 1–5)** — tip `ba4a83d` (≥ playhead sync `0a4da30`); Sideload green [35166972672](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35166972672). One Sideload: (1) Find pre-subscribe show page with full description + episode preview; (2) Unsubscribe left / Done right; (3) back → GlobalMiniPlayerBar keeps playing (audio + video/YouTube); (4) scrub seeks shared AVPlayer; (5) iPad full NP video aspect-fits the available region. Soft polish anytime. **Await Josh smoke.**
 
 **Do not start Browse charts / StoryAlign / SponsorBlock / Invidious/ad-strip / widgets / CarPlay unless Josh reorders.**
 ## Shipped
