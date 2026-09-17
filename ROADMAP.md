@@ -17,23 +17,28 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **More like this** (book detail) — PR #24 ready at `bcff3c7`. One horizontal cover rail
-  from local Storyteller metadata only: same series → same author → same tags; hide when empty.
+- **Streaming Books — Phase 1: Explore ebooks** — one focused PR after tip `b8ca122`.
+  Add a `Library | Explore` surface inside the existing Library tab (no sixth tab), backed only
+  by an authorized/public-domain OPDS catalog (Standard Ebooks for v1). Browse/search/detail;
+  **Read now** downloads a validated EPUB to temporary local cache and opens the existing
+  Silveran reader; **Add to Library** sends that EPUB through the existing Storyteller import path.
 
 **Next (strict order):**
-1. **Finish tonight** — quick Home win
-2. **Story Timeline** — distinctive but bigger
-3. Soft: distinct **Couldn't save server** copy vs connection-failed
+1. **Streaming Books — Phase 2: public-domain audiobooks** — LibriVox browse/search and HTTPS
+   streaming through the existing shared player / `AudioSessionActor`; no second player
+2. **Finish tonight** — quick Home win
+3. **Story Timeline** — distinctive but bigger
+4. Soft: distinct **Couldn't save server** copy vs connection-failed
 
-**Parked / out:** second concurrent player (shared NP stays); CarPlay; DSM/SMB; mainline Continue widget (Josh happy on Arena IPA; PR #23 closed not merged — reopen later with `ALTAppGroups` resolve if mainline should match)
+**Parked / out:** second concurrent player (shared NP stays); CarPlay; DSM/SMB; mainline Continue widget (Josh happy on Arena IPA; PR #23 closed not merged — reopen later with `ALTAppGroups` resolve if mainline should match); DRM catalogs; torrent/debrid sources; Bookracy/AudiobookBay and other scraper-backed acquisition.
 
-**Do not start DSM/SMB, CarPlay, second player, external rec APIs, or merge Arena widget unless Josh reorders.**
+**Do not start DSM/SMB, CarPlay, a second player, unlicensed/scraped catalogs, external recommendation APIs, or the Arena widget merge unless Josh reorders. Authorized public-domain catalog work is the narrow exception above; it must remain separate from local-library recommendations.**
 ## Shipped
 
 ### Product / sync
 - [x] **More like this** book-detail rail — local Storyteller library only; series → author
-  → tag-overlap ranking; tip `bcff3c7`; Simulator + Sideload green
-  [Actions 35215932274](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35215932274)
+  → tag-overlap ranking; PR #24 squash-merged at tip `b8ca122`; Simulator + Sideload green
+  [Actions 35217017886](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35217017886)
 - [x] Storyteller Cloudflare Access Google bypass (server)
 - [x] Storyteller URL **prefill** (not auto-save)
 - [x] Keychain Save on AltStore (drop Data Protection / no `KEYCHAIN_ACCESS_GROUP` on Sideload) — verified
@@ -94,9 +99,10 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-1. **Finish tonight** — smallest Home win
-2. **Story Timeline** — bigger distinctive cut
-3. Soft: **Couldn't save server** copy anytime
+1. **Streaming Books Phase 2** — LibriVox/public-domain audiobook browse + HTTPS streaming through the shared player
+2. **Finish tonight** — smallest Home win
+3. **Story Timeline** — bigger distinctive cut
+4. Soft: **Couldn't save server** copy anytime
 
 ### Soft UX polish (anytime)
 - Soft polish pack → **Shipped** (`b9b07ea` / PR #22)
@@ -104,7 +110,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Later / ideas (not blocking)
 
-**Discover books you don't have** — Goodreads-style external discovery, intentionally separate
+**Streaming Books Phase 3** — configurable, user-controlled authorized OPDS providers after the
+Standard Ebooks and LibriVox foundations are proven. **Discover books you don't have** remains a
+later Goodreads-style, metadata-only discovery idea, intentionally separate from acquisition and
 from the local-library **More like this** rail. Also later: Wrapped, series strip, Shortcuts.
 **Second player** remains parked (shared NP stays).
 
@@ -130,6 +138,14 @@ Strict order (Smokey / Nas-ty):
 
 - Keep `SilveranKit`; do not merge Enve tree (modules + AGPL only)
 - Storyteller = ebook / audiobook / readaloud; podcasts = RSS rail
+- Streaming catalogs must be authorized/public-domain or explicitly user-controlled. No torrent,
+  debrid, AudiobookBay, Bookracy, or HTML-scraper acquisition paths; never disable TLS validation.
+- EPUB **Read now** means a complete, validated temporary download before opening — do not present
+  it as progressive page streaming. Imported titles become normal Storyteller books.
+- Explore-only items must not enter Library/Shelf or `LocalBookRecommendations`; they appear there
+  only after explicit **Add to Library**. **More like this** remains Storyteller-library-only.
+- Reuse the existing ebook reader and shared audio session/player. Preserve Storyteller Read ↔ Listen
+  position sync for imported/owned books; do not add a second player.
 - AltStore unsigned IPA; no Apple Developer until we choose to
 - No Expo; no Xcode on JoshNuc — GitHub Actions macOS for builds
 - Sideload: never reintroduce `KEYCHAIN_ACCESS_GROUP`
