@@ -18,6 +18,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ## Now (do first)
 
 - **Playtorio Fetcher** — user-managed Data Sources CRUD + high-priority RaveBookSearch adapter; formats → Explore Download/Import → Storyteller ingest. Persist metadata + public URLs in Playtorio library index; Settings → Data Sources; CLI + `GET /api/books` / `GET|PUT /api/settings/adapters`.
+- **TorBox Debrid** — Settings → Debrid Settings (API key in Keychain); More / Add Book → Import via TorBox/Magnet; resolve magnet → direct URL → Storyteller Tus upload (background toast).
 
 **Next:** Finish tonight → Story Timeline → soft Couldn't save server copy.
 

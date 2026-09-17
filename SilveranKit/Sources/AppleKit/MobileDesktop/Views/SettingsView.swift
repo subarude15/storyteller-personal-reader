@@ -271,6 +271,12 @@ extension SettingsView {
                         Label("Data Sources", systemImage: "antenna.radiowaves.left.and.right")
                     }
                     .tag(SettingsTab.dataSources)
+
+                DebridSettingsView()
+                    .tabItem {
+                        Label("Debrid", systemImage: "bolt.horizontal.circle")
+                    }
+                    .tag(SettingsTab.debrid)
             }
 
             Divider()
@@ -395,6 +401,14 @@ extension SettingsView {
                         DataSourcesSettingsView()
                     } label: {
                         Label("Data Sources", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                }
+
+                Section("Debrid") {
+                    NavigationLink {
+                        DebridSettingsView()
+                    } label: {
+                        Label("Debrid Settings", systemImage: "bolt.horizontal.circle")
                     }
                 }
 
@@ -785,6 +799,7 @@ private enum SettingsTab: Hashable {
     case readingBar
     case bookSources
     case dataSources
+    case debrid
 }
 
 private struct MacSettingsContainer<Content: View>: View {

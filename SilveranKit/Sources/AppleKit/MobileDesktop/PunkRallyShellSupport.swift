@@ -89,6 +89,14 @@ extension Notification.Name {
     public static let punkRallyYouTubeNoMatches = Notification.Name(
         "punkRallyYouTubeNoMatches"
     )
+    /// TorBox magnet ingest succeeded — host toast (userInfo.message).
+    public static let punkRallyTorBoxIngestSucceeded = Notification.Name(
+        "punkRallyTorBoxIngestSucceeded"
+    )
+    /// TorBox magnet ingest failed — host toast (userInfo.message).
+    public static let punkRallyTorBoxIngestFailed = Notification.Name(
+        "punkRallyTorBoxIngestFailed"
+    )
     /// Podcast / YouTube playhead just persisted — host updates Continue progress.
     /// userInfo: episodeID (String), progress (Double 0...1)
     public static let punkRallyPodcastProgressDidPersist = Notification.Name(
