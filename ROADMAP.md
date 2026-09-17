@@ -71,7 +71,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **Mini-player slim** — scrub + −15/+15 removed from mini (status-cluster cut)
 
 ### Widgets
-- [~] **Continue home widget** — **Parked on free AltStore** (Josh+crew). Code in-tree through `inkamp.continue.v4` (`3cf76da`); Sideload does **not** embed the appex. Revisit when paid Apple ID or SideStore grants App Groups + reliable WidgetKit. Deep link `punkrally://continue` stays for in-app / Shortcuts.
+- [x] **Continue home widget** — **Re-enabled for Sideload (2026-09)**. The blank-tile bug was a hard-coded App Group id: AltStore grants `<group>.<TEAMID>`, and the app/widget now read `ALTAppGroups` first (`SilveranWidgetSnapshotStore.appGroupCandidates`). Extension re-embedded in the Sideload IPA, kind `InkAmpContinueWidget`: cover + title + progress, play/pause and ±15s through `AudioPlaybackIntent`s that run in the app's process. Write-up: `docs/CONTINUE_WIDGET.md`; SIDELOAD.md notes what it costs against the free App ID budget.
 ### Stats
 - [x] **SessionTracker local** — ebook / audiobook / readaloud / podcast → Home + Stats tab (`c627bbe`, Sideload [35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694))
 - [x] **Cross-device Stats sync** — tip `c5791ec` (`a5226d6` + BookServiceActor fix); private Storyteller collection `.inkamp.stats.v1` blob (same auth as place sync); session-id LWW merge (no double-count / no drop); footer Synced / Syncing… / Offline · local only; Settings last sync time; Sideload green [35028364424](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35028364424)

@@ -83,30 +83,34 @@ To provide a flawless 1-click install on free Apple IDs, the **Silveran Reader S
 | **Background Audio & Fetch** | **Kept** | Standard background playback and sync refresh. |
 | **Home Continue Hero & Sync Chip** | **Kept** | Dynamic resume from library/shelf. |
 | **Bundle ID** | Clean `com.punkrally.reader` | Single bundle ID, avoids split identifier confusion. |
-| **Continue Widget Extension** | **Parked (Sideload)** | Not embedded in Sideload IPA — no `PlugIns/*.appex`. Blank+tappable tiles on free AltStore were worse than none (Josh+crew). Sources stay in-tree (`SideloadContinueWidget.swift` / Widgets target) for paid Apple ID or SideStore. In-app / Shortcuts deep link `punkrally://continue` unchanged. |
-| **Library shelf widget** | **Parked with Continue** | Sources on disk; not compiled into Sideload. Re-enable with paid Apple Developer / SideStore App Groups. |
-| **App Group** | `group.com.punkrally.reader` (literal) | Still baked into Sideload entitlements / `SILVERAN_WIDGET_APP_GROUP` for when widgets return. **Free AltStore typically does not grant App Groups** (Josh confirmed). **Not** a Keychain access group. Never ship unexpanded `$(APP_GROUP_ID)`. |
+| **Continue Widget Extension** | **Shipped (2026-09 fix)** | Embedded again as `PlugIns/Silveran Reader Widgets.appex` (kind `InkAmpContinueWidget`). The old blank tiles came from a hard-coded App Group id; the tile now resolves the group AltStore actually granted (`ALTAppGroups` → `SILVERAN_WIDGET_APP_GROUP` → literal). Cover + title + progress, plus play/pause and ±15s via `AudioPlaybackIntent`s that run in the app's process. Costs one extra App ID + one App Group. See `docs/CONTINUE_WIDGET.md`. |
+| **Library shelf widget** | **Not compiled on Sideload** | `SilveranReadingWidget.swift` stays on disk for paid Apple ID / SideStore builds; the Sideload extension ships only the Continue tile. |
+| **App Group** | `group.com.punkrally.reader` (literal) | Declared in Sideload + widget entitlements and in `SILVERAN_WIDGET_APP_GROUP`. AltStore resign rewrites the granted id to `group.com.punkrally.reader.<TEAMID>` and records it in `ALTAppGroups` on the app **and each appex**; the app/widget read that key first at runtime. **Not** a Keychain access group. Never ship unexpanded `$(APP_GROUP_ID)`. |
 | **CarPlay Entitlement & Scene** | **Removed** | Free developer accounts cannot sign `com.apple.developer.carplay-audio` or CarPlay scenes. |
 | **watchOS Companion** | **Excluded** | Companion apps burn additional App IDs on personal teams. |
 | **Keychain Access Groups** | Fallback to default | Single app uses default app keychain without team group errors. Never reintroduce `KEYCHAIN_ACCESS_GROUP` on Sideload. |
 
 ### Continue widget + AltStore notes
 
-**Parked on free AltStore (Josh+crew decision):** Home Screen widgets are **not** shipped in the Sideload IPA (no widget extension / no `PlugIns/*.appex`). App Groups + WidgetKit render proved unreliable on free AltStore resign — blank+tappable tiles worse than none.
+**Un-parked 2026-09:** the widget extension is embedded in the Sideload IPA again. The earlier blank tiles were not "free AltStore can't do App Groups" — AltStore *does* provision the declared group, but it appends the signing team id and publishes the real ids in `ALTAppGroups`, which the app and widget never read. Full write-up + on-device verification steps: `docs/CONTINUE_WIDGET.md`.
 
-**Path back:** paid Apple Developer team or SideStore (App Groups granted) → re-embed `Silveran Reader Widgets (iOS)` into Sideload / ship Continue. Widget sources (`SideloadContinueWidget.swift`, kind `inkamp.continue.v4`, etc.) stay in-tree.
+**What the tile does now:**
+- Cover art, title, subtitle, progress bar and "42% · 12m left" caption.
+- Play/pause and ±15s when a live audio session exists. The buttons are `AudioPlaybackIntent` App Intents compiled into *both* the app and the extension, so WidgetKit performs them in the app's process — no foregrounding, no app-group-free workaround needed.
+- With no live session (cold launch / nothing playing) the tile paints the last item and a tap-to-continue deep link instead of a dead transport button.
+- Tap → `punkrally://continue` → Now Playing if live, else Home Continue.
 
-**Still works without a Home Screen tile:**
-- In-app Home Continue
-- Deep link `punkrally://continue` (Shortcuts / URL schemes) → Now Playing / Home Continue
+**Still works without a Home Screen tile:** in-app Home Continue and the `punkrally://continue` deep link are unchanged; the system Lock Screen Now Playing controls remain the fallback if the appex ever fails to install.
 
-Details still baked for when groups/widgets return:
+**Budget note:** embedding the appex spends one App ID (the appex) + one App Group from the free team's 10-per-7-days budget, and the appex counts against the 3-active-app limit. If AltStore reports app-group errors (`3014`/`3015`) during install, delete an unused sideloaded app and retry.
+
+Baked for the group:
 
 - **App Group id (baked literal):** `group.com.punkrally.reader`
   - Sideload entitlements (`SilveranReaderSideload.entitlements`) and widgets entitlements (`SilveranReaderWidgets.entitlements`) embed this string **literally** — never `$(APP_GROUP_ID)` in the Sideload IPA (unsigned `package-ipa` does not expand entitlement placeholders).
   - Sideload Info key `SILVERAN_WIDGET_APP_GROUP` is also the literal `group.com.punkrally.reader`.
   - Paid/Automatic Xcode iOS target may still use `$(APP_GROUP_ID)` from xcconfig; Sideload path must not.
-- Prefer **system Lock Screen Now Playing** for transport on free AltStore.
+- Resolution order at runtime: `ALTAppGroups` (what AltStore granted, team-suffixed) → `SILVERAN_WIDGET_APP_GROUP` → `group.com.punkrally.reader`.
 
 ---
 
