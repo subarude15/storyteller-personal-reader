@@ -218,6 +218,44 @@ import Testing
     #expect(stored.first?.asin == "B00EMXBDMA")
 }
 
+@Test func testEnrichmentOnlyFetchUsesQueryTitleSoExploreCanFindIt() async throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("playtorio-enrich-title-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let html = try MockHTTPClient.fixtureData("libgen-sample.html")
+    let client = MockHTTPClient(responses: [
+        (match: "libgen.is", data: html, status: 200),
+    ])
+    let settings = AdapterSettings(directory: dir)
+    try settings.save([
+        AdapterConfig(
+            id: "libgen-catalog",
+            name: "LibGen Catalog",
+            enabled: true,
+            type: "catalog",
+            priority: 1,
+            config: [:]
+        )
+    ])
+
+    let libraryPath = dir.appendingPathComponent("library.sqlite")
+    let service = FetcherService(
+        settings: settings,
+        cache: BookCache(databasePath: dir.appendingPathComponent("cache.sqlite")),
+        library: PlaytorioLibraryStore(databasePath: libraryPath),
+        http: client
+    )
+
+    let book = try await service.fetch(query: "The Martian", persist: true)
+    #expect(book?.title == "The Martian")
+    #expect(book?.formats.isEmpty == false)
+
+    let stored = PlaytorioLibraryStore(databasePath: libraryPath).allBooks()
+    #expect(stored.count == 1)
+    #expect(stored.first?.title == "The Martian")
+}
+
 @Test func testAPISettingsAdaptersRoundTrip() async throws {
     let dir = FileManager.default.temporaryDirectory
         .appendingPathComponent("playtorio-api-\(UUID().uuidString)", isDirectory: true)

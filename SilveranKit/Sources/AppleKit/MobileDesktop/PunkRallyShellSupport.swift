@@ -725,6 +725,10 @@ public struct PunkRallyLibraryView: View {
                     exploreStore.setSearchText(exploreSearchText)
                 }
             }
+            .onSubmit(of: .search) {
+                guard segment == .explore else { return }
+                Task { await exploreStore.searchExternalSources(query: exploreSearchText) }
+            }
             .navigationDestination(for: ExploreBook.self) { book in
                 ExploreBookDetailView(book: book)
             }

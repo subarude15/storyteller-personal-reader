@@ -69,7 +69,14 @@ public struct FetcherService: Sendable {
             }
         }
 
-        guard let merged = BookNormalizer.merge(results) else { return nil }
+        guard var merged = BookNormalizer.merge(results) else { return nil }
+        // LibGen/OpenLibrary-style providers can return enrichment-only results
+        // (formats / cover, but no definitive identity). Without a title fallback
+        // those rows persist as "Untitled", so Explore immediately hides them when
+        // the user searches for the title they just entered.
+        if merged.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            merged.title = trimmed
+        }
         cache.set(query: trimmed, book: merged)
         if persist {
             library.upsert(merged)

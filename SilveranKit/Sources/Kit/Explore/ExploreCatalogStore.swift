@@ -1,4 +1,5 @@
 import Foundation
+import PlaytorioFetcher
 import Observation
 
 /// Persists user-added Explore catalog sources (built-in Standard Ebooks is always present).
@@ -65,7 +66,9 @@ public final class ExploreCatalogStore {
     public private(set) var searchText: String = ""
     public private(set) var isLoading = false
     public private(set) var isLoadingMore = false
+    public private(set) var isSearchingExternalSources = false
     public private(set) var errorMessage: String?
+    public private(set) var externalSearchMessage: String?
     public private(set) var isShowingCachedResults = false
     public private(set) var nextURL: URL?
 
@@ -106,7 +109,42 @@ public final class ExploreCatalogStore {
 
     public func setSearchText(_ text: String) {
         searchText = text
+        externalSearchMessage = nil
         applyLocalFilter()
+    }
+
+    /// Runs the configured Data Sources adapters for the current Explore search,
+    /// persists the best merged result into the Playtorio index, switches Explore
+    /// to Playtorio, and reloads so the result appears in this same surface.
+    public func searchExternalSources(query rawQuery: String? = nil) async {
+        let query = (rawQuery ?? searchText).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, !isSearchingExternalSources else { return }
+
+        isSearchingExternalSources = true
+        errorMessage = nil
+        externalSearchMessage = nil
+        defer { isSearchingExternalSources = false }
+
+        do {
+            let service = Self.makeFetcherService()
+            guard let book = try await service.fetch(query: query, persist: true) else {
+                externalSearchMessage = "No Data Sources results for “\(query)”."
+                applyLocalFilter()
+                return
+            }
+
+            refreshSourcesFromDisk()
+            selectedSourceID = ExploreCatalogSource.playtorio.id
+            sourceStore.setSelectedSourceID(selectedSourceID)
+            searchText = query
+            pageCache.removeValue(forKey: ExploreCatalogSource.playtorio.id)
+            await reload(forceNetwork: true)
+            externalSearchMessage = "Saved “\(book.title.isEmpty ? query : book.title)” from Data Sources."
+        } catch is AdapterConfigurationError {
+            errorMessage = "Source configuration error"
+        } catch {
+            errorMessage = "Data Sources search failed: \(error.localizedDescription)"
+        }
     }
 
     public func addSource(name: String, feedURL: URL) async throws {
@@ -261,6 +299,19 @@ public final class ExploreCatalogStore {
     }
 
     // MARK: - Private
+
+    private static func makeFetcherService() -> FetcherService {
+        #if os(iOS) || os(macOS) || os(tvOS)
+        let dir = PlaytorioLibraryStore.applicationSupportPath().deletingLastPathComponent()
+        return FetcherService(
+            settings: AdapterSettings(directory: dir),
+            cache: BookCache(databasePath: dir.appendingPathComponent("cache.sqlite")),
+            library: PlaytorioLibraryStore(databasePath: PlaytorioLibraryStore.applicationSupportPath())
+        )
+        #else
+        return FetcherService()
+        #endif
+    }
 
     private func makeProvider(for source: ExploreCatalogSource) -> any ExploreCatalogProvider {
         switch source.kind {

@@ -92,16 +92,32 @@ public struct ExploreRootView: View {
                 retry: { Task { await store.reload(forceNetwork: true) } }
             )
         } else if store.filteredBooks.isEmpty {
-            ExploreStatusView(
-                title: store.searchText.isEmpty ? "No books" : "No matches",
-                message: store.searchText.isEmpty
-                    ? "This source didn’t return any titles."
-                    : "Nothing in this catalog matches “\(store.searchText)”.",
-                systemImage: "books.vertical",
-                retry: store.searchText.isEmpty
-                    ? { Task { await store.reload(forceNetwork: true) } }
-                    : nil
-            )
+            if store.searchText.isEmpty {
+                ExploreStatusView(
+                    title: "No books",
+                    message: "This source didn’t return any titles.",
+                    systemImage: "books.vertical",
+                    retry: { Task { await store.reload(forceNetwork: true) } }
+                )
+            } else {
+                ContentUnavailableView {
+                    Label("No matches", systemImage: "magnifyingglass")
+                } description: {
+                    Text("Nothing in this catalog matches “\(store.searchText)”. Search Data Sources to check RaveBookSearch, LibGen, OpenLibrary, and custom adapters.")
+                } actions: {
+                    Button {
+                        Task { await store.searchExternalSources() }
+                    } label: {
+                        if store.isSearchingExternalSources {
+                            ProgressView()
+                        } else {
+                            Text("Search Data Sources")
+                        }
+                    }
+                    .disabled(store.isSearchingExternalSources)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         } else {
             ScrollView {
                 LazyVGrid(
