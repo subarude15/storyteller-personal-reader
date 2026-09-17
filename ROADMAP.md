@@ -17,11 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Phone import → StoryAlign read-aloud** — tip ≥ Browse `ae3990d` (Josh verified). Library **Import** → EPUB + audiobook upload to active Storyteller (LAN failover) → Aligning… → SYNC / Continue read-aloud. Finish existing Import / ReadaloudAligning / UploadNewBook path — don’t rebuild a parallel importer. Soft polish anytime.
+- **P0 Mini player inset / close** — tip ≥ StoryAlign Import `05f0006` (Josh upload OK; Align may still finish on NAS). When mini is visible, every tab root + sheet gets bottom inset ≥ mini height so content never covers GlobalMiniPlayerBar; close/stop ≥44pt and above the tab bar. Audit Find / show / Library / Import / Browse / Settings. Soft polish anytime.
 
-- **Next after StoryAlign Sideload:** **P0 Mini player inset / close** — screens overlapping `GlobalMiniPlayerBar` block stop/close; every tab/sheet bottom inset ≥ mini height; close ≥44pt above tab bar.
-
-**Do not start SponsorBlock / Invidious/ad-strip / widgets / CarPlay / Podcast Index keys unless Josh reorders.**
+**Do not start SponsorBlock / Invidious/ad-strip / widgets / CarPlay / DSM folder dump unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
@@ -58,6 +56,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **YouTube playhead sync** — tip `0a4da30`; private Storyteller blob; Josh confirmed phone↔iPad resume near leave point; Sideload [35164207619](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35164207619)
 - [x] **Podcast / player UX polish (stamps 1–5)** — tip `ba4a83d`; pre-subscribe desc; Unsubscribe left / Done right; back→GlobalMiniPlayerBar; scrub seeks YouTube/RSS; iPad NP video fills frame; Josh confirmed; Sideload [35166993973](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35166993973)
 - [x] **Browse podcasts (Apple charts/genres)** — tip `ae3990d`; Find empty → Top charts + genre chips + cover grid; tap → pre-subscribe show page; Josh confirmed; Sideload [35168353054](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35168353054)
+- [x] **Phone import → StoryAlign read-aloud** — tip `05f0006`; Library Import → EPUB+audio upload → Aligning… / Storyteller queue; Josh confirmed upload; Sideload [35170255405](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35170255405)
 - [x] **Glance / system Now Playing** — tip `257e44e`; Josh confirmed Lock Screen / Control Center title + pause/skip
 - [x] **Episode status cluster + show filters + Josh UI stamps** — tip `b719921`; download glyph · Clean chip (incl. Clean failed) · Xm left/Played; show filters All|Downloaded|In progress|Clean pending; Shelf POD chrome; mini-player cover+title+play/pause(+close) only (scrub/−15/+15 stay on full Now Playing); Home/Library finishability text via `PlaybackFinishabilityCopy`; Sideload green [35023934089](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35023934089)
 - [x] **Podcast play queue** — tip `2f7deb4`; Play Next / Play Last in episode menus; `PodcastPlaybackQueueStore` + editable `PodcastPlaybackQueueView` (drag reorder, remove, clear finished); auto-advance on finish via shared player; persisted upcoming order; Sideload green [35025614228](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35025614228)
@@ -80,13 +79,12 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-### After StoryAlign phone import
-1. **P0 Mini player inset / close** — bottom inset under GlobalMiniPlayerBar so stop/close stays tappable
-2. Soft UX polish (anytime) — see below
-3. Later ideas (SponsorBlock, CarPlay/Watch, podcast cross-device sync) — see Later
+### After mini-inset P0
+1. Soft UX polish (anytime) — see below
+2. Later ideas (SponsorBlock, CarPlay/Watch, podcast cross-device sync, DSM/SMB folder dump) — see Later
 
 ### Soft UX polish (anytime)
-- ~~Mini player inset / close~~ → **Next after StoryAlign (P0)** — screens under GlobalMiniPlayerBar block stop/close
+- ~~Mini player inset / close~~ → **Now (P0)** — screens under GlobalMiniPlayerBar block stop/close
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
 - ~~Stats push / description decode~~ → **Shipped** (`cf5c663`) — Josh confirmed
 - Cleaning… chip must not look like episode remaining (job ETA or plain Cleaning…; keep Xm left on progress separately) — status cluster already separates job chip from Xm left
@@ -108,7 +106,7 @@ Strict order (Smokey / Nas-ty):
 8. ~~YouTube playhead sync~~ → **Shipped** (`0a4da30`; Josh confirmed)
 9. ~~Browse podcasts (Apple charts/genres)~~ → **Shipped** (`ae3990d`; Josh confirmed)
 10. **SponsorBlock-style skip** — additive seek on in-app YouTube (not podcast Clean)
-11. ~~Phone import → StoryAlign read-aloud~~ → **Now** (Library Import → upload → Aligning… → SYNC)
+11. ~~Phone import → StoryAlign read-aloud~~ → **Shipped** (`05f0006`; Josh upload OK)
 12. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
 
 **Later (not StoryAlign v1):** DSM share / SMB / WebDAV folder drop (put EPUB/audio into named NAS folders) and general photo dump — Import v1 uses Storyteller upload API into its library only.
