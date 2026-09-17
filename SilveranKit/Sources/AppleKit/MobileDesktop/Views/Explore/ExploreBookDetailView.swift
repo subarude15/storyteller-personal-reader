@@ -96,7 +96,7 @@ public struct ExploreBookDetailView: View {
                                 }
                                 .frame(maxWidth: .infinity)
                             } else {
-                                Label("Add to Library", systemImage: "square.and.arrow.down")
+                                Label(importActionTitle, systemImage: "square.and.arrow.down")
                                     .frame(maxWidth: .infinity)
                             }
                         }
@@ -118,6 +118,12 @@ public struct ExploreBookDetailView: View {
         .onAppear {
             importedRecord = ExploreImportStore.shared.record(for: book)
         }
+    }
+
+    /// Playtorio / adapter-backed titles use Download / Import so formats flow
+    /// into the Storyteller upload pipeline; OPDS keeps “Add to Library”.
+    private var importActionTitle: String {
+        book.sourceID == ExploreCatalogSource.playtorio.id ? "Download / Import" : "Add to Library"
     }
 
     // MARK: - Actions

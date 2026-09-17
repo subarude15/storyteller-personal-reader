@@ -265,6 +265,18 @@ extension SettingsView {
                         Label("Book Sources", systemImage: "externaldrive")
                     }
                     .tag(SettingsTab.bookSources)
+
+                DataSourcesSettingsView()
+                    .tabItem {
+                        Label("Data Sources", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                    .tag(SettingsTab.dataSources)
+
+                DebridSettingsView()
+                    .tabItem {
+                        Label("Debrid", systemImage: "bolt.horizontal.circle")
+                    }
+                    .tag(SettingsTab.debrid)
             }
 
             Divider()
@@ -381,6 +393,22 @@ extension SettingsView {
                         StorytellerServerSettingsView()
                     } label: {
                         Label("Book Sources", systemImage: "externaldrive")
+                    }
+                }
+
+                Section("Data Sources") {
+                    NavigationLink {
+                        DataSourcesSettingsView()
+                    } label: {
+                        Label("Data Sources", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                }
+
+                Section("Debrid") {
+                    NavigationLink {
+                        DebridSettingsView()
+                    } label: {
+                        Label("Debrid Settings", systemImage: "bolt.horizontal.circle")
                     }
                 }
 
@@ -770,6 +798,8 @@ private enum SettingsTab: Hashable {
     case readerSettings
     case readingBar
     case bookSources
+    case dataSources
+    case debrid
 }
 
 private struct MacSettingsContainer<Content: View>: View {

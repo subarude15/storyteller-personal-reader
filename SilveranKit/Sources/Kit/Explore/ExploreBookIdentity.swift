@@ -7,6 +7,7 @@ public enum ExploreBookIdentity {
     public static let bookSourceID: BookSourceID = "explore"
     public static let standardEbooksSourceID = "standard-ebooks"
     public static let directLinkSourceID = "direct-epub"
+    public static let playtorioSourceID = "playtorio"
 
     public static func stableID(sourceID: String, itemID: String) -> String {
         "explore.\(sanitize(sourceID)).\(sanitize(itemID))"

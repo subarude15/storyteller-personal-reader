@@ -17,11 +17,12 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Await Josh smoke clear** — Continue widget `cc910d9` confirmed green. Still need yes/no on **More like this** `b8ca122` + **Explore** `c200401` (browse + Add to Library / Read now temp — never silent auto-ingest). Then paste **Finish tonight**.
+- **Playtorio Fetcher** — user-managed Data Sources CRUD + high-priority RaveBookSearch adapter; formats → Explore Download/Import → Storyteller ingest. Persist metadata + public URLs in Playtorio library index; Settings → Data Sources; CLI + `GET /api/books` / `GET|PUT /api/settings/adapters`.
+- **TorBox Debrid** — Settings → Debrid Settings (API key in Keychain); More / Add Book → Import via TorBox/Magnet; resolve magnet → direct URL → Storyteller Tus upload (background toast).
 
-**Shipped this cycle (pending board stamp):** widget restore PR #26 / `cc910d9`.
+**Next:** Finish tonight → Story Timeline → soft Couldn't save server copy.
 
-**Next:** Finish tonight → Story Timeline → soft Couldn't save server. Explore expansion (more OPDS / user links / wishlist metadata) Later — no Playtorio scrape / DRM strip / Audible login path.
+**Later:** External discover books you don’t have. No Playtorio scrape / DRM strip / Audible login path.
 
 **Do not start second player, CarPlay, DSM/SMB, pirate indexes, or DRM strip unless Josh reorders.**
 ## Shipped

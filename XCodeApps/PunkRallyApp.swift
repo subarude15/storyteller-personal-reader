@@ -914,6 +914,15 @@ private struct PunkRallyShellToastModifier: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyYouTubeNoMatches)) { _ in
                 showToast("No matches")
             }
+            .onReceive(NotificationCenter.default.publisher(for: .punkRallyTorBoxIngestSucceeded)) { note in
+                let message = (note.userInfo?["message"] as? String)
+                    ?? "TorBox import finished — check Library."
+                showToast(message)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .punkRallyTorBoxIngestFailed)) { note in
+                let message = (note.userInfo?["message"] as? String) ?? "TorBox import failed"
+                showToast(message)
+            }
     }
 }
 
