@@ -17,7 +17,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **SponsorBlock-style skip (in-app YouTube)** — tip ≥ mini-inset `833d573`. Fetch SponsorBlock segments by video id; auto-seek shared AVPlayer for sponsor/selfpromo/intro/outro/interaction (Settings toggles; defaults on for sponsor/selfpromo/intro/outro); soft fail if API down; optional one-shot skip toast; keep playhead persist/sync. Soft polish anytime.
+- **Soft UX polish** — Cleaning… chip vs remaining; “Couldn't save server” copy; empty state when URL prefilled but no source; missing covers. Soft polish anytime.
 
 **Do not start DSM/SMB dump / CarPlay / widgets / podcast cross-device sync unless Josh reorders.**
 ## Shipped
@@ -58,6 +58,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **Browse podcasts (Apple charts/genres)** — tip `ae3990d`; Find empty → Top charts + genre chips + cover grid; tap → pre-subscribe show page; Josh confirmed; Sideload [35168353054](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35168353054)
 - [x] **Phone import → StoryAlign read-aloud** — tip `05f0006`; Library Import → EPUB+audio upload → Aligning… / Storyteller queue; Josh confirmed upload; Sideload [35170255405](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35170255405)
 - [x] **P0 Mini player inset / close** — tip `833d573`; bottom inset when GlobalMiniPlayerBar visible; Sideload [35172448040](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35172448040)
+- [x] **SponsorBlock-style skip (in-app YouTube)** — tip `436efb2`; fetch segments by video id; auto-seek shared AVPlayer for sponsor/selfpromo/intro/outro/interaction (Settings toggles; defaults on except interaction); soft fail if API down; one-shot skip toast; playhead persist/sync; not podcast Clean
 - [x] **Glance / system Now Playing** — tip `257e44e`; Josh confirmed Lock Screen / Control Center title + pause/skip
 - [x] **Episode status cluster + show filters + Josh UI stamps** — tip `b719921`; download glyph · Clean chip (incl. Clean failed) · Xm left/Played; show filters All|Downloaded|In progress|Clean pending; Shelf POD chrome; mini-player cover+title+play/pause(+close) only (scrub/−15/+15 stay on full Now Playing); Home/Library finishability text via `PlaybackFinishabilityCopy`; Sideload green [35023934089](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35023934089)
 - [x] **Podcast play queue** — tip `2f7deb4`; Play Next / Play Last in episode menus; `PodcastPlaybackQueueStore` + editable `PodcastPlaybackQueueView` (drag reorder, remove, clear finished); auto-advance on finish via shared player; persisted upcoming order; Sideload green [35025614228](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35025614228)
@@ -80,12 +81,12 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-### After SponsorBlock skip
-1. Soft UX polish (anytime) — see below
-2. Later ideas (CarPlay/Watch, podcast cross-device sync, DSM/SMB folder dump) — see Later
+### After soft UX polish
+1. Later ideas (CarPlay/Watch, podcast cross-device sync, DSM/SMB folder dump) — see Later
 
 ### Soft UX polish (anytime)
 - ~~Mini player inset / close~~ → **Shipped** (`833d573`)
+- ~~SponsorBlock-style skip~~ → **Shipped** (`436efb2`)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
 - ~~Stats push / description decode~~ → **Shipped** (`cf5c663`) — Josh confirmed
 - Cleaning… chip must not look like episode remaining (job ETA or plain Cleaning…; keep Xm left on progress separately) — status cluster already separates job chip from Xm left
@@ -106,7 +107,7 @@ Strict order (Smokey / Nas-ty):
 7. ~~LAN failover~~ → **Shipped** (`4f9d27d`; Josh confirmed Using LAN / Using public)
 8. ~~YouTube playhead sync~~ → **Shipped** (`0a4da30`; Josh confirmed)
 9. ~~Browse podcasts (Apple charts/genres)~~ → **Shipped** (`ae3990d`; Josh confirmed)
-10. ~~SponsorBlock-style skip~~ → **Now** (in-app YouTube; tip ≥ `833d573`)
+10. ~~SponsorBlock-style skip~~ → **Shipped** (`436efb2`)
 11. ~~Phone import → StoryAlign read-aloud~~ → **Shipped** (`05f0006`; Josh upload OK)
 12. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
 
