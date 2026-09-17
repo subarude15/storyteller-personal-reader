@@ -82,6 +82,11 @@ final class PodcastsViewModel {
         store.markRefreshed(feedURL)
     }
 
+    /// Load a show from RSS without subscribing — Find / Browse pre-subscribe preview.
+    func previewShow(feedURL: URL) async -> PRPodcastShow? {
+        await fetchFeed(feedURL)
+    }
+
     /// Subscribe only after the RSS feed loads successfully.
     @discardableResult
     func subscribe(feedURL: URL) async -> Bool {
@@ -213,7 +218,8 @@ final class PodcastsViewModel {
                 feedURL: feedURL,
                 mediaKind: mediaKind,
                 lastTouched: Date(),
-                progress: PodcastDownloadStore.shared.record(for: episode.id)?.progress ?? 0
+                progress: Self.recentProgress(for: episode),
+                youtubeURL: episode.watchOnYouTubeURL
             )
         )
 
@@ -264,7 +270,8 @@ final class PodcastsViewModel {
                     feedURL: feedURL,
                     mediaKind: .video,
                     lastTouched: Date(),
-                    progress: PodcastDownloadStore.shared.record(for: episode.id)?.progress ?? 0
+                    progress: Self.recentProgress(for: episode, youtubeURL: watchURL),
+                    youtubeURL: watchURL
                 )
             )
 
@@ -348,5 +355,23 @@ final class PodcastsViewModel {
         } catch {
             return nil
         }
+    }
+
+    /// Prefer YouTube playhead progress when a watch URL is known; else download ledger.
+    private static func recentProgress(
+        for episode: PRPodcastEpisode,
+        youtubeURL: URL? = nil
+    ) -> Double {
+        let watch = youtubeURL ?? episode.watchOnYouTubeURL
+        if let watch,
+            let videoID = PodcastYouTubeURL.videoID(from: watch),
+            let entry = YouTubePlayheadStore.shared.entry(for: videoID)
+        {
+            return entry.progress
+        }
+        if let playhead = PodcastPlayheadStore.shared.entry(for: episode.id) {
+            return playhead.progress
+        }
+        return PodcastDownloadStore.shared.record(for: episode.id)?.progress ?? 0
     }
 }
