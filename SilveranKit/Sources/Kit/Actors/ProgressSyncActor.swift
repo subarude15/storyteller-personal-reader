@@ -117,6 +117,18 @@ public actor ProgressSyncActor {
             "[PSA] syncProgress: bookID=\(bookID), reason=\(reason.rawValue), timestamp=\(timestamp), source=\(sourceIdentifier)"
         )
 
+        // Explore Read now identities are ephemeral and must never enter Storyteller sync
+        // or local library metadata. Persist locally via ExploreProgressStore instead.
+        if ExploreBookIdentity.isExplore(bookID) {
+            ExploreProgressStore.shared.save(
+                bookID: bookID,
+                locator: locator,
+                fraction: locator.locations?.totalProgression ?? locator.locations?.progression
+            )
+            debugLog("[PSA] syncProgress: skipped Storyteller sync for Explore identity \(bookID)")
+            return .success
+        }
+
         let locatorSummary = buildLocatorSummary(locator)
 
         guard

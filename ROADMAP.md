@@ -17,18 +17,25 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **More like this** — tip ≥ `b8ca122` (book detail cover rail: series → author → tags; in-library only). Josh installing; smoke pending. Soft polish anytime.
+- **Streaming Books — Phase 2: public-domain audiobooks** — LibriVox browse/search and HTTPS
+  streaming through the existing shared player / `AudioSessionActor`; no second player
 
-**Next after smoke:** Finish tonight → Story Timeline → soft Couldn't save server copy.
+**Next (strict order):**
+1. **Finish tonight** — quick Home win
+2. **Story Timeline** — distinctive but bigger
+3. Soft: distinct **Couldn't save server** copy vs connection-failed
 
-**Later:** external “books you don’t own yet” (Open Library / Hardcover / Goodreads-style discover). Second player stays dead.
+**Parked / out:** second concurrent player (shared NP stays); CarPlay; DSM/SMB; mainline Continue widget (Josh happy on Arena IPA; PR #23 closed not merged — reopen later with `ALTAppGroups` resolve if mainline should match); DRM catalogs; torrent/debrid transport adapters until needed after OPDS/direct-HTTPS; Bookracy/AudiobookBay and other scraper-backed acquisition.
 
-**Widget note:** mainline tip has no Arena Continue widget (PR #23 stayed closed). Arena IPA keeps the live tile; restore on tip only if Josh asks (clean reopen with `ALTAppGroups` resolve).
-
-**Do not start second player, external rec APIs, CarPlay, DSM/SMB, or merge Arena widget unless Josh reorders.**
+**Do not start DSM/SMB, CarPlay, a second player, unlicensed/scraped catalogs, external recommendation APIs, or the Arena widget merge unless Josh reorders. Authorized public-domain catalog work is the narrow exception above; it must remain separate from local-library recommendations.**
 ## Shipped
 
 ### Product / sync
+- [x] **Streaming Books Phase 1: Explore ebooks + lawful source foundation** — tip `0d71be3`;
+  `Library | Explore` segment; Standard Ebooks (public Atom new-releases) + user OPDS + direct
+  HTTPS EPUB; Read now via existing Silveran reader; Add to Library via Storyteller upload;
+  Simulator + Sideload green
+  [Actions 35229145644](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35229145644)
 - [x] **More like this** book-detail rail — local Storyteller library only; series → author
   → tag-overlap ranking; PR #24 squash-merged at tip `b8ca122`; Simulator + Sideload green
   [Actions 35217017886](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35217017886)
@@ -92,10 +99,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-1. **Streaming Books Phase 2** — LibriVox/public-domain audiobook browse + HTTPS streaming through the shared player
-2. **Finish tonight** — smallest Home win
-3. **Story Timeline** — bigger distinctive cut
-4. Soft: **Couldn't save server** copy anytime
+1. **Finish tonight** — smallest Home win
+2. **Story Timeline** — bigger distinctive cut
+3. Soft: **Couldn't save server** copy anytime
 
 ### Soft UX polish (anytime)
 - Soft polish pack → **Shipped** (`b9b07ea` / PR #22)

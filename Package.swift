@@ -108,6 +108,9 @@ let package = Package(
             name: "SilveranTests",
             dependencies: ["SilveranKit", "SilveranAppleKit", "SilveranAppleWidgets"],
             path: "SilveranKit/Tests/SilveranTests",
+            resources: [
+                .copy("Fixtures"),
+            ],
         ),
     ],
 )

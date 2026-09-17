@@ -161,10 +161,21 @@ public final class ReadingSession {
         nativeLoadingTask = Task { @SilveranUIActor in
             do {
                 let prepStarted = Date()
-                let prepared = try await BookServiceActor.shared.prepareEbookForReading(
-                    bookID: bookID,
-                    category: category,
-                )
+                let prepared: PreparedEbookMedia
+                if ExploreBookIdentity.isExplore(bookID), let localPath = localMediaPath {
+                    // Explore Read now: present a validated temporary EPUB without
+                    // resolving Storyteller library media.
+                    prepared = try await BookServiceActor.shared.prepareLocalEbookForReading(
+                        epubPath: localPath,
+                        bookID: bookID,
+                        category: category,
+                    )
+                } else {
+                    prepared = try await BookServiceActor.shared.prepareEbookForReading(
+                        bookID: bookID,
+                        category: category,
+                    )
+                }
                 let afterPrepare = Date()
                 debugLog(
                     "[RestoreTrace][BookOpen] prepareEbookForReading deltaMs=\(String(format: "%.1f", afterPrepare.timeIntervalSince(prepStarted) * 1000))"
