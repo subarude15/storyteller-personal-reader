@@ -368,6 +368,7 @@ struct PodcastShowView: View {
     let show: PRPodcastShow
 
     @State private var isSubscribed = false
+    @State private var isSubscribing = false
     @State private var episodeFilter: ShowEpisodeFilter = .all
     @State private var downloadStore = PodcastDownloadStore.shared
 
@@ -410,16 +411,39 @@ struct PodcastShowView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    Picker("Filter", selection: $episodeFilter) {
-                        ForEach(ShowEpisodeFilter.allCases) { filter in
-                            Text(filter.title).tag(filter)
+                    if !isSubscribed, show.feedURL != nil {
+                        Button {
+                            Task { await subscribeFromPreview() }
+                        } label: {
+                            if isSubscribing {
+                                ProgressView()
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
+                            } else {
+                                Text("Subscribe")
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
+                            }
                         }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isSubscribing)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .accessibilityLabel("Subscribe to \(show.title)")
                     }
-                    .pickerStyle(.segmented)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+
+                    if isSubscribed {
+                        Picker("Filter", selection: $episodeFilter) {
+                            ForEach(ShowEpisodeFilter.allCases) { filter in
+                                Text(filter.title).tag(filter)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    }
                 }
 
-                Section("Episodes") {
+                Section(isSubscribed ? "Episodes" : "Episodes preview") {
                     if show.episodes.isEmpty {
                         Text("No episodes yet — check back later.")
                             .foregroundStyle(.secondary)
@@ -427,13 +451,26 @@ struct PodcastShowView: View {
                         Text("No episodes match this filter.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(filteredEpisodes) { episode in
-                            EpisodeRow(
-                                episode: episode,
-                                chrome: chrome,
-                                viewModel: viewModel,
-                                showFeedURL: show.feedURL
-                            )
+                        ForEach(previewEpisodes) { episode in
+                            if isSubscribed {
+                                EpisodeRow(
+                                    episode: episode,
+                                    chrome: chrome,
+                                    viewModel: viewModel,
+                                    showFeedURL: show.feedURL
+                                )
+                            } else {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(episode.title)
+                                        .font(.subheadline.weight(.medium))
+                                    if let published = episode.publishedAt {
+                                        Text(published, style: .date)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                            }
                         }
                     }
                 }
@@ -441,24 +478,17 @@ struct PodcastShowView: View {
             .navigationTitle(show.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task {
-                            if let feedURL = show.feedURL {
-                                if isSubscribed {
-                                    await viewModel.unsubscribe(feedURL: feedURL)
-                                } else {
-                                    await viewModel.subscribe(feedURL: feedURL)
-                                }
-                                isSubscribed.toggle()
-                            }
-                        }
-                    } label: {
-                        Image(systemName: isSubscribed ? "checkmark.circle.fill" : "plus.circle")
-                    }
-                    .disabled(show.feedURL == nil)
-                }
+                // Left: clear Unsubscribe when subscribed. Right: Done.
+                // (No checkmark-as-unsubscribe.)
                 ToolbarItem(placement: .cancellationAction) {
+                    if isSubscribed {
+                        Button("Unsubscribe") {
+                            Task { await unsubscribeAndClose() }
+                        }
+                        .disabled(show.feedURL == nil)
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         dismiss()
                     }
@@ -470,6 +500,27 @@ struct PodcastShowView: View {
                 }
             }
         }
+    }
+
+    /// Pre-subscribe: cap the cheap list; subscribed: full filtered list.
+    private var previewEpisodes: [PRPodcastEpisode] {
+        if isSubscribed { return filteredEpisodes }
+        return Array(show.episodes.prefix(12))
+    }
+
+    private func subscribeFromPreview() async {
+        guard let feedURL = show.feedURL, !isSubscribing else { return }
+        isSubscribing = true
+        let ok = await viewModel.subscribe(feedURL: feedURL)
+        isSubscribing = false
+        if ok { isSubscribed = true }
+    }
+
+    private func unsubscribeAndClose() async {
+        guard let feedURL = show.feedURL else { return }
+        await viewModel.unsubscribe(feedURL: feedURL)
+        isSubscribed = false
+        dismiss()
     }
 
     private func episodeMatchesFilter(_ episode: PRPodcastEpisode) -> Bool {

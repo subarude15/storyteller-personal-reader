@@ -183,8 +183,9 @@ public final class PodcastPlayerPresenter {
         startError = nil
     }
 
-    /// Closes the card. Audio may continue in the mini player; video sessions
-    /// end with the card so video never runs mini-bar alone.
+    /// Closes the card. Playback (audio, RSS video, or in-app YouTube) may
+    /// continue under GlobalMiniPlayerBar when still playing; expand restores
+    /// the full Now Playing card without restarting the stream.
     public func dismiss() {
         Task { @MainActor in
             await Self.persistPodcastProgress(markFinished: false)
@@ -193,11 +194,9 @@ public final class PodcastPlayerPresenter {
             episode = nil
             startError = nil
             isOpening = false
-            if closing?.isVideo == true {
-                activeEpisode = nil
-                await AudioSessionActor.shared.closePodcast()
-                PunkRallyStatsEvents.sessionEnd(mediaID: "podcast/\(closing!.id)")
-            } else if snapshot?.isPlaying != true {
+            // Keep activeEpisode + shared AVPlayer when still playing so the
+            // existing mini bar stays visible (video included — audio-only mini).
+            if snapshot?.isPlaying != true {
                 activeEpisode = nil
                 await AudioSessionActor.shared.closePodcast()
                 if let closing {

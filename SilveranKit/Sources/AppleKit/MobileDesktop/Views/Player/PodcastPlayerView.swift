@@ -233,20 +233,26 @@ public struct PodcastPlayerView: View {
     @ViewBuilder
     private var artworkBlock: some View {
         if live.isVideo {
-            ZStack {
-                Color.black
-                if let videoPlayer {
-                    PodcastVideoSurfaceView(player: videoPlayer)
-                } else {
-                    ProgressView()
-                        .tint(.white)
+            // Fill the available NP video region (iPad-wide), aspect-fit inside.
+            // Mini bar stays slim elsewhere — this only applies to full NP.
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(minHeight: 180)
+                .overlay {
+                    ZStack {
+                        Color.black
+                        if let videoPlayer {
+                            PodcastVideoSurfaceView(player: videoPlayer)
+                        } else {
+                            ProgressView()
+                                .tint(.white)
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 220)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
-            .accessibilityLabel("Episode video")
+                .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+                .layoutPriority(1)
+                .accessibilityLabel("Episode video")
         } else {
             Group {
                 if let cover = monitor.coverImage {

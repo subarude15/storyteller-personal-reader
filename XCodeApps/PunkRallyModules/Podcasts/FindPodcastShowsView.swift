@@ -24,6 +24,9 @@ struct FindPodcastShowsView: View {
     @State private var statusIsError = false
     @State private var subscribingFeed: String?
     @State private var searchTask: Task<Void, Never>?
+    @State private var previewShow: PRPodcastShow?
+    @State private var loadingPreviewFeed: String?
+    @State private var previewError: String?
 
     private var chrome: PunkRallyTheme.Chrome {
         PunkRallyTheme.Chrome(scheme: colorScheme)
@@ -60,6 +63,30 @@ struct FindPodcastShowsView: View {
                         Label("Paste RSS URL", systemImage: "link")
                     }
                 }
+            }
+            .sheet(item: $previewShow) { show in
+                PodcastShowView(viewModel: viewModel, show: show)
+            }
+            .overlay {
+                if loadingPreviewFeed != nil {
+                    ZStack {
+                        Color.black.opacity(0.2).ignoresSafeArea()
+                        ProgressView("Loading show…")
+                            .padding(20)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+            }
+            .alert(
+                "Couldn't open show",
+                isPresented: Binding(
+                    get: { previewError != nil },
+                    set: { if !$0 { previewError = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { previewError = nil }
+            } message: {
+                Text(previewError ?? "")
             }
         }
     }
@@ -110,14 +137,14 @@ struct FindPodcastShowsView: View {
                         result: hit,
                         isSubscribed: viewModel.isSubscribed(to: hit.feedURL),
                         isSubscribing: subscribingFeed == hit.feedURL.absoluteString,
-                        chrome: chrome
-                    ) {
-                        Task { await subscribe(hit) }
-                    }
+                        chrome: chrome,
+                        onOpen: { Task { await openPreview(hit) } },
+                        onSubscribe: { Task { await subscribe(hit) } }
+                    )
                     .listRowBackground(chrome.surface)
                 }
             } footer: {
-                Text("Subscribe loads the RSS feed and adds it to Podcasts — same as paste-URL.")
+                Text("Tap a show to read the description before Subscribe. Subscribe loads the RSS feed — same as paste-URL.")
             }
         }
         .scrollContentBackground(.hidden)
@@ -162,6 +189,37 @@ struct FindPodcastShowsView: View {
         isSearching = false
     }
 
+    private func openPreview(_ hit: PRPodcastSearchResult) async {
+        let key = hit.feedURL.absoluteString
+        guard loadingPreviewFeed != key else { return }
+        loadingPreviewFeed = key
+        previewError = nil
+        let show = await viewModel.previewShow(feedURL: hit.feedURL)
+        loadingPreviewFeed = nil
+        if let show {
+            // Prefer search artwork when the feed omits a cover.
+            if show.coverURL == nil, let cover = hit.coverURL {
+                previewShow = PRPodcastShow(
+                    uuid: show.uuid,
+                    title: show.title,
+                    author: show.author ?? hit.author,
+                    description: show.description,
+                    coverURL: cover,
+                    feedURL: show.feedURL,
+                    categories: show.categories,
+                    episodes: show.episodes,
+                    lastUpdated: show.lastUpdated,
+                    addedAt: show.addedAt
+                )
+            } else {
+                previewShow = show
+            }
+        } else {
+            previewError =
+                "Couldn't load the RSS for \(hit.title). Try Subscribe, or paste the feed URL."
+        }
+    }
+
     private func subscribe(_ hit: PRPodcastSearchResult) async {
         let key = hit.feedURL.absoluteString
         guard subscribingFeed != key else { return }
@@ -189,40 +247,48 @@ private struct FindShowRow: View {
     let isSubscribed: Bool
     let isSubscribing: Bool
     let chrome: PunkRallyTheme.Chrome
+    let onOpen: () -> Void
     let onSubscribe: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
-            AsyncImage(url: result.coverURL) { phase in
-                switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFill()
-                    default:
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(chrome.surface2)
-                            .overlay(
-                                Image(systemName: "mic.fill")
-                                    .foregroundStyle(chrome.textFaint)
-                            )
+            Button(action: onOpen) {
+                HStack(spacing: 12) {
+                    AsyncImage(url: result.coverURL) { phase in
+                        switch phase {
+                            case .success(let image):
+                                image.resizable().scaledToFill()
+                            default:
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(chrome.surface2)
+                                    .overlay(
+                                        Image(systemName: "mic.fill")
+                                            .foregroundStyle(chrome.textFaint)
+                                    )
+                        }
+                    }
+                    .frame(width: 56, height: 56)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(result.title)
+                            .font(.headline)
+                            .foregroundStyle(chrome.text)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        if let author = result.author {
+                            Text(author)
+                                .font(.subheadline)
+                                .foregroundStyle(chrome.textMuted)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 0)
                 }
             }
-            .frame(width: 56, height: 56)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(result.title)
-                    .font(.headline)
-                    .foregroundStyle(chrome.text)
-                    .lineLimit(2)
-                if let author = result.author {
-                    Text(author)
-                        .font(.subheadline)
-                        .foregroundStyle(chrome.textMuted)
-                        .lineLimit(1)
-                }
-            }
-
-            Spacer(minLength: 8)
+            .buttonStyle(.plain)
+            .accessibilityLabel("Show details for \(result.title)")
+            .accessibilityHint("Opens description and episode preview without subscribing")
 
             Button(action: onSubscribe) {
                 if isSubscribing {

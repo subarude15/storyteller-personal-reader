@@ -82,6 +82,11 @@ final class PodcastsViewModel {
         store.markRefreshed(feedURL)
     }
 
+    /// Load a show from RSS without subscribing — Find / Browse pre-subscribe preview.
+    func previewShow(feedURL: URL) async -> PRPodcastShow? {
+        await fetchFeed(feedURL)
+    }
+
     /// Subscribe only after the RSS feed loads successfully.
     @discardableResult
     func subscribe(feedURL: URL) async -> Bool {

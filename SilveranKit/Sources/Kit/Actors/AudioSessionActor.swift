@@ -495,6 +495,14 @@ public actor AudioSessionActor {
     }
 
     private func publishPodcastState() async {
+        // Streams (YouTube / some RSS video) often report duration 0 at open;
+        // refresh from the live AVPlayer so scrub/seek have a real total.
+        if podcastDuration <= 0, let player = podcastPlayer {
+            let live = await player.duration
+            if live.isFinite, live > 0 {
+                podcastDuration = live
+            }
+        }
         notifySnapshotObservers(await podcastSnapshot())
         await updateNowPlaying(await podcastNowPlaying())
     }
@@ -562,8 +570,17 @@ public actor AudioSessionActor {
         let clamped = min(max(fraction, 0), 1)
         switch currentKind {
             case .podcast:
-                guard podcastDuration > 0, let player = podcastPlayer else { return }
-                await player.seek(to: podcastDuration * clamped)
+                guard let player = podcastPlayer else { return }
+                var total = podcastDuration
+                if total <= 0 {
+                    let live = await player.duration
+                    if live.isFinite, live > 0 {
+                        podcastDuration = live
+                        total = live
+                    }
+                }
+                guard total > 0 else { return }
+                await player.seek(to: total * clamped)
                 await publishPodcastState()
                 if podcastYouTubeVideoID != nil {
                     NotificationCenter.default.post(
