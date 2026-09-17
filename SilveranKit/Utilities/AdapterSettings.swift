@@ -51,15 +51,7 @@ public struct AdapterSettings: Sendable {
     }
 
     public static func defaultDirectory() -> URL {
-        #if os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
-        let base =
-            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        return base.appendingPathComponent("Playtorio", isDirectory: true)
-        #else
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        return home.appendingPathComponent(".playtorio", isDirectory: true)
-        #endif
+        PlaytorioPaths.dataDirectory()
     }
 
     public func load() throws -> [AdapterConfig] {

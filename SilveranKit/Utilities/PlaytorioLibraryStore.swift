@@ -13,17 +13,12 @@ public struct PlaytorioLibraryStore: Sendable {
     }
 
     public static func defaultDatabasePath() -> URL {
-        let dir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".playtorio", isDirectory: true)
-        return dir.appendingPathComponent("library.sqlite")
+        PlaytorioPaths.dataDirectory().appendingPathComponent("library.sqlite")
     }
 
     /// Application Support path for the iOS/macOS app (when available).
     public static func applicationSupportPath() -> URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? FileManager.default.homeDirectoryForCurrentUser
-        let dir = base.appendingPathComponent("Playtorio", isDirectory: true)
-        return dir.appendingPathComponent("library.sqlite")
+        PlaytorioPaths.dataDirectory().appendingPathComponent("library.sqlite")
     }
 
     public func upsert(_ book: NormalizedBook) {
