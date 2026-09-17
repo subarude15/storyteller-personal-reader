@@ -530,6 +530,19 @@ struct EpisodeRow: View {
     @State private var downloadStore = PodcastDownloadStore.shared
     @State private var showMediaPicker = false
     @State private var isResolvingYouTube = false
+    @State private var showYouTubeMatch = false
+    /// Bumps after a Match pick so chips refresh from the local store.
+    @State private var matchEpoch = 0
+
+    private var effectiveWatchURL: URL? {
+        _ = matchEpoch
+        return episode.watchOnYouTubeURL
+    }
+
+    private var showsMatchOnYouTube: Bool {
+        _ = matchEpoch
+        return episode.needsYouTubeMatch
+    }
 
     private var isDownloaded: Bool {
         downloadStore.isDownloaded(episode.id)
@@ -581,7 +594,7 @@ struct EpisodeRow: View {
                         .lineLimit(2)
                 }
                 statusCluster
-                if let youtubeURL = episode.watchOnYouTubeURL {
+                if let youtubeURL = effectiveWatchURL {
                     VStack(alignment: .leading, spacing: 6) {
                         Button {
                             Task { await playYouTubeInApp(watchURL: youtubeURL) }
@@ -607,10 +620,20 @@ struct EpisodeRow: View {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .disabled(isResolvingYouTube)
                         .accessibilityHint("Opens YouTube in Safari or the YouTube app")
                     }
                     .padding(.top, 2)
+                } else if showsMatchOnYouTube {
+                    Button {
+                        showYouTubeMatch = true
+                    } label: {
+                        Label("Match on YouTube", systemImage: "magnifyingglass")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .padding(.top, 2)
+                    .accessibilityHint("Search YouTube and confirm the matching video")
                 }
             }
             Spacer(minLength: 0)
@@ -630,6 +653,20 @@ struct EpisodeRow: View {
                 onCancel: { showMediaPicker = false }
             )
             .presentationDetents([.height(280)])
+        }
+        .sheet(isPresented: $showYouTubeMatch) {
+            PodcastYouTubeMatchSheet(
+                showTitle: episode.showTitle,
+                episodeTitle: episode.title,
+                onPick: { hit in
+                    showYouTubeMatch = false
+                    PodcastMatchedYouTubeStore.shared.save(watchURL: hit.watchURL, for: episode.id)
+                    matchEpoch += 1
+                    Task { await playYouTubeInApp(watchURL: hit.watchURL) }
+                },
+                onCancel: { showYouTubeMatch = false }
+            )
+            .presentationDetents([.medium, .large])
         }
         .contextMenu { episodeContextMenu }
     }

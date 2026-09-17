@@ -78,7 +78,7 @@ public struct PodcastDownloadsSettingsView: View {
             }
 
             Section {
-                TextField("http://192.168.1.2:3000", text: $youtubeResolveURLText)
+                TextField("http://192.168.1.2:20130", text: $youtubeResolveURLText)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
@@ -225,7 +225,7 @@ public struct PodcastDownloadsSettingsView: View {
 
     private var youtubeResolveFooterText: String {
         var text =
-            "Invidious / Piped-style base URL (no trailing path). Play in ink+amp calls /api/v1/videos/{id} (or Piped /streams/{id}) and plays a progressive/HLS URL on the shared player. Soft timeout ~20s; failure toasts and opens Watch on YouTube."
+            "Invidious / Piped-style base URL (no trailing path). Play in ink+amp and Match on YouTube use this host — /api/v1/videos/{id}, /api/v1/search, or Piped /streams/{id}. Soft timeout ~20s; resolve failure toasts and opens Watch on YouTube."
         if let err = PodcastYouTubeResolveSettings.lastReachError {
             text += " Last error: \(err)."
         }

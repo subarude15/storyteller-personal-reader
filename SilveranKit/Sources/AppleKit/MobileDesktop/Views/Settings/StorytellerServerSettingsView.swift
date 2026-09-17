@@ -168,6 +168,7 @@ struct BookSourceEditorView: View {
     @State private var kind: BookSourceKind = .storyteller
     @State private var name = ""
     @State private var serverURL = ""
+    @State private var lanURL = ""
     @State private var username = ""
     @State private var password = ""
     @State private var folderPath = ""
@@ -180,6 +181,7 @@ struct BookSourceEditorView: View {
     @State private var isPasswordVisible = false
     @State private var showingFolderImporter = false
     @State private var connectionStatus: ConnectionTestStatus = .notTested
+    @State private var networkRoute: StorytellerNetworkRoute?
     @State private var showRemoveDataConfirmation = false
 
     @Environment(\.dismiss) private var dismiss
@@ -198,6 +200,12 @@ struct BookSourceEditorView: View {
             initialValue:
                 source == nil && initialKind == .storyteller
                 ? kDefaultStorytellerServerURL
+                : ""
+        )
+        _lanURL = State(
+            initialValue:
+                source == nil && initialKind == .storyteller
+                ? kDefaultStorytellerLANURL
                 : ""
         )
         _folderPath = State(initialValue: source?.storagePath ?? "")
@@ -270,6 +278,26 @@ struct BookSourceEditorView: View {
                         .keyboardType(.URL)
                         #endif
                         .help("e.g., https://storyteller.example.com")
+
+                        TextField(
+                            "LAN URL",
+                            text: $lanURL,
+                            prompt: Text(verbatim: kDefaultStorytellerLANURL)
+                                .foregroundStyle(.secondary),
+                        )
+                        .textContentType(.URL)
+                        .autocorrectionDisabled()
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                        #endif
+                        .help("Optional home Wi‑Fi URL; leave blank to disable LAN failover")
+
+                        if let networkRoute {
+                            LabeledContent("Active route", value: networkRoute.settingsStatusLabel)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
 
                         TextField("Username", text: $username)
                             .textContentType(.username)
@@ -659,15 +687,20 @@ struct BookSourceEditorView: View {
         guard let sourceID, source?.kind == .storyteller else { return }
 
         if let credentials = await BookServiceActor.shared.credentials(for: sourceID) {
+            let route = await BookServiceActor.shared.storytellerNetworkRoute(sourceID: sourceID)
             await MainActor.run {
                 serverURL = credentials.url
+                // Missing key → prefill default; empty string → leave blank (disabled).
+                lanURL = credentials.lanURL ?? kDefaultStorytellerLANURL
                 username = credentials.username
                 password = credentials.password
                 hasSavedCredentials = true
+                networkRoute = route
             }
         } else {
             await MainActor.run {
                 hasSavedCredentials = false
+                networkRoute = nil
             }
         }
     }
@@ -682,6 +715,7 @@ struct BookSourceEditorView: View {
             kind: kind,
             name: name,
             serverURL: serverURL,
+            lanURL: lanURL,
             username: username,
             password: password,
             storagePath: folderPath,
@@ -700,10 +734,17 @@ struct BookSourceEditorView: View {
 
         if success {
             await onSaved()
+            let route: StorytellerNetworkRoute? =
+                if let sourceID {
+                    await BookServiceActor.shared.storytellerNetworkRoute(sourceID: sourceID)
+                } else {
+                    nil
+                }
             await MainActor.run {
                 hasSavedCredentials = true
                 isLoading = false
                 connectionStatus = .notTested
+                networkRoute = route
                 originalFolderPath = folderPath
                 originalFolderBookmarkData = folderBookmarkData
             }
