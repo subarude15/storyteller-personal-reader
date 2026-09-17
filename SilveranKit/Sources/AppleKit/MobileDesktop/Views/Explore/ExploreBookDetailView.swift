@@ -74,7 +74,7 @@ public struct ExploreBookDetailView: View {
                         } label: {
                             if isDownloading {
                                 HStack {
-                                    ProgressView(value: downloadProgress)
+                                    ProgressView(value: downloadProgress ?? 0)
                                     Text("Downloading…")
                                 }
                                 .frame(maxWidth: .infinity)
@@ -91,7 +91,7 @@ public struct ExploreBookDetailView: View {
                         } label: {
                             if isImporting {
                                 HStack {
-                                    ProgressView(value: importProgress)
+                                    ProgressView(value: importProgress ?? 0)
                                     Text(importProgressLabel ?? "Uploading…")
                                 }
                                 .frame(maxWidth: .infinity)

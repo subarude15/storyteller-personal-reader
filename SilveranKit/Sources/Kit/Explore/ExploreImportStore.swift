@@ -25,10 +25,20 @@ public struct ExploreImportStore: Sendable {
 
     public static let shared = ExploreImportStore()
 
-    private let defaults: UserDefaults
+    private let suiteName: String?
 
-    public init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
+    public init(suiteName: String? = nil) {
+        self.suiteName = suiteName
+    }
+
+    private var defaults: UserDefaults {
+        if let suiteName, let suite = UserDefaults(suiteName: suiteName) {
+            return suite
+        }
+        if let group = UserDefaults(suiteName: "group.com.punkrally.reader") {
+            return group
+        }
+        return .standard
     }
 
     public func record(forExploreID exploreID: String) -> ExploreImportRecord? {
@@ -89,10 +99,20 @@ public struct ExploreProgressStore: Sendable {
 
     public static let shared = ExploreProgressStore()
 
-    private let defaults: UserDefaults
+    private let suiteName: String?
 
-    public init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
+    public init(suiteName: String? = nil) {
+        self.suiteName = suiteName
+    }
+
+    private var defaults: UserDefaults {
+        if let suiteName, let suite = UserDefaults(suiteName: suiteName) {
+            return suite
+        }
+        if let group = UserDefaults(suiteName: "group.com.punkrally.reader") {
+            return group
+        }
+        return .standard
     }
 
     public func load(exploreID: String) -> ExploreProgressRecord? {

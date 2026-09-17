@@ -8,10 +8,21 @@ public struct ExploreSourceStore: Sendable {
 
     public static let shared = ExploreSourceStore()
 
-    private let defaults: UserDefaults
+    /// Optional UserDefaults suite for tests; nil uses app group / standard.
+    private let suiteName: String?
 
-    public init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
+    public init(suiteName: String? = nil) {
+        self.suiteName = suiteName
+    }
+
+    private var defaults: UserDefaults {
+        if let suiteName, let suite = UserDefaults(suiteName: suiteName) {
+            return suite
+        }
+        if let group = UserDefaults(suiteName: "group.com.punkrally.reader") {
+            return group
+        }
+        return .standard
     }
 
     public func loadSources() -> [ExploreCatalogSource] {

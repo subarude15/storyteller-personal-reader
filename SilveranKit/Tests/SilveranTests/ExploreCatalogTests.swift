@@ -108,7 +108,7 @@ struct ExploreCatalogBehaviorTests {
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        let sourceStore = ExploreSourceStore(defaults: defaults)
+        let sourceStore = ExploreSourceStore(suiteName: suiteName)
         let store = ExploreCatalogStore(sourceStore: sourceStore)
         #expect(store.sources.contains { $0.id == ExploreCatalogSource.standardEbooks.id })
 
@@ -172,7 +172,7 @@ struct ExploreCatalogBehaviorTests {
         var sources = sourceStore.loadSources()
         sources.append(fixtureSource)
         sourceStore.saveSources(sources)
-        let reloaded = ExploreSourceStore(defaults: defaults).loadSources()
+        let reloaded = ExploreSourceStore(suiteName: suiteName).loadSources()
         #expect(reloaded.contains { $0.id == fixtureSource.id && $0.name == "Fixture A" })
         #expect(reloaded.contains { $0.isBuiltIn && $0.id == ExploreCatalogSource.standardEbooks.id })
     }
@@ -335,7 +335,7 @@ struct ExploreImportIsolationTests {
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        let store = ExploreImportStore(defaults: defaults)
+        let store = ExploreImportStore(suiteName: suiteName)
         let book = ExploreBook(
             itemID: "item-1",
             sourceID: "standard-ebooks",
