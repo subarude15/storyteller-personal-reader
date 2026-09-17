@@ -17,9 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **P0 Mini player inset / close** — tip ≥ StoryAlign Import `05f0006` (Josh upload OK; Align may still finish on NAS). When mini is visible, every tab root + sheet gets bottom inset ≥ mini height so content never covers GlobalMiniPlayerBar; close/stop ≥44pt and above the tab bar. Audit Find / show / Library / Import / Browse / Settings. Soft polish anytime.
+- **SponsorBlock-style skip (in-app YouTube)** — tip ≥ mini-inset `833d573`. Fetch SponsorBlock segments by video id; auto-seek shared AVPlayer for sponsor/selfpromo/intro/outro/interaction (Settings toggles; defaults on for sponsor/selfpromo/intro/outro); soft fail if API down; optional one-shot skip toast; keep playhead persist/sync. Soft polish anytime.
 
-**Do not start SponsorBlock / Invidious/ad-strip / widgets / CarPlay / DSM folder dump unless Josh reorders.**
+**Do not start DSM/SMB dump / CarPlay / widgets / podcast cross-device sync unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
@@ -57,6 +57,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **Podcast / player UX polish (stamps 1–5)** — tip `ba4a83d`; pre-subscribe desc; Unsubscribe left / Done right; back→GlobalMiniPlayerBar; scrub seeks YouTube/RSS; iPad NP video fills frame; Josh confirmed; Sideload [35166993973](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35166993973)
 - [x] **Browse podcasts (Apple charts/genres)** — tip `ae3990d`; Find empty → Top charts + genre chips + cover grid; tap → pre-subscribe show page; Josh confirmed; Sideload [35168353054](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35168353054)
 - [x] **Phone import → StoryAlign read-aloud** — tip `05f0006`; Library Import → EPUB+audio upload → Aligning… / Storyteller queue; Josh confirmed upload; Sideload [35170255405](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35170255405)
+- [x] **P0 Mini player inset / close** — tip `833d573`; bottom inset when GlobalMiniPlayerBar visible; Sideload [35172448040](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35172448040)
 - [x] **Glance / system Now Playing** — tip `257e44e`; Josh confirmed Lock Screen / Control Center title + pause/skip
 - [x] **Episode status cluster + show filters + Josh UI stamps** — tip `b719921`; download glyph · Clean chip (incl. Clean failed) · Xm left/Played; show filters All|Downloaded|In progress|Clean pending; Shelf POD chrome; mini-player cover+title+play/pause(+close) only (scrub/−15/+15 stay on full Now Playing); Home/Library finishability text via `PlaybackFinishabilityCopy`; Sideload green [35023934089](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35023934089)
 - [x] **Podcast play queue** — tip `2f7deb4`; Play Next / Play Last in episode menus; `PodcastPlaybackQueueStore` + editable `PodcastPlaybackQueueView` (drag reorder, remove, clear finished); auto-advance on finish via shared player; persisted upcoming order; Sideload green [35025614228](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35025614228)
@@ -79,12 +80,12 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-### After mini-inset P0
+### After SponsorBlock skip
 1. Soft UX polish (anytime) — see below
-2. Later ideas (SponsorBlock, CarPlay/Watch, podcast cross-device sync, DSM/SMB folder dump) — see Later
+2. Later ideas (CarPlay/Watch, podcast cross-device sync, DSM/SMB folder dump) — see Later
 
 ### Soft UX polish (anytime)
-- ~~Mini player inset / close~~ → **Now (P0)** — screens under GlobalMiniPlayerBar block stop/close
+- ~~Mini player inset / close~~ → **Shipped** (`833d573`)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
 - ~~Stats push / description decode~~ → **Shipped** (`cf5c663`) — Josh confirmed
 - Cleaning… chip must not look like episode remaining (job ETA or plain Cleaning…; keep Xm left on progress separately) — status cluster already separates job chip from Xm left
@@ -105,7 +106,7 @@ Strict order (Smokey / Nas-ty):
 7. ~~LAN failover~~ → **Shipped** (`4f9d27d`; Josh confirmed Using LAN / Using public)
 8. ~~YouTube playhead sync~~ → **Shipped** (`0a4da30`; Josh confirmed)
 9. ~~Browse podcasts (Apple charts/genres)~~ → **Shipped** (`ae3990d`; Josh confirmed)
-10. **SponsorBlock-style skip** — additive seek on in-app YouTube (not podcast Clean)
+10. ~~SponsorBlock-style skip~~ → **Now** (in-app YouTube; tip ≥ `833d573`)
 11. ~~Phone import → StoryAlign read-aloud~~ → **Shipped** (`05f0006`; Josh upload OK)
 12. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
 
