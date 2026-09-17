@@ -79,6 +79,7 @@ let package = Package(
             dependencies: [
                 .product(name: "ZIPFoundation", package: "ZIPFoundation"),
                 .product(name: "SwiftSoup", package: "SwiftSoup"),
+                "PlaytorioFetcher",
             ],
             path: "SilveranKit/Sources/Kit",
             exclude: [
@@ -101,7 +102,7 @@ let package = Package(
         ),
         .target(
             name: "SilveranAppleKit",
-            dependencies: ["SilveranKit", "SilveranAppleWidgets"],
+            dependencies: ["SilveranKit", "SilveranAppleWidgets", "PlaytorioFetcher"],
             path: "SilveranKit/Sources/AppleKit",
             exclude: [
                 "WidgetSupport"
@@ -116,6 +117,7 @@ let package = Package(
             name: "SilveranContentServer",
             dependencies: [
                 "SilveranKit",
+                "PlaytorioFetcher",
                 .product(name: "Hummingbird", package: "hummingbird"),
             ],
             path: "SilveranKit/Sources/ContentServer",

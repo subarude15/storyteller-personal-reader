@@ -265,6 +265,12 @@ extension SettingsView {
                         Label("Book Sources", systemImage: "externaldrive")
                     }
                     .tag(SettingsTab.bookSources)
+
+                DataSourcesSettingsView()
+                    .tabItem {
+                        Label("Data Sources", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                    .tag(SettingsTab.dataSources)
             }
 
             Divider()
@@ -381,6 +387,14 @@ extension SettingsView {
                         StorytellerServerSettingsView()
                     } label: {
                         Label("Book Sources", systemImage: "externaldrive")
+                    }
+                }
+
+                Section("Data Sources") {
+                    NavigationLink {
+                        DataSourcesSettingsView()
+                    } label: {
+                        Label("Data Sources", systemImage: "antenna.radiowaves.left.and.right")
                     }
                 }
 
@@ -770,6 +784,7 @@ private enum SettingsTab: Hashable {
     case readerSettings
     case readingBar
     case bookSources
+    case dataSources
 }
 
 private struct MacSettingsContainer<Content: View>: View {

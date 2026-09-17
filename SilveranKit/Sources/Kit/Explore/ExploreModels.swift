@@ -99,6 +99,7 @@ public enum ExploreCatalogSourceKind: String, Codable, Sendable, Hashable {
     case standardEbooks
     case userOPDS
     case directEPUB
+    case playtorio
 }
 
 /// Persisted catalog source configuration (built-in or user-added).
@@ -128,6 +129,14 @@ public struct ExploreCatalogSource: Identifiable, Hashable, Codable, Sendable {
         name: "Standard Ebooks",
         feedURL: URL(string: "https://standardebooks.org/opds")!,
         kind: .standardEbooks,
+        isBuiltIn: true
+    )
+
+    public static let playtorio = ExploreCatalogSource(
+        id: ExploreBookIdentity.playtorioSourceID,
+        name: "Playtorio",
+        feedURL: URL(string: "playtorio://library")!,
+        kind: .playtorio,
         isBuiltIn: true
     )
 }

@@ -26,7 +26,7 @@ public struct ExploreSourceStore: Sendable {
     }
 
     public func loadSources() -> [ExploreCatalogSource] {
-        var sources = [ExploreCatalogSource.standardEbooks]
+        var sources = [ExploreCatalogSource.standardEbooks, ExploreCatalogSource.playtorio]
         if let data = defaults.data(forKey: Self.defaultsKey),
             let decoded = try? JSONDecoder().decode([ExploreCatalogSource].self, from: data)
         {
@@ -268,6 +268,8 @@ public final class ExploreCatalogStore {
             return StandardEbooksCatalogProvider(source: source, session: session)
         case .userOPDS, .directEPUB:
             return OPDSCatalogProvider(source: source, session: session)
+        case .playtorio:
+            return PlaytorioCatalogProvider(source: source)
         }
     }
 

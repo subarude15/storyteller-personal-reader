@@ -150,3 +150,97 @@ import Testing
         #expect(again == first)
     }
 }
+
+// MARK: - Orchestrator / library / API
+
+@Test func testDryRunListsEnabledAdaptersByPriority() throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("playtorio-dry-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let settings = AdapterSettings(directory: dir)
+    var configs = AdapterSettings.defaultConfigs
+    configs[1].enabled = false // disable libgen
+    try settings.save(configs)
+
+    let service = FetcherService(
+        settings: settings,
+        cache: BookCache(databasePath: dir.appendingPathComponent("cache.sqlite")),
+        library: PlaytorioLibraryStore(databasePath: dir.appendingPathComponent("library.sqlite"))
+    )
+    let planned = try service.plannedAdapters()
+    #expect(planned.map(\.id) == ["audible-metadata", "openlibrary-normalizer"])
+    let description = try service.dryRunDescription()
+    #expect(description.contains("audible-metadata"))
+    #expect(description.contains("openlibrary-normalizer"))
+    #expect(!description.contains("libgen-catalog"))
+}
+
+@Test func testLibraryPersistSurfacesIngestedBook() async throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("playtorio-lib-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let html = try MockHTTPClient.fixtureData("audible-sample.html")
+    let robots = Data("User-agent: *\nDisallow:\n".utf8)
+    let ol = try MockHTTPClient.fixtureData("openlibrary-sample.json")
+    let client = MockHTTPClient(responses: [
+        (match: "robots.txt", data: robots, status: 200),
+        (match: "audible.com", data: html, status: 200),
+        (match: "openlibrary.org", data: ol, status: 200),
+    ])
+
+    let settings = AdapterSettings(directory: dir)
+    var configs = AdapterSettings.defaultConfigs
+    configs[1].enabled = false // libgen off
+    try settings.save(configs)
+
+    let libraryPath = dir.appendingPathComponent("library.sqlite")
+    let service = FetcherService(
+        settings: settings,
+        cache: BookCache(databasePath: dir.appendingPathComponent("cache.sqlite")),
+        library: PlaytorioLibraryStore(databasePath: libraryPath),
+        http: client
+    )
+
+    let book = try await service.fetch(query: "B00EMXBDMA", persist: true)
+    #expect(book?.asin == "B00EMXBDMA")
+    let stored = PlaytorioLibraryStore(databasePath: libraryPath).allBooks()
+    #expect(stored.count == 1)
+    #expect(stored.first?.asin == "B00EMXBDMA")
+}
+
+@Test func testAPISettingsAdaptersRoundTrip() async throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("playtorio-api-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let service = FetcherService(
+        settings: AdapterSettings(directory: dir),
+        cache: BookCache(databasePath: dir.appendingPathComponent("cache.sqlite")),
+        library: PlaytorioLibraryStore(databasePath: dir.appendingPathComponent("library.sqlite"))
+    )
+    let api = PlaytorioAPIServer(service: service)
+
+    var configs = AdapterSettings.defaultConfigs
+    configs[0].priority = 5
+    configs[1].enabled = false
+    let body = try JSONEncoder().encode(configs)
+    let (putStatus, putData, _) = try await api.handle(
+        method: "PUT",
+        path: "/api/settings/adapters",
+        query: [:],
+        body: body
+    )
+    #expect(putStatus == 200)
+
+    let (getStatus, getData, _) = try await api.handle(
+        method: "GET",
+        path: "/api/settings/adapters",
+        query: [:],
+        body: nil
+    )
+    #expect(getStatus == 200)
+    let loaded = try JSONDecoder().decode([AdapterConfig].self, from: getData)
+    #expect(loaded.first { $0.id == "audible-metadata" }?.priority == 5)
+    #expect(loaded.first { $0.id == "libgen-catalog" }?.enabled == false)
+    _ = putData
+}
