@@ -778,6 +778,7 @@ struct BookSourceEditorView: View {
 
         let result = await StorytellerActor.validateCredentials(
             baseURL: serverURL,
+            lanURL: lanURL,
             username: username,
             password: password,
         )

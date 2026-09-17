@@ -40,6 +40,17 @@ public enum StorytellerLANRouting {
         effectiveLANURL != nil && probeSucceeded
     }
 
+    public static func credentialValidationBaseURLs(
+        publicURL: URL,
+        lanURL: URL?,
+        lanReachable: Bool,
+    ) -> [URL] {
+        guard lanReachable, let lanURL else {
+            return [publicURL]
+        }
+        return [lanURL, publicURL]
+    }
+
     /// Cheap reachability: any HTTP response (including 401/404/405) means the host is up.
     /// Connection errors / timeouts mean LAN is unavailable.
     public static func probeReachability(

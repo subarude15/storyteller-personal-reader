@@ -43,6 +43,35 @@ import Testing
     #expect(api.absoluteString == "http://192.168.1.2:1800/api/v2")
 }
 
+@Test func credentialValidationTriesLANFirstWhenReachable() {
+    let publicURL = URL(string: "https://storyteller.banditoburrito.xyz")!
+    let lanURL = URL(string: "http://192.168.1.2:1800")!
+
+    let bases = StorytellerLANRouting.credentialValidationBaseURLs(
+        publicURL: publicURL,
+        lanURL: lanURL,
+        lanReachable: true,
+    )
+
+    #expect(bases.map(\.absoluteString) == [
+        "http://192.168.1.2:1800",
+        "https://storyteller.banditoburrito.xyz",
+    ])
+}
+
+@Test func credentialValidationFallsBackToPublicWhenLANUnavailable() {
+    let publicURL = URL(string: "https://storyteller.banditoburrito.xyz")!
+    let lanURL = URL(string: "http://192.168.1.2:1800")!
+
+    let bases = StorytellerLANRouting.credentialValidationBaseURLs(
+        publicURL: publicURL,
+        lanURL: lanURL,
+        lanReachable: false,
+    )
+
+    #expect(bases == [publicURL])
+}
+
 @Test func networkRouteStatusLabels() {
     #expect(StorytellerNetworkRoute.lan.settingsStatusLabel == "Using LAN")
     #expect(StorytellerNetworkRoute.public.settingsStatusLabel == "Using public")

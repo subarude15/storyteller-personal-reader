@@ -454,44 +454,70 @@ public actor StorytellerActor {
     /// Uses an ephemeral session with a short timeout so it never hangs the UI.
     public static func validateCredentials(
         baseURL baseURLString: String,
+        lanURL lanURLString: String? = nil,
         username: String,
         password: String,
     ) async -> CredentialTestResult {
         let trimmedURL = baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let baseURL = URL(string: trimmedURL), baseURL.scheme != nil else {
+        guard let publicBaseURL = URL(string: trimmedURL), publicBaseURL.scheme != nil else {
             return .failure("Invalid server URL")
         }
-
-        let apiBaseURL = resolveAPIBaseURL(from: baseURL)
-        let tokenURL = apiBaseURL.appendingPathComponent("token")
 
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 20
         configuration.timeoutIntervalForResource = 20
+        configuration.waitsForConnectivity = false
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
 
-        do {
-            _ = try await httpPost(
-                tokenURL.absoluteString,
-                headers: [
-                    "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
-                    "Accept": "application/json",
-                ],
-                formParameters: [
-                    "usernameOrEmail": username,
-                    "password": password,
-                ],
-                session: session,
-            )
-            return .success
-        } catch HTTPRequestError.unauthorized {
-            return .invalidCredentials
-        } catch let error as URLError {
-            return .failure(error.localizedDescription)
-        } catch {
-            return .failure("Could not connect to this server.")
+        // Match the runtime Storyteller actor route selection: when a LAN URL is
+        // configured and reachable, validate credentials against LAN first. The
+        // public URL may sit behind Cloudflare/WAF while the NAS API is reachable
+        // only on home Wi‑Fi, so testing public-only makes the app look unable to
+        // see Storyteller even when the actual route would work.
+        var lanCandidate: URL?
+        var lanReachable = false
+        if let effectiveLAN = StorytellerLANRouting.effectiveLANURL(stored: lanURLString),
+            let lanURL = URL(string: effectiveLAN),
+            lanURL.scheme != nil
+        {
+            lanCandidate = lanURL
+            lanReachable = await StorytellerLANRouting.probeReachability(serverURL: lanURL)
         }
+        let basesToTry = StorytellerLANRouting.credentialValidationBaseURLs(
+            publicURL: publicBaseURL,
+            lanURL: lanCandidate,
+            lanReachable: lanReachable,
+        )
+
+        var lastFailure: CredentialTestResult = .failure("Could not connect to this server.")
+        for baseURL in basesToTry {
+            let tokenURL = resolveAPIBaseURL(from: baseURL).appendingPathComponent("token")
+            do {
+                _ = try await httpPost(
+                    tokenURL.absoluteString,
+                    headers: [
+                        "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+                        "Accept": "application/json",
+                    ],
+                    formParameters: [
+                        "usernameOrEmail": username,
+                        "password": password,
+                    ],
+                    session: session,
+                )
+                return .success
+            } catch HTTPRequestError.unauthorized {
+                // A reachable Storyteller API rejected the credentials; do not mask
+                // that with public fallback because the password is route-independent.
+                return .invalidCredentials
+            } catch let error as URLError {
+                lastFailure = .failure(error.localizedDescription)
+            } catch {
+                lastFailure = .failure("Could not connect to this server.")
+            }
+        }
+        return lastFailure
     }
 
     public func configureCredentials(
