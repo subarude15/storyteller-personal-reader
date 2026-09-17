@@ -7,6 +7,7 @@
 //  SPDX-License-Identifier: AGPL-3.0-only
 
 import Foundation
+import SilveranAppleKit
 import SilveranKit
 
 /// A single Home Continue / Up next row (book or podcast).
@@ -117,9 +118,11 @@ public enum HomeMixedQueue {
 
         var seenPodcasts = Set<String>()
         for entry in podcastRecents {
-            guard entry.progress < 0.995 else { continue }
-            seenPodcasts.insert(entry.episodeID)
-            items.append(.podcast(entry))
+            var recent = entry
+            recent.progress = Self.effectivePodcastProgress(for: recent)
+            guard recent.progress < 0.995 else { continue }
+            seenPodcasts.insert(recent.episodeID)
+            items.append(.podcast(recent))
         }
 
         // Downloaded plays not yet in the recent store (e.g. older ledger).
@@ -167,5 +170,22 @@ public enum HomeMixedQueue {
                 if book.hasAvailableAudiobook, !book.hasAvailableEbook { return .audiobook }
                 return .ebook
         }
+    }
+
+    /// Prefer YouTube video-id playhead, then episode playhead, then stored recent.
+    private static func effectivePodcastProgress(for entry: PodcastRecentEntry) -> Double {
+        let watch =
+            entry.youtubeURL
+            ?? PodcastMatchedYouTubeStore.shared.watchURL(for: entry.episodeID)
+        if let watch,
+            let videoID = PodcastYouTubeURL.videoID(from: watch),
+            let yt = YouTubePlayheadStore.shared.entry(for: videoID)
+        {
+            return yt.progress
+        }
+        if let playhead = PodcastPlayheadStore.shared.entry(for: entry.episodeID) {
+            return playhead.progress
+        }
+        return entry.progress
     }
 }

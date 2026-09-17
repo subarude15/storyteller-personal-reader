@@ -40,11 +40,46 @@ extension Notification.Name {
     )
     /// Stats sync landed Offline after Syncing… — host shows a short toast.
     public static let punkRallyStatsSyncFailed = Notification.Name("punkRallyStatsSyncFailed")
+    /// Settings: request an immediate YouTube playhead sync retry.
+    public static let punkRallyRetryYouTubePlayheadSync = Notification.Name(
+        "punkRallyRetryYouTubePlayheadSync"
+    )
+    /// YouTubePlayheadSyncCoordinator published UI (Settings row).
+    /// userInfo: isSyncing (Bool), lastSuccessfulSyncAt (Date?), footerLabel (String)
+    public static let punkRallyYouTubePlayheadSyncUIDidChange = Notification.Name(
+        "punkRallyYouTubePlayheadSyncUIDidChange"
+    )
+    /// YouTube playhead sync landed Offline after Settings retry — host toast.
+    public static let punkRallyYouTubePlayheadSyncFailed = Notification.Name(
+        "punkRallyYouTubePlayheadSyncFailed"
+    )
     /// Clean-path ad strip failed / timed out — host shows a short toast.
     public static let punkRallyAdStripFailed = Notification.Name("punkRallyAdStripFailed")
     /// YouTube in-app resolve failed / timed out — host toast; caller may hand off to Safari.
     public static let punkRallyYouTubeResolveFailed = Notification.Name(
         "punkRallyYouTubeResolveFailed"
+    )
+    /// Match on YouTube search failed / timed out — host toast (no hang).
+    public static let punkRallyYouTubeSearchFailed = Notification.Name(
+        "punkRallyYouTubeSearchFailed"
+    )
+    /// Match on YouTube returned zero hits — host toast “No matches”.
+    public static let punkRallyYouTubeNoMatches = Notification.Name(
+        "punkRallyYouTubeNoMatches"
+    )
+    /// Podcast / YouTube playhead just persisted — host updates Continue progress.
+    /// userInfo: episodeID (String), progress (Double 0...1)
+    public static let punkRallyPodcastProgressDidPersist = Notification.Name(
+        "punkRallyPodcastProgressDidPersist"
+    )
+    /// Pause / periodic / interrupt — host should call persistPodcastProgress.
+    public static let punkRallyPodcastShouldPersistProgress = Notification.Name(
+        "punkRallyPodcastShouldPersistProgress"
+    )
+    /// Shared player opened a podcast/YouTube session — host records Home Continue.
+    /// userInfo mirrors punkRallyPlayPodcastEpisode (no second play).
+    public static let punkRallyPodcastSessionDidStart = Notification.Name(
+        "punkRallyPodcastSessionDidStart"
     )
     /// Continue widget / `punkrally://continue` — open Home Continue / Now Playing.
     public static let punkRallyOpenContinue = Notification.Name("punkRallyOpenContinue")
@@ -574,6 +609,7 @@ public struct PunkRallyLibraryView: View {
     @State private var searchText = ""
     @State private var showSettings = false
     @State private var showOfflineSheet = false
+    @State private var showImport = false
 
     public init() {}
 
@@ -585,6 +621,16 @@ public struct PunkRallyLibraryView: View {
                     showSettings: $showSettings,
                     showOfflineSheet: $showOfflineSheet
                 )
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            showImport = true
+                        } label: {
+                            Label("Import", systemImage: "square.and.arrow.down")
+                        }
+                        .accessibilityHint("Upload EPUB and audiobook to Storyteller, then generate read-aloud")
+                    }
+                }
                 .searchable(
                     text: $searchText,
                     placement: .navigationBarDrawer(displayMode: .always),
@@ -594,6 +640,18 @@ public struct PunkRallyLibraryView: View {
                     showSettings: $showSettings,
                     showOfflineSheet: $showOfflineSheet
                 )
+                .sheet(isPresented: $showImport) {
+                    NavigationStack {
+                        UploadNewBookView()
+                            .navigationTitle("Import")
+                            .navigationBarTitleDisplayMode(.inline)
+                            .toolbar {
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    Button("Done") { showImport = false }
+                                }
+                            }
+                    }
+                }
         }
         .punkRallySheets(
             showSettings: $showSettings,

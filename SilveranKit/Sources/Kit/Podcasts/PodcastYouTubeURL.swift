@@ -2,10 +2,11 @@
 //  PodcastYouTubeURL.swift
 //  SilveranKit
 //
-//  Detect YouTube watch URLs in RSS link / show notes / iTunes text.
-//  Extract/normalize video id for in-app resolve (Settings → YouTube resolve URL)
-//  or external Watch on YouTube handoff. Never treat the watch page itself as an
-//  RSS video enclosure — resolve to a progressive/HLS URL first.
+//  Detect YouTube *video* URLs in RSS link / show notes / iTunes text.
+//  Extract only when a video id parses (watch / youtu.be / embed / shorts / live);
+//  skip channel / @handle / /user/ /c/ /playlist. Normalize for in-app resolve
+//  (Settings → YouTube resolve URL) or Watch on YouTube handoff. Never treat the
+//  watch page itself as an RSS video enclosure — resolve to progressive/HLS first.
 //
 //  SPDX-License-Identifier: AGPL-3.0-only
 
@@ -23,17 +24,19 @@ public enum PodcastYouTubeURL: Sendable {
         "www.youtu.be",
     ]
 
-    /// Returns the first plausible YouTube URL found in any candidate string.
+    /// Returns the first YouTube URL that yields a real video id.
+    /// Channel / @handle / /user/ /c/ /playlist (without `v=`) are skipped so
+    /// Play in ink+amp never hands off a channel page as if it were an episode.
     public static func extract(from candidates: [String]) -> URL? {
         for raw in candidates {
             let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
-            if let direct = URL(string: trimmed), isYouTubeURL(direct) {
-                return normalizedWatchURL(direct) ?? direct
+            if let direct = URL(string: trimmed), let watch = normalizedWatchURL(direct) {
+                return watch
             }
             for match in urlMatches(in: trimmed) {
-                if let url = URL(string: match), isYouTubeURL(url) {
-                    return normalizedWatchURL(url) ?? url
+                if let url = URL(string: match), let watch = normalizedWatchURL(url) {
+                    return watch
                 }
             }
         }
