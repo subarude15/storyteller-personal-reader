@@ -92,7 +92,12 @@ To provide a flawless 1-click install on free Apple IDs, the **Silveran Reader S
 
 ### Continue widget + AltStore notes
 
-**Un-parked 2026-09:** the widget extension is embedded in the Sideload IPA again. The earlier blank tiles were not "free AltStore can't do App Groups" — AltStore *does* provision the declared group, but it appends the signing team id and publishes the real ids in `ALTAppGroups`, which the app and widget never read. Full write-up + on-device verification steps: `docs/CONTINUE_WIDGET.md`.
+**Un-parked 2026-09:** the widget extension is embedded in the Sideload IPA again. The earlier blank tiles came from two breaks in the chain, not from "free AltStore can't do App Groups":
+
+1. `package-ipa` built with `CODE_SIGNING_ALLOWED=NO`, so the Mach-O carried **no entitlements blob** — and AltStore/AltSign reads declared capabilities straight out of the code signature (`ldid::Entitlements()`). With nothing to read, AltStore never created or assigned the App Group. The script now ad-hoc signs the app **and** each `PlugIns/*.appex` with its entitlements file, then asserts the signature really contains `com.apple.security.application-groups = group.com.punkrally.reader` (the build fails if not). AltStore re-signs with the user's certificate on install, so the ad-hoc signature only exists to carry the entitlements.
+2. The app + widget resolved the App Group from the hard-coded `SILVERAN_WIDGET_APP_GROUP`, while AltStore provisions `<declared-group>.<TEAMID>` and publishes the granted ids in the `ALTAppGroups` Info key of the app **and every appex** (`ResignAppOperation.prepare`). Runtime resolution is now `ALTAppGroups` → `SILVERAN_WIDGET_APP_GROUP` → literal.
+
+Full write-up + on-device verification steps: `docs/CONTINUE_WIDGET.md`.
 
 **What the tile does now:**
 - Cover art, title, subtitle, progress bar and "42% · 12m left" caption.
