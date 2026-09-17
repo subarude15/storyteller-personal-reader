@@ -111,6 +111,8 @@ Strict order (Smokey / Nas-ty):
 11. ~~Phone import → StoryAlign read-aloud~~ → **Now** (Library Import → upload → Aligning… → SYNC)
 12. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
 
+**Later (not StoryAlign v1):** DSM share / SMB / WebDAV folder drop (put EPUB/audio into named NAS folders) and general photo dump — Import v1 uses Storyteller upload API into its library only.
+
 **P1000 (Later, not ahead of StoryAlign / YouTube playhead sync):** **Podcast cross-device sync** — subscriptions + playheads only. **Downloads stay per-device**.
 ## Constraints
 
