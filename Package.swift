@@ -9,7 +9,8 @@ let playtorioProducts: [Product] = [
     .executable(name: "playtorio-fetcher", targets: ["playtorio-fetcher"]),
 ]
 
-let playtorioTargets: [Target] = [
+#if os(Linux)
+let sqliteTargets: [Target] = [
     .systemLibrary(
         name: "SQLite3",
         path: "SilveranKit/CSQLite",
@@ -19,9 +20,19 @@ let playtorioTargets: [Target] = [
             .brew(["sqlite"]),
         ]
     ),
+]
+let playtorioDependencies: [Target.Dependency] = ["SQLite3"]
+#else
+// Apple SDKs already provide SQLite3. Registering our Linux module map on
+// Apple platforms would declare SQLite3 twice and break Clang's module scan.
+let sqliteTargets: [Target] = []
+let playtorioDependencies: [Target.Dependency] = []
+#endif
+
+let playtorioTargets: [Target] = sqliteTargets + [
     .target(
         name: "PlaytorioFetcher",
-        dependencies: ["SQLite3"],
+        dependencies: playtorioDependencies,
         path: "SilveranKit/Utilities"
     ),
     .executableTarget(
