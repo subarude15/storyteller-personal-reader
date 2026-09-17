@@ -17,7 +17,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Browse podcasts (Apple charts/genres)** — tip ≥ UX polish `ba4a83d` (Josh verified stamps 1–5). Find empty state → Top charts + genre chips + cover grid (free Apple RSS charts, same stack as iTunes Search; no Podcast Index keys); tap → pre-subscribe show page; search field stays above. Soft polish anytime.
+- **Browse podcasts (Apple charts/genres)** — tip `ae3990d` (≥ UX polish `ba4a83d`; Josh verified stamps 1–5). Find empty → Top charts + genre chips + cover grid (free Apple iTunes RSS + lookup; no Podcast Index keys); tap → pre-subscribe show page; search hides Browse. Soft polish anytime. Sideload green [35168343398](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35168343398). **Await Josh smoke.**
 
 **Do not start StoryAlign / SponsorBlock / Invidious/ad-strip / widgets / CarPlay unless Josh reorders.**
 ## Shipped
