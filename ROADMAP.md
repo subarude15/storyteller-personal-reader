@@ -17,11 +17,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Smoke order:** (1) **More like this** tip `b8ca122` — book detail rail series → author → tags. (2) **Explore ebook catalogs** tip `c200401` — Standard Ebooks / OPDS / HTTPS EPUB → Add to Library / Storyteller import (lawful “books you don’t own yet”). Sideload [35232090628](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35232090628).
+- **Smoke order:** (1) **More like this** `b8ca122` — series → author → tags. (2) **Explore catalogs** `c200401` — Standard Ebooks / OPDS → Add to Library. (3) **Continue widget restore** `cc910d9` (PR #26; `ALTAppGroups`) — wipe old blank tiles, add Continue; cover + title + tap → Continue. Sideload [35235074331](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35235074331).
 
-**Next after both smokes:** Finish tonight → Story Timeline → soft Couldn't save server. Optional: restore Arena Continue widget on tip (`ALTAppGroups`) if Josh asks.
+**Next after smokes:** Finish tonight → Story Timeline → soft Couldn't save server.
 
-**Do not start second player, CarPlay, DSM/SMB, or feed Explore titles into More like this until imported unless Josh reorders.**
+**Do not start second player, CarPlay, DSM/SMB unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
@@ -81,10 +81,8 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **Mini-player slim** — scrub + −15/+15 removed from mini (status-cluster cut)
 
 ### Widgets
-- [~] **Continue home widget** — Arena PR #23 is being cleanly rebased onto the Phase 1 tip.
-  Preserve the proven `ALTAppGroups` runtime resolution, embedded Sideload appex, cover/progress,
-  play/pause and ±15s `AudioPlaybackIntent` controls. Mark Shipped after rebased Simulator +
-  Sideload CI are green. Write-up: `docs/CONTINUE_WIDGET.md`.
+- [~] **Continue home widget** — restore on tip `cc910d9` (PR #26 Arena `ALTAppGroups` resolve). Smoke pending. Prior PR #23 stayed closed; this is the clean reopen.
+
 ### Stats
 - [x] **SessionTracker local** — ebook / audiobook / readaloud / podcast → Home + Stats tab (`c627bbe`, Sideload [35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694))
 - [x] **Cross-device Stats sync** — tip `c5791ec` (`a5226d6` + BookServiceActor fix); private Storyteller collection `.inkamp.stats.v1` blob (same auth as place sync); session-id LWW merge (no double-count / no drop); footer Synced / Syncing… / Offline · local only; Settings last sync time; Sideload green [35028364424](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35028364424)
@@ -99,7 +97,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 1. **Finish tonight** — Home quick win
 2. **Story Timeline** — distinctive ink+amp cut
 3. Soft: **Couldn't save server** copy anytime
-4. Optional: mainline Continue widget restore (Arena `ALTAppGroups` fix; PR #23 was closed not merged)
+4. ~~Continue widget restore~~ → **smoke** tip `cc910d9` (PR #26)
 
 ### Soft UX polish (anytime)
 - Soft polish pack → **Shipped** (`b9b07ea` / PR #22)
