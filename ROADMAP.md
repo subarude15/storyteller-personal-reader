@@ -17,9 +17,10 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Streaming Books — Phase 1: Explore ebooks** — one focused PR after tip `b8ca122`.
-  Add a `Library | Explore` surface inside the existing Library tab (no sixth tab), backed only
-  by an authorized/public-domain OPDS catalog (Standard Ebooks for v1). Browse/search/detail;
+- **Streaming Books — Phase 1: Explore ebooks + lawful source foundation** — one focused PR after
+  tip `3316d1f`. Add a `Library | Explore` surface inside the existing Library tab (no sixth tab)
+  and a source-agnostic catalog/import layer. Ship Standard Ebooks as the built-in public-domain
+  catalog plus user-added OPDS feeds and direct HTTPS EPUB links. Browse/search/detail;
   **Read now** downloads a validated EPUB to temporary local cache and opens the existing
   Silveran reader; **Add to Library** sends that EPUB through the existing Storyteller import path.
 
@@ -30,7 +31,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 3. **Story Timeline** — distinctive but bigger
 4. Soft: distinct **Couldn't save server** copy vs connection-failed
 
-**Parked / out:** second concurrent player (shared NP stays); CarPlay; DSM/SMB; mainline Continue widget (Josh happy on Arena IPA; PR #23 closed not merged — reopen later with `ALTAppGroups` resolve if mainline should match); DRM catalogs; torrent/debrid sources; Bookracy/AudiobookBay and other scraper-backed acquisition.
+**Parked / out:** second concurrent player (shared NP stays); CarPlay; DSM/SMB; mainline Continue widget (Josh happy on Arena IPA; PR #23 closed not merged — reopen later with `ALTAppGroups` resolve if mainline should match); DRM catalogs; torrent/debrid transport adapters until the lawful-source foundation ships; Bookracy/AudiobookBay and other scraper-backed acquisition.
 
 **Do not start DSM/SMB, CarPlay, a second player, unlicensed/scraped catalogs, external recommendation APIs, or the Arena widget merge unless Josh reorders. Authorized public-domain catalog work is the narrow exception above; it must remain separate from local-library recommendations.**
 ## Shipped
@@ -110,10 +111,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Later / ideas (not blocking)
 
-**Streaming Books Phase 3** — configurable, user-controlled authorized OPDS providers after the
-Standard Ebooks and LibriVox foundations are proven. **Discover books you don't have** remains a
-later Goodreads-style, metadata-only discovery idea, intentionally separate from acquisition and
-from the local-library **More like this** rail. Also later: Wrapped, series strip, Shortcuts.
+**Streaming Books Phase 3** — optional bring-your-own-link transport adapters for authorized
+torrent/debrid downloads after the OPDS/direct-HTTPS foundation is proven. No bundled torrent
+index, search scraper, or piracy catalog. **Discover books you don't have** remains a later
+Goodreads-style, metadata-only discovery idea, intentionally separate from acquisition and from
+the local-library **More like this** rail. Also later: Wrapped, series strip, Shortcuts.
 **Second player** remains parked (shared NP stays).
 
 Strict order (Smokey / Nas-ty):
@@ -138,8 +140,10 @@ Strict order (Smokey / Nas-ty):
 
 - Keep `SilveranKit`; do not merge Enve tree (modules + AGPL only)
 - Storyteller = ebook / audiobook / readaloud; podcasts = RSS rail
-- Streaming catalogs must be authorized/public-domain or explicitly user-controlled. No torrent,
-  debrid, AudiobookBay, Bookracy, or HTML-scraper acquisition paths; never disable TLS validation.
+- Streaming catalogs must be authorized/public-domain or explicitly user-controlled. Never bundle
+  AudiobookBay, Bookracy, torrent indexes, debrid search catalogs, or HTML-scraper acquisition;
+  never disable TLS validation. Any later torrent/debrid adapter is transport-only for an explicit
+  user-supplied authorized link and must feed the same validation/import pipeline.
 - EPUB **Read now** means a complete, validated temporary download before opening — do not present
   it as progressive page streaming. Imported titles become normal Storyteller books.
 - Explore-only items must not enter Library/Shelf or `LocalBookRecommendations`; they appear there
