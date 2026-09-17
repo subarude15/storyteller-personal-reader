@@ -457,13 +457,14 @@ enum InkAmpWidgetPalette {
     )
 }
 
-extension View {
-    /// `widgetAccentedRenderingMode` is iOS-only; the macOS widget target compiles
-    /// this file too, so the tinted-mode opt-out has to be conditional.
+extension Image {
+    /// `widgetAccentedRenderingMode` is an `Image` method and iOS-only; the
+    /// macOS widget target compiles this file too, so the tinted-mode opt-out
+    /// has to be conditional.
     @ViewBuilder
     func inkAmpFullColorRendering() -> some View {
         #if os(iOS)
-        self.widgetAccentedRenderingMode(.fullColor)
+        widgetAccentedRenderingMode(.fullColor)
         #else
         self
         #endif
