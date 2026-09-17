@@ -609,6 +609,7 @@ public struct PunkRallyLibraryView: View {
     @State private var searchText = ""
     @State private var showSettings = false
     @State private var showOfflineSheet = false
+    @State private var showImport = false
 
     public init() {}
 
@@ -620,6 +621,16 @@ public struct PunkRallyLibraryView: View {
                     showSettings: $showSettings,
                     showOfflineSheet: $showOfflineSheet
                 )
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            showImport = true
+                        } label: {
+                            Label("Import", systemImage: "square.and.arrow.down")
+                        }
+                        .accessibilityHint("Upload EPUB and audiobook to Storyteller, then generate read-aloud")
+                    }
+                }
                 .searchable(
                     text: $searchText,
                     placement: .navigationBarDrawer(displayMode: .always),
@@ -629,6 +640,18 @@ public struct PunkRallyLibraryView: View {
                     showSettings: $showSettings,
                     showOfflineSheet: $showOfflineSheet
                 )
+                .sheet(isPresented: $showImport) {
+                    NavigationStack {
+                        UploadNewBookView()
+                            .navigationTitle("Import")
+                            .navigationBarTitleDisplayMode(.inline)
+                            .toolbar {
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    Button("Done") { showImport = false }
+                                }
+                            }
+                    }
+                }
         }
         .punkRallySheets(
             showSettings: $showSettings,
