@@ -237,6 +237,12 @@ public actor AudioSessionActor {
     private var youtubePlayheadTask: Task<Void, Never>?
     /// Keeps MPNowPlayingInfoCenter elapsed/rate fresh while a podcast/YouTube session is live.
     private var podcastNowPlayingTask: Task<Void, Never>?
+    /// SponsorBlock segments for the live in-app YouTube id (empty = no skip / soft-fail).
+    private var sponsorBlockSegments: [SponsorBlockSegment] = []
+    private var sponsorBlockSkipTask: Task<Void, Never>?
+    /// One toast per YouTube open — don't spam across multiple segments.
+    private var sponsorBlockDidToastThisSession = false
+    private var sponsorBlockSeekInFlight = false
 
     private init() {}
 
@@ -341,6 +347,7 @@ public actor AudioSessionActor {
         }
         startPodcastNowPlayingTicker()
         startYouTubePlayheadTickerIfNeeded()
+        startSponsorBlockSkipIfNeeded()
     }
 
     /// Video id for the live in-app YouTube session (nil for RSS audio/video).
@@ -392,6 +399,11 @@ public actor AudioSessionActor {
         youtubePlayheadTask = nil
         podcastNowPlayingTask?.cancel()
         podcastNowPlayingTask = nil
+        sponsorBlockSkipTask?.cancel()
+        sponsorBlockSkipTask = nil
+        sponsorBlockSegments = []
+        sponsorBlockDidToastThisSession = false
+        sponsorBlockSeekInFlight = false
         await podcastPlayer?.stop()
         podcastPlayer = nil
         podcastEpisodeID = nil
@@ -476,6 +488,78 @@ public actor AudioSessionActor {
                     object: nil
                 )
             }
+        }
+    }
+
+    /// Fetch SponsorBlock segments + poll playhead; auto-seek shared player (YouTube only).
+    private func startSponsorBlockSkipIfNeeded() {
+        sponsorBlockSkipTask?.cancel()
+        sponsorBlockSegments = []
+        sponsorBlockDidToastThisSession = false
+        sponsorBlockSeekInFlight = false
+        guard let videoID = podcastYouTubeVideoID, !videoID.isEmpty else {
+            sponsorBlockSkipTask = nil
+            return
+        }
+        sponsorBlockSkipTask = Task { [weak self] in
+            // Fetch all v1 categories once; filter by Settings each tick so toggles apply live.
+            let allCats = Set(SponsorBlockCategory.allCases.map(\.rawValue))
+            let segments = await SponsorBlockClient.shared.fetchSegments(
+                videoID: videoID,
+                categories: allCats
+            )
+            guard !Task.isCancelled, let self else { return }
+            guard await self.podcastYouTubeVideoID == videoID else { return }
+            await self.setSponsorBlockSegments(segments)
+
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled, let self else { return }
+                await self.tickSponsorBlockSkip()
+            }
+        }
+    }
+
+    private func setSponsorBlockSegments(_ segments: [SponsorBlockSegment]) {
+        sponsorBlockSegments = segments
+    }
+
+    private func tickSponsorBlockSkip() async {
+        guard podcastYouTubeVideoID != nil else { return }
+        guard SponsorBlockSettings.isEnabled else { return }
+        guard podcastIsPlaying, !sponsorBlockSeekInFlight else { return }
+        guard let player = podcastPlayer else { return }
+        let segments = sponsorBlockSegments
+        guard !segments.isEmpty else { return }
+
+        let time = await player.currentTime
+        guard
+            let hit = SponsorBlockSkipLogic.activeSegment(
+                at: time,
+                in: segments,
+                allowedCategories: SponsorBlockSettings.enabledCategories
+            )
+        else { return }
+
+        sponsorBlockSeekInFlight = true
+        defer { sponsorBlockSeekInFlight = false }
+
+        await player.seek(to: hit.end)
+        await publishPodcastState()
+        NotificationCenter.default.post(
+            name: Notification.Name("punkRallyPodcastShouldPersistProgress"),
+            object: nil
+        )
+
+        if SponsorBlockSettings.showSkipToast, !sponsorBlockDidToastThisSession {
+            sponsorBlockDidToastThisSession = true
+            let label = SponsorBlockCategory(rawValue: hit.category)?.settingsTitle
+                ?? hit.category
+            NotificationCenter.default.post(
+                name: Notification.Name("punkRallySponsorBlockSkipped"),
+                object: nil,
+                userInfo: ["category": hit.category, "label": label]
+            )
         }
     }
 

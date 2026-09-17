@@ -15,6 +15,8 @@ public struct PodcastDownloadsSettingsView: View {
     @State private var youtubeResolveURLText = PodcastYouTubeResolveSettings.urlString
     @State private var youtubeResolveTestStatus: AdStripTestStatus = .idle
     @State private var youtubeResolveTestTask: Task<Void, Never>?
+    @State private var sponsorBlockEnabled = SponsorBlockSettings.isEnabled
+    @State private var sponsorBlockShowToast = SponsorBlockSettings.showSkipToast
 
     public init() {}
 
@@ -124,6 +126,34 @@ public struct PodcastDownloadsSettingsView: View {
             }
 
             Section {
+                Toggle("Skip sponsors & intros", isOn: $sponsorBlockEnabled)
+                    .onChange(of: sponsorBlockEnabled) { _, newValue in
+                        SponsorBlockSettings.isEnabled = newValue
+                    }
+                if sponsorBlockEnabled {
+                    ForEach(SponsorBlockCategory.allCases) { category in
+                        Toggle(
+                            category.settingsTitle,
+                            isOn: Binding(
+                                get: { SponsorBlockSettings.isCategoryEnabled(category) },
+                                set: { SponsorBlockSettings.setCategory(category, enabled: $0) }
+                            )
+                        )
+                    }
+                    Toggle("Show skip toast", isOn: $sponsorBlockShowToast)
+                        .onChange(of: sponsorBlockShowToast) { _, newValue in
+                            SponsorBlockSettings.showSkipToast = newValue
+                        }
+                }
+            } header: {
+                Text("SponsorBlock")
+            } footer: {
+                Text(
+                    "Auto-skip marked segments while watching YouTube in ink+amp (Match / Play in ink+amp). Not used for podcast Clean downloads. Soft-fails if the API is unreachable."
+                )
+            }
+
+            Section {
                 Toggle("Auto-clean downloads", isOn: autoCleanBinding)
             } footer: {
                 Text(
@@ -204,6 +234,8 @@ public struct PodcastDownloadsSettingsView: View {
         .onAppear {
             adStripURLText = PodcastAdStripSettings.urlString
             youtubeResolveURLText = PodcastYouTubeResolveSettings.urlString
+            sponsorBlockEnabled = SponsorBlockSettings.isEnabled
+            sponsorBlockShowToast = SponsorBlockSettings.showSkipToast
             if settings.autoCleanEnabled && !settings.hasSeenAutoCleanExplainer {
                 showExplainer = true
             }

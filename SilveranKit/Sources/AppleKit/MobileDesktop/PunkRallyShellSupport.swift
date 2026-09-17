@@ -59,6 +59,11 @@ extension Notification.Name {
     public static let punkRallyYouTubeResolveFailed = Notification.Name(
         "punkRallyYouTubeResolveFailed"
     )
+    /// SponsorBlock auto-skip fired once this session — host toast “Skipped …”.
+    /// userInfo: category (String), label (String)
+    public static let punkRallySponsorBlockSkipped = Notification.Name(
+        "punkRallySponsorBlockSkipped"
+    )
     /// Match on YouTube search failed / timed out — host toast (no hang).
     public static let punkRallyYouTubeSearchFailed = Notification.Name(
         "punkRallyYouTubeSearchFailed"

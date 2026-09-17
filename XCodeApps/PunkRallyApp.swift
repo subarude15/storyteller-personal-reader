@@ -887,6 +887,14 @@ private struct PunkRallyShellToastModifier: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyYouTubeResolveFailed)) { _ in
                 showToast("Couldn't play YouTube · opening app")
             }
+            .onReceive(NotificationCenter.default.publisher(for: .punkRallySponsorBlockSkipped)) { note in
+                let label = (note.userInfo?["label"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let label, !label.isEmpty {
+                    showToast("Skipped \(label.lowercased())")
+                } else {
+                    showToast("Skipped sponsor")
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyYouTubeSearchFailed)) { _ in
                 showToast("Couldn't search YouTube")
             }
