@@ -514,7 +514,7 @@ public actor AudioSessionActor {
 
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(500))
-                guard !Task.isCancelled, let self else { return }
+                guard !Task.isCancelled else { return }
                 await self.tickSponsorBlockSkip()
             }
         }
