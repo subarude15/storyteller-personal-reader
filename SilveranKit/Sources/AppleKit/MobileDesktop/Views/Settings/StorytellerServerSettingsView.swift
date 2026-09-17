@@ -57,6 +57,19 @@ public struct StorytellerServerSettingsView: View {
                         }
                         #endif
                     }
+
+                    if !sources.contains(where: { $0.kind == .storyteller }) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label("Storyteller isn't connected yet", systemImage: "server.rack")
+                                .font(.headline)
+                            Text(
+                                "Your Storyteller URL is prefilled in Add Book Source, but it is not saved until you enter your sign-in and tap Save."
+                            )
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
                 }
 
                 Button {

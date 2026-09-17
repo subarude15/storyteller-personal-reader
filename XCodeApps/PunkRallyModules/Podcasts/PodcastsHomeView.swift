@@ -244,10 +244,10 @@ struct PodcastShowRow: View {
                 image.resizable().scaledToFill()
             } placeholder: {
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(chrome.surface2)
+                    .fill(Color(white: 0.12))
                     .overlay(
                         Image(systemName: "mic")
-                            .foregroundStyle(chrome.textFaint)
+                            .foregroundStyle(Color.white.opacity(0.72))
                     )
             }
             .frame(width: 56, height: 56)
@@ -398,7 +398,11 @@ struct PodcastShowView: View {
                             image.resizable().scaledToFill()
                         } placeholder: {
                             RoundedRectangle(cornerRadius: 8)
-                                .fill(chrome.surface2)
+                                .fill(Color(white: 0.12))
+                                .overlay(
+                                    Image(systemName: "mic.fill")
+                                        .foregroundStyle(Color.white.opacity(0.72))
+                                )
                         }
                         .frame(width: 96, height: 96)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -932,7 +936,9 @@ struct EpisodeRow: View {
             feedURL: showFeedURL
         )
         if !ok {
-            openURL(watchURL)
+            // The view model posts the failure toast. Stay in ink+amp and leave
+            // Watch on YouTube as a separate, explicit choice.
+            return
         }
     }
 }

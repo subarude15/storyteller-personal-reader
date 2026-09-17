@@ -17,9 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Soft UX polish** — Cleaning… chip vs remaining; “Couldn't save server” copy; empty state when URL prefilled but no source; missing covers. Soft polish anytime.
+- **No active committed cut** — soft UX polish pack is complete; await Josh smoke / board reorder.
 
-**Do not start DSM/SMB dump / CarPlay / widgets unless Josh reorders.**
+**Do not start DSM/SMB dump, CarPlay, widgets, Story Timeline, Finish tonight, Wrapped, series strip, Shortcuts, or a second player unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
@@ -83,7 +83,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ## Next (strict order — do not reorder)
 
 ### After soft UX polish
-1. Later ideas (CarPlay/Watch, DSM/SMB folder dump) — see Later
+1. No committed cut — wait for Josh / board reorder
 
 ### Soft UX polish (anytime)
 - ~~Mini player inset / close~~ → **Shipped** (`833d573` / `bf8bb81`)
@@ -91,10 +91,8 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - ~~Podcast cross-device sync~~ → **Shipped** (`51563cd`)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
 - ~~Stats push / description decode~~ → **Shipped** (`cf5c663`) — Josh confirmed
-- Cleaning… chip must not look like episode remaining (job ETA or plain Cleaning…; keep Xm left on progress separately) — status cluster already separates job chip from Xm left
-- Separate **Couldn't save server** copy (≠ “Connection failed”)
-- Empty state when URL prefilled but no saved Storyteller source
-- Missing Storyteller covers (cosmetic; not a blocker)
+- ~~Soft UX polish pack~~ → **Shipped** (`codex/soft-ux-polish-pack`): Cleaning job chip stays separate from episode time-left; Play shows Resolving… and never auto-hands off; dark cover placeholders across Home/Library/Find/queue; Aligning… / Creating Readaloud… stays distinct from device SYNC; Storyteller/Stats/Find empty and offline states expose clear next actions.
+- Separate **Couldn't save server** copy (≠ “Connection failed”) — still soft / not part of the closed pack
 
 ---
 ## Later / ideas (not blocking)
@@ -112,9 +110,11 @@ Strict order (Smokey / Nas-ty):
 10. ~~SponsorBlock-style skip~~ → **Shipped** (Josh confirmed; tip `c38b1e4`)
 11. ~~Phone import → StoryAlign read-aloud~~ → **Shipped** (`05f0006`; Josh upload OK)
 12. ~~Podcast cross-device sync~~ → **Shipped** (`51563cd`; subs + playheads; downloads per-device)
-13. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
+13. ~~CarPlay~~ → **parked** (Josh: already does what he needs on free AltStore); Apple Watch remains out of Sideload scope
 
-**Later (not StoryAlign v1):** DSM share / SMB / WebDAV folder drop (put EPUB/audio into named NAS folders) and general photo dump — Import v1 uses Storyteller upload API into its library only.
+**Cancelled (Josh 2026-09-16):** DSM/SMB/WebDAV folder dump — happy with Storyteller Import as-is.
+
+**Later toys (only if reordered):** Story Timeline; Finish tonight; Wrapped/heat map; series strip; Shortcuts Continue; widgets; second player.
 ## Constraints
 
 - Keep `SilveranKit`; do not merge Enve tree (modules + AGPL only)

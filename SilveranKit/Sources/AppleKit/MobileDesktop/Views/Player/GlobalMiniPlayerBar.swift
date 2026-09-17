@@ -181,12 +181,12 @@ struct GlobalMiniPlayerBar: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         } else {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.secondary.opacity(0.2))
+                .fill(Color(white: 0.12))
                 .frame(width: 40, height: 40)
                 .overlay(
                     Image(systemName: placeholderIcon(for: snapshot.kind))
                         .font(.body)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.white.opacity(0.72))
                 )
         }
     }
