@@ -17,9 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **P0 Mini player inset / close** — tip ≥ Browse `ae3990d`. Screens overlap `GlobalMiniPlayerBar` and block stop/close. Every tab root + sheet needs bottom inset ≥ mini height when mini is visible; mini close/stop stays ≥44pt and above the tab bar. Reuse existing safeAreaInset / mini-height padding — don’t invent a second chrome.
+- **Phone import → StoryAlign read-aloud** — tip ≥ Browse `ae3990d` (Josh verified). Library **Import** → EPUB + audiobook upload to active Storyteller (LAN failover) → Aligning… → SYNC / Continue read-aloud. Finish existing Import / ReadaloudAligning / UploadNewBook path — don’t rebuild a parallel importer. Soft polish anytime.
 
-- **Next after hotfix:** **Phone import → StoryAlign read-aloud** (Library Import → EPUB+audio upload → Aligning… → SYNC). Soft polish anytime.
+- **Next after StoryAlign Sideload:** **P0 Mini player inset / close** — screens overlapping `GlobalMiniPlayerBar` block stop/close; every tab/sheet bottom inset ≥ mini height; close ≥44pt above tab bar.
 
 **Do not start SponsorBlock / Invidious/ad-strip / widgets / CarPlay / Podcast Index keys unless Josh reorders.**
 ## Shipped
@@ -81,11 +81,12 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ## Next (strict order — do not reorder)
 
 ### After StoryAlign phone import
-1. Soft UX polish (anytime) — see below
-2. Later ideas (SponsorBlock, CarPlay/Watch, podcast cross-device sync) — see Later
+1. **P0 Mini player inset / close** — bottom inset under GlobalMiniPlayerBar so stop/close stays tappable
+2. Soft UX polish (anytime) — see below
+3. Later ideas (SponsorBlock, CarPlay/Watch, podcast cross-device sync) — see Later
 
 ### Soft UX polish (anytime)
-- ~~Mini player inset / close~~ → **Now (P0)** — screens under GlobalMiniPlayerBar block stop/close
+- ~~Mini player inset / close~~ → **Next after StoryAlign (P0)** — screens under GlobalMiniPlayerBar block stop/close
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
 - ~~Stats push / description decode~~ → **Shipped** (`cf5c663`) — Josh confirmed
 - Cleaning… chip must not look like episode remaining (job ETA or plain Cleaning…; keep Xm left on progress separately) — status cluster already separates job chip from Xm left
