@@ -17,8 +17,8 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **More like this** (book detail) — this cut. One horizontal cover rail from local
-  Storyteller metadata only: same series → same author → same tags; hide when empty.
+- **More like this** (book detail) — PR #24 ready at `bcff3c7`. One horizontal cover rail
+  from local Storyteller metadata only: same series → same author → same tags; hide when empty.
 
 **Next (strict order):**
 1. **Finish tonight** — quick Home win
@@ -31,6 +31,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ## Shipped
 
 ### Product / sync
+- [x] **More like this** book-detail rail — local Storyteller library only; series → author
+  → tag-overlap ranking; tip `bcff3c7`; Simulator + Sideload green
+  [Actions 35215932274](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35215932274)
 - [x] Storyteller Cloudflare Access Google bypass (server)
 - [x] Storyteller URL **prefill** (not auto-save)
 - [x] Keychain Save on AltStore (drop Data Protection / no `KEYCHAIN_ACCESS_GROUP` on Sideload) — verified
