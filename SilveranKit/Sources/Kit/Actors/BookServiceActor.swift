@@ -1459,6 +1459,24 @@ public actor BookServiceActor {
         return await storyteller.pushInkampYouTubePlayheadsDocument(document)
     }
 
+    public func fetchInkampPodcastSyncDocument() async
+        -> StorytellerActor.InkampPodcastSyncFetchResult
+    {
+        guard let storyteller = await primaryStorytellerActor() else {
+            return .unavailable(reason: "no Storyteller source")
+        }
+        return await storyteller.fetchInkampPodcastSyncDocument()
+    }
+
+    public func pushInkampPodcastSyncDocument(_ document: InkampPodcastSyncDocument) async
+        -> StorytellerActor.InkampPodcastSyncPushResult
+    {
+        guard let storyteller = await primaryStorytellerActor() else {
+            return .failure(reason: "no Storyteller source")
+        }
+        return await storyteller.pushInkampPodcastSyncDocument(document)
+    }
+
     private func primaryStorytellerActor() async -> StorytellerActor? {
         await ensureSourceRegistryLoaded()
         return storytellerActors().first

@@ -2676,6 +2676,145 @@ public actor StorytellerActor {
         UserDefaults.standard.string(forKey: Self.inkampYouTubePlayheadCollectionUUIDKey)
     }
 
+    // MARK: - ink+amp podcast sync (private collection blob)
+
+    public enum InkampPodcastSyncFetchResult: Sendable {
+        case unavailable(reason: String)
+        case empty
+        case document(InkampPodcastSyncDocument)
+    }
+
+    public enum InkampPodcastSyncPushResult: Sendable, Equatable {
+        case success
+        case failure(reason: String)
+    }
+
+    private static let inkampPodcastSyncCollectionUUIDKey =
+        "punkRally.podcastSync.collectionUUID.v1"
+
+    /// Fetches podcast subscriptions + playheads from a private Storyteller collection
+    /// (same auth as Stats / YouTube playheads). Downloads are never in this blob.
+    public func fetchInkampPodcastSyncDocument() async -> InkampPodcastSyncFetchResult {
+        guard await ensureAuthentication() != nil else {
+            return .unavailable(reason: "auth failed")
+        }
+
+        let collections = await fetchCollections()
+        if let collections {
+            if let collection = collections.first(where: {
+                $0.name == InkampPodcastSyncDocument.collectionName
+            }) {
+                rememberInkampPodcastSyncCollectionUUID(collection.uuid)
+                return Self.podcastSyncDocument(from: collection)
+            }
+        } else {
+            if let remembered = rememberedInkampPodcastSyncCollectionUUID(),
+                let collection = await fetchCollection(uuid: remembered)
+            {
+                return Self.podcastSyncDocument(from: collection)
+            }
+            return .unavailable(reason: "fetchCollections failed")
+        }
+
+        if let remembered = rememberedInkampPodcastSyncCollectionUUID(),
+            let collection = await fetchCollection(uuid: remembered)
+        {
+            return Self.podcastSyncDocument(from: collection)
+        }
+
+        return .empty
+    }
+
+    private static func podcastSyncDocument(from collection: StorytellerCollection)
+        -> InkampPodcastSyncFetchResult
+    {
+        guard let description = collection.description, !description.isEmpty else {
+            return .empty
+        }
+        guard description.hasPrefix("{") else {
+            return .empty
+        }
+        guard let doc = try? PodcastSyncMerge.decodeDescription(description) else {
+            return .empty
+        }
+        return .document(doc)
+    }
+
+    /// Upserts the podcast sync document onto a private Storyteller collection.
+    public func pushInkampPodcastSyncDocument(_ document: InkampPodcastSyncDocument) async
+        -> InkampPodcastSyncPushResult
+    {
+        guard await ensureAuthentication() != nil else {
+            return .failure(reason: "auth failed")
+        }
+        let encoded: String
+        do {
+            encoded = try PodcastSyncMerge.encodeDescription(document)
+        } catch {
+            logStorytellerError("pushInkampPodcastSyncDocument encode", error: error)
+            return .failure(reason: "encode failed")
+        }
+
+        if let existing = await inkampPodcastSyncCollection() {
+            rememberInkampPodcastSyncCollectionUUID(existing.uuid)
+            let updated = await updateCollection(
+                uuid: existing.uuid,
+                payload: StorytellerCollectionUpdatePayload(
+                    description: encoded,
+                    isPublic: false
+                )
+            )
+            if updated != nil {
+                return .success
+            }
+            return .failure(reason: "updateCollection failed uuid=\(existing.uuid)")
+        }
+
+        let created = await createCollection(
+            StorytellerCollectionCreatePayload(
+                name: InkampPodcastSyncDocument.collectionName,
+                description: encoded,
+                isPublic: false,
+                users: nil
+            )
+        )
+        if let created {
+            if created.uuid != "pending" {
+                rememberInkampPodcastSyncCollectionUUID(created.uuid)
+            }
+            return .success
+        }
+        return .failure(
+            reason: "createCollection failed name=\(InkampPodcastSyncDocument.collectionName)"
+        )
+    }
+
+    private func inkampPodcastSyncCollection() async -> StorytellerCollection? {
+        if let collections = await fetchCollections(),
+            let found = collections.first(where: {
+                $0.name == InkampPodcastSyncDocument.collectionName
+            })
+        {
+            rememberInkampPodcastSyncCollectionUUID(found.uuid)
+            return found
+        }
+        if let uuid = rememberedInkampPodcastSyncCollectionUUID(),
+            let collection = await fetchCollection(uuid: uuid)
+        {
+            return collection
+        }
+        return nil
+    }
+
+    private func rememberInkampPodcastSyncCollectionUUID(_ uuid: String) {
+        guard uuid != "pending", !uuid.isEmpty else { return }
+        UserDefaults.standard.set(uuid, forKey: Self.inkampPodcastSyncCollectionUUIDKey)
+    }
+
+    private func rememberedInkampPodcastSyncCollectionUUID() -> String? {
+        UserDefaults.standard.string(forKey: Self.inkampPodcastSyncCollectionUUIDKey)
+    }
+
     private static func peekCollectionUUID(from data: Data) -> String? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let uuid = object["uuid"] as? String,

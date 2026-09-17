@@ -151,6 +151,11 @@ public struct PunkRallyTabView: View {
             ) { _ in
                 Task { await YouTubePlayheadSyncCoordinator.shared.syncNow(reason: "settingsRetry") }
             }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .punkRallyRetryPodcastSync)
+            ) { _ in
+                Task { await PodcastSyncCoordinator.shared.syncNow(reason: "settingsRetry") }
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
                     _ = PodcastDownloadStore.shared.runOvernightPruneIfDue()
@@ -161,6 +166,7 @@ public struct PunkRallyTabView: View {
                     )
                     Task { await StatsSyncCoordinator.shared.syncNow(reason: "appActive") }
                     Task { await YouTubePlayheadSyncCoordinator.shared.syncNow(reason: "appActive") }
+                    Task { await PodcastSyncCoordinator.shared.syncNow(reason: "appActive") }
                 } else if phase == .background {
                     Task {
                         await AudioSessionActor.shared.refreshNowPlaying()
@@ -178,6 +184,7 @@ public struct PunkRallyTabView: View {
                             )
                         }
                         YouTubePlayheadSyncCoordinator.shared.scheduleSyncAfterLocalChange()
+                        PodcastSyncCoordinator.shared.scheduleSyncAfterLocalChange()
                     }
                 }
             }
@@ -226,7 +233,8 @@ public struct PunkRallyTabView: View {
             youtubeURL: youtubeURL
         )
         Task {
-            // Pull remote YouTube playhead before resume (soft timeout; offline keeps local).
+            // Pull remote playheads before resume (soft timeout; offline keeps local).
+            await PodcastSyncCoordinator.shared.syncNow(reason: "beforePlay")
             if episode.youtubeVideoID != nil {
                 await YouTubePlayheadSyncCoordinator.shared.syncNow(reason: "beforePlay")
             }
@@ -881,6 +889,9 @@ private struct PunkRallyShellToastModifier: ViewModifier {
             ) { _ in
                 showToast("Couldn't sync YouTube playheads · try again")
             }
+            .onReceive(NotificationCenter.default.publisher(for: .punkRallyPodcastSyncFailed)) { _ in
+                showToast("Couldn't sync podcasts · try again")
+            }
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyAdStripFailed)) { _ in
                 showToast("Clean failed · try again")
             }
@@ -924,6 +935,7 @@ private struct PunkRallyPodcastBridgeModifier: ViewModifier {
                 Task {
                     await PodcastPlayerPresenter.persistPodcastProgress(markFinished: false)
                     YouTubePlayheadSyncCoordinator.shared.scheduleSyncAfterLocalChange()
+                    PodcastSyncCoordinator.shared.scheduleSyncAfterLocalChange()
                 }
             }
             .onReceive(
@@ -936,6 +948,7 @@ private struct PunkRallyPodcastBridgeModifier: ViewModifier {
                 PodcastRecentStore.shared.updateProgress(episodeID: episodeID, progress: progress)
                 NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
                 YouTubePlayheadSyncCoordinator.shared.scheduleSyncAfterLocalChange()
+                PodcastSyncCoordinator.shared.scheduleSyncAfterLocalChange()
             }
             .onReceive(
                 NotificationCenter.default.publisher(
@@ -945,6 +958,7 @@ private struct PunkRallyPodcastBridgeModifier: ViewModifier {
                 Task {
                     await PodcastPlayerPresenter.persistPodcastProgress(markFinished: true)
                     YouTubePlayheadSyncCoordinator.shared.scheduleSyncAfterLocalChange()
+                    PodcastSyncCoordinator.shared.scheduleSyncAfterLocalChange()
                     if let episodeID = note.userInfo?["episodeID"] as? String {
                         PodcastRecentStore.shared.updateProgress(
                             episodeID: episodeID,

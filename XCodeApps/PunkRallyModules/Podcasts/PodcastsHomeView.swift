@@ -102,6 +102,11 @@ struct PodcastsHomeView: View {
         .task {
             await viewModel.loadIfNeeded()
         }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .punkRallyPodcastSubscriptionsDidChange)
+        ) { _ in
+            Task { await viewModel.reloadAfterSync() }
+        }
         .refreshable {
             await viewModel.load()
         }

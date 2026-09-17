@@ -91,13 +91,14 @@ final class PodcastsViewModel {
     @discardableResult
     func subscribe(feedURL: URL) async -> Bool {
         guard let show = await fetchFeed(feedURL) else { return false }
-        store.subscribe(to: feedURL)
+        store.subscribe(to: feedURL, title: show.title)
         if let index = shows.firstIndex(where: { $0.feedURL == feedURL }) {
             shows[index] = show
         } else {
             shows.append(show)
         }
         store.markRefreshed(feedURL)
+        PodcastSyncCoordinator.shared.scheduleSyncAfterLocalChange()
         return true
     }
 
@@ -108,6 +109,7 @@ final class PodcastsViewModel {
     func unsubscribe(feedURL: URL) async {
         store.unsubscribe(from: feedURL)
         shows.removeAll { $0.feedURL == feedURL }
+        PodcastSyncCoordinator.shared.scheduleSyncAfterLocalChange()
     }
 
     func removeAllFeeds() async {
@@ -117,6 +119,13 @@ final class PodcastsViewModel {
             shows.removeAll { $0.feedURL == sub.feedURL }
         }
         subs.removeAll()
+        PodcastSyncCoordinator.shared.scheduleSyncAfterLocalChange()
+    }
+
+    /// After remote sync merges subscriptions, refresh the show list from disk + RSS.
+    func reloadAfterSync() async {
+        lastLoadDate = nil
+        await load()
     }
 
     // MARK: - Playback

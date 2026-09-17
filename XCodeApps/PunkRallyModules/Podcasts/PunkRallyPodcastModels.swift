@@ -144,11 +144,36 @@ public struct PRPodcastSubscription: Identifiable, Codable, Equatable {
     public let feedURL: URL
     public let addedAt: Date
     public var lastRefreshedAt: Date?
+    /// Optional show title for sync / UI before the next RSS refresh.
+    public var title: String?
+    public var updatedAt: Date
+    /// Unsubscribe tombstone for cross-device sync (hidden from subscribed list).
+    public var unsubscribed: Bool
 
-    public init(feedURL: URL, addedAt: Date = Date(), lastRefreshedAt: Date? = nil) {
+    public init(
+        feedURL: URL,
+        addedAt: Date = Date(),
+        lastRefreshedAt: Date? = nil,
+        title: String? = nil,
+        updatedAt: Date? = nil,
+        unsubscribed: Bool = false
+    ) {
         self.feedURL = feedURL
         self.addedAt = addedAt
         self.lastRefreshedAt = lastRefreshedAt
+        self.title = title
+        self.updatedAt = updatedAt ?? addedAt
+        self.unsubscribed = unsubscribed
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        feedURL = try container.decode(URL.self, forKey: .feedURL)
+        addedAt = try container.decode(Date.self, forKey: .addedAt)
+        lastRefreshedAt = try container.decodeIfPresent(Date.self, forKey: .lastRefreshedAt)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? addedAt
+        unsubscribed = try container.decodeIfPresent(Bool.self, forKey: .unsubscribed) ?? false
     }
 }
 

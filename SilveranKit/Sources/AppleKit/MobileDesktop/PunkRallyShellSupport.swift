@@ -53,6 +53,23 @@ extension Notification.Name {
     public static let punkRallyYouTubePlayheadSyncFailed = Notification.Name(
         "punkRallyYouTubePlayheadSyncFailed"
     )
+    /// Settings: request an immediate podcast sync retry.
+    public static let punkRallyRetryPodcastSync = Notification.Name(
+        "punkRallyRetryPodcastSync"
+    )
+    /// PodcastSyncCoordinator published UI (Settings row).
+    /// userInfo: isSyncing (Bool), lastSuccessfulSyncAt (Date?), footerLabel (String)
+    public static let punkRallyPodcastSyncUIDidChange = Notification.Name(
+        "punkRallyPodcastSyncUIDidChange"
+    )
+    /// Podcast sync landed Offline after Settings retry — host toast.
+    public static let punkRallyPodcastSyncFailed = Notification.Name(
+        "punkRallyPodcastSyncFailed"
+    )
+    /// Merged remote subscriptions applied — PodcastsViewModel should reload feeds.
+    public static let punkRallyPodcastSubscriptionsDidChange = Notification.Name(
+        "punkRallyPodcastSubscriptionsDidChange"
+    )
     /// Clean-path ad strip failed / timed out — host shows a short toast.
     public static let punkRallyAdStripFailed = Notification.Name("punkRallyAdStripFailed")
     /// YouTube in-app resolve failed / timed out — host toast; caller may hand off to Safari.
