@@ -17,9 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Podcast / player UX polish (Josh stamps 1–5)** — tip ≥ YouTube playhead sync `0a4da30` (Josh verified phone↔iPad resume). One Sideload: (1) pre-subscribe show page with full description; (2) Unsubscribe left / Done right; (3) back → GlobalMiniPlayerBar keeps playing; (4) scrub seeks shared AVPlayer for YouTube/RSS video; (5) iPad full NP video aspect-fits the available video region (not phone-width). Soft polish anytime.
+- **Browse podcasts (Apple charts/genres)** — tip ≥ UX polish `ba4a83d` (Josh verified stamps 1–5). Find empty state → Top charts + genre chips + cover grid (free Apple RSS charts, same stack as iTunes Search; no Podcast Index keys); tap → pre-subscribe show page; search field stays above. Soft polish anytime.
 
-**Do not start Browse charts / StoryAlign / SponsorBlock / Invidious/ad-strip / widgets / CarPlay unless Josh reorders.**
+**Do not start StoryAlign / SponsorBlock / Invidious/ad-strip / widgets / CarPlay unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
@@ -54,6 +54,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **Match on YouTube** — tip `a0722eb`; Josh confirmed Match → confirm → Play in ink+amp (Invidious `http://192.168.1.2:20130`)
 - [x] **YouTube playhead persist (local)** — Josh confirmed scrub/leave/reopen resumes near leave point
 - [x] **YouTube playhead sync** — tip `0a4da30`; private Storyteller blob; Josh confirmed phone↔iPad resume near leave point; Sideload [35164207619](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35164207619)
+- [x] **Podcast / player UX polish (stamps 1–5)** — tip `ba4a83d`; pre-subscribe desc; Unsubscribe left / Done right; back→GlobalMiniPlayerBar; scrub seeks YouTube/RSS; iPad NP video fills frame; Josh confirmed; Sideload [35166993973](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35166993973)
 - [x] **Glance / system Now Playing** — tip `257e44e`; Josh confirmed Lock Screen / Control Center title + pause/skip
 - [x] **Episode status cluster + show filters + Josh UI stamps** — tip `b719921`; download glyph · Clean chip (incl. Clean failed) · Xm left/Played; show filters All|Downloaded|In progress|Clean pending; Shelf POD chrome; mini-player cover+title+play/pause(+close) only (scrub/−15/+15 stay on full Now Playing); Home/Library finishability text via `PlaybackFinishabilityCopy`; Sideload green [35023934089](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35023934089)
 - [x] **Podcast play queue** — tip `2f7deb4`; Play Next / Play Last in episode menus; `PodcastPlaybackQueueStore` + editable `PodcastPlaybackQueueView` (drag reorder, remove, clear finished); auto-advance on finish via shared player; persisted upcoming order; Sideload green [35025614228](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35025614228)
@@ -76,10 +77,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-### After UX polish (stamps 1–5)
-1. **Browse podcasts (Apple charts/genres)** — Find empty state → Top charts + genre chips + cover grid (free Apple RSS charts, same stack as iTunes Search; no Podcast Index keys); tap → pre-subscribe show page; search field stays above
-2. **Phone import → StoryAlign read-aloud** — Library Import → Storyteller upload → align → refresh
-3. Soft UX polish (anytime) — see below
+### After Browse
+1. **Phone import → StoryAlign read-aloud** — Library Import → Storyteller upload → align → refresh
+2. Soft UX polish (anytime) — see below
 
 ### Soft UX polish (anytime)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
@@ -101,7 +101,7 @@ Strict order (Smokey / Nas-ty):
 6. ~~Glance / Lock Screen~~ → **Shipped** (`257e44e`; Josh confirmed)
 7. ~~LAN failover~~ → **Shipped** (`4f9d27d`; Josh confirmed Using LAN / Using public)
 8. ~~YouTube playhead sync~~ → **Shipped** (`0a4da30`; Josh confirmed)
-9. **Browse podcasts (Apple charts/genres)** — Find empty → charts/genres grid (board Next after UX polish)
+9. ~~Browse podcasts (Apple charts/genres)~~ → **Now** (`ba4a83d` tip base; Find empty → charts/genres)
 10. **SponsorBlock-style skip** — additive seek on in-app YouTube (not podcast Clean)
 11. **Phone import → StoryAlign read-aloud** — Library Import → Storyteller upload → align → refresh (**board Next** after playhead sync)
 12. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
