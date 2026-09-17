@@ -95,6 +95,8 @@ final class AudioSessionMonitor {
             let (data, _) = try await URLSession.shared.data(from: url)
             guard podcastCoverURL == url else { return }
             coverImage = UIImage(data: data)
+            // Keep system Now Playing art in sync with the mini-player cover.
+            await AudioSessionActor.shared.setSessionArtwork(data)
         } catch {
             // Keep placeholder.
         }
@@ -142,7 +144,8 @@ struct GlobalMiniPlayerBar: View {
             } label: {
                 Image(systemName: snapshot.isPlaying ? "pause.fill" : "play.fill")
                     .font(.title3)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
                     .background(Circle().fill(Color.primary.opacity(0.1)))
             }
             .buttonStyle(.plain)
@@ -152,15 +155,16 @@ struct GlobalMiniPlayerBar: View {
                 presenter.stopSession()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.subheadline.weight(.semibold))
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 36)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Stop playback")
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
         .modifier(MiniPlayerGlassModifier())
         .padding(.horizontal, 8)
         .padding(.bottom, 4)

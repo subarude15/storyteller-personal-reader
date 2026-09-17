@@ -46,6 +46,11 @@ public final class PodcastPlayerPresenter {
             self.coverURL = coverURL
             self.youtubeURL = youtubeURL
         }
+
+        public var youtubeVideoID: String? {
+            guard let youtubeURL else { return nil }
+            return PodcastYouTubeURL.videoID(from: youtubeURL)
+        }
     }
 
     public private(set) var episode: Episode?
@@ -105,7 +110,7 @@ public final class PodcastPlayerPresenter {
         if PlayerPresenter.shared.card != nil {
             PlayerPresenter.shared.dismissCard()
         }
-        let resumeAt = Self.resumePositionSeconds(for: episode.id)
+        let resumeAt = Self.resumePositionSeconds(for: episode)
         // Show card immediately with Loading… while the session opens.
         activeEpisode = episode
         self.episode = nil
@@ -120,7 +125,8 @@ public final class PodcastPlayerPresenter {
                 author: episode.showTitle,
                 audioURL: episode.audioURL,
                 duration: episode.duration,
-                startAtSeconds: resumeAt
+                startAtSeconds: resumeAt,
+                youtubeVideoID: episode.youtubeVideoID
             )
         } catch {
             debugLog("[PodcastPlayerPresenter] Failed to open episode: \(error)")
@@ -135,7 +141,41 @@ public final class PodcastPlayerPresenter {
             mediaID: "podcast/\(episode.id)",
             mediaTitle: episode.title
         )
+        var startInfo: [String: Any] = [
+            "episodeID": episode.id,
+            "title": episode.title,
+            "audioURL": episode.audioURL,
+            "mediaKind": episode.isVideo ? "video" : "audio",
+        ]
+        startInfo["showTitle"] = episode.showTitle
+        startInfo["summary"] = episode.summary
+        if let duration = episode.duration {
+            startInfo["durationSeconds"] = duration
+        }
+        if let cover = episode.coverURL {
+            startInfo["coverURL"] = cover
+        }
+        if let youtube = episode.youtubeURL {
+            startInfo["youtubeURL"] = youtube
+        }
+        NotificationCenter.default.post(
+            name: .punkRallyPodcastSessionDidStart,
+            object: nil,
+            userInfo: startInfo
+        )
+        Task { await Self.publishCoverArtwork(from: episode.coverURL) }
         return true
+    }
+
+    /// Feed Lock Screen / Control Center artwork from the episode cover URL.
+    private static func publishCoverArtwork(from coverURL: URL?) async {
+        guard let coverURL else { return }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: coverURL)
+            await AudioSessionActor.shared.setSessionArtwork(data)
+        } catch {
+            // Keep Now Playing without art; mini-player may still load later.
+        }
     }
 
     /// Clears a transient start error after the user dismisses it.
@@ -143,8 +183,9 @@ public final class PodcastPlayerPresenter {
         startError = nil
     }
 
-    /// Closes the card. Audio may continue in the mini player; video sessions
-    /// end with the card so video never runs mini-bar alone.
+    /// Closes the card. Playback (audio, RSS video, or in-app YouTube) may
+    /// continue under GlobalMiniPlayerBar when still playing; expand restores
+    /// the full Now Playing card without restarting the stream.
     public func dismiss() {
         Task { @MainActor in
             await Self.persistPodcastProgress(markFinished: false)
@@ -153,11 +194,9 @@ public final class PodcastPlayerPresenter {
             episode = nil
             startError = nil
             isOpening = false
-            if closing?.isVideo == true {
-                activeEpisode = nil
-                await AudioSessionActor.shared.closePodcast()
-                PunkRallyStatsEvents.sessionEnd(mediaID: "podcast/\(closing!.id)")
-            } else if snapshot?.isPlaying != true {
+            // Keep activeEpisode + shared AVPlayer when still playing so the
+            // existing mini bar stays visible (video included — audio-only mini).
+            if snapshot?.isPlaying != true {
                 activeEpisode = nil
                 await AudioSessionActor.shared.closePodcast()
                 if let closing {
@@ -191,7 +230,8 @@ public final class PodcastPlayerPresenter {
     }
 
     /// Writes listen progress into the playhead store (always) and download
-    /// ledger when the episode is on Shelf.
+    /// ledger when the episode is on Shelf. YouTube sessions also write the
+    /// video-id playhead store (local only).
     public static func persistPodcastProgress(markFinished: Bool) async {
         guard let progress = await AudioSessionActor.shared.podcastPlaybackProgress() else {
             return
@@ -209,14 +249,49 @@ public final class PodcastPlayerPresenter {
             durationSeconds: duration,
             markFinished: markFinished || progress.isFinished
         )
+
+        let youtubeVideoID = await AudioSessionActor.shared.currentYouTubeVideoID()
+            ?? shared.episode?.youtubeVideoID
+            ?? shared.activeEpisode?.youtubeVideoID
+        if let youtubeVideoID {
+            let showTitle = shared.episode?.showTitle ?? shared.activeEpisode?.showTitle
+            YouTubePlayheadStore.shared.save(
+                videoID: youtubeVideoID,
+                positionSeconds: progress.position,
+                durationSeconds: duration,
+                episodeID: progress.episodeID,
+                showTitle: showTitle,
+                markFinished: markFinished || progress.isFinished
+            )
+        }
+
+        let fraction: Double = {
+            if markFinished || progress.isFinished { return 1 }
+            guard let duration, duration > 0 else { return 0 }
+            return min(max(progress.position / duration, 0), 1)
+        }()
+        NotificationCenter.default.post(
+            name: .punkRallyPodcastProgressDidPersist,
+            object: nil,
+            userInfo: [
+                "episodeID": progress.episodeID,
+                "progress": fraction,
+            ]
+        )
     }
 
-    /// Prefer streaming playhead; fall back to download ledger position.
-    private static func resumePositionSeconds(for episodeID: String) -> TimeInterval? {
-        if let stored = PodcastPlayheadStore.shared.position(for: episodeID), stored > 1 {
+    /// Prefer YouTube video-id playhead when present; else episode playhead / download ledger.
+    private static func resumePositionSeconds(for episode: Episode) -> TimeInterval? {
+        if let videoID = episode.youtubeVideoID,
+            let stored = YouTubePlayheadStore.shared.position(for: videoID),
+            stored > 1
+        {
             return stored
         }
-        if let downloaded = PodcastDownloadStore.shared.record(for: episodeID)?.positionSeconds,
+        if let stored = PodcastPlayheadStore.shared.position(for: episode.id), stored > 1 {
+            return stored
+        }
+        if let downloaded = PodcastDownloadStore.shared.record(for: episode.id)?.positionSeconds,
             downloaded > 1
         {
             return downloaded

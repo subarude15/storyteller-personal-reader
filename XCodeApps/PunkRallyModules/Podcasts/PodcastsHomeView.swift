@@ -79,15 +79,19 @@ struct PodcastsHomeView: View {
                         showAddFeed = true
                     }
                 }
+                .punkRallyMiniPlayerInset()
             }
             .sheet(isPresented: $showAddFeed) {
                 AddPodcastFeedView(viewModel: viewModel)
+                    .punkRallyMiniPlayerInset()
             }
             .sheet(item: $selectedShow) { show in
                 PodcastShowView(viewModel: viewModel, show: show)
+                    .punkRallyMiniPlayerInset()
             }
             .sheet(isPresented: $showPlaybackQueue) {
                 PodcastPlaybackQueueView()
+                    .punkRallyMiniPlayerInset()
             }
         }
         .onReceive(
@@ -97,6 +101,11 @@ struct PodcastsHomeView: View {
         }
         .task {
             await viewModel.loadIfNeeded()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .punkRallyPodcastSubscriptionsDidChange)
+        ) { _ in
+            Task { await viewModel.reloadAfterSync() }
         }
         .refreshable {
             await viewModel.load()
@@ -368,6 +377,7 @@ struct PodcastShowView: View {
     let show: PRPodcastShow
 
     @State private var isSubscribed = false
+    @State private var isSubscribing = false
     @State private var episodeFilter: ShowEpisodeFilter = .all
     @State private var downloadStore = PodcastDownloadStore.shared
 
@@ -410,16 +420,39 @@ struct PodcastShowView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    Picker("Filter", selection: $episodeFilter) {
-                        ForEach(ShowEpisodeFilter.allCases) { filter in
-                            Text(filter.title).tag(filter)
+                    if !isSubscribed, show.feedURL != nil {
+                        Button {
+                            Task { await subscribeFromPreview() }
+                        } label: {
+                            if isSubscribing {
+                                ProgressView()
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
+                            } else {
+                                Text("Subscribe")
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
+                            }
                         }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isSubscribing)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .accessibilityLabel("Subscribe to \(show.title)")
                     }
-                    .pickerStyle(.segmented)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+
+                    if isSubscribed {
+                        Picker("Filter", selection: $episodeFilter) {
+                            ForEach(ShowEpisodeFilter.allCases) { filter in
+                                Text(filter.title).tag(filter)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    }
                 }
 
-                Section("Episodes") {
+                Section(isSubscribed ? "Episodes" : "Episodes preview") {
                     if show.episodes.isEmpty {
                         Text("No episodes yet — check back later.")
                             .foregroundStyle(.secondary)
@@ -427,13 +460,26 @@ struct PodcastShowView: View {
                         Text("No episodes match this filter.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(filteredEpisodes) { episode in
-                            EpisodeRow(
-                                episode: episode,
-                                chrome: chrome,
-                                viewModel: viewModel,
-                                showFeedURL: show.feedURL
-                            )
+                        ForEach(previewEpisodes) { episode in
+                            if isSubscribed {
+                                EpisodeRow(
+                                    episode: episode,
+                                    chrome: chrome,
+                                    viewModel: viewModel,
+                                    showFeedURL: show.feedURL
+                                )
+                            } else {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(episode.title)
+                                        .font(.subheadline.weight(.medium))
+                                    if let published = episode.publishedAt {
+                                        Text(published, style: .date)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                            }
                         }
                     }
                 }
@@ -441,24 +487,17 @@ struct PodcastShowView: View {
             .navigationTitle(show.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task {
-                            if let feedURL = show.feedURL {
-                                if isSubscribed {
-                                    await viewModel.unsubscribe(feedURL: feedURL)
-                                } else {
-                                    await viewModel.subscribe(feedURL: feedURL)
-                                }
-                                isSubscribed.toggle()
-                            }
-                        }
-                    } label: {
-                        Image(systemName: isSubscribed ? "checkmark.circle.fill" : "plus.circle")
-                    }
-                    .disabled(show.feedURL == nil)
-                }
+                // Left: clear Unsubscribe when subscribed. Right: Done.
+                // (No checkmark-as-unsubscribe.)
                 ToolbarItem(placement: .cancellationAction) {
+                    if isSubscribed {
+                        Button("Unsubscribe") {
+                            Task { await unsubscribeAndClose() }
+                        }
+                        .disabled(show.feedURL == nil)
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         dismiss()
                     }
@@ -470,6 +509,27 @@ struct PodcastShowView: View {
                 }
             }
         }
+    }
+
+    /// Pre-subscribe: cap the cheap list; subscribed: full filtered list.
+    private var previewEpisodes: [PRPodcastEpisode] {
+        if isSubscribed { return filteredEpisodes }
+        return Array(show.episodes.prefix(12))
+    }
+
+    private func subscribeFromPreview() async {
+        guard let feedURL = show.feedURL, !isSubscribing else { return }
+        isSubscribing = true
+        let ok = await viewModel.subscribe(feedURL: feedURL)
+        isSubscribing = false
+        if ok { isSubscribed = true }
+    }
+
+    private func unsubscribeAndClose() async {
+        guard let feedURL = show.feedURL else { return }
+        await viewModel.unsubscribe(feedURL: feedURL)
+        isSubscribed = false
+        dismiss()
     }
 
     private func episodeMatchesFilter(_ episode: PRPodcastEpisode) -> Bool {
@@ -530,6 +590,19 @@ struct EpisodeRow: View {
     @State private var downloadStore = PodcastDownloadStore.shared
     @State private var showMediaPicker = false
     @State private var isResolvingYouTube = false
+    @State private var showYouTubeMatch = false
+    /// Bumps after a Match pick so chips refresh from the local store.
+    @State private var matchEpoch = 0
+
+    private var effectiveWatchURL: URL? {
+        _ = matchEpoch
+        return episode.watchOnYouTubeURL
+    }
+
+    private var showsMatchOnYouTube: Bool {
+        _ = matchEpoch
+        return episode.needsYouTubeMatch
+    }
 
     private var isDownloaded: Bool {
         downloadStore.isDownloaded(episode.id)
@@ -581,7 +654,7 @@ struct EpisodeRow: View {
                         .lineLimit(2)
                 }
                 statusCluster
-                if let youtubeURL = episode.watchOnYouTubeURL {
+                if let youtubeURL = effectiveWatchURL {
                     VStack(alignment: .leading, spacing: 6) {
                         Button {
                             Task { await playYouTubeInApp(watchURL: youtubeURL) }
@@ -607,10 +680,20 @@ struct EpisodeRow: View {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .disabled(isResolvingYouTube)
                         .accessibilityHint("Opens YouTube in Safari or the YouTube app")
                     }
                     .padding(.top, 2)
+                } else if showsMatchOnYouTube {
+                    Button {
+                        showYouTubeMatch = true
+                    } label: {
+                        Label("Match on YouTube", systemImage: "magnifyingglass")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .padding(.top, 2)
+                    .accessibilityHint("Search YouTube and confirm the matching video")
                 }
             }
             Spacer(minLength: 0)
@@ -630,6 +713,22 @@ struct EpisodeRow: View {
                 onCancel: { showMediaPicker = false }
             )
             .presentationDetents([.height(280)])
+            .punkRallyMiniPlayerInset()
+        }
+        .sheet(isPresented: $showYouTubeMatch) {
+            PodcastYouTubeMatchSheet(
+                showTitle: episode.showTitle,
+                episodeTitle: episode.title,
+                onPick: { hit in
+                    showYouTubeMatch = false
+                    PodcastMatchedYouTubeStore.shared.save(watchURL: hit.watchURL, for: episode.id)
+                    matchEpoch += 1
+                    Task { await playYouTubeInApp(watchURL: hit.watchURL) }
+                },
+                onCancel: { showYouTubeMatch = false }
+            )
+            .presentationDetents([.medium, .large])
+            .punkRallyMiniPlayerInset()
         }
         .contextMenu { episodeContextMenu }
     }

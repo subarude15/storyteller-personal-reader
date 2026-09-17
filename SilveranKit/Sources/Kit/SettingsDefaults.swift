@@ -76,6 +76,10 @@ public let kDefaultAutoSyncToNewerServerPosition = false
 /// is given no explicit server URL. This is the private cellar server.
 public let kDefaultStorytellerServerURL = "https://storyteller.banditoburrito.xyz"
 
+/// ink+amp: default on-LAN Storyteller URL (PrincessDonut NAS). Prefill / missing-key default
+/// for optional home-Wi‑Fi failover; editable in Settings. Same credentials as public URL.
+public let kDefaultStorytellerLANURL = "http://192.168.1.2:1800"
+
 public let kDefaultShowAudioIndicator = true
 public let kDefaultTabBarSlot1 = "books"
 public let kDefaultTabBarSlot2 = "series"

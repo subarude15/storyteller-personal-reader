@@ -279,11 +279,13 @@ public final class RSSPodcastParser: NSObject, XMLParserDelegate {
     }
 
     private static func resolveYouTubeURL(ep: PendingEpisode, enclosures: [Enclosure]) -> URL? {
+        // Prefer first *valid video* URL: link → media:player → enclosures → show notes.
+        // extract() skips channel / @handle so a channel item link cannot beat a watch URL in notes.
         var candidates: [String] = []
+        if !ep.link.isEmpty { candidates.append(ep.link) }
         if let mediaPlayer = ep.mediaPlayerURL?.absoluteString {
             candidates.append(mediaPlayer)
         }
-        if !ep.link.isEmpty { candidates.append(ep.link) }
         for enclosure in enclosures {
             if let url = enclosure.url?.absoluteString {
                 candidates.append(url)

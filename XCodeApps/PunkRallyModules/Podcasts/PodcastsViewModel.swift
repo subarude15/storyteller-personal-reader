@@ -82,17 +82,23 @@ final class PodcastsViewModel {
         store.markRefreshed(feedURL)
     }
 
+    /// Load a show from RSS without subscribing — Find / Browse pre-subscribe preview.
+    func previewShow(feedURL: URL) async -> PRPodcastShow? {
+        await fetchFeed(feedURL)
+    }
+
     /// Subscribe only after the RSS feed loads successfully.
     @discardableResult
     func subscribe(feedURL: URL) async -> Bool {
         guard let show = await fetchFeed(feedURL) else { return false }
-        store.subscribe(to: feedURL)
+        store.subscribe(to: feedURL, title: show.title)
         if let index = shows.firstIndex(where: { $0.feedURL == feedURL }) {
             shows[index] = show
         } else {
             shows.append(show)
         }
         store.markRefreshed(feedURL)
+        PodcastSyncCoordinator.shared.scheduleSyncAfterLocalChange()
         return true
     }
 
@@ -103,6 +109,7 @@ final class PodcastsViewModel {
     func unsubscribe(feedURL: URL) async {
         store.unsubscribe(from: feedURL)
         shows.removeAll { $0.feedURL == feedURL }
+        PodcastSyncCoordinator.shared.scheduleSyncAfterLocalChange()
     }
 
     func removeAllFeeds() async {
@@ -112,6 +119,13 @@ final class PodcastsViewModel {
             shows.removeAll { $0.feedURL == sub.feedURL }
         }
         subs.removeAll()
+        PodcastSyncCoordinator.shared.scheduleSyncAfterLocalChange()
+    }
+
+    /// After remote sync merges subscriptions, refresh the show list from disk + RSS.
+    func reloadAfterSync() async {
+        lastLoadDate = nil
+        await load()
     }
 
     // MARK: - Playback
@@ -213,7 +227,8 @@ final class PodcastsViewModel {
                 feedURL: feedURL,
                 mediaKind: mediaKind,
                 lastTouched: Date(),
-                progress: PodcastDownloadStore.shared.record(for: episode.id)?.progress ?? 0
+                progress: Self.recentProgress(for: episode),
+                youtubeURL: episode.watchOnYouTubeURL
             )
         )
 
@@ -264,7 +279,8 @@ final class PodcastsViewModel {
                     feedURL: feedURL,
                     mediaKind: .video,
                     lastTouched: Date(),
-                    progress: PodcastDownloadStore.shared.record(for: episode.id)?.progress ?? 0
+                    progress: Self.recentProgress(for: episode, youtubeURL: watchURL),
+                    youtubeURL: watchURL
                 )
             )
 
@@ -348,5 +364,23 @@ final class PodcastsViewModel {
         } catch {
             return nil
         }
+    }
+
+    /// Prefer YouTube playhead progress when a watch URL is known; else download ledger.
+    private static func recentProgress(
+        for episode: PRPodcastEpisode,
+        youtubeURL: URL? = nil
+    ) -> Double {
+        let watch = youtubeURL ?? episode.watchOnYouTubeURL
+        if let watch,
+            let videoID = PodcastYouTubeURL.videoID(from: watch),
+            let entry = YouTubePlayheadStore.shared.entry(for: videoID)
+        {
+            return entry.progress
+        }
+        if let playhead = PodcastPlayheadStore.shared.entry(for: episode.id) {
+            return playhead.progress
+        }
+        return PodcastDownloadStore.shared.record(for: episode.id)?.progress ?? 0
     }
 }

@@ -865,6 +865,7 @@ struct BooksContentView: View {
                 MediaGridView.ColumnBreakpoint(columns: 3, minWidth: 0)
             ],
             initialNarrationFilterOption: .both,
+            showAddBookButton: true,
         )
         .navigationTitle("Books")
         .navigationBarTitleDisplayMode(.inline)

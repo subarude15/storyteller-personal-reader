@@ -1,59 +1,48 @@
 //
-//  PodcastPlayheadStore.swift
-//  SilveranAppleKit
+//  YouTubePlayheadStore.swift
+//  SilveranKit
 //
-//  Last playhead for RSS episodes (streaming + downloaded). Separate from the
-//  download ledger so Vergecast-style stream plays still resume after close.
-//  Cross-device sync via `.inkamp.podcastSync.v1` (PodcastSyncCoordinator).
+//  Local playhead for in-app YouTube (matched or feed watch URL). Keyed by
+//  video id — sibling of PodcastPlayheadStore. Cross-device sync via
+//  `.inkamp.youtubePlayheads.v1` (YouTubePlayheadSyncCoordinator).
 //
 //  SPDX-License-Identifier: AGPL-3.0-only
 
-#if os(iOS)
 import Foundation
-import SilveranKit
 
-/// Persists RSS episode playheads on-device (UserDefaults app group when available).
-public struct PodcastPlayheadStore: Sendable {
-    public static let shared = PodcastPlayheadStore()
+/// Persists YouTube video playheads on-device (UserDefaults app group when available).
+public struct YouTubePlayheadStore: Sendable {
+    public static let shared = YouTubePlayheadStore()
 
-    private static let defaultsKey = "punkRally.podcastPlayheads.v1"
+    private static let defaultsKey = "punkRally.youtubePlayheads.v1"
     private static let maxEntries = 80
 
     private init() {}
 
     public struct Entry: Codable, Equatable, Sendable {
-        public var episodeID: String
+        public var videoID: String
         public var positionSeconds: TimeInterval
         public var durationSeconds: TimeInterval?
-        public var feedURL: String?
+        /// RSS episode id when known (Continue / Up next).
+        public var episodeID: String?
         public var showTitle: String?
         public var updatedAt: Date
         /// Finished / near-end tombstone for cross-device sync.
         public var cleared: Bool
 
-        private enum CodingKeys: String, CodingKey {
-            case episodeID
-            case positionSeconds
-            case durationSeconds
-            case feedURL
-            case showTitle
-            case updatedAt
-            case cleared
-        }
-
         public init(
-            episodeID: String,
+            videoID: String,
             positionSeconds: TimeInterval,
             durationSeconds: TimeInterval? = nil,
-            feedURL: String? = nil,
+            episodeID: String? = nil,
             showTitle: String? = nil,
             updatedAt: Date = Date(),
             cleared: Bool = false
         ) {
-            self.episodeID = episodeID
+            self.videoID = videoID
             self.positionSeconds = max(0, positionSeconds)
             self.durationSeconds = durationSeconds
-            self.feedURL = feedURL
+            self.episodeID = episodeID
             self.showTitle = showTitle
             self.updatedAt = updatedAt
             self.cleared = cleared
@@ -61,13 +50,13 @@ public struct PodcastPlayheadStore: Sendable {
 
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            episodeID = try container.decode(String.self, forKey: .episodeID)
+            videoID = try container.decode(String.self, forKey: .videoID)
             positionSeconds = try container.decode(TimeInterval.self, forKey: .positionSeconds)
             durationSeconds = try container.decodeIfPresent(
                 TimeInterval.self,
                 forKey: .durationSeconds
             )
-            feedURL = try container.decodeIfPresent(String.self, forKey: .feedURL)
+            episodeID = try container.decodeIfPresent(String.self, forKey: .episodeID)
             showTitle = try container.decodeIfPresent(String.self, forKey: .showTitle)
             updatedAt = try container.decode(Date.self, forKey: .updatedAt)
             cleared = try container.decodeIfPresent(Bool.self, forKey: .cleared) ?? false
@@ -86,13 +75,13 @@ public struct PodcastPlayheadStore: Sendable {
         return .standard
     }
 
-    public func position(for episodeID: String) -> TimeInterval? {
-        guard let entry = entry(for: episodeID), !entry.cleared else { return nil }
+    public func position(for videoID: String) -> TimeInterval? {
+        guard let entry = entry(for: videoID), !entry.cleared else { return nil }
         return entry.positionSeconds
     }
 
-    public func entry(for episodeID: String) -> Entry? {
-        load().first(where: { $0.episodeID == episodeID && !$0.cleared })
+    public func entry(for videoID: String) -> Entry? {
+        load().first(where: { $0.videoID == videoID && !$0.cleared })
     }
 
     /// All entries including cleared tombstones (for sync export).
@@ -100,6 +89,7 @@ public struct PodcastPlayheadStore: Sendable {
         load()
     }
 
+    /// Replace local ledger with merged sync result (includes tombstones).
     public func replaceAllForSync(_ entries: [Entry]) {
         var items = entries.sorted { $0.updatedAt > $1.updatedAt }
         if items.count > Self.maxEntries {
@@ -111,10 +101,10 @@ public struct PodcastPlayheadStore: Sendable {
     /// Save playhead. Near-end (≥95%) writes a cleared tombstone so sync
     /// does not resurrect an older mid-episode position from another device.
     public func save(
-        episodeID: String,
+        videoID: String,
         positionSeconds: TimeInterval,
         durationSeconds: TimeInterval?,
-        feedURL: String? = nil,
+        episodeID: String? = nil,
         showTitle: String? = nil,
         markFinished: Bool = false
     ) {
@@ -124,15 +114,15 @@ public struct PodcastPlayheadStore: Sendable {
             return positionSeconds / durationSeconds >= 0.95
         }()
 
-        let prior = load().first(where: { $0.episodeID == episodeID })
-        var items = load().filter { $0.episodeID != episodeID }
+        let prior = load().first(where: { $0.videoID == videoID })
+        var items = load().filter { $0.videoID != videoID }
         if finished {
             items.insert(
                 Entry(
-                    episodeID: episodeID,
+                    videoID: videoID,
                     positionSeconds: 0,
                     durationSeconds: durationSeconds ?? prior?.durationSeconds,
-                    feedURL: feedURL ?? prior?.feedURL,
+                    episodeID: episodeID ?? prior?.episodeID,
                     showTitle: showTitle ?? prior?.showTitle,
                     updatedAt: Date(),
                     cleared: true
@@ -142,10 +132,10 @@ public struct PodcastPlayheadStore: Sendable {
         } else if positionSeconds >= 1 {
             items.insert(
                 Entry(
-                    episodeID: episodeID,
+                    videoID: videoID,
                     positionSeconds: positionSeconds,
                     durationSeconds: durationSeconds,
-                    feedURL: feedURL ?? prior?.feedURL,
+                    episodeID: episodeID ?? prior?.episodeID,
                     showTitle: showTitle ?? prior?.showTitle
                 ),
                 at: 0
@@ -157,15 +147,15 @@ public struct PodcastPlayheadStore: Sendable {
         persist(items)
     }
 
-    public func clear(episodeID: String) {
-        let prior = load().first(where: { $0.episodeID == episodeID })
-        var items = load().filter { $0.episodeID != episodeID }
+    public func clear(videoID: String) {
+        let prior = load().first(where: { $0.videoID == videoID })
+        var items = load().filter { $0.videoID != videoID }
         items.insert(
             Entry(
-                episodeID: episodeID,
+                videoID: videoID,
                 positionSeconds: 0,
                 durationSeconds: prior?.durationSeconds,
-                feedURL: prior?.feedURL,
+                episodeID: prior?.episodeID,
                 showTitle: prior?.showTitle,
                 updatedAt: Date(),
                 cleared: true
@@ -178,34 +168,15 @@ public struct PodcastPlayheadStore: Sendable {
         persist(items)
     }
 
-    public func exportPlayheadRecords() -> [InkampPodcastPlayheadRecord] {
-        load().map { entry in
-            InkampPodcastPlayheadRecord(
-                episodeID: entry.episodeID,
-                positionSeconds: entry.positionSeconds,
-                durationSeconds: entry.durationSeconds,
-                feedURL: entry.feedURL,
-                showTitle: entry.showTitle,
-                updatedAt: entry.updatedAt,
-                cleared: entry.cleared
-            )
-        }
+    public func exportSyncDocument() -> InkampYouTubePlayheadSyncDocument {
+        InkampYouTubePlayheadSyncDocument(
+            playheads: load().map(InkampYouTubePlayheadRecord.init(from:))
+        )
     }
 
-    public func applyPlayheadRecords(_ records: [InkampPodcastPlayheadRecord]) {
-        replaceAllForSync(
-            records.map { record in
-                Entry(
-                    episodeID: record.episodeID,
-                    positionSeconds: record.positionSeconds,
-                    durationSeconds: record.durationSeconds,
-                    feedURL: record.feedURL,
-                    showTitle: record.showTitle,
-                    updatedAt: record.updatedAt,
-                    cleared: record.cleared
-                )
-            }
-        )
+    /// Apply merged remote∪local document. Caller already ran YouTubePlayheadSyncMerge.
+    public func applyMergedSyncDocument(_ document: InkampYouTubePlayheadSyncDocument) {
+        replaceAllForSync(document.playheads.map { $0.asStoreEntry() })
     }
 
     private func load() -> [Entry] {
@@ -221,4 +192,3 @@ public struct PodcastPlayheadStore: Sendable {
         defaults.set(data, forKey: Self.defaultsKey)
     }
 }
-#endif

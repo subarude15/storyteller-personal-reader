@@ -15,6 +15,8 @@ public struct PodcastDownloadsSettingsView: View {
     @State private var youtubeResolveURLText = PodcastYouTubeResolveSettings.urlString
     @State private var youtubeResolveTestStatus: AdStripTestStatus = .idle
     @State private var youtubeResolveTestTask: Task<Void, Never>?
+    @State private var sponsorBlockEnabled = SponsorBlockSettings.isEnabled
+    @State private var sponsorBlockShowToast = SponsorBlockSettings.showSkipToast
 
     public init() {}
 
@@ -78,7 +80,7 @@ public struct PodcastDownloadsSettingsView: View {
             }
 
             Section {
-                TextField("http://192.168.1.2:3000", text: $youtubeResolveURLText)
+                TextField("http://192.168.1.2:20130", text: $youtubeResolveURLText)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
@@ -121,6 +123,34 @@ public struct PodcastDownloadsSettingsView: View {
                 Text("YouTube resolve URL")
             } footer: {
                 Text(youtubeResolveFooterText)
+            }
+
+            Section {
+                Toggle("Skip sponsors & intros", isOn: $sponsorBlockEnabled)
+                    .onChange(of: sponsorBlockEnabled) { _, newValue in
+                        SponsorBlockSettings.isEnabled = newValue
+                    }
+                if sponsorBlockEnabled {
+                    ForEach(SponsorBlockCategory.allCases) { category in
+                        Toggle(
+                            category.settingsTitle,
+                            isOn: Binding(
+                                get: { SponsorBlockSettings.isCategoryEnabled(category) },
+                                set: { SponsorBlockSettings.setCategory(category, enabled: $0) }
+                            )
+                        )
+                    }
+                    Toggle("Show skip toast", isOn: $sponsorBlockShowToast)
+                        .onChange(of: sponsorBlockShowToast) { _, newValue in
+                            SponsorBlockSettings.showSkipToast = newValue
+                        }
+                }
+            } header: {
+                Text("SponsorBlock")
+            } footer: {
+                Text(
+                    "Auto-skip marked segments while watching YouTube in ink+amp (Match / Play in ink+amp). Not used for podcast Clean downloads. Soft-fails if the API is unreachable."
+                )
             }
 
             Section {
@@ -204,6 +234,8 @@ public struct PodcastDownloadsSettingsView: View {
         .onAppear {
             adStripURLText = PodcastAdStripSettings.urlString
             youtubeResolveURLText = PodcastYouTubeResolveSettings.urlString
+            sponsorBlockEnabled = SponsorBlockSettings.isEnabled
+            sponsorBlockShowToast = SponsorBlockSettings.showSkipToast
             if settings.autoCleanEnabled && !settings.hasSeenAutoCleanExplainer {
                 showExplainer = true
             }
@@ -225,7 +257,7 @@ public struct PodcastDownloadsSettingsView: View {
 
     private var youtubeResolveFooterText: String {
         var text =
-            "Invidious / Piped-style base URL (no trailing path). Play in ink+amp calls /api/v1/videos/{id} (or Piped /streams/{id}) and plays a progressive/HLS URL on the shared player. Soft timeout ~20s; failure toasts and opens Watch on YouTube."
+            "Invidious / Piped-style base URL (no trailing path). Play in ink+amp and Match on YouTube use this host — /api/v1/videos/{id}, /api/v1/search, or Piped /streams/{id}. Soft timeout ~20s; resolve failure toasts and opens Watch on YouTube."
         if let err = PodcastYouTubeResolveSettings.lastReachError {
             text += " Last error: \(err)."
         }
