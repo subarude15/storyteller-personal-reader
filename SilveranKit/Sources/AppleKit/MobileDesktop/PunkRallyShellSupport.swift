@@ -630,55 +630,113 @@ private struct PodcastShelfDownloadRow: View {
 
 /// Full catalogue browser ("Library" tab) without Silveran's inner tab bar:
 /// searchable cover grid with book-detail navigation destinations wired.
-/// Wrapper around Silveran's internal `BooksContentView`.
+/// Wrapper around Silveran's internal `BooksContentView`, plus Explore catalogs.
 public struct PunkRallyLibraryView: View {
+    private enum LibrarySegment: String, CaseIterable, Identifiable {
+        case library = "Library"
+        case explore = "Explore"
+        var id: String { rawValue }
+    }
+
+    @State private var segment: LibrarySegment = .library
     @State private var searchText = ""
+    @State private var exploreSearchText = ""
     @State private var showSettings = false
     @State private var showOfflineSheet = false
     @State private var showImport = false
+    @State private var exploreStore = ExploreCatalogStore()
+    @State private var navigationPath = NavigationPath()
 
     public init() {}
 
+    private var searchBinding: Binding<String> {
+        Binding(
+            get: { segment == .library ? searchText : exploreSearchText },
+            set: { newValue in
+                if segment == .library {
+                    searchText = newValue
+                } else {
+                    exploreSearchText = newValue
+                }
+            }
+        )
+    }
+
     public var body: some View {
-        NavigationStack {
-            BooksContentView(searchText: searchText)
-                .environment(\.mediaGridTapOpensPlayer, true)
-                .iOSLibraryToolbar(
-                    showSettings: $showSettings,
-                    showOfflineSheet: $showOfflineSheet
-                )
-                .toolbar {
+        NavigationStack(path: $navigationPath) {
+            VStack(spacing: 0) {
+                Picker("Library section", selection: $segment) {
+                    ForEach(LibrarySegment.allCases) { value in
+                        Text(value.rawValue).tag(value)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+
+                Group {
+                    switch segment {
+                    case .library:
+                        BooksContentView(searchText: searchText)
+                            .environment(\.mediaGridTapOpensPlayer, true)
+                    case .explore:
+                        ExploreRootView(store: exploreStore)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .iOSLibraryToolbar(
+                showSettings: $showSettings,
+                showOfflineSheet: $showOfflineSheet
+            )
+            .toolbar {
+                if segment == .library {
                     ToolbarItem(placement: .topBarLeading) {
                         Button {
                             showImport = true
                         } label: {
                             Label("Import", systemImage: "square.and.arrow.down")
                         }
-                        .accessibilityHint("Upload EPUB and audiobook to Storyteller, then generate read-aloud")
+                        .accessibilityHint(
+                            "Upload EPUB and audiobook to Storyteller, then generate read-aloud"
+                        )
                     }
                 }
-                .searchable(
-                    text: $searchText,
-                    placement: .navigationBarDrawer(displayMode: .always),
-                    prompt: "Search"
-                )
-                .libraryNavigationDestinations(
-                    showSettings: $showSettings,
-                    showOfflineSheet: $showOfflineSheet
-                )
-                .sheet(isPresented: $showImport) {
-                    NavigationStack {
-                        UploadNewBookView()
-                            .navigationTitle("Import")
-                            .navigationBarTitleDisplayMode(.inline)
-                            .toolbar {
-                                ToolbarItem(placement: .topBarTrailing) {
-                                    Button("Done") { showImport = false }
-                                }
+            }
+            .searchable(
+                text: searchBinding,
+                placement: .navigationBarDrawer(displayMode: .always),
+                prompt: segment == .library ? "Search" : "Search catalog"
+            )
+            .onChange(of: exploreSearchText) { _, newValue in
+                exploreStore.setSearchText(newValue)
+            }
+            .onChange(of: segment) { _, newValue in
+                navigationPath = NavigationPath()
+                if newValue == .explore {
+                    exploreStore.setSearchText(exploreSearchText)
+                }
+            }
+            .navigationDestination(for: ExploreBook.self) { book in
+                ExploreBookDetailView(book: book)
+            }
+            .libraryNavigationDestinations(
+                showSettings: $showSettings,
+                showOfflineSheet: $showOfflineSheet
+            )
+            .sheet(isPresented: $showImport) {
+                NavigationStack {
+                    UploadNewBookView()
+                        .navigationTitle("Import")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button("Done") { showImport = false }
                             }
-                    }
-                    .punkRallyMiniPlayerInset()
+                        }
                 }
+                .punkRallyMiniPlayerInset()
+            }
         }
         .punkRallySheets(
             showSettings: $showSettings,

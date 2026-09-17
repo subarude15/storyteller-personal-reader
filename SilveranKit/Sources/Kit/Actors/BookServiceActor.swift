@@ -1091,6 +1091,28 @@ public actor BookServiceActor {
         )
     }
 
+    /// Prepares a local EPUB path for the reader without Storyteller media resolution.
+    /// Used by Explore Read now ephemeral identities.
+    public func prepareLocalEbookForReading(
+        epubPath: URL,
+        bookID: BookID,
+        category: LocalMediaCategory,
+    ) async throws -> PreparedEbookMedia {
+        let readerURL = try await FilesystemActor.shared.prepareEpubForReading(
+            epubPath: epubPath,
+            sourceID: bookID.sourceID,
+            bookID: bookID.uuid,
+            category: category,
+        )
+        return PreparedEbookMedia(
+            bookID: bookID,
+            category: category,
+            originalURL: epubPath,
+            readerURL: readerURL,
+            locationKind: .cached,
+        )
+    }
+
     public func createAuthenticatedDownloadRequest(
         for bookID: BookID,
         format: StorytellerBookFormat,
