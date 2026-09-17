@@ -9,16 +9,14 @@ enum PlaytorioPaths {
             FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         return base.appendingPathComponent("Playtorio", isDirectory: true)
-        #elseif os(macOS)
-        // Prefer Application Support for app builds; CLI/Linux still use ~/.playtorio via
-        // the home-directory path below when running outside a sandboxed app bundle.
+        #else
+        // Prefer Application Support when present (macOS app); otherwise ~/.playtorio
+        // for CLI/Linux. Use NSHomeDirectory() — never homeDirectoryForCurrentUser —
+        // so this file stays iOS-safe even under multiplatform availability checking.
         if let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
             return support.appendingPathComponent("Playtorio", isDirectory: true)
         }
-        return FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".playtorio", isDirectory: true)
-        #else
-        return FileManager.default.homeDirectoryForCurrentUser
+        return URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
             .appendingPathComponent(".playtorio", isDirectory: true)
         #endif
     }
