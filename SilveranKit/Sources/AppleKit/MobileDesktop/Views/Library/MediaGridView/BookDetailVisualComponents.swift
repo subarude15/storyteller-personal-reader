@@ -101,6 +101,7 @@ struct BookDetailCard<Content: View>: View {
 
 enum BookDetailDisclosureSection: String {
     case description
+    case moreLikeThis
     case relatedSeries
     case relatedAuthor
     case bookInfo
@@ -567,7 +568,7 @@ private struct RelatedBookThumbnail: View {
         VStack(alignment: .leading, spacing: 5) {
             RoundedCoverArtwork(
                 image: mediaViewModel.coverImage(for: book, variant: variant),
-                placeholderColor: .secondary.opacity(0.18),
+                placeholderColor: Color(white: 0.2),
                 variant: variant,
                 cornerRadius: 5,
             )

@@ -131,14 +131,15 @@ struct MediaGridInfoSidebar: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 18) {
-            descriptionSection
             #if os(macOS)
+            descriptionSection
             relatedBooksSections
             macBookInfoSection
             macMediaInfoSection
             macSyncHistorySection
             #else
-            iosRelatedBooksSections
+            iosMoreLikeThisSection
+            descriptionSection
             iosBookInfoSection
             iosMediaInfoSection
             iosSyncHistorySection
@@ -630,73 +631,21 @@ struct MediaGridInfoSidebar: View {
     }
 
     @ViewBuilder
-    private var iosRelatedBooksSections: some View {
-        let series = iosRelatedSeriesBooks
-        if !series.isEmpty {
+    private var iosMoreLikeThisSection: some View {
+        let recommendations = LocalBookRecommendations.recommendations(
+            for: currentItem,
+            in: mediaViewModel.library.bookMetaData,
+        )
+        if !recommendations.isEmpty {
             BookDetailRelatedShelf(
-                title: iosRelatedSeriesTitle,
-                systemImage: "books.vertical.fill",
-                section: .relatedSeries,
-                books: series,
+                title: "More like this",
+                systemImage: "sparkles",
+                section: .moreLikeThis,
+                books: recommendations,
                 onSelect: { relatedItemOverride = $0 },
                 seriesName: currentItem.series?.first?.name,
             )
         }
-
-        let authors = iosRelatedAuthorBooks
-        if !authors.isEmpty {
-            BookDetailRelatedShelf(
-                title: iosRelatedAuthorTitle,
-                systemImage: "person.2.fill",
-                section: .relatedAuthor,
-                books: authors,
-                onSelect: { relatedItemOverride = $0 },
-            )
-        }
-    }
-
-    private var iosRelatedSeriesTitle: String {
-        guard let name = currentItem.series?.first?.name, !name.isEmpty else {
-            return "Other Books in This Series"
-        }
-        return "More in \(name) series"
-    }
-
-    private var iosRelatedAuthorTitle: String {
-        guard let name = currentItem.authors?.first?.name, !name.isEmpty else {
-            return "More by This Author"
-        }
-        return "More by \(name)"
-    }
-
-    private var iosRelatedSeriesBooks: [BookMetadata] {
-        guard let series = currentItem.series?.first else { return [] }
-        let normalized = series.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !normalized.isEmpty else { return [] }
-        let group = mediaViewModel.booksBySeries(for: mediaKind ?? .ebook).first {
-            $0.series?.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                == normalized
-        }
-        return Array((group?.books ?? []).filter { $0.id != currentItem.id }.prefix(12))
-    }
-
-    private var iosRelatedAuthorBooks: [BookMetadata] {
-        guard let author = currentItem.authors?.first else { return [] }
-        let seriesBookIDs = Set(iosRelatedSeriesBooks.map(\.id))
-        let normalized = author.name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard let normalized, !normalized.isEmpty else { return [] }
-        let group = mediaViewModel.booksByAuthor(for: mediaKind ?? .ebook).first {
-            if let authorID = author.uuid, let groupID = $0.author?.uuid {
-                return authorID == groupID
-            }
-            return $0.author?.name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                == normalized
-        }
-        return Array(
-            (group?.books ?? [])
-                .filter { $0.id != currentItem.id && !seriesBookIDs.contains($0.id) }
-                .prefix(12)
-        )
     }
     #endif
 
