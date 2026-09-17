@@ -128,6 +128,9 @@ public enum PodcastSyncMerge {
             if let existing = byID[item.episodeID] {
                 if item.updatedAt > existing.updatedAt
                     || (item.updatedAt == existing.updatedAt
+                        && item.cleared && !existing.cleared)
+                    || (item.updatedAt == existing.updatedAt
+                        && item.cleared == existing.cleared
                         && item.positionSeconds > existing.positionSeconds)
                 {
                     byID[item.episodeID] = item

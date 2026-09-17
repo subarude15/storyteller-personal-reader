@@ -111,6 +111,20 @@ struct PodcastSyncMergeTests {
         #expect(merged[0].cleared)
     }
 
+    @Test func clearedPlayheadWinsTimestampTie() {
+        let timestamp = Date(timeIntervalSince1970: 200)
+        let mid = head(episodeID: "ep", position: 200, updatedAt: timestamp)
+        let finished = head(
+            episodeID: "ep",
+            position: 0,
+            updatedAt: timestamp,
+            cleared: true
+        )
+        let merged = PodcastSyncMerge.mergePlayheads(local: [mid], remote: [finished])
+        #expect(merged.count == 1)
+        #expect(merged[0].cleared)
+    }
+
     @Test func encodeRoundTrip() throws {
         let doc = InkampPodcastSyncDocument(
             subscriptions: [

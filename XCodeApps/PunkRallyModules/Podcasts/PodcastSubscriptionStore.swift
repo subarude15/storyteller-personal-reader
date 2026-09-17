@@ -96,7 +96,9 @@ public struct PodcastSubscriptionStore: Sendable {
         var all = loadAll()
         if let index = all.firstIndex(where: { $0.feedURL == feedURL && !$0.unsubscribed }) {
             all[index].lastRefreshedAt = date
-            all[index].updatedAt = date
+            // Refresh bookkeeping is device-local and must not become an LWW
+            // subscription write. Otherwise a routine feed refresh on one device
+            // can outrank (and resurrect) an unsubscribe from another device.
             persist(all)
         }
     }
