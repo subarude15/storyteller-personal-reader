@@ -17,26 +17,25 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Streaming Books — Phase 1: Explore ebooks + lawful source foundation** — one focused PR after
-  tip `3316d1f`. Add a `Library | Explore` surface inside the existing Library tab (no sixth tab)
-  and a source-agnostic catalog/import layer. Ship Standard Ebooks as the built-in public-domain
-  catalog plus user-added OPDS feeds and direct HTTPS EPUB links. Browse/search/detail;
-  **Read now** downloads a validated EPUB to temporary local cache and opens the existing
-  Silveran reader; **Add to Library** sends that EPUB through the existing Storyteller import path.
+- **Streaming Books — Phase 2: public-domain audiobooks** — LibriVox browse/search and HTTPS
+  streaming through the existing shared player / `AudioSessionActor`; no second player
 
 **Next (strict order):**
-1. **Streaming Books — Phase 2: public-domain audiobooks** — LibriVox browse/search and HTTPS
-   streaming through the existing shared player / `AudioSessionActor`; no second player
-2. **Finish tonight** — quick Home win
-3. **Story Timeline** — distinctive but bigger
-4. Soft: distinct **Couldn't save server** copy vs connection-failed
+1. **Finish tonight** — quick Home win
+2. **Story Timeline** — distinctive but bigger
+3. Soft: distinct **Couldn't save server** copy vs connection-failed
 
-**Parked / out:** second concurrent player (shared NP stays); CarPlay; DSM/SMB; mainline Continue widget (Josh happy on Arena IPA; PR #23 closed not merged — reopen later with `ALTAppGroups` resolve if mainline should match); DRM catalogs; torrent/debrid transport adapters until the lawful-source foundation ships; Bookracy/AudiobookBay and other scraper-backed acquisition.
+**Parked / out:** second concurrent player (shared NP stays); CarPlay; DSM/SMB; mainline Continue widget (Josh happy on Arena IPA; PR #23 closed not merged — reopen later with `ALTAppGroups` resolve if mainline should match); DRM catalogs; torrent/debrid transport adapters until needed after OPDS/direct-HTTPS; Bookracy/AudiobookBay and other scraper-backed acquisition.
 
 **Do not start DSM/SMB, CarPlay, a second player, unlicensed/scraped catalogs, external recommendation APIs, or the Arena widget merge unless Josh reorders. Authorized public-domain catalog work is the narrow exception above; it must remain separate from local-library recommendations.**
 ## Shipped
 
 ### Product / sync
+- [x] **Streaming Books Phase 1: Explore ebooks + lawful source foundation** — tip `f31f45a`;
+  `Library | Explore` segment; Standard Ebooks (public Atom new-releases) + user OPDS + direct
+  HTTPS EPUB; Read now via existing Silveran reader; Add to Library via Storyteller upload;
+  Simulator + Sideload green
+  [Actions 35226804279](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35226804279)
 - [x] **More like this** book-detail rail — local Storyteller library only; series → author
   → tag-overlap ranking; PR #24 squash-merged at tip `b8ca122`; Simulator + Sideload green
   [Actions 35217017886](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35217017886)
@@ -100,10 +99,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-1. **Streaming Books Phase 2** — LibriVox/public-domain audiobook browse + HTTPS streaming through the shared player
-2. **Finish tonight** — smallest Home win
-3. **Story Timeline** — bigger distinctive cut
-4. Soft: **Couldn't save server** copy anytime
+1. **Finish tonight** — smallest Home win
+2. **Story Timeline** — bigger distinctive cut
+3. Soft: **Couldn't save server** copy anytime
 
 ### Soft UX polish (anytime)
 - Soft polish pack → **Shipped** (`b9b07ea` / PR #22)
