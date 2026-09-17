@@ -19,9 +19,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 - Soft polish anytime. **SponsorBlock / StoryAlign / widgets stay Later until Josh verifies YouTube playhead sync.**
 
-**Now: YouTube playhead sync** — Storyteller private collection `.inkamp.youtubePlayheads.v1` (same auth as Stats / place sync). Local `YouTubePlayheadStore` stays source of truth; LWW per video id; push on pause/background/seek; pull on launch / foreground / before Play. Settings last-sync row (Synced / Syncing… / Offline · local only). Offline Continue still uses local.
+**Now: YouTube playhead sync** — tip `0a4da30` ([PR 15](https://github.com/subarude15/storyteller-personal-reader/pull/15)) — Sideload green [35164207619](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35164207619). Storyteller private collection `.inkamp.youtubePlayheads.v1` (same auth as Stats / place sync). Local `YouTubePlayheadStore` stays source of truth; LWW per video id; push on pause/background/seek; pull on launch / foreground / before Play. Settings last-sync row (Synced / Syncing… / Offline · local only). Offline Continue still uses local.
 
-**Await Josh smoke after Sideload green:** play matched YouTube on phone, leave mid-episode; open same ep on iPad (or reinstall) → resumes near that playhead after sync.
+**Await Josh smoke:** play matched YouTube on phone, leave mid-episode; open same ep on iPad (or reinstall) → resumes near that playhead after sync. After Josh verifies → move playhead sync to Shipped.
 
 **Next after Josh verifies playhead sync:** Phone import → StoryAlign read-aloud (board Next).
 
@@ -101,7 +101,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 8. ~~YouTube playhead local~~ → **Shipped** (`fc82893`; await Josh smoke)
 9. ~~Glance / system Now Playing~~ → **Shipped** (`257e44e`; Josh confirmed)
 10. ~~One-tap LAN failover~~ → **Shipped** (`6423bae`; Josh confirmed Using LAN / Using public)
-11. **YouTube playhead sync** → **Now** (Storyteller blob `.inkamp.youtubePlayheads.v1`)
+11. **YouTube playhead sync** → **Now** (tip `0a4da30`; Sideload green [35164207619](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35164207619); await Josh smoke)
 12. **Phone import → StoryAlign read-aloud** — Next after playhead sync
 
 ### Soft UX polish (anytime)
@@ -123,7 +123,7 @@ Strict order (Smokey / Nas-ty):
 5. ~~YouTube playhead persist (local)~~ → **Shipped** (`fc82893`; Josh confirmed resume)
 6. ~~Glance / Lock Screen~~ → **Shipped** (`257e44e`; Josh confirmed)
 7. ~~LAN failover~~ → **Shipped** (`6423bae`; Josh confirmed Using LAN / Using public)
-8. **YouTube playhead sync** → **Now** (Storyteller blob `.inkamp.youtubePlayheads.v1`)
+8. **YouTube playhead sync** → **Now** (tip `0a4da30` Sideload green; await Josh)
 9. **SponsorBlock-style skip** — additive seek on in-app YouTube (not podcast Clean)
 10. **Phone import → StoryAlign read-aloud** — Library Import → Storyteller upload → align → refresh
 11. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
