@@ -47,7 +47,7 @@ public enum PodcastYouTubeResolveSettings {
     public static let lastReachErrorKey = "punkRally.youtubeResolveLastReachError.v1"
 
     /// Prefill for PrincessDonut LAN Invidious (Josh can edit).
-    public static let defaultURLString = "http://192.168.1.2:3000"
+    public static let defaultURLString = "http://192.168.1.2:20130"
 
     public static var urlString: String {
         get {
@@ -135,6 +135,18 @@ public struct PodcastYouTubeResolver: Sendable {
         }
     }
 
+    /// Invidious search for Match on YouTube. Soft timeout; empty array = no matches.
+    public func search(query: String, limit: Int = 5) async throws -> [PodcastYouTubeSearchResult] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        guard let base = await MainActor.run(body: { PodcastYouTubeResolveSettings.baseURL }) else {
+            throw PodcastYouTubeResolveError.missingURL
+        }
+        return try await Self.withTimeout(seconds: overallTimeoutSeconds) {
+            try await self.searchAgainstBase(base: base, query: trimmed, limit: limit)
+        }
+    }
+
     /// Settings Test: GET `/api/v1/stats` (Invidious) or `/health` (thin NAS).
     public func testReachability(baseURL: URL) async -> Result<String, PodcastYouTubeResolveError> {
         let candidates = ["api/v1/stats", "health"].compactMap { Self.endpoint(baseURL, $0) }
@@ -165,6 +177,36 @@ public struct PodcastYouTubeResolver: Sendable {
             }
         }
         return .failure(lastError)
+    }
+
+    // MARK: - Search
+
+    private func searchAgainstBase(
+        base: URL,
+        query: String,
+        limit: Int
+    ) async throws -> [PodcastYouTubeSearchResult] {
+        var components = URLComponents(
+            url: Self.endpoint(base, "api/v1/search") ?? base.appendingPathComponent("api/v1/search"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "type", value: "video"),
+        ]
+        guard let url = components?.url else {
+            throw PodcastYouTubeResolveError.badResponse("search URL")
+        }
+        do {
+            let data = try await getJSON(url: url, timeout: requestTimeoutSeconds)
+            await MainActor.run { PodcastYouTubeResolveSettings.clearOfflineState() }
+            return PodcastYouTubeSearchPicker.pick(from: data, limit: limit)
+        } catch let err as PodcastYouTubeResolveError {
+            await MainActor.run {
+                PodcastYouTubeResolveSettings.markUnreachable(err.errorDescription ?? "failed")
+            }
+            throw err
+        }
     }
 
     // MARK: - Resolve
