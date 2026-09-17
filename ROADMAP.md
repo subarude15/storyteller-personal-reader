@@ -19,7 +19,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 - **Podcast cross-device sync (subs + playheads)** — tip ≥ SponsorBlock / mini-inset `bf8bb81` (Josh: mini-inset OK; SponsorBlock working). Private Storyteller blob (e.g. `.inkamp.podcastSync.v1`); sync feed subscriptions + episode playheads / finished flags; LWW merge; **downloads stay per-device**; push/pull like YouTube playhead sync; soft timeout + Offline footer. Soft polish anytime.
 
-**Do not start DSM/SMB dump / CarPlay / widgets unless Josh reorders.**
+**Do not start DSM/SMB dump / CarPlay / widgets unless Josh reorders** (Josh: CarPlay already good enough; SMB dump cancelled).
 ## Shipped
 
 ### Product / sync
@@ -82,17 +82,25 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ## Next (strict order — do not reorder)
 
 ### After podcast cross-device sync
-1. Soft UX polish (anytime) — see below
-2. Later ideas (CarPlay/Watch, DSM/SMB folder dump) — see Later
+1. **UX polish pack** — Cleaning… vs time-left; YouTube Resolving…; dark cover placeholders; Aligning… vs SYNC copy; soft empty states
+2. Soft UX polish leftovers — see below
+3. Later toys (Timeline / Finish tonight / Wrapped) — see Later; no SMB; no CarPlay push
 
 ### Soft UX polish (anytime)
-- ~~Mini player inset / close~~ → **Shipped** (`833d573`)
+- ~~Mini player inset / close~~ → **Shipped** (`bf8bb81`; Josh OK)
+- ~~Pre-subscribe show description~~ → **Shipped** (Josh can read before Subscribe)
+- ~~Subscribed chrome Unsubscribe left / Done right~~ → **Shipped** (Josh OK)
+- **After podcast sync Sideload** — remaining polish pack:
+  - Cleaning… chip vs episode time-left (job state ≠ Xm left)
+  - YouTube Play **Resolving…** affordance (no silent handoff)
+  - Dark cover placeholders everywhere white-on-white still shows
+  - **Aligning…** (server) vs **SYNC** (download to device) copy
+  - Soft empty states (Storyteller prefilled but unsaved; etc.)
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
 - ~~Stats push / description decode~~ → **Shipped** (`cf5c663`) — Josh confirmed
-- Cleaning… chip must not look like episode remaining (job ETA or plain Cleaning…; keep Xm left on progress separately) — status cluster already separates job chip from Xm left
-- Separate **Couldn't save server** copy (≠ “Connection failed”)
-- Empty state when URL prefilled but no saved Storyteller source
-- Missing Storyteller covers (cosmetic; not a blocker)
+- Separate **Couldn't save server** copy (≠ “Connection failed”) — still soft
+- Missing Storyteller covers (cosmetic; not a blocker) — fold into dark placeholders above
+
 
 ---
 ## Later / ideas (not blocking)
@@ -109,9 +117,11 @@ Strict order (Smokey / Nas-ty):
 9. ~~Browse podcasts (Apple charts/genres)~~ → **Shipped** (`ae3990d`; Josh confirmed)
 10. ~~SponsorBlock-style skip~~ → **Shipped** (Josh confirmed; tip `c38b1e4`)
 11. ~~Phone import → StoryAlign read-aloud~~ → **Shipped** (`05f0006`; Josh upload OK)
-12. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
+12. ~~CarPlay~~ → **parked** (Josh: already does what he needs on free AltStore); Apple Watch still out of Sideload scope
 
-**Later (not StoryAlign v1):** DSM share / SMB / WebDAV folder drop (put EPUB/audio into named NAS folders) and general photo dump — Import v1 uses Storyteller upload API into its library only.
+**Cancelled (Josh 2026-09-16):** DSM/SMB/WebDAV folder dump — happy with Storyteller Import as-is.
+
+**Later toys (high leverage, not urgent):** Story Timeline; Finish tonight card; Wrapped/heat map; series strip; Shortcuts Continue — no Stats widget until paid/SideStore App Groups.
 
 **Podcast cross-device sync** — subscriptions + playheads only; downloads stay per-device → **Now**.
 ## Constraints
