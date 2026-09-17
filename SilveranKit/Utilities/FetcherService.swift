@@ -51,12 +51,22 @@ public struct FetcherService: Sendable {
             return cached
         }
 
+        // Always reload settings so user CRUD changes take effect without restart.
         let planned = try plannedAdapters()
         var results: [AdapterResult] = []
         for config in planned {
-            let adapter = makeAdapter(for: config)
-            let result = try await adapter.fetch(query: trimmed)
-            results.append(result)
+            let adapter: any BookAdapter
+            do {
+                adapter = try makeAdapter(for: config)
+            } catch is AdapterConfigurationError {
+                throw AdapterConfigurationError.malformedURL
+            }
+            do {
+                let result = try await adapter.fetch(query: trimmed)
+                results.append(result)
+            } catch is AdapterConfigurationError {
+                throw AdapterConfigurationError.malformedURL
+            }
         }
 
         guard let merged = BookNormalizer.merge(results) else { return nil }
@@ -67,7 +77,12 @@ public struct FetcherService: Sendable {
         return merged
     }
 
-    public func makeAdapter(for config: AdapterConfig) -> any BookAdapter {
+    /// Builds an adapter for `config`. Re-reads nothing — callers must pass the
+    /// latest settings entry. Throws `AdapterConfigurationError` for bad URLs.
+    public func makeAdapter(for config: AdapterConfig) throws -> any BookAdapter {
+        let loweredType = config.type.lowercased()
+        let loweredId = config.id.lowercased()
+
         switch config.id {
         case "audible-metadata":
             return AudibleAdapter(http: http)
@@ -75,10 +90,24 @@ public struct FetcherService: Sendable {
             return LibGenAdapter(http: http)
         case "openlibrary-normalizer":
             return OpenLibraryAdapter(http: http)
+        case RaveBookSearchAdapter.defaultId, "ravebook-search", "rave-book-search":
+            return RaveBookSearchAdapter(http: http, config: config)
         default:
-            // Unknown id: treat as openlibrary-style no-op enrichment via none.
-            return DisabledAdapter(config: config)
+            break
         }
+
+        if loweredId.contains("rave") || loweredType.contains("rave") {
+            return RaveBookSearchAdapter(http: http, config: config)
+        }
+
+        let hasBase = !(config.config["baseURL"] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty
+        if hasBase || loweredType == "custom" || loweredType == "html" || loweredType == "user" {
+            return try ConfigurableSearchAdapter(config: config, http: http)
+        }
+
+        return DisabledAdapter(config: config)
     }
 }
 

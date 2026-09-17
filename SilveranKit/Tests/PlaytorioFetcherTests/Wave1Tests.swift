@@ -126,18 +126,23 @@ import Testing
 
     let store = AdapterSettings(directory: dir)
     var configs = AdapterSettings.defaultConfigs
-    configs[0].priority = 42
-    configs[0].config = ["region": "us"]
-    configs[1].enabled = false
+    if let idx = configs.firstIndex(where: { $0.id == "audible-metadata" }) {
+        configs[idx].priority = 42
+        configs[idx].config = ["region": "us"]
+    }
+    if let idx = configs.firstIndex(where: { $0.id == "libgen-catalog" }) {
+        configs[idx].enabled = false
+    }
 
     try store.save(configs)
     let loaded = try store.load()
 
-    #expect(loaded.count == 3)
+    #expect(loaded.count == AdapterSettings.defaultConfigs.count)
     let audible = loaded.first { $0.id == "audible-metadata" }
     #expect(audible?.priority == 42)
     #expect(audible?.config["region"] == "us")
     #expect(loaded.first { $0.id == "libgen-catalog" }?.enabled == false)
+    #expect(loaded.contains { $0.id == "ravebooksearch" })
 }
 
 // MARK: - Cache

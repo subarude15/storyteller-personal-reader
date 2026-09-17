@@ -159,7 +159,11 @@ import Testing
     defer { try? FileManager.default.removeItem(at: dir) }
     let settings = AdapterSettings(directory: dir)
     var configs = AdapterSettings.defaultConfigs
-    configs[1].enabled = false // disable libgen
+    for i in configs.indices {
+        if configs[i].id == "libgen-catalog" || configs[i].id == "ravebooksearch" {
+            configs[i].enabled = false
+        }
+    }
     try settings.save(configs)
 
     let service = FetcherService(
@@ -173,6 +177,7 @@ import Testing
     #expect(description.contains("audible-metadata"))
     #expect(description.contains("openlibrary-normalizer"))
     #expect(!description.contains("libgen-catalog"))
+    #expect(!description.contains("ravebooksearch"))
 }
 
 @Test func testLibraryPersistSurfacesIngestedBook() async throws {
@@ -191,7 +196,11 @@ import Testing
 
     let settings = AdapterSettings(directory: dir)
     var configs = AdapterSettings.defaultConfigs
-    configs[1].enabled = false // libgen off
+    for i in configs.indices {
+        if configs[i].id == "libgen-catalog" || configs[i].id == "ravebooksearch" {
+            configs[i].enabled = false
+        }
+    }
     try settings.save(configs)
 
     let libraryPath = dir.appendingPathComponent("library.sqlite")
@@ -221,8 +230,12 @@ import Testing
     let api = PlaytorioAPIServer(service: service)
 
     var configs = AdapterSettings.defaultConfigs
-    configs[0].priority = 5
-    configs[1].enabled = false
+    if let idx = configs.firstIndex(where: { $0.id == "audible-metadata" }) {
+        configs[idx].priority = 15
+    }
+    if let idx = configs.firstIndex(where: { $0.id == "libgen-catalog" }) {
+        configs[idx].enabled = false
+    }
     let body = try JSONEncoder().encode(configs)
     let (putStatus, putData, _) = try await api.handle(
         method: "PUT",
@@ -240,7 +253,7 @@ import Testing
     )
     #expect(getStatus == 200)
     let loaded = try JSONDecoder().decode([AdapterConfig].self, from: getData)
-    #expect(loaded.first { $0.id == "audible-metadata" }?.priority == 5)
+    #expect(loaded.first { $0.id == "audible-metadata" }?.priority == 15)
     #expect(loaded.first { $0.id == "libgen-catalog" }?.enabled == false)
     _ = putData
 }

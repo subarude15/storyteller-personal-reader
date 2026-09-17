@@ -17,7 +17,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Playtorio Fetcher** — settings-driven adapters (Audible metadata / LibGen catalog / OpenLibrary normalizer) + Library/Explore integration. Persist metadata + public URLs only into the Playtorio library index; surface under Explore → Playtorio. Settings → Data Sources. CLI `playtorio-fetcher` + `GET /api/books?query=` / `GET|PUT /api/settings/adapters`.
+- **Playtorio Fetcher** — user-managed Data Sources CRUD + high-priority RaveBookSearch adapter; formats → Explore Download/Import → Storyteller ingest. Persist metadata + public URLs in Playtorio library index; Settings → Data Sources; CLI + `GET /api/books` / `GET|PUT /api/settings/adapters`.
 
 **Next:** Finish tonight → Story Timeline → soft Couldn't save server copy.
 

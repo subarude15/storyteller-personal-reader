@@ -4,6 +4,18 @@ import SQLite3
 public struct AdapterSettings: Sendable {
     public static let defaultConfigs: [AdapterConfig] = [
         AdapterConfig(
+            id: "ravebooksearch",
+            name: "RaveBookSearch",
+            enabled: true,
+            type: "catalog",
+            priority: 5,
+            config: [
+                "baseURL": RaveBookSearchAdapter.defaultBaseURL,
+                "mode": "ebooks",
+                "searchPath": "/search/all",
+            ]
+        ),
+        AdapterConfig(
             id: "audible-metadata",
             name: "Audible Metadata",
             enabled: true,
