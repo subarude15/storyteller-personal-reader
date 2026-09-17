@@ -4,11 +4,13 @@
 //
 //  Find shows via Apple iTunes Search → Subscribe uses the same RSS path as
 //  paste-URL (PodcastSubscriptionStore + RSSPodcastParser).
+//  Empty search shows Browse (Top Charts + genre chips + cover grid).
 //
 //  SPDX-License-Identifier: AGPL-3.0-only
 
 #if os(iOS)
 import SwiftUI
+import SilveranKit
 
 /// Search Apple's podcast catalog; Subscribe resolves RSS into local subscriptions.
 struct FindPodcastShowsView: View {
@@ -28,19 +30,36 @@ struct FindPodcastShowsView: View {
     @State private var loadingPreviewFeed: String?
     @State private var previewError: String?
 
+    @State private var selectedGenre: PodcastBrowseGenre = .topCharts
+    @State private var browseItems: [PodcastChartHit] = []
+    @State private var browseCache: [Int: [PodcastChartHit]] = [:]
+    @State private var isLoadingBrowse = false
+    @State private var browseError: String?
+    @State private var browseTask: Task<Void, Never>?
+
     private var chrome: PunkRallyTheme.Chrome {
         PunkRallyTheme.Chrome(scheme: colorScheme)
+    }
+
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isBrowseMode: Bool {
+        trimmedQuery.isEmpty
     }
 
     var body: some View {
         NavigationStack {
             Group {
-                if isSearching && results.isEmpty {
+                if isBrowseMode {
+                    browseContent
+                } else if isSearching && results.isEmpty {
                     ProgressView("Searching…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(chrome.bg)
                 } else if results.isEmpty {
-                    emptyOrHint
+                    searchEmptyOrHint
                 } else {
                     resultsList
                 }
@@ -51,6 +70,14 @@ struct FindPodcastShowsView: View {
             .searchable(text: $query, prompt: "Show name, e.g. Vergecast")
             .onChange(of: query) { _, newValue in
                 scheduleSearch(newValue)
+            }
+            .onChange(of: selectedGenre) { _, genre in
+                loadBrowse(genre: genre)
+            }
+            .task {
+                if isBrowseMode, browseItems.isEmpty, browseError == nil {
+                    loadBrowse(genre: selectedGenre)
+                }
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -91,12 +118,188 @@ struct FindPodcastShowsView: View {
         }
     }
 
-    private var emptyOrHint: some View {
+    // MARK: - Browse (empty / idle search)
+
+    private var browseContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Browse")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(chrome.text)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+
+                genreChips
+
+                if isLoadingBrowse && browseItems.isEmpty {
+                    ProgressView("Loading charts…")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 40)
+                } else if let browseError, browseItems.isEmpty {
+                    browseOffline(message: browseError)
+                } else if browseItems.isEmpty {
+                    browseOffline(message: "No chart shows right now.")
+                } else {
+                    coverGrid
+                    if let browseError {
+                        Text(browseError)
+                            .font(.caption)
+                            .foregroundStyle(chrome.textMuted)
+                            .padding(.horizontal, 16)
+                    }
+                }
+
+                Button {
+                    onOpenPasteURL?()
+                } label: {
+                    Label("Paste RSS URL instead", systemImage: "link")
+                        .font(.subheadline.weight(.medium))
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 24)
+            }
+        }
+        .background(chrome.bg)
+    }
+
+    private var genreChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(PodcastBrowseGenre.all) { genre in
+                    let selected = genre == selectedGenre
+                    Button {
+                        selectedGenre = genre
+                    } label: {
+                        Text(genre.name)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(selected ? Color.white : chrome.text)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(
+                                Capsule().fill(
+                                    selected
+                                        ? PunkRallyTheme.Accent.primary
+                                        : chrome.surface2
+                                )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+    }
+
+    private var coverGrid: some View {
+        let columns = [
+            GridItem(.flexible(), spacing: 12),
+            GridItem(.flexible(), spacing: 12),
+            GridItem(.flexible(), spacing: 12),
+        ]
+        return LazyVGrid(columns: columns, spacing: 16) {
+            ForEach(browseItems) { hit in
+                Button {
+                    Task { await openChartPreview(hit) }
+                } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        AsyncImage(url: hit.coverURL) { phase in
+                            switch phase {
+                                case .success(let image):
+                                    image.resizable().scaledToFill()
+                                default:
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(chrome.surface2)
+                                        .overlay(
+                                            Image(systemName: "mic.fill")
+                                                .foregroundStyle(chrome.textFaint)
+                                        )
+                            }
+                        }
+                        .aspectRatio(1, contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                        Text(hit.title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(chrome.text)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        if let author = hit.author {
+                            Text(author)
+                                .font(.caption2)
+                                .foregroundStyle(chrome.textMuted)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(hit.title)")
+                .accessibilityHint("Opens show description without subscribing")
+            }
+        }
+        .padding(.horizontal, 16)
+        .opacity(isLoadingBrowse ? 0.55 : 1)
+    }
+
+    private func browseOffline(message: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 36))
+                .foregroundStyle(chrome.textFaint)
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(chrome.textMuted)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+            Button("Retry") {
+                browseCache[selectedGenre.id] = nil
+                loadBrowse(genre: selectedGenre, force: true)
+            }
+            .buttonStyle(.bordered)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 32)
+    }
+
+    private func loadBrowse(genre: PodcastBrowseGenre, force: Bool = false) {
+        if !force, let cached = browseCache[genre.id], !cached.isEmpty {
+            browseItems = cached
+            browseError = nil
+            isLoadingBrowse = false
+            return
+        }
+        browseTask?.cancel()
+        if browseCache[genre.id] == nil {
+            browseItems = []
+        }
+        isLoadingBrowse = true
+        browseError = nil
+        browseTask = Task {
+            do {
+                let hits = try await PodcastBrowseChartsService.shared.chart(genre: genre)
+                guard !Task.isCancelled else { return }
+                browseCache[genre.id] = hits
+                browseItems = hits
+                browseError = nil
+            } catch let error as PodcastAppleChartsError {
+                guard !Task.isCancelled else { return }
+                browseError = error.errorDescription
+            } catch {
+                guard !Task.isCancelled else { return }
+                browseError = PodcastAppleChartsError.offline.errorDescription
+            }
+            isLoadingBrowse = false
+        }
+    }
+
+    // MARK: - Search
+
+    private var searchEmptyOrHint: some View {
         VStack(spacing: 16) {
             Image(systemName: statusIsError ? "wifi.exclamationmark" : "magnifyingglass")
                 .font(.system(size: 40))
                 .foregroundStyle(chrome.textFaint)
-            Text(statusMessage ?? "Search for a show")
+            Text(statusMessage ?? "No shows found")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(chrome.text)
                 .multilineTextAlignment(.center)
@@ -104,7 +307,7 @@ struct FindPodcastShowsView: View {
             Text(
                 statusIsError
                     ? "You can still add a show by pasting its RSS feed URL."
-                    : "Results come from Apple Podcasts Search and include artwork when available."
+                    : "Try another spelling, clear search to Browse charts, or paste an RSS URL."
             )
             .font(.subheadline)
             .foregroundStyle(chrome.textMuted)
@@ -189,6 +392,17 @@ struct FindPodcastShowsView: View {
         isSearching = false
     }
 
+    private func openChartPreview(_ hit: PodcastChartHit) async {
+        let searchHit = PRPodcastSearchResult(
+            title: hit.title,
+            author: hit.author,
+            coverURL: hit.coverURL,
+            feedURL: hit.feedURL,
+            collectionID: hit.collectionID
+        )
+        await openPreview(searchHit)
+    }
+
     private func openPreview(_ hit: PRPodcastSearchResult) async {
         let key = hit.feedURL.absoluteString
         guard loadingPreviewFeed != key else { return }
@@ -197,7 +411,6 @@ struct FindPodcastShowsView: View {
         let show = await viewModel.previewShow(feedURL: hit.feedURL)
         loadingPreviewFeed = nil
         if let show {
-            // Prefer search artwork when the feed omits a cover.
             if show.coverURL == nil, let cover = hit.coverURL {
                 previewShow = PRPodcastShow(
                     uuid: show.uuid,
