@@ -1,5 +1,6 @@
 #if os(iOS) || os(macOS)
 import SwiftUI
+import SilveranKit
 
 struct MediaCompactCardView: View {
     let item: BookMetadata
@@ -29,35 +30,66 @@ struct MediaCompactCardView: View {
     }
 
     private var availableMediaColor: Color { palette.mutedAccent }
-    #if os(iOS)
-    @Environment(\.mediaNavigationPath) private var mediaNavigationPath
-    @Environment(\.editMetadataAction) private var editMetadataAction
-    @State private var pendingDetailsNavigation = false
-    #endif
-
-    var body: some View {
         #if os(iOS)
-        if let playerData = preferredPlayerBookData {
-            Button {
-                PlayerPresenter.shared.present(playerData)
-            } label: {
-                cardContent
-            }
-            .buttonStyle(.plain)
-            .background(deferredNavigationLinks)
-            .contextMenu { iOSContextMenu }
-        } else {
-            NavigationLink(value: item) {
-                cardContent
-            }
-            .buttonStyle(.plain)
-            .background(deferredNavigationLinks)
-            .contextMenu { iOSContextMenu }
-        }
-        #else
-        cardContent
+        @Environment(\.mediaNavigationPath) private var mediaNavigationPath
+        @Environment(\.editMetadataAction) private var editMetadataAction
+        @Environment(\.mediaGridTapOpensPlayer) private var mediaGridTapOpensPlayer
+        @State private var pendingDetailsNavigation = false
         #endif
-    }
+
+        var body: some View {
+            #if os(iOS)
+            if mediaGridTapOpensPlayer {
+                // ink+amp: tapping a downloaded ebook/audiobook/readaloud opens
+                // it in the player/reader. An undownloaded tap opens the book
+                // detail (download UI) — no toast. The toast fires only when a
+                // downloaded title can't resolve/open its local media.
+                Button {
+                    openForPlayback()
+                } label: {
+                    cardContent
+                }
+                .buttonStyle(.plain)
+                .background(deferredNavigationLinks)
+                .contextMenu { iOSContextMenu }
+            } else if let playerData = preferredPlayerBookData {
+                Button {
+                    PlayerPresenter.shared.present(playerData)
+                } label: {
+                    cardContent
+                }
+                .buttonStyle(.plain)
+                .background(deferredNavigationLinks)
+                .contextMenu { iOSContextMenu }
+            } else {
+                NavigationLink(value: item) {
+                    cardContent
+                }
+                .buttonStyle(.plain)
+                .background(deferredNavigationLinks)
+                .contextMenu { iOSContextMenu }
+            }
+            #else
+            cardContent
+            #endif
+        }
+
+        #if os(iOS)
+                private func openForPlayback() {
+                    if PunkRallyPlayerHost.shouldOpenPlayer(for: item, mediaViewModel: mediaViewModel) {
+                        Task {
+                            await PunkRallyPlayerHost.open(
+                                item,
+                                mediaViewModel: mediaViewModel
+                            )
+                        }
+                    } else {
+                        // Nothing downloaded yet: open the book detail (download UI)
+                        // instead of toasting — an undownloaded tap is not a failure.
+                        handleDetailsNavigation()
+                    }
+                }
+                #endif
 
     private var isDoubleCover: Bool {
         coverPreference == .storytellerDouble
@@ -129,11 +161,14 @@ struct MediaCompactCardView: View {
                         )
                         .padding(.trailing, 3)
                         .padding(.bottom, 3)
-                    } else if progressStyle == .text {
-                        ProgressTextBadge(progress: progress)
-                            .padding(.trailing, 3)
-                            .padding(.bottom, 3)
                     }
+                    // Always show finishability text so Library cards are not bar-only.
+                    ProgressTextBadge(
+                        progress: progress,
+                        durationSeconds: item.durationValue
+                    )
+                    .padding(.trailing, progressStyle == .circle && !shouldRenderDoubleCover ? 22 : 3)
+                    .padding(.bottom, 3)
                 }
             }
             .overlay(alignment: .bottomLeading) {

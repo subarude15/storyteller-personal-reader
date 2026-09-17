@@ -83,6 +83,11 @@ public struct iOSLibraryView: View {
         if case .error(let message) = mediaViewModel.connectionStatus {
             return .authError(message)
         }
+        for info in mediaViewModel.sourceConnectionInfos {
+            if case .error(let message) = info.status {
+                return .authError(message)
+            }
+        }
         return .networkOffline
     }
 
@@ -860,6 +865,7 @@ struct BooksContentView: View {
                 MediaGridView.ColumnBreakpoint(columns: 3, minWidth: 0)
             ],
             initialNarrationFilterOption: .both,
+            showAddBookButton: true,
         )
         .navigationTitle("Books")
         .navigationBarTitleDisplayMode(.inline)
@@ -1214,21 +1220,21 @@ struct SeriesContentView: View {
     }
 }
 
-struct OfflineStatusSheet: View {
-    enum ErrorType: Equatable {
+public struct OfflineStatusSheet: View {
+    public enum ErrorType: Equatable {
         case networkOffline
         case authError(String)
     }
 
-    let errorType: ErrorType
-    let sources: [SourceConnectionInfo]
-    let onRetry: () async -> Bool
-    let onGoToDownloads: () -> Void
-    let onGoToSettings: (() -> Void)?
+    public let errorType: ErrorType
+    public let sources: [SourceConnectionInfo]
+    public let onRetry: () async -> Bool
+    public let onGoToDownloads: () -> Void
+    public let onGoToSettings: (() -> Void)?
 
     @State private var isRetrying = false
 
-    init(
+    public init(
         errorType: ErrorType = .networkOffline,
         sources: [SourceConnectionInfo] = [],
         onRetry: @escaping () async -> Bool,
@@ -1256,6 +1262,9 @@ struct OfflineStatusSheet: View {
     private var message: String {
         switch errorType {
             case .networkOffline:
+                if sources.filter({ $0.kind == .storyteller }).isEmpty {
+                    return "No Storyteller server is connected yet. You can connect a server in Settings or read downloaded books on your shelf."
+                }
                 return
                     "Downloaded books are always available. Per-source status is shown below."
             case .authError(let details):
@@ -1315,7 +1324,7 @@ struct OfflineStatusSheet: View {
         }
     }
 
-    var body: some View {
+    public var body: some View {
         VStack(spacing: 24) {
             Image(systemName: icon)
                 .font(.system(size: 48))
@@ -1334,7 +1343,7 @@ struct OfflineStatusSheet: View {
             sourceStatusList
 
             VStack(spacing: 12) {
-                if case .authError = errorType, let onGoToSettings {
+                if let onGoToSettings {
                     Button(action: onGoToSettings) {
                         HStack {
                             Image(systemName: "gearshape.fill")
@@ -1388,7 +1397,7 @@ struct OfflineStatusSheet: View {
 }
 
 extension OfflineStatusSheet.ErrorType {
-    var isAuthError: Bool {
+    public var isAuthError: Bool {
         if case .authError = self { return true }
         return false
     }

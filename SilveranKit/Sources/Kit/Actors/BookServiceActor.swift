@@ -135,8 +135,10 @@ public actor BookServiceActor {
             guard let source = sourcesByID[record.id] else { continue }
             let status = await source.connectionStatus
             var netOpSucceeded: Bool? = nil
+            var networkRoute: StorytellerNetworkRoute? = nil
             if let storyteller = source as? StorytellerActor {
                 netOpSucceeded = await storyteller.lastNetworkOpSucceeded
+                networkRoute = await storyteller.networkRoute
             }
             result.append(
                 SourceConnectionInfo(
@@ -145,6 +147,7 @@ public actor BookServiceActor {
                     kind: record.kind,
                     status: status,
                     lastNetworkOpSucceeded: netOpSucceeded,
+                    networkRoute: networkRoute,
                 )
             )
         }
@@ -276,6 +279,7 @@ public actor BookServiceActor {
                 guard
                     await actor.configureCredentials(
                         baseURL: serverURL,
+                        lanURL: configuration.lanURL,
                         username: username,
                         password: password,
                     )
@@ -287,6 +291,7 @@ public actor BookServiceActor {
                 do {
                     try await AuthenticationActor.shared.saveCredentials(
                         url: serverURL,
+                        lanURL: configuration.lanURL,
                         username: username,
                         password: password,
                         sourceID: record.id,
@@ -370,6 +375,7 @@ public actor BookServiceActor {
                 guard
                     await actor.configureCredentials(
                         baseURL: serverURL,
+                        lanURL: configuration.lanURL,
                         username: username,
                         password: password,
                     )
@@ -380,6 +386,7 @@ public actor BookServiceActor {
                 do {
                     try await AuthenticationActor.shared.saveCredentials(
                         url: serverURL,
+                        lanURL: configuration.lanURL,
                         username: username,
                         password: password,
                         sourceID: sourceID,
@@ -426,6 +433,7 @@ public actor BookServiceActor {
 
         return await actor.setLogin(
             baseURL: credentials.url,
+            lanURL: credentials.lanURL,
             username: credentials.username,
             password: credentials.password,
         )
@@ -462,10 +470,13 @@ public actor BookServiceActor {
         return true
     }
 
-    public func credentials(for sourceID: BookSourceID) async
-        -> (url: String, username: String, password: String)?
-    {
+    public func credentials(for sourceID: BookSourceID) async -> StorytellerSourceCredentials? {
         try? await AuthenticationActor.shared.loadCredentials(sourceID: sourceID)
+    }
+
+    public func storytellerNetworkRoute(sourceID: BookSourceID) async -> StorytellerNetworkRoute? {
+        guard let actor = await storytellerActor(for: sourceID) else { return nil }
+        return await actor.networkRoute
     }
 
     public func checkBookUpdatePermission(
@@ -1401,6 +1412,76 @@ public actor BookServiceActor {
         return await storyteller.fetchCollections()
     }
 
+    // MARK: - ink+amp Stats sync (first Storyteller source)
+
+    /// Primary configured Storyteller source (same account as place sync).
+    public func primaryStorytellerSourceID() async -> BookSourceID? {
+        await ensureSourceRegistryLoaded()
+        return sourceRecords.first(where: { $0.kind == .storyteller })?.id
+    }
+
+    public func canReachStorytellerForStatsSync() async -> Bool {
+        guard let storyteller = await primaryStorytellerActor() else { return false }
+        return await storyteller.canReachStorytellerForStatsSync()
+    }
+
+    public func fetchInkampStatsDocument() async -> StorytellerActor.InkampStatsFetchResult {
+        guard let storyteller = await primaryStorytellerActor() else {
+            return .unavailable(reason: "no Storyteller source")
+        }
+        return await storyteller.fetchInkampStatsDocument()
+    }
+
+    public func pushInkampStatsDocument(_ document: InkampStatsSyncDocument) async
+        -> StorytellerActor.InkampStatsPushResult
+    {
+        guard let storyteller = await primaryStorytellerActor() else {
+            return .failure(reason: "no Storyteller source")
+        }
+        return await storyteller.pushInkampStatsDocument(document)
+    }
+
+    public func fetchInkampYouTubePlayheadsDocument() async
+        -> StorytellerActor.InkampYouTubePlayheadFetchResult
+    {
+        guard let storyteller = await primaryStorytellerActor() else {
+            return .unavailable(reason: "no Storyteller source")
+        }
+        return await storyteller.fetchInkampYouTubePlayheadsDocument()
+    }
+
+    public func pushInkampYouTubePlayheadsDocument(_ document: InkampYouTubePlayheadSyncDocument)
+        async -> StorytellerActor.InkampYouTubePlayheadPushResult
+    {
+        guard let storyteller = await primaryStorytellerActor() else {
+            return .failure(reason: "no Storyteller source")
+        }
+        return await storyteller.pushInkampYouTubePlayheadsDocument(document)
+    }
+
+    public func fetchInkampPodcastSyncDocument() async
+        -> StorytellerActor.InkampPodcastSyncFetchResult
+    {
+        guard let storyteller = await primaryStorytellerActor() else {
+            return .unavailable(reason: "no Storyteller source")
+        }
+        return await storyteller.fetchInkampPodcastSyncDocument()
+    }
+
+    public func pushInkampPodcastSyncDocument(_ document: InkampPodcastSyncDocument) async
+        -> StorytellerActor.InkampPodcastSyncPushResult
+    {
+        guard let storyteller = await primaryStorytellerActor() else {
+            return .failure(reason: "no Storyteller source")
+        }
+        return await storyteller.pushInkampPodcastSyncDocument(document)
+    }
+
+    private func primaryStorytellerActor() async -> StorytellerActor? {
+        await ensureSourceRegistryLoaded()
+        return storytellerActors().first
+    }
+
     public func createCollection(
         _ payload: StorytellerCollectionCreatePayload,
         sourceID: BookSourceID,
@@ -1464,6 +1545,7 @@ public actor BookServiceActor {
                     {
                         _ = await actor.configureCredentials(
                             baseURL: credentials.url,
+                            lanURL: credentials.lanURL,
                             username: credentials.username,
                             password: credentials.password,
                         )

@@ -11,6 +11,39 @@ if [[ "${SILVERAN_DISABLE_CODE_SIGNING:-0}" == "1" ]]; then
     XCODEBUILD_OPTIONS=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build)
 fi
 
+# Resolve package dependencies if needed
+xcodebuild -resolvePackageDependencies \
+    -project Silveran.xcodeproj \
+    -scheme "Silveran Reader (iOS)" \
+    -derivedDataPath .buildIos
+
+# Patch WordAligner in StoryAlign checkouts if present to avoid Swift 6.2 type-checking timeout
+chmod -R u+w .buildIos 2>/dev/null || true
+python3 -c '
+import glob, os
+paths = glob.glob("**/*WordAligner.swift", recursive=True) + \
+        glob.glob(".buildIos/**/WordAligner.swift", recursive=True) + \
+        glob.glob(os.path.expanduser("~/Library/Developer/Xcode/DerivedData/**/WordAligner.swift"), recursive=True)
+for path in paths:
+    try:
+        os.chmod(path, 0o644)
+        with open(path, "r") as f:
+            content = f.read()
+        target = """        let idealTakes: [Double] = (0..<intervals).map { i in
+            Double(totalWords) * max(0.0, bounds[i+1] - bounds[i]) / totalDuration
+        }"""
+        replacement = """        let idealTakes: [Double] = (0..<intervals).map { i -> Double in
+            let span = max(0.0, bounds[i+1] - bounds[i])
+            return Double(totalWords) * span / totalDuration
+        }"""
+        if target in content:
+            with open(path, "w") as f:
+                f.write(content.replace(target, replacement))
+            print(f"Patched {path}")
+    except Exception as e:
+        print(f"Error checking {path}: {e}")
+' 2>&1 || true
+
 xcodebuild -project Silveran.xcodeproj \
     -scheme "Silveran Reader (iOS)" \
     -configuration Debug \

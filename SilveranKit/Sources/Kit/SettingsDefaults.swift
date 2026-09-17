@@ -1,7 +1,10 @@
 import Foundation
 
 public let kDefaultFontSize: Double = 24
-public let kDefaultFontFamily = "System Default"
+// ink+amp: Fast Serif is the designated default reader body. The constant
+// names a bundled family so new installs open on Fast Serif; users can still
+// switch via the Aa picker.
+public let kDefaultFontFamily = "Fast Serif"
 public let kDefaultLineSpacing: Double = 1.4
 public let kDefaultMarginLeftRightIOS: Double = 2
 public let kDefaultMarginLeftRightMac: Double = 5
@@ -68,6 +71,14 @@ public let kDefaultProgressSyncIntervalSeconds: Double = 30
 public let kDefaultMetadataRefreshIntervalSeconds: Double = 300
 public let kDefaultIsManuallyOffline = false
 public let kDefaultAutoSyncToNewerServerPosition = false
+
+/// ink+amp: default Storyteller server used when fresh-book-source creation
+/// is given no explicit server URL. This is the private cellar server.
+public let kDefaultStorytellerServerURL = "https://storyteller.banditoburrito.xyz"
+
+/// ink+amp: default on-LAN Storyteller URL (PrincessDonut NAS). Prefill / missing-key default
+/// for optional home-Wi‑Fi failover; editable in Settings. Same credentials as public URL.
+public let kDefaultStorytellerLANURL = "http://192.168.1.2:1800"
 
 public let kDefaultShowAudioIndicator = true
 public let kDefaultTabBarSlot1 = "books"

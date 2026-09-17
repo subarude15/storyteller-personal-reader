@@ -72,7 +72,7 @@ struct MediaGridSortAndFilterBar: View {
                 onAddBook()
             } label: {
                 #if os(iOS)
-                Label("Add Book", systemImage: "plus.circle")
+                Label("Import", systemImage: "square.and.arrow.down")
                     .labelStyle(.iconOnly)
                 #else
                 Label("Add Book", systemImage: "plus")
@@ -81,7 +81,8 @@ struct MediaGridSortAndFilterBar: View {
             #if os(macOS)
             .buttonStyle(.borderless)
             #endif
-            .help("Add book")
+            .help("Import EPUB and audiobook")
+            .accessibilityLabel("Import")
         }
     }
 

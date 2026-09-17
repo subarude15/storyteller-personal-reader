@@ -27,6 +27,7 @@ extension FilesystemActor {
 
                 try await AuthenticationActor.shared.saveCredentials(
                     url: credentials.url,
+                    lanURL: credentials.lanURL,
                     username: credentials.username,
                     password: credentials.password,
                     sourceID: source.id,

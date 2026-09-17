@@ -617,7 +617,7 @@ struct MediaGridView: View {
         .sheet(isPresented: $showAddBook) {
             NavigationStack {
                 UploadNewBookView(initialSourceID: addBookSourceID)
-                .navigationTitle("Add Book")
+                .navigationTitle("Import")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -627,6 +627,7 @@ struct MediaGridView: View {
                     }
                 }
             }
+            .punkRallyMiniPlayerInset()
         }
         #endif
     }

@@ -106,7 +106,7 @@ public struct SecurityKeychainStore: KeychainStoring {
         if configuredService != nil {
             return configuredAccessGroup
         }
-        return Self.requiredInfoValue(for: Self.accessGroupInfoKey)
+        return Self.infoValue(for: Self.accessGroupInfoKey)
     }
 
     #if canImport(Security)
@@ -119,10 +119,14 @@ public struct SecurityKeychainStore: KeychainStoring {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
-            kSecUseDataProtectionKeychain as String: true,
         ]
+        // kSecUseDataProtectionKeychain requires the keychain-access-groups /
+        // data-protection entitlement; under a free AltStore resign (sideload)
+        // it can trigger errSecMissingEntitlement (-34018) even without a
+        // shared group. Only set it when we actually have an access group.
         if let accessGroup {
             query[kSecAttrAccessGroup as String] = accessGroup
+            query[kSecUseDataProtectionKeychain as String] = true
         }
         return query
     }

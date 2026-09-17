@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""Generate all app icon sizes for ink+amp from the twin-pages design source.
+
+Source of truth: XCodeApps/Assets.xcassets/TwinPagesIcon.imageset/twin-pages-final.png
+(1280x720 RGB, dark charcoal background to the edges with the cream/ink book +
+orange waveform/spark artwork centered; it is a WIDE canvas, not square).
+
+Treatment (full-bleed dark icon, artwork intact):
+  1. Scale the whole source so its WIDTH fills the target square.
+  2. Pad vertically with the source's own background color (near-black).
+  3. Downscale to size with high-quality Lanczos. Output is sRGB, opaque,
+     no alpha (iOS app icons must be opaque).
+
+Outputs:
+  iOS main icon:  XCodeApps/Assets.xcassets/AppIcon.appiconset/icon_1024x1024.png
+  watchOS icon:   XCodeApps/WatchAssets.xcassets/AppIcon.appiconset/icon_1024x1024.png
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+from PIL import Image
+
+REPO = Path(__file__).resolve().parent.parent
+SRC = REPO / "XCodeApps" / "Assets.xcassets" / "TwinPagesIcon.imageset" / "twin-pages-final.png"
+IOS_DIR = REPO / "XCodeApps" / "Assets.xcassets" / "AppIcon.appiconset"
+WATCH_DIR = REPO / "XCodeApps" / "WatchAssets.xcassets" / "AppIcon.appiconset"
+
+TARGETS = [
+    (IOS_DIR / "icon_1024x1024.png", 1024),
+    (WATCH_DIR / "icon_1024x1024.png", 1024),
+]
+
+
+def dominant_corner_color(im: Image.Image):
+    """Average of the four corner pixels — the source's flat bg color."""
+    w, h = im.size
+    px = im.convert("RGB")
+    corners = [
+        px.getpixel((2, 2)),
+        px.getpixel((w - 3, 2)),
+        px.getpixel((2, h - 3)),
+        px.getpixel((w - 3, h - 3)),
+    ]
+    return tuple(sum(c[i] for c in corners) // len(corners) for i in range(3))
+
+
+def main() -> int:
+    if not SRC.exists():
+        print(f"ERROR: source icon missing: {SRC}")
+        return 1
+    im = Image.open(SRC).convert("RGB")
+    w, h = im.size
+    for out_path, size in TARGETS:
+        # Scale source so width fills target, then pad vertically with bg color.
+        scaled_w = size
+        scaled_h = max(1, round(h * scaled_w / w))
+        scaled = im.resize((scaled_w, scaled_h), Image.LANCZOS)
+        canvas = Image.new("RGB", (size, size), dominant_corner_color(im))
+        y = (size - scaled_h) // 2
+        canvas.paste(scaled, (0, y))
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        canvas.save(out_path, format="PNG", optimize=True)
+        print(f"wrote {out_path} ({size}x{size}, art {scaled_w}x{scaled_h} at y={y})")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
