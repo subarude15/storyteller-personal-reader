@@ -84,7 +84,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 2. Later ideas (SponsorBlock, CarPlay/Watch, podcast cross-device sync, DSM/SMB folder dump) — see Later
 
 ### Soft UX polish (anytime)
-- ~~Mini player inset / close~~ → **Now (P0)** — screens under GlobalMiniPlayerBar block stop/close
+- ~~Mini player inset / close~~ → **Now (P0 tip in flight)** — sheets + close ≥44pt
 - ~~Stats Retry sync~~ → **Shipped** (`fdb5560`)
 - ~~Stats push / description decode~~ → **Shipped** (`cf5c663`) — Josh confirmed
 - Cleaning… chip must not look like episode remaining (job ETA or plain Cleaning…; keep Xm left on progress separately) — status cluster already separates job chip from Xm left
