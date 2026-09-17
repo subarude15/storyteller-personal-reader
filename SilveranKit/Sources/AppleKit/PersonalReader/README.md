@@ -10,11 +10,16 @@ PersonalReader/
 │   ├── Home/
 │   ├── Library/
 │   ├── Podcasts/
-│   └── Journal/
+│   ├── Journal/
+│   └── Explore/            # lawful-only: public OPDS/Atom, user OPDS, direct https, BYO debrid link (no pirate bundle)
 └── Services/
     ├── Activity/
     └── Podcasts/
 ```
+
+Explore is lawful-only per `Features/Explore/README.md` and `docs/cursor-paste-explore-authorized.md`:
+no bundled pirate indexes, no Audible login scrape, no DRM strip; Open Library/Hardcover are
+wishlist/search (metadata-only); “More like this” is library-only until Add to Library.
 
 Directories should be created when they contain executable code rather than as empty placeholders.
 
