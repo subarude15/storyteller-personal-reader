@@ -22,6 +22,8 @@ public struct PodcastRecentEntry: Identifiable, Codable, Equatable, Sendable {
     public var mediaKind: PRPodcastMediaKind
     public var lastTouched: Date
     public var progress: Double
+    /// Watch URL when this recent is in-app YouTube (re-resolve on Continue).
+    public var youtubeURL: URL?
 
     public init(
         episodeID: String,
@@ -33,7 +35,8 @@ public struct PodcastRecentEntry: Identifiable, Codable, Equatable, Sendable {
         feedURL: URL? = nil,
         mediaKind: PRPodcastMediaKind = .audio,
         lastTouched: Date = Date(),
-        progress: Double = 0
+        progress: Double = 0,
+        youtubeURL: URL? = nil
     ) {
         self.episodeID = episodeID
         self.title = title
@@ -45,6 +48,7 @@ public struct PodcastRecentEntry: Identifiable, Codable, Equatable, Sendable {
         self.mediaKind = mediaKind
         self.lastTouched = lastTouched
         self.progress = min(max(progress, 0), 1)
+        self.youtubeURL = youtubeURL
     }
 }
 

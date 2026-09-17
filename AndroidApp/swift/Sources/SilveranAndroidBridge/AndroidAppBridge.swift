@@ -773,7 +773,7 @@ private func encodeStorytellerSettings() async throws -> String {
     let source = await BookServiceActor.shared.bookSources.first {
         $0.kind == .storyteller
     }
-    let credentials: (url: String, username: String, password: String)?
+    let credentials: StorytellerSourceCredentials?
     let connection: ConnectionStatus
 
     if let source {

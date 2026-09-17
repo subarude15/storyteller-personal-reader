@@ -5,6 +5,7 @@ public actor AuthenticationActor {
     public static let shared = AuthenticationActor()
 
     private let serverURLKey = "serverURL"
+    private let lanURLKey = "lanURL"
     private let usernameKey = "username"
     private let passwordKey = "password"
     private let hardcoverTokenKey = "hardcoverToken"
@@ -22,6 +23,7 @@ public actor AuthenticationActor {
 
     public func saveCredentials(
         url: String,
+        lanURL: String? = nil,
         username: String,
         password: String,
         sourceID: BookSourceID,
@@ -31,6 +33,8 @@ public actor AuthenticationActor {
         try await saveString(url, for: accountKey(serverURLKey, sourceID: sourceID))
         try await saveString(username, for: accountKey(usernameKey, sourceID: sourceID))
         try await saveString(password, for: accountKey(passwordKey, sourceID: sourceID))
+        // Persist LAN even when empty so "cleared" stays disabled (≠ missing → default).
+        try await saveString(lanURL ?? "", for: accountKey(lanURLKey, sourceID: sourceID))
     }
 
     public func loadCredentials() async throws -> (url: String, username: String, password: String)?
@@ -45,8 +49,7 @@ public actor AuthenticationActor {
         return (url, username, password)
     }
 
-    public func loadCredentials(sourceID: BookSourceID) async throws
-        -> (url: String, username: String, password: String)?
+    public func loadCredentials(sourceID: BookSourceID) async throws -> StorytellerSourceCredentials?
     {
         guard let url = try await loadString(for: accountKey(serverURLKey, sourceID: sourceID)),
             let username = try await loadString(for: accountKey(usernameKey, sourceID: sourceID)),
@@ -55,7 +58,20 @@ public actor AuthenticationActor {
             return nil
         }
 
-        return (url, username, password)
+        // Missing key → nil (routing uses default). Present empty string → disabled.
+        let lanURL: String?
+        if try await keychain.item(account: accountKey(lanURLKey, sourceID: sourceID)) == nil {
+            lanURL = nil
+        } else {
+            lanURL = try await loadString(for: accountKey(lanURLKey, sourceID: sourceID)) ?? ""
+        }
+
+        return StorytellerSourceCredentials(
+            url: url,
+            lanURL: lanURL,
+            username: username,
+            password: password,
+        )
     }
 
     public func deleteCredentials() async throws {
@@ -65,7 +81,7 @@ public actor AuthenticationActor {
     }
 
     public func deleteCredentials(sourceID: BookSourceID) async throws {
-        for key in [serverURLKey, usernameKey, passwordKey] {
+        for key in [serverURLKey, lanURLKey, usernameKey, passwordKey] {
             try await keychain.removeItem(account: accountKey(key, sourceID: sourceID))
         }
     }

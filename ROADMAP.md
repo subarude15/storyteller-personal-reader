@@ -59,7 +59,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **Episode status cluster + show filters + Josh UI stamps** — tip `b719921`; download glyph · Clean chip (incl. Clean failed) · Xm left/Played; show filters All|Downloaded|In progress|Clean pending; Shelf POD chrome; mini-player cover+title+play/pause(+close) only (scrub/−15/+15 stay on full Now Playing); Home/Library finishability text via `PlaybackFinishabilityCopy`; Sideload green [35023934089](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35023934089)
 - [x] **Podcast play queue** — tip `2f7deb4`; Play Next / Play Last in episode menus; `PodcastPlaybackQueueStore` + editable `PodcastPlaybackQueueView` (drag reorder, remove, clear finished); auto-advance on finish via shared player; persisted upcoming order; Sideload green [35025614228](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35025614228)
 - [x] **P0 Podcast resume / Home Continue stall** — tip `7eb0a9e`; Josh confirmed; Loading until playhead advances; Pause only when truly playing; Sideload green [35031138576](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35031138576)
-
+- [x] **In-app YouTube v1** — tip `bd32690`; Settings resolve URL → Invidious/Piped → shared AVPlayer video path; soft timeout; toast + Watch on YouTube handoff
+- [x] **P0 YouTube extract video-id only** — channel / @handle no longer fake-Play; first valid watch URL wins; chips gated on `videoID`; Resolving… then toast/handoff
+- [x] **Match on YouTube v1** — tip `0cb8155` / `a0722eb` ([PR 11](https://github.com/subarude15/storyteller-personal-reader/pull/11)); search + confirm + persist; Sideload green
+- [x] **YouTube playhead persist (local)** — tip `fc82893` ([PR 12](https://github.com/subarude15/storyteller-personal-reader/pull/12)); video-id `YouTubePlayheadStore`; Sideload green [35156077127](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35156077127); Josh confirmed
+- [x] **One-tap LAN failover** — tip `6423bae` ([PR 14](https://github.com/subarude15/storyteller-personal-reader/pull/14)); Sideload green [35161811290](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35161811290); Josh confirmed Using LAN / Using public
 ### Shell polish
 - [x] **Mini-player above tab bar** — per-tab inset (`be395da`, Sideload [35008731469](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35008731469)); Josh confirmed
 - [x] **Mini / full player polish** — −15/+15, elapsed|scrub|remaining, podcast cover on mini (`b8c85f9` / tip ≥ `70866b7`, Sideload [35011914260](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35011914260)); Josh ready for next
@@ -97,7 +101,7 @@ Strict order (Smokey / Nas-ty):
 2. ~~Silence-trim~~ → **Shipped** (`d8af263`; Josh verified)
 3. ~~Full in-app YouTube embed/SDK~~ → **superseded** by hybrid + in-app YouTube v1 + Match
 4. ~~Match on YouTube~~ → **Shipped** (`a0722eb`; Josh confirmed)
-5. ~~YouTube playhead persist (local)~~ → **Shipped** (Josh confirmed resume)
+5. ~~YouTube playhead persist (local)~~ → **Shipped** (`fc82893`; Josh confirmed resume)
 6. ~~Glance / Lock Screen~~ → **Shipped** (`257e44e`; Josh confirmed)
 7. ~~LAN failover~~ → **Shipped** (`4f9d27d`; Josh confirmed Using LAN / Using public)
 8. ~~YouTube playhead sync~~ → **Shipped** (`0a4da30`; Josh confirmed)
