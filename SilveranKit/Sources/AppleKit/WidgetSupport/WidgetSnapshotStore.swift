@@ -8,13 +8,24 @@ import WidgetKit
 
 public enum SilveranWidgetConstants {
     public static let appGroupInfoKey = "SILVERAN_WIDGET_APP_GROUP"
-    /// Prefer Info.plist override; Sideload + ink+amp use group.com.punkrally.reader.
+    /// AltStore Classic writes the *resigned* App Group identifiers here for the
+    /// app and for every embedded app extension (`ResignAppOperation.prepare`).
+    /// AltStore appends the signing team identifier to each declared group
+    /// (`<group>.<TEAMID>` in `FetchProvisioningProfilesOperation.updateAppGroups`),
+    /// so a hard-coded group id resolves to a container that does not exist on a
+    /// sideloaded build. Always read this key first.
+    public static let altStoreAppGroupsInfoKey = "ALTAppGroups"
+    /// Fallback for builds that are not resigned by AltStore (Xcode, TestFlight,
+    /// paid team) — Sideload + ink+amp use group.com.punkrally.reader.
     public static let fallbackAppGroupIdentifier = "group.com.punkrally.reader"
     public static let readingWidgetKind = "SilveranReadingWidget"
-    /// Paid / SideStore Continue widget (compiled, not registered on Sideload).
+    /// ink+amp Continue widget (cover + progress + transport controls). One kind
+    /// for every build that ships the tile — Sideload appex, paid Xcode target.
     public static let continueWidgetKind = "InkAmpContinueWidget"
-    /// Sideload gallery kind. New string so iOS cannot resurrect blank Library/Continue tiles.
-    public static let sideloadContinueWidgetKind = "inkamp.continue.v3"
+    /// Kinds of the retired static Sideload tiles that painted blank on AltStore.
+    /// Kept for assertions only: never register or reload these, or a dead tile
+    /// comes back.
+    public static let legacySideloadContinueWidgetKinds = ["inkamp.continue.v3", "inkamp.continue.v4"]
 }
 
 public enum SilveranWidgetReadingKind: String, Codable, Sendable, Hashable {
@@ -128,34 +139,97 @@ public enum SilveranWidgetSnapshotStore {
     private static let snapshotFilename = "currently-reading.json"
     private static let coversDirectoryName = "Covers"
 
-    public static func appGroupIdentifier(bundle: Bundle = .main) -> String {
-        if let identifier = bundle.object(
+    /// Candidate App Group identifiers for a bundle, most-trusted first.
+    ///
+    /// Order:
+    /// 1. `ALTAppGroups` — the identifiers AltStore actually granted this bundle
+    ///    when it resigned the IPA. On free/personal teams these are rewritten to
+    ///    `<declared-group>.<TEAMID>`, which is why a hard-coded group id reads back
+    ///    an empty container even though the group exists.
+    /// 2. `SILVERAN_WIDGET_APP_GROUP` — build-time value for Xcode/TestFlight/paid
+    ///    team installs (and the literal fallback baked into the Sideload target).
+    /// 3. `group.com.punkrally.reader` — last-resort constant.
+    public static func appGroupCandidates(bundle: Bundle = .main) -> [String] {
+        let altStoreGroups = bundle.object(
+            forInfoDictionaryKey: SilveranWidgetConstants.altStoreAppGroupsInfoKey
+        ) as? [String]
+        let configured = bundle.object(
             forInfoDictionaryKey: SilveranWidgetConstants.appGroupInfoKey
         ) as? String
-        {
-            let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
-            // Reject empty / unexpanded build settings left in unsigned IPAs.
-            if !trimmed.isEmpty, !trimmed.contains("$(") {
-                return trimmed
-            }
-        }
-        return SilveranWidgetConstants.fallbackAppGroupIdentifier
-    }
-
-    public static func sharedContainerURL(bundle: Bundle = .main) -> URL? {
-        FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: appGroupIdentifier(bundle: bundle)
+        return groupCandidates(
+            altStoreGroups: altStoreGroups,
+            configured: configured,
+            fallback: SilveranWidgetConstants.fallbackAppGroupIdentifier,
         )
     }
 
-    /// One-line Console probe: App Group id + whether the container URL resolved.
+    /// Pure helper (unit-tested): filters junk and de-duplicates while preserving order.
+    public static func groupCandidates(
+        altStoreGroups: [String]?,
+        configured: String?,
+        fallback: String,
+    ) -> [String] {
+        var candidates: [String] = []
+        for group in altStoreGroups ?? [] where isUsableGroupIdentifier(group) {
+            candidates.append(group)
+        }
+        if let configured, isUsableGroupIdentifier(configured) {
+            candidates.append(configured)
+        }
+        if isUsableGroupIdentifier(fallback) {
+            candidates.append(fallback)
+        }
+        var seen = Set<String>()
+        return candidates.filter { seen.insert($0).inserted }
+    }
+
+    private static func isUsableGroupIdentifier(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Reject empty / unexpanded build settings left in unsigned IPAs.
+        return !trimmed.isEmpty && !trimmed.contains("$(")
+    }
+
+    /// First candidate that resolves a container; otherwise the preferred candidate
+    /// (so callers can still log which group id *should* have worked).
+    public static func appGroupIdentifier(bundle: Bundle = .main) -> String {
+        let candidates = appGroupCandidates(bundle: bundle)
+        if let resolved = candidates.first(where: { containerExists(for: $0) }) {
+            return resolved
+        }
+        return candidates.first ?? SilveranWidgetConstants.fallbackAppGroupIdentifier
+    }
+
+    public static func sharedContainerURL(bundle: Bundle = .main) -> URL? {
+        for candidate in appGroupCandidates(bundle: bundle) {
+            if let url = FileManager.default.containerURL(
+                forSecurityApplicationGroupIdentifier: candidate
+            ) {
+                return url
+            }
+        }
+        return nil
+    }
+
+    private static func containerExists(for identifier: String) -> Bool {
+        FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: identifier
+        ) != nil
+    }
+
+    /// One-line Console probe: App Group ids seen + whether a container resolved.
     public static func logAppGroupAvailability(
         source: String,
         bundle: Bundle = .main,
     ) {
-        let id = appGroupIdentifier(bundle: bundle)
+        let candidates = appGroupCandidates(bundle: bundle)
         let available = sharedContainerURL(bundle: bundle) != nil
-        print("[ContinueWidget] \(source) appGroup=\(id) container=\(available ? "ok" : "nil")")
+        let altGroups = (bundle.object(
+            forInfoDictionaryKey: SilveranWidgetConstants.altStoreAppGroupsInfoKey
+        ) as? [String]) ?? []
+        print(
+            "[ContinueWidget] \(source) altGroups=\(altGroups) candidates=\(candidates) "
+                + "resolved=\(available ? "ok" : "nil")"
+        )
     }
 
     public static func loadSnapshot(bundle: Bundle = .main) -> SilveranWidgetSnapshot {
@@ -406,7 +480,6 @@ public enum SilveranWidgetSnapshotStore {
         #if canImport(WidgetKit) && (os(iOS) || os(macOS))
         WidgetCenter.shared.reloadTimelines(ofKind: SilveranWidgetConstants.readingWidgetKind)
         WidgetCenter.shared.reloadTimelines(ofKind: SilveranWidgetConstants.continueWidgetKind)
-        WidgetCenter.shared.reloadTimelines(ofKind: SilveranWidgetConstants.sideloadContinueWidgetKind)
         #endif
     }
 }

@@ -87,8 +87,10 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **Mini-player slim** — scrub + −15/+15 removed from mini (status-cluster cut)
 
 ### Widgets
-- [~] **Continue home widget** — Josh live on **Arena IPA** (`ALTAppGroups` resolve; not “free AltStore can’t”). PR **#23** closed **not** merged so tip `b9b07ea` stays clean. Reopen clean PR later if mainline should match. Docs still say Parked until that lands.
-
+- [~] **Continue home widget** — Arena PR #23 is being cleanly rebased onto the Phase 1 tip.
+  Preserve the proven `ALTAppGroups` runtime resolution, embedded Sideload appex, cover/progress,
+  play/pause and ±15s `AudioPlaybackIntent` controls. Mark Shipped after rebased Simulator +
+  Sideload CI are green. Write-up: `docs/CONTINUE_WIDGET.md`.
 ### Stats
 - [x] **SessionTracker local** — ebook / audiobook / readaloud / podcast → Home + Stats tab (`c627bbe`, Sideload [35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694))
 - [x] **Cross-device Stats sync** — tip `c5791ec` (`a5226d6` + BookServiceActor fix); private Storyteller collection `.inkamp.stats.v1` blob (same auth as place sync); session-id LWW merge (no double-count / no drop); footer Synced / Syncing… / Offline · local only; Settings last sync time; Sideload green [35028364424](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35028364424)

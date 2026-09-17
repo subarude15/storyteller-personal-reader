@@ -3,10 +3,13 @@ import SilveranKit
 
 /// Cross-process Continue widget → app bridge.
 ///
-/// App Group holds the snapshot; Darwin notifications poke the running app
-/// for play/pause. Sideload widget path must not ship AppIntents /
-/// AudioPlaybackIntent — free AltStore cannot honor them and WidgetKit
-/// snapshot then kills the extension (blank tappable tile).
+/// App Group holds the snapshot; Darwin notifications poke the running app.
+/// Kept for the deep-link path (`punkrally://continue?action=toggle`) and for
+/// hosts that cannot use App Intents. The Home Screen tile itself no longer
+/// needs this: its play/pause and ±15s buttons are `AudioPlaybackIntent`s that
+/// WidgetKit performs in the app's process (see `ContinueWidgetIntents.swift`,
+/// and docs/CONTINUE_WIDGET.md for why the old "free AltStore cannot honor
+/// AppIntents" note was wrong).
 public enum ContinueWidgetBridge {
     public static let toggleDarwinName = "com.punkrally.reader.continueToggle"
     public static let openDarwinName = "com.punkrally.reader.continueOpen"

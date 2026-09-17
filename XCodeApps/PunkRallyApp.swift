@@ -713,6 +713,8 @@ private struct HomeTabView: View {
             subtitle: item.subtitle,
             kind: kind,
             coverData: coverData,
+            progress: item.progress,
+            durationSeconds: item.durationSeconds,
         )
     }
 }
