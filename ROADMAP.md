@@ -17,7 +17,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Phone import → StoryAlign read-aloud** — tip ≥ Browse `ae3990d` (Josh verified Find empty → charts/genres → pre-subscribe). Library **Import** → EPUB/MP3 upload to Storyteller → Aligning… → SYNC on refresh → read-aloud. Soft polish anytime.
+- **Phone import → StoryAlign read-aloud** — tip `05f0006` (≥ Browse `ae3990d`; Josh verified Find empty → charts/genres → pre-subscribe). Library **Import** → EPUB/MP3 upload to Storyteller → Aligning… → SYNC on refresh → read-aloud. Soft polish anytime. Sideload green [35170248241](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35170248241). **Await Josh smoke.**
 
 **Do not start SponsorBlock / Invidious/ad-strip / widgets / CarPlay / Podcast Index keys unless Josh reorders.**
 ## Shipped
