@@ -17,9 +17,7 @@ public struct BookCache: Sendable {
     }
 
     public static func defaultDatabasePath() -> URL {
-        let dir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".playtorio", isDirectory: true)
-        return dir.appendingPathComponent("cache.sqlite")
+        PlaytorioPaths.dataDirectory().appendingPathComponent("cache.sqlite")
     }
 
     public func get(query: String) -> NormalizedBook? {

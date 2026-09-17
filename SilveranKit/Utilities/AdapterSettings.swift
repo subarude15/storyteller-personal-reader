@@ -51,8 +51,7 @@ public struct AdapterSettings: Sendable {
     }
 
     public static func defaultDirectory() -> URL {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        return home.appendingPathComponent(".playtorio", isDirectory: true)
+        PlaytorioPaths.dataDirectory()
     }
 
     public func load() throws -> [AdapterConfig] {
