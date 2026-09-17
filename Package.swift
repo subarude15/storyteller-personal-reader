@@ -10,8 +10,18 @@ let playtorioProducts: [Product] = [
 ]
 
 let playtorioTargets: [Target] = [
+    .systemLibrary(
+        name: "SQLite3",
+        path: "SilveranKit/CSQLite",
+        pkgConfig: "sqlite3",
+        providers: [
+            .apt(["libsqlite3-dev"]),
+            .brew(["sqlite"]),
+        ]
+    ),
     .target(
         name: "PlaytorioFetcher",
+        dependencies: ["SQLite3"],
         path: "SilveranKit/Utilities"
     ),
     .executableTarget(
@@ -22,7 +32,8 @@ let playtorioTargets: [Target] = [
     .testTarget(
         name: "PlaytorioFetcherTests",
         dependencies: ["PlaytorioFetcher"],
-        path: "SilveranKit/Tests/PlaytorioFetcherTests"
+        path: "SilveranKit/Tests/PlaytorioFetcherTests",
+        exclude: ["Fixtures"]
     ),
 ]
 
