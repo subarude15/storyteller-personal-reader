@@ -51,15 +51,13 @@ struct ContinueWidgetAppGroupTests {
         #expect(SilveranWidgetConstants.appGroupInfoKey == "SILVERAN_WIDGET_APP_GROUP")
     }
 
-    @Test func widgetKindsStayDistinctFromReadingWidget() {
-        #expect(SilveranWidgetConstants.continueWidgetKind == "InkAmpContinueWidget")
-        #expect(SilveranWidgetConstants.sideloadContinueWidgetKind == "inkamp.continue.v5")
-        #expect(
-            SilveranWidgetConstants.sideloadContinueWidgetKind
-                != SilveranWidgetConstants.readingWidgetKind
-        )
+    @Test func continueKindNeverCollidesWithRetiredTiles() {
+        let kind = SilveranWidgetConstants.continueWidgetKind
+        #expect(kind == "InkAmpContinueWidget")
+        #expect(kind != SilveranWidgetConstants.readingWidgetKind)
+        // The parked static tiles must never be registered or reloaded again.
         for legacy in SilveranWidgetConstants.legacySideloadContinueWidgetKinds {
-            #expect(legacy != SilveranWidgetConstants.sideloadContinueWidgetKind)
+            #expect(legacy != kind)
         }
     }
 }

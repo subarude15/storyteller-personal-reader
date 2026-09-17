@@ -19,11 +19,12 @@ public enum SilveranWidgetConstants {
     /// paid team) — Sideload + ink+amp use group.com.punkrally.reader.
     public static let fallbackAppGroupIdentifier = "group.com.punkrally.reader"
     public static let readingWidgetKind = "SilveranReadingWidget"
-    /// ink+amp Continue widget (the real tile: cover + transport controls).
+    /// ink+amp Continue widget (cover + progress + transport controls). One kind
+    /// for every build that ships the tile — Sideload appex, paid Xcode target.
     public static let continueWidgetKind = "InkAmpContinueWidget"
-    /// Sideload gallery kinds. Kept as distinct strings so iOS cannot resurrect
-    /// the old blank static v3/v4 tiles.
-    public static let sideloadContinueWidgetKind = "inkamp.continue.v5"
+    /// Kinds of the retired static Sideload tiles that painted blank on AltStore.
+    /// Kept for assertions only: never register or reload these, or a dead tile
+    /// comes back.
     public static let legacySideloadContinueWidgetKinds = ["inkamp.continue.v3", "inkamp.continue.v4"]
 }
 
@@ -479,7 +480,6 @@ public enum SilveranWidgetSnapshotStore {
         #if canImport(WidgetKit) && (os(iOS) || os(macOS))
         WidgetCenter.shared.reloadTimelines(ofKind: SilveranWidgetConstants.readingWidgetKind)
         WidgetCenter.shared.reloadTimelines(ofKind: SilveranWidgetConstants.continueWidgetKind)
-        WidgetCenter.shared.reloadTimelines(ofKind: SilveranWidgetConstants.sideloadContinueWidgetKind)
         #endif
     }
 }

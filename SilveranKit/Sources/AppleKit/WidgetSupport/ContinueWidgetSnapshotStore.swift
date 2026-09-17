@@ -389,7 +389,6 @@ public enum ContinueWidgetSnapshotStore {
     public static func reloadTimelines() {
         #if canImport(WidgetKit) && (os(iOS) || os(macOS))
         WidgetCenter.shared.reloadTimelines(ofKind: SilveranWidgetConstants.continueWidgetKind)
-        WidgetCenter.shared.reloadTimelines(ofKind: SilveranWidgetConstants.sideloadContinueWidgetKind)
         #endif
     }
 

@@ -21,15 +21,14 @@ struct ContinueWidgetLinkTests {
             SilveranWidgetConstants.fallbackAppGroupIdentifier == "group.com.punkrally.reader"
         )
         #expect(SilveranWidgetConstants.continueWidgetKind == "InkAmpContinueWidget")
-        #expect(SilveranWidgetConstants.sideloadContinueWidgetKind == "inkamp.continue.v5")
         #expect(
-            SilveranWidgetConstants.sideloadContinueWidgetKind
+            SilveranWidgetConstants.continueWidgetKind
                 != SilveranWidgetConstants.readingWidgetKind
         )
-        // Old static tiles must never be resurrected by a reload call.
+        // Old static tiles must never be resurrected by a register/reload call.
         #expect(
             !SilveranWidgetConstants.legacySideloadContinueWidgetKinds.contains(
-                SilveranWidgetConstants.sideloadContinueWidgetKind
+                SilveranWidgetConstants.continueWidgetKind
             )
         )
     }
