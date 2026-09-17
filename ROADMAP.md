@@ -101,7 +101,7 @@ Strict order (Smokey / Nas-ty):
 6. ~~Glance / Lock Screen~~ → **Shipped** (`257e44e`; Josh confirmed)
 7. ~~LAN failover~~ → **Shipped** (`4f9d27d`; Josh confirmed Using LAN / Using public)
 8. ~~YouTube playhead sync~~ → **Shipped** (`0a4da30`; Josh confirmed)
-9. ~~Browse podcasts (Apple charts/genres)~~ → **Now** (`ba4a83d` tip base; Find empty → charts/genres)
+9. ~~Browse podcasts (Apple charts/genres)~~ → **Now** (tip ≥ `ba4a83d`; Find empty → charts/genres)
 10. **SponsorBlock-style skip** — additive seek on in-app YouTube (not podcast Clean)
 11. **Phone import → StoryAlign read-aloud** — Library Import → Storyteller upload → align → refresh (**board Next** after playhead sync)
 12. **CarPlay** / **Apple Watch** (out of current AltStore Sideload scope)
