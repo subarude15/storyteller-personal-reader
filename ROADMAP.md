@@ -31,11 +31,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ## Shipped
 
 ### Product / sync
-- [x] **Streaming Books Phase 1: Explore ebooks + lawful source foundation** — tip `f31f45a`;
+- [x] **Streaming Books Phase 1: Explore ebooks + lawful source foundation** — tip `fa2a8bb`;
   `Library | Explore` segment; Standard Ebooks (public Atom new-releases) + user OPDS + direct
   HTTPS EPUB; Read now via existing Silveran reader; Add to Library via Storyteller upload;
   Simulator + Sideload green
-  [Actions 35226804279](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35226804279)
+  [Actions 35227878713](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35227878713)
 - [x] **More like this** book-detail rail — local Storyteller library only; series → author
   → tag-overlap ranking; PR #24 squash-merged at tip `b8ca122`; Simulator + Sideload green
   [Actions 35217017886](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35217017886)
