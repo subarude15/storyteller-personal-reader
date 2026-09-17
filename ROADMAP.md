@@ -17,17 +17,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Streaming Books — Phase 2: public-domain audiobooks** — LibriVox browse/search and HTTPS
-  streaming through the existing shared player / `AudioSessionActor`; no second player
+- **Smoke order:** (1) **More like this** tip `b8ca122` — book detail rail series → author → tags. (2) **Explore ebook catalogs** tip `c200401` — Standard Ebooks / OPDS / HTTPS EPUB → Add to Library / Storyteller import (lawful “books you don’t own yet”). Sideload [35232090628](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35232090628).
 
-**Next (strict order):**
-1. **Finish tonight** — quick Home win
-2. **Story Timeline** — distinctive but bigger
-3. Soft: distinct **Couldn't save server** copy vs connection-failed
+**Next after both smokes:** Finish tonight → Story Timeline → soft Couldn't save server. Optional: restore Arena Continue widget on tip (`ALTAppGroups`) if Josh asks.
 
-**Parked / out:** second concurrent player (shared NP stays); CarPlay; DSM/SMB; mainline Continue widget (Josh happy on Arena IPA; PR #23 closed not merged — reopen later with `ALTAppGroups` resolve if mainline should match); DRM catalogs; torrent/debrid transport adapters until needed after OPDS/direct-HTTPS; Bookracy/AudiobookBay and other scraper-backed acquisition.
-
-**Do not start DSM/SMB, CarPlay, a second player, unlicensed/scraped catalogs, external recommendation APIs, or the Arena widget merge unless Josh reorders. Authorized public-domain catalog work is the narrow exception above; it must remain separate from local-library recommendations.**
+**Do not start second player, CarPlay, DSM/SMB, or feed Explore titles into More like this until imported unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
@@ -99,9 +93,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-1. **Finish tonight** — smallest Home win
-2. **Story Timeline** — bigger distinctive cut
+### After More like this + Explore smoke
+1. **Finish tonight** — Home quick win
+2. **Story Timeline** — distinctive ink+amp cut
 3. Soft: **Couldn't save server** copy anytime
+4. Optional: mainline Continue widget restore (Arena `ALTAppGroups` fix; PR #23 was closed not merged)
 
 ### Soft UX polish (anytime)
 - Soft polish pack → **Shipped** (`b9b07ea` / PR #22)
