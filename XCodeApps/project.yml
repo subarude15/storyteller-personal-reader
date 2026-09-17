@@ -224,9 +224,14 @@ targets:
         product: SilveranAppleKit
       - package: Silveran
         product: SilveranReadaloud
-      # Home Screen widgets parked on free AltStore (Josh+crew): blank+tappable
-      # tiles worse than none. Do not embed/register an appex on Sideload.
-      # Widget sources stay in-tree; paid Apple ID / SideStore re-links later.
+      # Home Screen Continue widget is embedded again (2026-09): the tile was
+      # blank because the App Group id was hard-coded, while AltStore grants
+      # `<declared-group>.<TEAMID>` and re-publishes it in the Info key
+      # `ALTAppGroups`. The widget now resolves the group at runtime, so the
+      # appex reads the same container the app writes. Cost: the appex spends
+      # one extra App ID (and one App Group) of the free-team weekly budget.
+      - target: "Silveran Reader Widgets (iOS)"
+        embed: true
   Silveran Reader Widgets (iOS):
     type: app-extension
     platform: iOS
@@ -261,11 +266,14 @@ targets:
         # Literal — must match Sideload + widgets entitlements for AltStore.
         SILVERAN_WIDGET_APP_GROUP: group.com.punkrally.reader
     sources:
-      # Crash-proof Sideload path: only SideloadContinueWidget.swift (no AppIntents).
-      # Old ContinueWidget + Library stay on disk for paid/SideStore; compiling them
-      # into this extension pulls AudioPlaybackIntent metadata AltStore can't sign.
-      # No SilveranAppleWidgets link — lean paint is SwiftUI+WidgetKit only.
-      - path: SilveranWidgets/Sources/SideloadContinueWidget.swift
+      # ink+amp Continue: cover + progress + transport controls.
+      # `SilveranAppleWidgets` gives the extension the shared snapshot store and
+      # the AppIntents the buttons use; both are also linked into the app so the
+      # system can perform the AudioPlaybackIntents in the app's process.
+      - path: SilveranWidgets/Sources/InkAmpContinueWidget.swift
+    dependencies:
+      - package: Silveran
+        product: SilveranAppleWidgets
   Silveran Reader Widgets (macOS):
     type: app-extension
     platform: macOS
@@ -300,7 +308,10 @@ targets:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
         SILVERAN_WIDGET_APP_GROUP: "$(MAC_APP_GROUP_ID)"
     sources:
-      - path: SilveranWidgets/Sources
+      # Silveran Reading (library/progress) widget + the shared ink+amp Continue
+      # tile (registered by the WidgetBundle in InkAmpContinueWidget.swift).
+      - path: SilveranWidgets/Sources/SilveranReadingWidget.swift
+      - path: SilveranWidgets/Sources/InkAmpContinueWidget.swift
     dependencies:
       - package: Silveran
         product: SilveranAppleWidgets
@@ -418,6 +429,7 @@ schemes:
     build:
       targets:
         "Silveran Reader Sideload (iOS)": all
+        "Silveran Reader Widgets (iOS)": all
     run:
       config: Debug
       executable: "Silveran Reader Sideload (iOS)"

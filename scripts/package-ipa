@@ -76,6 +76,73 @@ trap 'rm -rf "${STAGE_DIR}"' EXIT
 PAYLOAD_DIR="${STAGE_DIR}/Payload"
 mkdir -p "${PAYLOAD_DIR}"
 cp -R "${APP_PATH}" "${PAYLOAD_DIR}/"
+STAGED_APP="${PAYLOAD_DIR}/$(basename "${APP_PATH}")"
+
+# ---------------------------------------------------------------------------
+# Ad-hoc sign with real entitlements.
+#
+# `CODE_SIGNING_ALLOWED=NO` leaves the Mach-O without a code signature, and
+# AltStore/AltSign reads the app's entitlements straight out of that signature
+# (`ALTApplication.entitlementsString` -> ldid). With no entitlements blob,
+# AltStore sees no `com.apple.security.application-groups`, never provisions
+# the group, and the resigned app + widget end up with no shared container —
+# which is why sideloaded Continue widgets painted blank tiles.
+#
+# Signing ad-hoc here (identity `-`) puts the entitlements back into the
+# binary so AltStore can provision the App Group (`group.com.punkrally.reader`
+# -> `group.com.punkrally.reader.<TEAMID>`) and record it in `ALTAppGroups`.
+# AltStore re-signs everything with the user's certificate on install, so this
+# signature is only a vehicle for the entitlements.
+# ---------------------------------------------------------------------------
+APP_ENTITLEMENTS="${SCRIPT_DIR}/../XCodeApps/SilveranReaderSideload.entitlements"
+APPEX_ENTITLEMENTS="${SCRIPT_DIR}/../XCodeApps/SilveranReaderWidgets.entitlements"
+
+if [[ "${SKIP_ADHOC_ENTITLEMENTS:-0}" != "1" ]]; then
+    echo "==> Ad-hoc signing with entitlements (App Group must reach AltStore)"
+    while IFS= read -r APPEX; do
+        [[ -n "${APPEX}" ]] || continue
+        echo "    appex: $(basename "${APPEX}")"
+        codesign --force --sign - --timestamp=none \
+            --entitlements "${APPEX_ENTITLEMENTS}" "${APPEX}"
+    done < <(find "${STAGED_APP}/PlugIns" -maxdepth 1 -name "*.appex" -type d 2>/dev/null || true)
+
+    if ! codesign --force --sign - --timestamp=none \
+        --entitlements "${APP_ENTITLEMENTS}" "${STAGED_APP}"; then
+        # Nested frameworks/dylibs would need signing first; --deep covers them.
+        echo "    retrying app signature with --deep for nested code"
+        codesign --force --deep --sign - --timestamp=none \
+            --entitlements "${APP_ENTITLEMENTS}" "${STAGED_APP}"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Verify the packaging contract on every build.
+# ---------------------------------------------------------------------------
+APPEX_COUNT="$(find "${STAGED_APP}/PlugIns" -maxdepth 1 -name "*.appex" -type d 2>/dev/null | wc -l | tr -d ' ')"
+if [[ "${APPEX_COUNT}" -lt 1 ]]; then
+    echo "ERROR: ${STAGED_APP} has no PlugIns/*.appex — the Continue widget would not install."
+    exit 1
+fi
+echo "==> Embedded app extensions: ${APPEX_COUNT}"
+
+if [[ "${SKIP_ADHOC_ENTITLEMENTS:-0}" != "1" ]]; then
+    APP_GROUP_ENTITLEMENT="com.apple.security.application-groups"
+    APP_GROUP_ID="group.com.punkrally.reader"
+
+    APP_ENTITLEMENTS_DUMP="$(codesign -d --entitlements :- "${STAGED_APP}" 2>/dev/null || true)"
+    APPEX_ENTITLEMENTS_DUMP="$(codesign -d --entitlements :- "$(find "${STAGED_APP}/PlugIns" -maxdepth 1 -name '*.appex' -type d | head -n 1)" 2>/dev/null || true)"
+
+    for pair in "app:${APP_ENTITLEMENTS_DUMP}" "appex:${APPEX_ENTITLEMENTS_DUMP}"; do
+        name="${pair%%:*}"
+        dump="${pair#*:}"
+        if [[ "${dump}" != *"${APP_GROUP_ENTITLEMENT}"* || "${dump}" != *"${APP_GROUP_ID}"* ]]; then
+            echo "ERROR: ${name} is missing ${APP_GROUP_ENTITLEMENT} = ${APP_GROUP_ID} in its signature."
+            echo "       AltStore will not provision the App Group without it."
+            exit 1
+        fi
+    done
+    echo "==> App Group entitlement present on app + appex"
+fi
 
 IPA_OUTPUT_PATH="${OUTPUT_DIR}/${IPA_NAME}"
 mkdir -p "$(dirname "${IPA_OUTPUT_PATH}")"
@@ -83,5 +150,6 @@ rm -f "${IPA_OUTPUT_PATH}"
 
 (cd "${STAGE_DIR}" && zip -qr "${SCRIPT_DIR}/../${IPA_OUTPUT_PATH}" Payload)
 
-echo "==> Successfully created unsigned IPA: ${IPA_OUTPUT_PATH}"
+echo "==> Successfully created sideload IPA: ${IPA_OUTPUT_PATH}"
 ls -lh "${IPA_OUTPUT_PATH}"
+unzip -l "${SCRIPT_DIR}/../${IPA_OUTPUT_PATH}" | grep -E "PlugIns/.*appex/" | head -3 || true

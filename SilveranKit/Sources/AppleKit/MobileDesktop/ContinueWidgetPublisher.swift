@@ -53,6 +53,8 @@ public enum ContinueWidgetPublisher {
         subtitle: String?,
         kind: ContinueWidgetKindTag?,
         coverData: Data?,
+        progress: Double? = nil,
+        durationSeconds: Double? = nil,
     ) {
         Task { @MainActor in
             let session = await AudioSessionActor.shared.currentSnapshot()
@@ -66,6 +68,9 @@ public enum ContinueWidgetPublisher {
                 isPlaying: false,
                 kind: kind,
                 coverData: coverData,
+                progress: progress,
+                durationSeconds: durationSeconds,
+                hasLiveSession: false,
             )
         }
     }
@@ -92,13 +97,18 @@ public enum ContinueWidgetPublisher {
         guard let snapshot else {
             // Session ended — keep title/cover, clear playing so the tile isn't stuck.
             let last = ContinueWidgetSnapshotStore.loadSnapshot()
-            guard last.isPlaying else { return }
+            guard last.isPlaying || (last.hasLiveSession ?? false) else { return }
             ContinueWidgetSnapshotStore.publish(
                 title: last.title,
                 subtitle: last.subtitle,
                 isPlaying: false,
                 kind: last.kind,
                 coverData: nil,
+                progress: last.progress,
+                elapsedSeconds: last.elapsedSeconds,
+                durationSeconds: last.durationSeconds,
+                hasLiveSession: false,
+                rate: last.rate,
             )
             return
         }
@@ -132,6 +142,11 @@ public enum ContinueWidgetPublisher {
             isPlaying: snapshot.isPlaying,
             kind: kind,
             coverData: coverData,
+            progress: snapshot.bookProgress,
+            elapsedSeconds: snapshot.elapsedSeconds,
+            durationSeconds: snapshot.durationSeconds,
+            hasLiveSession: true,
+            rate: snapshot.playbackRate,
         )
     }
 
