@@ -17,13 +17,13 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **No active committed cut** — tip `b9b07ea` (soft UX polish PR #22). Await Josh pick.
+- **More like this** (book detail) — this cut. One horizontal cover rail from local
+  Storyteller metadata only: same series → same author → same tags; hide when empty.
 
-**Candidate Next (pick one):**
-1. **More like this** (book detail) — horizontal cover rail: same series → same author → same tags from Storyteller metadata only; hide empty; no external rec engines
-2. **Finish tonight** — quick Home win
-3. **Story Timeline** — distinctive but bigger
-4. Soft anytime: distinct **Couldn't save server** copy vs connection-failed
+**Next (strict order):**
+1. **Finish tonight** — quick Home win
+2. **Story Timeline** — distinctive but bigger
+3. Soft: distinct **Couldn't save server** copy vs connection-failed
 
 **Parked / out:** second concurrent player (shared NP stays); CarPlay; DSM/SMB; mainline Continue widget (Josh happy on Arena IPA; PR #23 closed not merged — reopen later with `ALTAppGroups` resolve if mainline should match)
 
@@ -91,11 +91,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-### Awaiting Josh pick
-1. **More like this** on book detail (series → author → tags) — crew lean if Library win next
-2. **Finish tonight** — smallest Home win
-3. **Story Timeline** — bigger distinctive cut
-4. Soft: **Couldn't save server** copy anytime
+1. **Finish tonight** — smallest Home win
+2. **Story Timeline** — bigger distinctive cut
+3. Soft: **Couldn't save server** copy anytime
 
 ### Soft UX polish (anytime)
 - Soft polish pack → **Shipped** (`b9b07ea` / PR #22)
@@ -103,7 +101,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Later / ideas (not blocking)
 
-**Candidate / Later:** **More like this** on book detail (series → author → tags; Storyteller metadata only). **Finish tonight**, **Story Timeline**, Wrapped, series strip, Shortcuts. **Second player** parked (shared NP stays).
+**Discover books you don't have** — Goodreads-style external discovery, intentionally separate
+from the local-library **More like this** rail. Also later: Wrapped, series strip, Shortcuts.
+**Second player** remains parked (shared NP stays).
 
 Strict order (Smokey / Nas-ty):
 1. ~~NAS `AD_STRIP_URL` worker~~ → **Shipped** (`e00d800` + `:20129`)
