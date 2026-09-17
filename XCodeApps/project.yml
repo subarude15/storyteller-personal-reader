@@ -26,7 +26,7 @@ targetTemplates:
         GENERATE_INFOPLIST_FILE: NO
         MARKETING_VERSION: 0.1
         PRODUCT_NAME: Silveran Reader
-        SWIFT_VERSION: 6.2
+        SWIFT_VERSION: 5.10
 
 targets:
   Silveran Reader (macOS):
@@ -48,7 +48,7 @@ targets:
     info:
       path: XCodeApps/Info-macOS.plist
       properties:
-        CFBundleName: "Silveran Reader"
+        CFBundleName: "ink+amp"
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -58,13 +58,13 @@ targets:
         KEYCHAIN_SERVICE: "$(KEYCHAIN_SERVICE)"
         SILVERAN_WIDGET_APP_GROUP: "$(MAC_APP_GROUP_ID)"
         LSApplicationCategoryType: "public.app-category.books"
-        NSLocalNetworkUsageDescription: "Silveran Reader needs local network access to connect to your Storyteller server."
+        NSLocalNetworkUsageDescription: "ink+amp needs local network access to connect to your Storyteller server."
         ITSAppUsesNonExemptEncryption: false
         ATSApplicationFontsPath: "fonts"
         CFBundleURLTypes:
-          - CFBundleURLName: com.kyonifer.SilveranReader
+          - CFBundleURLName: com.punkrally.reader
             CFBundleURLSchemes:
-              - silveran
+              - punkrally
     sources:
       - path: XCodeApps
         includes:
@@ -95,14 +95,14 @@ targets:
         INFOPLIST_FILE: XCodeApps/Info-iOS.plist
         PRODUCT_BUNDLE_IDENTIFIER: "$(APP_BUNDLE_ID)"
         #INFOPLIST_KEY_CFBundleDisplayName: Silveran Reader
-        #INFOPLIST_KEY_CFBundleName: Silveran Reader
+        INFOPLIST_KEY_CFBundleDisplayName: "ink+amp"
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
         #SWIFT_UPCOMING_FEATURE_NONSENDING_NONISOLATING_BY_DEFAULT: YES
     info:
       path: XCodeApps/Info-iOS.plist
       properties:
-        CFBundleName: "Silveran Reader"
-        CFBundleDisplayName: "Silveran Reader"
+        CFBundleName: "ink+amp"
+        CFBundleDisplayName: "ink+amp"
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -112,11 +112,13 @@ targets:
         KEYCHAIN_SERVICE: "$(KEYCHAIN_SERVICE)"
         SILVERAN_WIDGET_APP_GROUP: "$(APP_GROUP_ID)"
         LSApplicationCategoryType: "public.app-category.books"
-        NSLocalNetworkUsageDescription: "Silveran Reader needs local network access to connect to your Storyteller server."
+        NSLocalNetworkUsageDescription: "ink+amp needs local network access to connect to your Storyteller server and ad-strip worker."
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         CFBundleURLTypes:
-          - CFBundleURLName: com.kyonifer.SilveranReader
+          - CFBundleURLName: com.punkrally.reader
             CFBundleURLSchemes:
-              - silveran
+              - punkrally
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -154,7 +156,81 @@ targets:
         product: SilveranReadaloud
       - target: "Silveran Reader Widgets (iOS)"
         embed: true
-      - target: "Silveran Reader (watchOS)"
+
+  Silveran Reader Sideload (iOS):
+    templates:
+      - appBase
+    platform: iOS
+    settings:
+      base:
+        IPHONEOS_DEPLOYMENT_TARGET: 18.0
+        CODE_SIGN_ENTITLEMENTS: XCodeApps/SilveranReaderSideload.entitlements
+        CODE_SIGN_STYLE: Automatic
+        INFOPLIST_FILE: XCodeApps/Info-iOS-Sideload.plist
+        PRODUCT_BUNDLE_IDENTIFIER: "$(APP_BUNDLE_ID)"
+        INFOPLIST_KEY_CFBundleDisplayName: "ink+amp"
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+    info:
+      path: XCodeApps/Info-iOS-Sideload.plist
+      properties:
+        CFBundleName: "ink+amp"
+        CFBundleDisplayName: "ink+amp"
+        CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundlePackageType: "$(PRODUCT_BUNDLE_PACKAGE_TYPE)"
+        CFBundleExecutable: "$(EXECUTABLE_NAME)"
+        # KEYCHAIN_ACCESS_GROUP omitted: free AltStore signing can't use the
+        # shared $(AppIdentifierPrefix) group; SecurityKeychainStore falls back
+        # to the default (app-keyed) access group when this Info key is absent.
+        KEYCHAIN_SERVICE: "$(KEYCHAIN_SERVICE)"
+        # Literal App Group (not $(APP_GROUP_ID)): unsigned IPA must not ship
+        # unexpanded build-setting placeholders into Info / AltStore resign.
+        SILVERAN_WIDGET_APP_GROUP: group.com.punkrally.reader
+        LSApplicationCategoryType: "public.app-category.books"
+        NSLocalNetworkUsageDescription: "ink+amp needs local network access to connect to your Storyteller server and ad-strip worker."
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        CFBundleURLTypes:
+          - CFBundleURLName: com.punkrally.reader
+            CFBundleURLSchemes:
+              - punkrally
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIBackgroundModes:
+          - audio
+          - fetch
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.kyonifer.silveran.progresssync.refresh
+        ITSAppUsesNonExemptEncryption: false
+    sources:
+      - path: XCodeApps
+        includes:
+          - "**/*.swift"
+      - path: XCodeApps/Assets.xcassets
+        type: assetcatalog
+      - path: XCodeApps/PrivacyInfo.xcprivacy
+        buildPhase: resources
+    dependencies:
+      - package: Silveran
+        product: SilveranAppleKit
+      - package: Silveran
+        product: SilveranReadaloud
+      # Home Screen Continue widget is embedded again (2026-09): the tile was
+      # blank because the App Group id was hard-coded, while AltStore grants
+      # `<declared-group>.<TEAMID>` and re-publishes it in the Info key
+      # `ALTAppGroups`. The widget now resolves the group at runtime, so the
+      # appex reads the same container the app writes. Cost: the appex spends
+      # one extra App ID (and one App Group) of the free-team weekly budget.
+      - target: "Silveran Reader Widgets (iOS)"
         embed: true
   Silveran Reader Widgets (iOS):
     type: app-extension
@@ -174,12 +250,12 @@ targets:
         MARKETING_VERSION: 0.1
         PRODUCT_BUNDLE_IDENTIFIER: "$(APP_BUNDLE_ID).widgets"
         PRODUCT_NAME: Silveran Reader Widgets
-        SWIFT_VERSION: 6.2
+        SWIFT_VERSION: 5.10
     info:
       path: XCodeApps/Info-Widgets-iOS.plist
       properties:
         CFBundleName: "Silveran Reader Widgets"
-        CFBundleDisplayName: "Silveran Reader"
+        CFBundleDisplayName: "ink+amp"
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -187,9 +263,14 @@ targets:
         CFBundleExecutable: "$(EXECUTABLE_NAME)"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
-        SILVERAN_WIDGET_APP_GROUP: "$(APP_GROUP_ID)"
+        # Literal — must match Sideload + widgets entitlements for AltStore.
+        SILVERAN_WIDGET_APP_GROUP: group.com.punkrally.reader
     sources:
-      - path: SilveranWidgets/Sources
+      # ink+amp Continue: cover + progress + transport controls.
+      # `SilveranAppleWidgets` gives the extension the shared snapshot store and
+      # the AppIntents the buttons use; both are also linked into the app so the
+      # system can perform the AudioPlaybackIntents in the app's process.
+      - path: SilveranWidgets/Sources/InkAmpContinueWidget.swift
     dependencies:
       - package: Silveran
         product: SilveranAppleWidgets
@@ -212,12 +293,12 @@ targets:
         MARKETING_VERSION: 0.1
         PRODUCT_BUNDLE_IDENTIFIER: "$(APP_BUNDLE_ID).widgets"
         PRODUCT_NAME: Silveran Reader Widgets
-        SWIFT_VERSION: 6.2
+        SWIFT_VERSION: 5.10
     info:
       path: XCodeApps/Info-Widgets-macOS.plist
       properties:
         CFBundleName: "Silveran Reader Widgets"
-        CFBundleDisplayName: "Silveran Reader"
+        CFBundleDisplayName: "ink+amp"
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -227,7 +308,10 @@ targets:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
         SILVERAN_WIDGET_APP_GROUP: "$(MAC_APP_GROUP_ID)"
     sources:
-      - path: SilveranWidgets/Sources
+      # Silveran Reading (library/progress) widget + the shared ink+amp Continue
+      # tile (registered by the WidgetBundle in InkAmpContinueWidget.swift).
+      - path: SilveranWidgets/Sources/SilveranReadingWidget.swift
+      - path: SilveranWidgets/Sources/InkAmpContinueWidget.swift
     dependencies:
       - package: Silveran
         product: SilveranAppleWidgets
@@ -246,8 +330,8 @@ targets:
     info:
       path: XCodeApps/Info-watchOS.plist
       properties:
-        CFBundleName: "Silveran Reader"
-        CFBundleDisplayName: "Silveran Reader"
+        CFBundleName: "ink+amp"
+        CFBundleDisplayName: "ink+amp"
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -281,8 +365,8 @@ targets:
     info:
       path: XCodeApps/Info-tvOS.plist
       properties:
-        CFBundleName: "Silveran Reader"
-        CFBundleDisplayName: "Silveran Reader"
+        CFBundleName: "ink+amp"
+        CFBundleDisplayName: "ink+amp"
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -328,10 +412,27 @@ schemes:
       targets:
         "Silveran Reader (iOS)": all
         "Silveran Reader Widgets (iOS)": all
-        "Silveran Reader (watchOS)": all
     run:
       config: Debug
       executable: "Silveran Reader (iOS)"
+    test:
+      config: Debug
+      targets: []
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+  "Silveran Reader Sideload (iOS)":
+    shared: true
+    build:
+      targets:
+        "Silveran Reader Sideload (iOS)": all
+        "Silveran Reader Widgets (iOS)": all
+    run:
+      config: Debug
+      executable: "Silveran Reader Sideload (iOS)"
     test:
       config: Debug
       targets: []

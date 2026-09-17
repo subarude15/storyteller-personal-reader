@@ -332,9 +332,11 @@ public actor AppleWatchActor: NSObject {
 
         session.sendMessage(
             request,
-            replyHandler: { [weak self] response in
+            replyHandler: { response in
                 guard let message = try? WatchProtocolMessage.decode(from: response) else { return }
-                Task { await self?.handleWatchLibrary(message) }
+                Task {
+                    await AppleWatchActor.shared.handleWatchLibrary(message)
+                }
             },
             errorHandler: { error in
                 debugLog("[AppleWatchActor] Failed to request library: \(error)")
@@ -353,15 +355,17 @@ public actor AppleWatchActor: NSObject {
         )
         send(
             message,
-            replyHandler: { [weak self] response in
+            replyHandler: { response in
                 guard case .acknowledgement = try? WatchProtocolMessage.decode(from: response)
                 else { return }
-                Task { await self?.requestWatchLibrary() }
+                Task {
+                    await AppleWatchActor.shared.requestWatchLibrary()
+                }
             },
         )
     }
 
-    private func handleWatchLibrary(_ message: WatchProtocolMessage) {
+    func handleWatchLibrary(_ message: WatchProtocolMessage) {
         guard case .watchLibrary(let library) = message else { return }
         watchBooks = library.books
         notifyObservers(.watchBooksUpdated(books: library.books))

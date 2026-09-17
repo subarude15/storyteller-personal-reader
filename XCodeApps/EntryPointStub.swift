@@ -1,3 +1,4 @@
+import SwiftUI
 import SilveranAppleKit
 
 #if os(macOS)
@@ -7,7 +8,6 @@ import SilveranContentServer
 import SilveranReadaloud
 #endif
 
-/// Keep code out of the Xcode project, because LSP can't complete here.
 @main
 class EntryPointStub {
     static func main() {
@@ -20,6 +20,11 @@ class EntryPointStub {
             )
         )
         #elseif os(iOS)
+        // ink+amp: inject the five-tab shell (Home · Library · Shelf · Podcasts · Stats)
+        // as the iOS root. Silveran's app shell (background sync, keychain, reader,
+        // now-playing) runs normally underneath; AppLaunchContext.iosRootView replaces
+        // just the root library view.
+        AppLaunchContext.iosRootView = AnyView(PunkRallyTabView())
         iosAppEntryPoint(
             environment: SilveranEnvironment(readaloudAligner: ReadaloudEngine())
         )

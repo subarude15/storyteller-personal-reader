@@ -2,6 +2,7 @@ import Foundation
 import HTTPTypes
 import Hummingbird
 import NIOCore
+import PlaytorioFetcher
 import SilveranKit
 
 /// Stateless request handlers for the content server. Holds only immutable, `Sendable`
@@ -10,6 +11,15 @@ struct ContentServerHandlers: Sendable {
     let configuration: ContentServerConfiguration
     let sourceID: BookSourceID
     let sessionToken: String
+
+    private var playtorioService: FetcherService {
+        let dir = PlaytorioLibraryStore.applicationSupportPath().deletingLastPathComponent()
+        return FetcherService(
+            settings: AdapterSettings(directory: dir),
+            cache: BookCache(databasePath: dir.appendingPathComponent("cache.sqlite")),
+            library: PlaytorioLibraryStore(databasePath: PlaytorioLibraryStore.applicationSupportPath())
+        )
+    }
 
     func token(_ request: Request, _ context: BasicRequestContext) async throws -> Response {
         let body = try await collectString(request)
@@ -54,6 +64,53 @@ struct ContentServerHandlers: Sendable {
         let books = await BookServiceActor.shared.fetchLibraryInformation(sourceID: sourceID) ?? []
         let payload = books.map { StorytellerBookMetadataPayload(book: $0) }
         return try json(bookEncoder().encode(payload))
+    }
+
+    // MARK: - Playtorio discovery API
+
+    func playtorioBooks(_ request: Request, _ context: BasicRequestContext) async throws -> Response {
+        let service = playtorioService
+        let query = stringQuery(request, "query") ?? ""
+        let api = PlaytorioAPIServer(service: service)
+        let (status, data, _) = try await api.handle(
+            method: "GET",
+            path: "/api/books",
+            query: query.isEmpty ? [:] : ["query": query],
+            body: nil
+        )
+        return json(data, status: httpStatus(status))
+    }
+
+    func getPlaytorioAdapters(_ request: Request, _ context: BasicRequestContext) async throws -> Response {
+        let api = PlaytorioAPIServer(service: playtorioService)
+        let (status, data, _) = try await api.handle(
+            method: "GET",
+            path: "/api/settings/adapters",
+            query: [:],
+            body: nil
+        )
+        return json(data, status: httpStatus(status))
+    }
+
+    func putPlaytorioAdapters(_ request: Request, _ context: BasicRequestContext) async throws -> Response {
+        let body = try await collectData(request)
+        let api = PlaytorioAPIServer(service: playtorioService)
+        let (status, data, _) = try await api.handle(
+            method: "PUT",
+            path: "/api/settings/adapters",
+            query: [:],
+            body: body
+        )
+        return json(data, status: httpStatus(status))
+    }
+
+    private func httpStatus(_ code: Int) -> HTTPResponse.Status {
+        switch code {
+        case 200: return .ok
+        case 400: return .badRequest
+        case 404: return .notFound
+        default: return .init(code: code, reasonPhrase: "")
+        }
     }
 
     func book(_ request: Request, _ context: BasicRequestContext) async throws -> Response {

@@ -1,0 +1,43 @@
+{
+  "source": "libgen",
+  "cached": false,
+  "meta": { "libgen": 2 },
+  "results": [
+    {
+      "title": "Project Hail Mary",
+      "author": "Andy Weir,",
+      "publisher": "Penguin Random House LLC",
+      "year": "2021",
+      "language": "English",
+      "pages": "",
+      "isbn": "9780593135211",
+      "filesize": 9000000,
+      "format": "epub",
+      "source": "Library Genesis",
+      "downloadUrl": "https://example.com/rave/hail-mary.epub",
+      "md5": "F21EF754F3C4B986F3896807D80A6CE1",
+      "coverUrl": "https://example.com/covers/hail-mary.jpg",
+      "directUrl": "https://example.com/rave/hail-mary-direct.epub",
+      "directReady": true,
+      "_score": 108
+    },
+    {
+      "title": "Project Hail Mary",
+      "author": "Weir, Andy",
+      "publisher": "",
+      "year": "2021",
+      "language": "English",
+      "pages": "",
+      "isbn": "9780593135204",
+      "filesize": 3000000,
+      "format": "epub",
+      "source": "Library Genesis",
+      "downloadUrl": "https://example.com/rave/hail-mary-alt.epub",
+      "md5": "B9DE89584928D249A11B495B9D70345A",
+      "coverUrl": "https://example.com/covers/hail-mary-alt.jpg",
+      "directUrl": "",
+      "directReady": false,
+      "_score": 90
+    }
+  ]
+}

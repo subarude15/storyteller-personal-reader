@@ -46,8 +46,13 @@ public actor StorytellerActor {
 
     private var username: String?
     private var password: String?
+    /// User-facing public Storyteller URL (primary).
+    private var publicServerURL: URL?
+    /// Optional LAN URL as stored (nil = use default; resolved via StorytellerLANRouting).
+    private var storedLANURL: String?
     private var apiBaseURL: URL?
     private var accessToken: AccessToken?
+    public private(set) var networkRoute: StorytellerNetworkRoute = .public
     private(set) public var libraryMetadata: [BookMetadata] = []
     public var lastUpdateBookError: String?
     private var cachedStatuses: [BookStatus] = []
@@ -188,6 +193,8 @@ public actor StorytellerActor {
         await ProgressSyncActor.shared.startPolling()
 
         guard networkAvailable else { return }
+
+        await refreshNetworkRoute(reauthenticateIfChanged: false)
 
         var reconnected = false
         if connectionStatus != .connected {
@@ -352,6 +359,7 @@ public actor StorytellerActor {
 
         guard isAppActive else { return }
         resetReconnectBackoff()
+        await refreshNetworkRoute(reauthenticateIfChanged: true)
         if connectionStatus == .connected {
             await verifyConnection()
         } else {
@@ -389,6 +397,10 @@ public actor StorytellerActor {
             return false
         }
 
+        if await fallbackFromLANToPublicIfNeeded() {
+            return true
+        }
+
         lastNetworkOpSucceeded = false
         switch connectionStatus {
             case .connected, .connecting:
@@ -401,12 +413,14 @@ public actor StorytellerActor {
 
     public func setLogin(
         baseURL baseURLString: String,
+        lanURL lanURLString: String? = nil,
         username: String,
         password: String,
     ) async -> Bool {
         guard
             await configureCredentials(
                 baseURL: baseURLString,
+                lanURL: lanURLString,
                 username: username,
                 password: password,
             )
@@ -440,60 +454,149 @@ public actor StorytellerActor {
     /// Uses an ephemeral session with a short timeout so it never hangs the UI.
     public static func validateCredentials(
         baseURL baseURLString: String,
+        lanURL lanURLString: String? = nil,
         username: String,
         password: String,
     ) async -> CredentialTestResult {
         let trimmedURL = baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let baseURL = URL(string: trimmedURL), baseURL.scheme != nil else {
+        guard let publicBaseURL = URL(string: trimmedURL), publicBaseURL.scheme != nil else {
             return .failure("Invalid server URL")
         }
-
-        let apiBaseURL = resolveAPIBaseURL(from: baseURL)
-        let tokenURL = apiBaseURL.appendingPathComponent("token")
 
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 20
         configuration.timeoutIntervalForResource = 20
+        configuration.waitsForConnectivity = false
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
 
-        do {
-            _ = try await httpPost(
-                tokenURL.absoluteString,
-                headers: [
-                    "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
-                    "Accept": "application/json",
-                ],
-                formParameters: [
-                    "usernameOrEmail": username,
-                    "password": password,
-                ],
-                session: session,
-            )
-            return .success
-        } catch HTTPRequestError.unauthorized {
-            return .invalidCredentials
-        } catch let error as URLError {
-            return .failure(error.localizedDescription)
-        } catch {
-            return .failure("Could not connect to this server.")
+        // Match the runtime Storyteller actor route selection: when a LAN URL is
+        // configured and reachable, validate credentials against LAN first. The
+        // public URL may sit behind Cloudflare/WAF while the NAS API is reachable
+        // only on home Wi‑Fi, so testing public-only makes the app look unable to
+        // see Storyteller even when the actual route would work.
+        var lanCandidate: URL?
+        var lanReachable = false
+        if let effectiveLAN = StorytellerLANRouting.effectiveLANURL(stored: lanURLString),
+            let lanURL = URL(string: effectiveLAN),
+            lanURL.scheme != nil
+        {
+            lanCandidate = lanURL
+            lanReachable = await StorytellerLANRouting.probeReachability(serverURL: lanURL)
         }
+        let basesToTry = StorytellerLANRouting.credentialValidationBaseURLs(
+            publicURL: publicBaseURL,
+            lanURL: lanCandidate,
+            lanReachable: lanReachable,
+        )
+
+        var lastFailure: CredentialTestResult = .failure("Could not connect to this server.")
+        for baseURL in basesToTry {
+            let tokenURL = resolveAPIBaseURL(from: baseURL).appendingPathComponent("token")
+            do {
+                _ = try await httpPost(
+                    tokenURL.absoluteString,
+                    headers: [
+                        "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+                        "Accept": "application/json",
+                    ],
+                    formParameters: [
+                        "usernameOrEmail": username,
+                        "password": password,
+                    ],
+                    session: session,
+                )
+                return .success
+            } catch HTTPRequestError.unauthorized {
+                // A reachable Storyteller API rejected the credentials; do not mask
+                // that with public fallback because the password is route-independent.
+                return .invalidCredentials
+            } catch let error as URLError {
+                lastFailure = .failure(error.localizedDescription)
+            } catch {
+                lastFailure = .failure("Could not connect to this server.")
+            }
+        }
+        return lastFailure
     }
 
     public func configureCredentials(
         baseURL baseURLString: String,
+        lanURL lanURLString: String? = nil,
         username: String,
         password: String,
     ) async -> Bool {
         self.username = username
         self.password = password
         self.accessToken = nil
+        self.storedLANURL = lanURLString
         guard let baseURL = URL(string: baseURLString) else {
             debugLog("[StorytellerActor] Invalid base URL: \(baseURLString)")
             await updateConnectionStatus(.error("Invalid server URL"))
             return false
         }
+        publicServerURL = baseURL
+        networkRoute = .public
         apiBaseURL = StorytellerActor.resolveAPIBaseURL(from: baseURL)
+        await refreshNetworkRoute(reauthenticateIfChanged: false)
+        startNetworkMonitoring()
+        return true
+    }
+
+    /// Probe optional LAN URL and prefer it when reachable; otherwise keep public.
+    public func refreshNetworkRoute(reauthenticateIfChanged: Bool) async {
+        let previous = networkRoute
+        let effectiveLAN = StorytellerLANRouting.effectiveLANURL(stored: storedLANURL)
+
+        var preferLAN = false
+        if let lanString = effectiveLAN, let lanURL = URL(string: lanString), lanURL.scheme != nil {
+            preferLAN = await StorytellerLANRouting.probeReachability(serverURL: lanURL)
+        }
+
+        let next: StorytellerNetworkRoute = preferLAN ? .lan : .public
+        applyNetworkRoute(next)
+
+        if previous != networkRoute {
+            debugLog(
+                "[StorytellerActor] network route \(previous.rawValue) -> \(networkRoute.rawValue)"
+            )
+            accessToken = nil
+            observers?()
+            if reauthenticateIfChanged, networkAvailable {
+                _ = await ensureAuthentication()
+            }
+        }
+    }
+
+    private func applyNetworkRoute(_ route: StorytellerNetworkRoute) {
+        networkRoute = route
+        switch route {
+            case .lan:
+                if let lanString = StorytellerLANRouting.effectiveLANURL(stored: storedLANURL),
+                    let lanURL = URL(string: lanString)
+                {
+                    apiBaseURL = StorytellerActor.resolveAPIBaseURL(from: lanURL)
+                    return
+                }
+                networkRoute = .public
+                fallthrough
+            case .public:
+                if let publicServerURL {
+                    apiBaseURL = StorytellerActor.resolveAPIBaseURL(from: publicServerURL)
+                }
+        }
+    }
+
+    /// Soft fail: LAN selected but unreachable mid-flight → flip to public once.
+    @discardableResult
+    private func fallbackFromLANToPublicIfNeeded() async -> Bool {
+        guard networkRoute == .lan, publicServerURL != nil else { return false }
+        debugLog("[StorytellerActor] LAN request failed; falling back to public")
+        accessToken = nil
+        applyNetworkRoute(.public)
+        resetReconnectBackoff()
+        lastNetworkOpSucceeded = nil
+        observers?()
         return true
     }
 
@@ -595,6 +698,14 @@ public actor StorytellerActor {
         if await authenticate(), let accessToken = accessToken, let apiBaseURL = apiBaseURL {
             await updateConnectionStatus(.connected)
             return (apiBaseURL, accessToken)
+        }
+
+        // Soft fail: auth against LAN failed → try public once.
+        if networkRoute == .lan, await fallbackFromLANToPublicIfNeeded() {
+            if await authenticate(), let accessToken = accessToken, let apiBaseURL = apiBaseURL {
+                await updateConnectionStatus(.connected)
+                return (apiBaseURL, accessToken)
+            }
         }
 
         return nil
@@ -726,6 +837,10 @@ public actor StorytellerActor {
     /// Fetches library metadata from `/api/v2/books`.
     /// Server implementation: `storyteller/web/src/app/api/v2/books/route.ts`.
     public func fetchLibraryInformation() async -> [BookMetadata]? {
+        await fetchLibraryInformation(allowLANFailover: true)
+    }
+
+    private func fetchLibraryInformation(allowLANFailover: Bool) async -> [BookMetadata]? {
         guard let (baseURL, token) = await ensureAuthentication() else { return nil }
         let booksURL = baseURL.appendingPathComponent("books")
 
@@ -792,6 +907,13 @@ public actor StorytellerActor {
             return libraryMetadata
         } catch {
             logStorytellerError("fetchLibraryInformation", error: error)
+            if allowLANFailover,
+                let urlError = error as? URLError,
+                isConnectivityError(urlError),
+                await fallbackFromLANToPublicIfNeeded()
+            {
+                return await fetchLibraryInformation(allowLANFailover: false)
+            }
             return nil
         }
     }
@@ -2158,11 +2280,44 @@ public actor StorytellerActor {
                 return nil
             }
 
-            return try decoder.decode([StorytellerCollection].self, from: response.data)
+            return try decodeCollectionsList(from: response.data)
         } catch {
             logStorytellerError("fetchCollections", error: error)
             return nil
         }
+    }
+
+    /// Decodes the collections array, skipping individual bad elements so one
+    /// malformed collection cannot wipe Stats sync / library collection UI.
+    private func decodeCollectionsList(from data: Data) throws -> [StorytellerCollection] {
+        if let all = try? decoder.decode([StorytellerCollection].self, from: data) {
+            return all
+        }
+
+        let root = try JSONSerialization.jsonObject(with: data)
+        guard let items = root as? [Any] else {
+            throw DecodingError.dataCorrupted(
+                .init(codingPath: [], debugDescription: "collections root is not an array")
+            )
+        }
+
+        var decoded: [StorytellerCollection] = []
+        for (index, item) in items.enumerated() {
+            guard JSONSerialization.isValidJSONObject(item),
+                let itemData = try? JSONSerialization.data(withJSONObject: item),
+                let collection = try? decoder.decode(StorytellerCollection.self, from: itemData)
+            else {
+                debugLog(
+                    "[StorytellerActor] fetchCollections skipped index=\(index) (element decode failed)"
+                )
+                continue
+            }
+            decoded.append(collection)
+        }
+        debugLog(
+            "[StorytellerActor] fetchCollections tolerant decode kept=\(decoded.count)/\(items.count)"
+        )
+        return decoded
     }
 
     /// Retrieves details for a specific collection via `/api/v2/collections/{uuid}`.
@@ -2250,7 +2405,13 @@ public actor StorytellerActor {
                 return try decoder.decode(StorytellerCollection.self, from: response.data)
             } catch {
                 logStorytellerError("createCollection decode", error: error)
-                return nil
+                let uuid = Self.peekCollectionUUID(from: response.data) ?? "pending"
+                return StorytellerCollection(
+                    uuid: uuid,
+                    name: payload.name,
+                    description: payload.description,
+                    isPublic: payload.isPublic
+                )
             }
         } catch {
             logStorytellerError("createCollection", error: error)
@@ -2258,10 +2419,441 @@ public actor StorytellerActor {
         }
     }
 
+    // MARK: - ink+amp Stats sync (private collection blob)
+
+    public enum InkampStatsFetchResult: Sendable {
+        /// Auth / network / collections list failed — do not wipe local.
+        case unavailable(reason: String)
+        /// No collection yet (first sync).
+        case empty
+        case document(InkampStatsSyncDocument)
+    }
+
+    public enum InkampStatsPushResult: Sendable, Equatable {
+        case success
+        case failure(reason: String)
+    }
+
+    private static let inkampStatsCollectionUUIDKey = "punkRally.stats.collectionUUID.v1"
+
+    /// Fetches the Stats sync document from a private Storyteller collection
+    /// (same auth as place sync). Tolerates unrelated collections that fail to
+    /// decode — Stats only needs `.inkamp.stats.v1`.
+    public func fetchInkampStatsDocument() async -> InkampStatsFetchResult {
+        guard await ensureAuthentication() != nil else {
+            return .unavailable(reason: "auth failed")
+        }
+
+        let collections = await fetchCollections()
+        if let collections {
+            if let collection = collections.first(where: {
+                $0.name == InkampStatsSyncDocument.collectionName
+            }) {
+                rememberInkampStatsCollectionUUID(collection.uuid)
+                return Self.statsDocument(from: collection)
+            }
+        } else {
+            // List failed — try remembered UUID before declaring unavailable.
+            if let remembered = rememberedInkampStatsCollectionUUID(),
+                let collection = await fetchCollection(uuid: remembered)
+            {
+                return Self.statsDocument(from: collection)
+            }
+            return .unavailable(reason: "fetchCollections failed")
+        }
+
+        if let remembered = rememberedInkampStatsCollectionUUID(),
+            let collection = await fetchCollection(uuid: remembered)
+        {
+            return Self.statsDocument(from: collection)
+        }
+
+        return .empty
+    }
+
+    private static func statsDocument(from collection: StorytellerCollection) -> InkampStatsFetchResult {
+        guard let description = collection.description, !description.isEmpty else {
+            return .empty
+        }
+        guard description.hasPrefix("{") else {
+            return .empty
+        }
+        guard let doc = try? StatsSyncMerge.decodeDescription(description) else {
+            return .empty
+        }
+        return .document(doc)
+    }
+
+    /// Upserts the Stats sync document onto the private Storyteller collection.
+    public func pushInkampStatsDocument(_ document: InkampStatsSyncDocument) async
+        -> InkampStatsPushResult
+    {
+        guard await ensureAuthentication() != nil else {
+            return .failure(reason: "auth failed")
+        }
+        let encoded: String
+        do {
+            encoded = try StatsSyncMerge.encodeDescription(document)
+        } catch {
+            logStorytellerError("pushInkampStatsDocument encode", error: error)
+            return .failure(reason: "encode failed")
+        }
+
+        if let existing = await inkampStatsCollection() {
+            rememberInkampStatsCollectionUUID(existing.uuid)
+            let updated = await updateCollection(
+                uuid: existing.uuid,
+                payload: StorytellerCollectionUpdatePayload(
+                    description: encoded,
+                    isPublic: false
+                )
+            )
+            if updated != nil {
+                return .success
+            }
+            return .failure(reason: "updateCollection failed uuid=\(existing.uuid)")
+        }
+
+        let created = await createCollection(
+            StorytellerCollectionCreatePayload(
+                name: InkampStatsSyncDocument.collectionName,
+                description: encoded,
+                isPublic: false,
+                users: nil
+            )
+        )
+        if let created {
+            if created.uuid != "pending" {
+                rememberInkampStatsCollectionUUID(created.uuid)
+            }
+            return .success
+        }
+        return .failure(reason: "createCollection failed name=\(InkampStatsSyncDocument.collectionName)")
+    }
+
+    /// True when Storyteller credentials can authenticate (shared with place sync).
+    public func canReachStorytellerForStatsSync() async -> Bool {
+        await ensureAuthentication() != nil
+    }
+
+    private func inkampStatsCollection() async -> StorytellerCollection? {
+        if let collections = await fetchCollections(),
+            let found = collections.first(where: {
+                $0.name == InkampStatsSyncDocument.collectionName
+            })
+        {
+            rememberInkampStatsCollectionUUID(found.uuid)
+            return found
+        }
+        if let uuid = rememberedInkampStatsCollectionUUID(),
+            let collection = await fetchCollection(uuid: uuid)
+        {
+            return collection
+        }
+        return nil
+    }
+
+    private func rememberInkampStatsCollectionUUID(_ uuid: String) {
+        guard uuid != "pending", !uuid.isEmpty else { return }
+        UserDefaults.standard.set(uuid, forKey: Self.inkampStatsCollectionUUIDKey)
+    }
+
+    private func rememberedInkampStatsCollectionUUID() -> String? {
+        UserDefaults.standard.string(forKey: Self.inkampStatsCollectionUUIDKey)
+    }
+
+    // MARK: - ink+amp YouTube playhead sync (private collection blob)
+
+    public enum InkampYouTubePlayheadFetchResult: Sendable {
+        case unavailable(reason: String)
+        case empty
+        case document(InkampYouTubePlayheadSyncDocument)
+    }
+
+    public enum InkampYouTubePlayheadPushResult: Sendable, Equatable {
+        case success
+        case failure(reason: String)
+    }
+
+    private static let inkampYouTubePlayheadCollectionUUIDKey =
+        "punkRally.youtubePlayheads.collectionUUID.v1"
+
+    /// Fetches YouTube playheads from a private Storyteller collection
+    /// (same auth as Stats / place sync).
+    public func fetchInkampYouTubePlayheadsDocument() async -> InkampYouTubePlayheadFetchResult {
+        guard await ensureAuthentication() != nil else {
+            return .unavailable(reason: "auth failed")
+        }
+
+        let collections = await fetchCollections()
+        if let collections {
+            if let collection = collections.first(where: {
+                $0.name == InkampYouTubePlayheadSyncDocument.collectionName
+            }) {
+                rememberInkampYouTubePlayheadCollectionUUID(collection.uuid)
+                return Self.youTubePlayheadsDocument(from: collection)
+            }
+        } else {
+            if let remembered = rememberedInkampYouTubePlayheadCollectionUUID(),
+                let collection = await fetchCollection(uuid: remembered)
+            {
+                return Self.youTubePlayheadsDocument(from: collection)
+            }
+            return .unavailable(reason: "fetchCollections failed")
+        }
+
+        if let remembered = rememberedInkampYouTubePlayheadCollectionUUID(),
+            let collection = await fetchCollection(uuid: remembered)
+        {
+            return Self.youTubePlayheadsDocument(from: collection)
+        }
+
+        return .empty
+    }
+
+    private static func youTubePlayheadsDocument(from collection: StorytellerCollection)
+        -> InkampYouTubePlayheadFetchResult
+    {
+        guard let description = collection.description, !description.isEmpty else {
+            return .empty
+        }
+        guard description.hasPrefix("{") else {
+            return .empty
+        }
+        guard let doc = try? YouTubePlayheadSyncMerge.decodeDescription(description) else {
+            return .empty
+        }
+        return .document(doc)
+    }
+
+    /// Upserts the YouTube playhead sync document onto a private Storyteller collection.
+    public func pushInkampYouTubePlayheadsDocument(_ document: InkampYouTubePlayheadSyncDocument)
+        async -> InkampYouTubePlayheadPushResult
+    {
+        guard await ensureAuthentication() != nil else {
+            return .failure(reason: "auth failed")
+        }
+        let encoded: String
+        do {
+            encoded = try YouTubePlayheadSyncMerge.encodeDescription(document)
+        } catch {
+            logStorytellerError("pushInkampYouTubePlayheadsDocument encode", error: error)
+            return .failure(reason: "encode failed")
+        }
+
+        if let existing = await inkampYouTubePlayheadCollection() {
+            rememberInkampYouTubePlayheadCollectionUUID(existing.uuid)
+            let updated = await updateCollection(
+                uuid: existing.uuid,
+                payload: StorytellerCollectionUpdatePayload(
+                    description: encoded,
+                    isPublic: false
+                )
+            )
+            if updated != nil {
+                return .success
+            }
+            return .failure(reason: "updateCollection failed uuid=\(existing.uuid)")
+        }
+
+        let created = await createCollection(
+            StorytellerCollectionCreatePayload(
+                name: InkampYouTubePlayheadSyncDocument.collectionName,
+                description: encoded,
+                isPublic: false,
+                users: nil
+            )
+        )
+        if let created {
+            if created.uuid != "pending" {
+                rememberInkampYouTubePlayheadCollectionUUID(created.uuid)
+            }
+            return .success
+        }
+        return .failure(
+            reason:
+                "createCollection failed name=\(InkampYouTubePlayheadSyncDocument.collectionName)"
+        )
+    }
+
+    private func inkampYouTubePlayheadCollection() async -> StorytellerCollection? {
+        if let collections = await fetchCollections(),
+            let found = collections.first(where: {
+                $0.name == InkampYouTubePlayheadSyncDocument.collectionName
+            })
+        {
+            rememberInkampYouTubePlayheadCollectionUUID(found.uuid)
+            return found
+        }
+        if let uuid = rememberedInkampYouTubePlayheadCollectionUUID(),
+            let collection = await fetchCollection(uuid: uuid)
+        {
+            return collection
+        }
+        return nil
+    }
+
+    private func rememberInkampYouTubePlayheadCollectionUUID(_ uuid: String) {
+        guard uuid != "pending", !uuid.isEmpty else { return }
+        UserDefaults.standard.set(uuid, forKey: Self.inkampYouTubePlayheadCollectionUUIDKey)
+    }
+
+    private func rememberedInkampYouTubePlayheadCollectionUUID() -> String? {
+        UserDefaults.standard.string(forKey: Self.inkampYouTubePlayheadCollectionUUIDKey)
+    }
+
+    // MARK: - ink+amp podcast sync (private collection blob)
+
+    public enum InkampPodcastSyncFetchResult: Sendable {
+        case unavailable(reason: String)
+        case empty
+        case document(InkampPodcastSyncDocument)
+    }
+
+    public enum InkampPodcastSyncPushResult: Sendable, Equatable {
+        case success
+        case failure(reason: String)
+    }
+
+    private static let inkampPodcastSyncCollectionUUIDKey =
+        "punkRally.podcastSync.collectionUUID.v1"
+
+    /// Fetches podcast subscriptions + playheads from a private Storyteller collection
+    /// (same auth as Stats / YouTube playheads). Downloads are never in this blob.
+    public func fetchInkampPodcastSyncDocument() async -> InkampPodcastSyncFetchResult {
+        guard await ensureAuthentication() != nil else {
+            return .unavailable(reason: "auth failed")
+        }
+
+        let collections = await fetchCollections()
+        if let collections {
+            if let collection = collections.first(where: {
+                $0.name == InkampPodcastSyncDocument.collectionName
+            }) {
+                rememberInkampPodcastSyncCollectionUUID(collection.uuid)
+                return Self.podcastSyncDocument(from: collection)
+            }
+        } else {
+            if let remembered = rememberedInkampPodcastSyncCollectionUUID(),
+                let collection = await fetchCollection(uuid: remembered)
+            {
+                return Self.podcastSyncDocument(from: collection)
+            }
+            return .unavailable(reason: "fetchCollections failed")
+        }
+
+        if let remembered = rememberedInkampPodcastSyncCollectionUUID(),
+            let collection = await fetchCollection(uuid: remembered)
+        {
+            return Self.podcastSyncDocument(from: collection)
+        }
+
+        return .empty
+    }
+
+    private static func podcastSyncDocument(from collection: StorytellerCollection)
+        -> InkampPodcastSyncFetchResult
+    {
+        guard let description = collection.description, !description.isEmpty else {
+            return .empty
+        }
+        guard description.hasPrefix("{") else {
+            return .empty
+        }
+        guard let doc = try? PodcastSyncMerge.decodeDescription(description) else {
+            return .empty
+        }
+        return .document(doc)
+    }
+
+    /// Upserts the podcast sync document onto a private Storyteller collection.
+    public func pushInkampPodcastSyncDocument(_ document: InkampPodcastSyncDocument) async
+        -> InkampPodcastSyncPushResult
+    {
+        guard await ensureAuthentication() != nil else {
+            return .failure(reason: "auth failed")
+        }
+        let encoded: String
+        do {
+            encoded = try PodcastSyncMerge.encodeDescription(document)
+        } catch {
+            logStorytellerError("pushInkampPodcastSyncDocument encode", error: error)
+            return .failure(reason: "encode failed")
+        }
+
+        if let existing = await inkampPodcastSyncCollection() {
+            rememberInkampPodcastSyncCollectionUUID(existing.uuid)
+            let updated = await updateCollection(
+                uuid: existing.uuid,
+                payload: StorytellerCollectionUpdatePayload(
+                    description: encoded,
+                    isPublic: false
+                )
+            )
+            if updated != nil {
+                return .success
+            }
+            return .failure(reason: "updateCollection failed uuid=\(existing.uuid)")
+        }
+
+        let created = await createCollection(
+            StorytellerCollectionCreatePayload(
+                name: InkampPodcastSyncDocument.collectionName,
+                description: encoded,
+                isPublic: false,
+                users: nil
+            )
+        )
+        if let created {
+            if created.uuid != "pending" {
+                rememberInkampPodcastSyncCollectionUUID(created.uuid)
+            }
+            return .success
+        }
+        return .failure(
+            reason: "createCollection failed name=\(InkampPodcastSyncDocument.collectionName)"
+        )
+    }
+
+    private func inkampPodcastSyncCollection() async -> StorytellerCollection? {
+        if let collections = await fetchCollections(),
+            let found = collections.first(where: {
+                $0.name == InkampPodcastSyncDocument.collectionName
+            })
+        {
+            rememberInkampPodcastSyncCollectionUUID(found.uuid)
+            return found
+        }
+        if let uuid = rememberedInkampPodcastSyncCollectionUUID(),
+            let collection = await fetchCollection(uuid: uuid)
+        {
+            return collection
+        }
+        return nil
+    }
+
+    private func rememberInkampPodcastSyncCollectionUUID(_ uuid: String) {
+        guard uuid != "pending", !uuid.isEmpty else { return }
+        UserDefaults.standard.set(uuid, forKey: Self.inkampPodcastSyncCollectionUUIDKey)
+    }
+
+    private func rememberedInkampPodcastSyncCollectionUUID() -> String? {
+        UserDefaults.standard.string(forKey: Self.inkampPodcastSyncCollectionUUIDKey)
+    }
+
+    private static func peekCollectionUUID(from data: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let uuid = object["uuid"] as? String,
+            !uuid.isEmpty
+        else {
+            return nil
+        }
+        return uuid
+    }
+
     /// Updates collection metadata via `/api/v2/collections/{uuid}`.
     /// Server implementation: `storyteller/web/src/app/api/v2/collections/[uuid]/route.ts` (PUT handler).
-    /// TODO: UNTESTED
-    func updateCollection(
+    public func updateCollection(
         uuid: String,
         payload: StorytellerCollectionUpdatePayload,
     ) async -> StorytellerCollection? {
@@ -2313,7 +2905,13 @@ public actor StorytellerActor {
                 return try decoder.decode(StorytellerCollection.self, from: response.data)
             } catch {
                 logStorytellerError("updateCollection decode", error: error)
-                return nil
+                // Write landed; response shape mismatch must not fail Stats push.
+                return StorytellerCollection(
+                    uuid: uuid,
+                    name: payload.name ?? "",
+                    description: payload.description,
+                    isPublic: payload.isPublic ?? false
+                )
             }
         } catch {
             logStorytellerError("updateCollection", error: error)
@@ -2498,6 +3096,9 @@ public actor StorytellerActor {
         accessToken = nil
         username = nil
         password = nil
+        publicServerURL = nil
+        storedLANURL = nil
+        networkRoute = .public
         self.apiBaseURL = nil
         libraryMetadata.removeAll()
         await updateConnectionStatus(.disconnected)

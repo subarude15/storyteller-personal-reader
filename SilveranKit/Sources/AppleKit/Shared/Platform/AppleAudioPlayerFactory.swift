@@ -178,7 +178,7 @@ private final class NotificationObserverBag: @unchecked Sendable {
     }
 }
 
-actor AppleSMILAudioPlayer: AudioPlaying {
+actor AppleSMILAudioPlayer: AudioPlaying, AVPlayerProvidingPlaying {
     private var player: AVPlayer?
     private let endObserverBag = NotificationObserverBag()
     private var desiredRate: Double = 1.0
@@ -220,6 +220,10 @@ actor AppleSMILAudioPlayer: AudioPlaying {
         let normalizedDuration = duration.isFinite && duration > 0 ? duration : 0
         debugLog("[AppleSMILAudioPlayer] Audio loaded, duration: \(normalizedDuration)s")
         return normalizedDuration
+    }
+
+    func avPlayer() async -> AVPlayer? {
+        player
     }
 
     func play() {

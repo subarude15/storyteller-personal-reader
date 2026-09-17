@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)"
+cd "${SCRIPT_DIR}/.."
+
+SCHEME="${1:-Silveran Reader Sideload (iOS)}"
+CONFIGURATION="${2:-Release}"
+OUTPUT_DIR="${3:-.buildIosDevice}"
+IPA_NAME="${4:-punkrally-sideload-unsigned.ipa}"
+
+DESTINATION="generic/platform=iOS"
+
+echo "==> Building device target: ${SCHEME} (${CONFIGURATION}) for ${DESTINATION}"
+
+# Resolve package dependencies
+xcodebuild -resolvePackageDependencies \
+    -project Silveran.xcodeproj \
+    -scheme "${SCHEME}" \
+    -derivedDataPath "${OUTPUT_DIR}"
+
+# Patch WordAligner in StoryAlign checkouts if present to avoid Swift 6.2 type-checking timeout
+chmod -R u+w "${OUTPUT_DIR}" 2>/dev/null || true
+python3 -c '
+import glob, os
+paths = glob.glob("**/*WordAligner.swift", recursive=True) + \
+        glob.glob("'${OUTPUT_DIR}'/**/WordAligner.swift", recursive=True) + \
+        glob.glob(os.path.expanduser("~/Library/Developer/Xcode/DerivedData/**/WordAligner.swift"), recursive=True)
+for path in paths:
+    try:
+        os.chmod(path, 0o644)
+        with open(path, "r") as f:
+            content = f.read()
+        target = """        let idealTakes: [Double] = (0..<intervals).map { i in
+            Double(totalWords) * max(0.0, bounds[i+1] - bounds[i]) / totalDuration
+        }"""
+        replacement = """        let idealTakes: [Double] = (0..<intervals).map { i -> Double in
+            let span = max(0.0, bounds[i+1] - bounds[i])
+            return Double(totalWords) * span / totalDuration
+        }"""
+        if target in content:
+            with open(path, "w") as f:
+                f.write(content.replace(target, replacement))
+            print(f"Patched {path}")
+    except Exception as e:
+        print(f"Error checking {path}: {e}")
+' 2>&1 || true
+
+# Build device slice without code signing
+xcodebuild -project Silveran.xcodeproj \
+    -scheme "${SCHEME}" \
+    -configuration "${CONFIGURATION}" \
+    -destination "${DESTINATION}" \
+    -derivedDataPath "${OUTPUT_DIR}" \
+    CODE_SIGNING_ALLOWED=NO \
+    CODE_SIGNING_REQUIRED=NO \
+    CODE_SIGN_IDENTITY="" \
+    AD_HOC_CODE_SIGNING_ALLOWED=YES \
+    build | xcbeautify
+
+# Locate built .app bundle in Build/Products
+APP_PATH="$(find "${OUTPUT_DIR}/Build/Products" -maxdepth 3 -type d -name "*.app" | head -n 1)"
+
+if [[ -z "${APP_PATH}" || ! -d "${APP_PATH}" ]]; then
+    echo "ERROR: Could not find built .app bundle under ${OUTPUT_DIR}/Build/Products"
+    exit 1
+fi
+
+echo "==> Found built application: ${APP_PATH}"
+
+# Package Payload/<App>.app into .ipa
+STAGE_DIR="$(mktemp -d)"
+trap 'rm -rf "${STAGE_DIR}"' EXIT
+
+PAYLOAD_DIR="${STAGE_DIR}/Payload"
+mkdir -p "${PAYLOAD_DIR}"
+cp -R "${APP_PATH}" "${PAYLOAD_DIR}/"
+STAGED_APP="${PAYLOAD_DIR}/$(basename "${APP_PATH}")"
+
+# ---------------------------------------------------------------------------
+# Ad-hoc sign with real entitlements.
+#
+# `CODE_SIGNING_ALLOWED=NO` leaves the Mach-O without a code signature, and
+# AltStore/AltSign reads the app's entitlements straight out of that signature
+# (`ALTApplication.entitlementsString` -> ldid). With no entitlements blob,
+# AltStore sees no `com.apple.security.application-groups`, never provisions
+# the group, and the resigned app + widget end up with no shared container —
+# which is why sideloaded Continue widgets painted blank tiles.
+#
+# Signing ad-hoc here (identity `-`) puts the entitlements back into the
+# binary so AltStore can provision the App Group (`group.com.punkrally.reader`
+# -> `group.com.punkrally.reader.<TEAMID>`) and record it in `ALTAppGroups`.
+# AltStore re-signs everything with the user's certificate on install, so this
+# signature is only a vehicle for the entitlements.
+# ---------------------------------------------------------------------------
+APP_ENTITLEMENTS="${SCRIPT_DIR}/../XCodeApps/SilveranReaderSideload.entitlements"
+APPEX_ENTITLEMENTS="${SCRIPT_DIR}/../XCodeApps/SilveranReaderWidgets.entitlements"
+
+if [[ "${SKIP_ADHOC_ENTITLEMENTS:-0}" != "1" ]]; then
+    echo "==> Ad-hoc signing with entitlements (App Group must reach AltStore)"
+    while IFS= read -r APPEX; do
+        [[ -n "${APPEX}" ]] || continue
+        echo "    appex: $(basename "${APPEX}")"
+        codesign --force --sign - --timestamp=none \
+            --entitlements "${APPEX_ENTITLEMENTS}" "${APPEX}"
+    done < <(find "${STAGED_APP}/PlugIns" -maxdepth 1 -name "*.appex" -type d 2>/dev/null || true)
+
+    if ! codesign --force --sign - --timestamp=none \
+        --entitlements "${APP_ENTITLEMENTS}" "${STAGED_APP}"; then
+        # Nested frameworks/dylibs would need signing first; --deep covers them.
+        echo "    retrying app signature with --deep for nested code"
+        codesign --force --deep --sign - --timestamp=none \
+            --entitlements "${APP_ENTITLEMENTS}" "${STAGED_APP}"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Verify the packaging contract on every build.
+# ---------------------------------------------------------------------------
+APPEX_COUNT="$(find "${STAGED_APP}/PlugIns" -maxdepth 1 -name "*.appex" -type d 2>/dev/null | wc -l | tr -d ' ')"
+if [[ "${APPEX_COUNT}" -lt 1 ]]; then
+    echo "ERROR: ${STAGED_APP} has no PlugIns/*.appex — the Continue widget would not install."
+    exit 1
+fi
+echo "==> Embedded app extensions: ${APPEX_COUNT}"
+
+if [[ "${SKIP_ADHOC_ENTITLEMENTS:-0}" != "1" ]]; then
+    APP_GROUP_ENTITLEMENT="com.apple.security.application-groups"
+    APP_GROUP_ID="group.com.punkrally.reader"
+
+    APP_ENTITLEMENTS_DUMP="$(codesign -d --entitlements :- "${STAGED_APP}" 2>/dev/null || true)"
+    APPEX_ENTITLEMENTS_DUMP="$(codesign -d --entitlements :- "$(find "${STAGED_APP}/PlugIns" -maxdepth 1 -name '*.appex' -type d | head -n 1)" 2>/dev/null || true)"
+
+    for pair in "app:${APP_ENTITLEMENTS_DUMP}" "appex:${APPEX_ENTITLEMENTS_DUMP}"; do
+        name="${pair%%:*}"
+        dump="${pair#*:}"
+        if [[ "${dump}" != *"${APP_GROUP_ENTITLEMENT}"* || "${dump}" != *"${APP_GROUP_ID}"* ]]; then
+            echo "ERROR: ${name} is missing ${APP_GROUP_ENTITLEMENT} = ${APP_GROUP_ID} in its signature."
+            echo "       AltStore will not provision the App Group without it."
+            exit 1
+        fi
+    done
+    echo "==> App Group entitlement present on app + appex"
+fi
+
+IPA_OUTPUT_PATH="${OUTPUT_DIR}/${IPA_NAME}"
+mkdir -p "$(dirname "${IPA_OUTPUT_PATH}")"
+rm -f "${IPA_OUTPUT_PATH}"
+
+(cd "${STAGE_DIR}" && zip -qr "${SCRIPT_DIR}/../${IPA_OUTPUT_PATH}" Payload)
+
+echo "==> Successfully created sideload IPA: ${IPA_OUTPUT_PATH}"
+ls -lh "${IPA_OUTPUT_PATH}"
+unzip -l "${SCRIPT_DIR}/../${IPA_OUTPUT_PATH}" | grep -E "PlugIns/.*appex/" | head -3 || true

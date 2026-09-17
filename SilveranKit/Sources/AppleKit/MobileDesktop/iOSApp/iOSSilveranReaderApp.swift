@@ -264,7 +264,11 @@ private struct iOSRootView: View {
                 ProgressView(LastOpenBookStore.hasSavedRoute ? "Loading book..." : "Loading...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                iOSLibraryView()
+                if let customRoot = AppLaunchContext.iosRootView {
+                    customRoot
+                } else {
+                    iOSLibraryView()
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .silveranCreateReadaloud)) {
@@ -310,6 +314,14 @@ private struct iOSRootView: View {
     }
 
     private func handleOpenURL(_ url: URL) {
+        if InkAmpContinueLink.isContinueURL(url) {
+            if InkAmpContinueLink.wantsToggle(url) {
+                ContinueWidgetBridge.postToggle()
+            } else {
+                NotificationCenter.default.post(name: .punkRallyOpenContinue, object: nil)
+            }
+            return
+        }
         guard let bookID = SilveranBookLink.bookID(from: url) else { return }
         mediaViewModel.pendingOpenBookID = bookID
     }

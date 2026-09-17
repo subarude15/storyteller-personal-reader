@@ -11,8 +11,8 @@ TV_ASSETS_DIR="XCodeApps/TVAssets.xcassets/App Icon.brandassets"
 STORYTELLER_LOGO="XCodeApps/Assets.xcassets/StorytellerLogo.imageset/Storyteller_Logo.png"
 MAC_MASK="SilveranKit/Sources/Kit/Resources/assets/icons/macos_icon_mask.png"
 
-if [ ! -f "$STORYTELLER_LOGO" ]; then
-    echo "Error: Storyteller_Logo.png not found in project"
+if [ ! -f "$STORYTELLER_LOGO" ] && [ ! -f "icons/twin-pages-final.png" ]; then
+    echo "Error: Storyteller_Logo.png and icons/twin-pages-final.png both missing from project"
     exit 1
 fi
 
@@ -21,18 +21,31 @@ if ! command -v magick &> /dev/null; then
     exit 1
 fi
 
-echo "Generating app icons from Storyteller_Logo.png..."
+echo "Generating app icons from twin-pages-final.png..."
 
 SRGB_PROFILE="/System/Library/ColorSync/Profiles/sRGB Profile.icc"
 ICON_WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$ICON_WORK_DIR"' EXIT
-MAIN_ICON="${ICON_WORK_DIR}/storyteller_app_icon.png"
+MAIN_ICON="${ICON_WORK_DIR}/twin_pages_app_icon.png"
 ANDROID_FOREGROUND="${ASSETS_DIR}/icon_android_foreground.png"
 
-magick -size 1024x1024 gradient:'#fbfffe-#fffbee' \
-    \( "${STORYTELLER_LOGO}" -trim +repage -resize 700x700 \) \
-    -gravity center -compose over -composite \
-    -colorspace sRGB -profile "${SRGB_PROFILE}" "${MAIN_ICON}"
+SOURCE_ICON="icons/twin-pages-final.png"
+if [ ! -f "$SOURCE_ICON" ]; then
+    echo "Note: icons/twin-pages-final.png missing; falling back to Storyteller_Logo.png"
+    SOURCE_ICON="$STORYTELLER_LOGO"
+fi
+
+if [[ "$SOURCE_ICON" == *"twin-pages"* ]]; then
+    # twin-pages-final.png is full 1280x720 art (dark bg + centered book + bottom glow).
+    # Scale-to-cover 1024, then center-crop to the iOS square.
+    magick "${SOURCE_ICON}" -auto-orient -resize '1024x1024^' -gravity center -extent 1024x1024 \
+        -colorspace sRGB -profile "${SRGB_PROFILE}" "${MAIN_ICON}"
+else
+    magick -size 1024x1024 gradient:'#fbfffe-#fffbee' \
+        \( "${SOURCE_ICON}" -trim +repage -resize 700x700 \) \
+        -gravity center -compose over -composite \
+        -colorspace sRGB -profile "${SRGB_PROFILE}" "${MAIN_ICON}"
+fi
 
 magick "${MAIN_ICON}" "${ASSETS_DIR}/icon_1024x1024.png"
 magick "${MAIN_ICON}" "${WATCH_ASSETS_DIR}/icon_1024x1024.png"

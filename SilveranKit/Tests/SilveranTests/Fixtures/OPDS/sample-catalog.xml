@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
+  <id>https://example.com/opds/all</id>
+  <title>Example Public Domain Catalog</title>
+  <link href="/opds/all" rel="self" type="application/atom+xml;profile=opds-catalog"/>
+  <link href="/opds" rel="start" type="application/atom+xml;profile=opds-catalog"/>
+  <link href="/opds/all?page=2" rel="next" type="application/atom+xml;profile=opds-catalog"/>
+  <entry>
+    <id>https://example.com/ebooks/jane-austen/pride-and-prejudice</id>
+    <title>Pride and Prejudice</title>
+    <author>
+      <name>Jane Austen</name>
+      <uri>https://example.com/authors/jane-austen</uri>
+    </author>
+    <author>
+      <name>Editor Example</name>
+    </author>
+    <summary type="text">A witty romance of manners.</summary>
+    <content type="html">&lt;p&gt;Longer &lt;i&gt;HTML&lt;/i&gt; description.&lt;/p&gt;</content>
+    <rights>Public domain in the United States.</rights>
+    <published>2020-01-02T12:00:00Z</published>
+    <updated>2020-02-03T12:00:00Z</updated>
+    <category term="Fiction"/>
+    <category term="Romance"/>
+    <media:thumbnail url="/covers/pride-thumb.jpg" height="100" width="66"/>
+    <link href="/covers/pride.jpg" rel="http://opds-spec.org/image" type="image/jpeg"/>
+    <link href="/ebooks/jane-austen/pride-and-prejudice" rel="alternate" type="application/xhtml+xml"/>
+    <link href="/downloads/pride.epub" rel="http://opds-spec.org/acquisition" type="application/epub+zip" title="Recommended compatible epub"/>
+    <link href="/downloads/pride_advanced.epub" rel="http://opds-spec.org/acquisition" type="application/epub+zip" title="Advanced epub"/>
+  </entry>
+  <entry>
+    <id>urn:uuid:malformed-missing-title</id>
+    <author><name>Nobody</name></author>
+  </entry>
+  <entry>
+    <id>https://example.com/ebooks/herman-melville/moby-dick</id>
+    <title>Moby-Dick</title>
+    <author><name>Herman Melville</name></author>
+    <summary>Whales.</summary>
+    <link href="https://cdn.example.com/moby.epub" rel="enclosure" type="application/epub+zip"/>
+  </entry>
+</feed>

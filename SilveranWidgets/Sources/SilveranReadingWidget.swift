@@ -240,7 +240,7 @@ struct SilveranReadingWidget: Widget {
         ) { entry in
             SilveranReadingWidgetView(entry: entry)
         }
-        .configurationDisplayName("Silveran Reader")
+        .configurationDisplayName("Library")
         .description("Track current books and reading progress.")
         .supportedFamilies(Self.supportedFamilies)
         .contentMarginsDisabled()
@@ -260,12 +260,9 @@ struct SilveranReadingWidget: Widget {
     }
 }
 
-@main
-struct SilveranReaderWidgets: WidgetBundle {
-    var body: some Widget {
-        SilveranReadingWidget()
-    }
-}
+// @main WidgetBundle lives in InkAmpContinueWidget.swift (registers the
+// Continue tile). This Library widget stays in-tree for paid / SideStore
+// later — it is not part of the Sideload iOS extension.
 
 private struct SilveranReadingWidgetView: View {
     let entry: SilveranReadingEntry
@@ -835,16 +832,17 @@ private struct EmptyReadingWidgetView: View {
             Image(systemName: "book.closed")
                 .font(.title2)
                 .foregroundStyle(WidgetPalette.secondaryText)
-            Text("No books yet")
+            Text("Open ink+amp")
                 .font(.headline)
                 .foregroundStyle(WidgetPalette.primaryText)
-            Text("Add a book in Silveran Reader to see it here.")
+            Text("Library shelf needs App Groups (paid Apple ID or SideStore).")
                 .font(.caption)
                 .foregroundStyle(WidgetPalette.secondaryText)
                 .lineLimit(3)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .padding(18)
+        .widgetURL(InkAmpContinueLink.continueURL)
     }
 }
 

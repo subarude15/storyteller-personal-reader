@@ -22,12 +22,14 @@ public struct UploadNewBookView: View {
     @State private var selectedEbookURL: URL?
     @State private var selectedAudiobookURLs: [URL] = []
     @State private var selectedReadaloudURL: URL?
-    @State private var isUploading = false
+    @State private var isBusy = false
     @State private var uploadProgress: String?
     @State private var uploadProgressFraction: Double?
     @State private var uploadResult: UploadResult?
     @State private var bookSources: [BookSourceRecord] = []
     @State private var selectedSourceID: BookSourceID?
+    /// Book from the last successful upload — used to start / retry align.
+    @State private var pendingAlignBookID: BookID?
 
     #if os(iOS)
     @State private var activeImporter: ImporterTarget?
@@ -44,6 +46,8 @@ public struct UploadNewBookView: View {
 
     private enum UploadResult {
         case success
+        case aligning
+        case aligned
         case failure(String)
     }
 
@@ -55,13 +59,32 @@ public struct UploadNewBookView: View {
         VStack(spacing: 0) {
             Form {
                 Section("Destination") {
-                    Picker("Upload To", selection: selectedSourceBinding) {
-                        ForEach(bookSources) { source in
-                            Label(source.name, systemImage: iconName(for: source.kind))
-                                .tag(source.id)
+                    if bookSources.isEmpty {
+                        Text("Add a Storyteller source in Settings first.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker("Upload To", selection: selectedSourceBinding) {
+                            ForEach(bookSources) { source in
+                                Label(source.name, systemImage: iconName(for: source.kind))
+                                    .tag(source.id)
+                            }
                         }
+                        .disabled(isBusy || uploadResult != nil)
                     }
-                    .disabled(isUploading || uploadResult != nil || bookSources.isEmpty)
+                    if selectedSource?.kind == .storyteller {
+                        Text("Uses the active Storyteller URL (LAN when on home Wi‑Fi).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Import") {
+                    NavigationLink {
+                        TorBoxMagnetImportView()
+                    } label: {
+                        Label("Import via TorBox/Magnet", systemImage: "bolt.horizontal.circle")
+                    }
+                    .disabled(isBusy)
                 }
 
                 Section {
@@ -80,7 +103,7 @@ public struct UploadNewBookView: View {
                     )
 
                     fileRow(
-                        label: "Readaloud",
+                        label: "Readaloud (optional)",
                         selectedURL: selectedReadaloudURL,
                         onClear: { selectedReadaloudURL = nil },
                         onSelect: selectReadaloud,
@@ -89,7 +112,7 @@ public struct UploadNewBookView: View {
                     Text("Select Files")
                 } footer: {
                     Text(
-                        "Selected formats are added together as one book in the destination source."
+                        "Pick EPUB and/or audiobook (multi-file OK). On Storyteller, ebook + audio then Aligning… until read-aloud is ready. Files you picked are never deleted."
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -99,17 +122,42 @@ public struct UploadNewBookView: View {
                     Section {
                         switch result {
                             case .success:
-                                HStack(spacing: 8) {
-                                    Image(systemName: "checkmark.circle.fill")
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Label("Book added", systemImage: "checkmark.circle.fill")
                                         .foregroundStyle(.green)
-                                    Text("Book added")
+                                    if pendingAlignBookID != nil {
+                                        Text(
+                                            "Aligning continues on the book card (Creating Readaloud…). Open it for SYNC when ready."
+                                        )
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    }
+                                }
+                            case .aligning:
+                                HStack(spacing: 10) {
+                                    ProgressView()
+                                    Text("Aligning…")
+                                        .foregroundStyle(.secondary)
+                                }
+                            case .aligned:
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Label(
+                                        "Read-aloud ready",
+                                        systemImage: "checkmark.circle.fill"
+                                    )
+                                    .foregroundStyle(.green)
+                                    Text("Open the book for SYNC / Continue.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
                             case .failure(let message):
-                                HStack(alignment: .top, spacing: 8) {
-                                    Image(systemName: "exclamationmark.triangle.fill")
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Label(message, systemImage: "exclamationmark.triangle.fill")
                                         .foregroundStyle(.red)
-                                    Text(message)
-                                        .foregroundStyle(.secondary)
+                                    Button("Retry") {
+                                        Task { await retryImport() }
+                                    }
+                                    .buttonStyle(.bordered)
                                 }
                         }
                     }
@@ -122,19 +170,21 @@ public struct UploadNewBookView: View {
 
             HStack {
                 if uploadResult != nil {
-                    Button("Upload Another") {
+                    Button("Import Another") {
                         resetForNewUpload()
                     }
                     .buttonStyle(.bordered)
+                    .disabled(isBusy)
                 }
 
                 Spacer()
 
-                if isUploading {
+                if isBusy {
                     progressCircle(progress: uploadProgressFraction ?? 0)
                     if let progress = uploadProgress {
                         Text(progress)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
 
@@ -153,7 +203,7 @@ public struct UploadNewBookView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(
-                    isUploading || !hasAnyFileSelected || uploadResult != nil
+                    isBusy || !hasAnyFileSelected || uploadResult != nil
                         || selectedSourceID == nil
                 )
                 .keyboardShortcut(.defaultAction)
@@ -161,7 +211,7 @@ public struct UploadNewBookView: View {
             .padding()
         }
         #if os(macOS)
-        .frame(width: 500, height: 440)
+        .frame(width: 500, height: 480)
         #endif
         .task {
             await loadSources()
@@ -207,14 +257,14 @@ public struct UploadNewBookView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(isUploading || uploadResult != nil)
+                .disabled(isBusy || uploadResult != nil)
             }
             Button("Select...") {
                 onSelect()
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .disabled(isUploading || uploadResult != nil)
+            .disabled(isBusy || uploadResult != nil)
         }
     }
 
@@ -242,14 +292,14 @@ public struct UploadNewBookView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(isUploading || uploadResult != nil)
+                .disabled(isBusy || uploadResult != nil)
             }
             Button("Select...") {
                 onSelect()
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .disabled(isUploading || uploadResult != nil)
+            .disabled(isBusy || uploadResult != nil)
         }
     }
 
@@ -262,7 +312,7 @@ public struct UploadNewBookView: View {
     }
 
     private var primaryActionTitle: String {
-        selectedSource?.kind == .localFolder ? "Add" : "Upload"
+        selectedSource?.kind == .localFolder ? "Add" : "Import"
     }
 
     private func resetForNewUpload() {
@@ -272,11 +322,19 @@ public struct UploadNewBookView: View {
         uploadResult = nil
         uploadProgress = nil
         uploadProgressFraction = nil
+        pendingAlignBookID = nil
+        isBusy = false
     }
 
     private func loadSources() async {
         let sources = await BookServiceActor.shared.bookSources
             .filter { $0.capabilities.canUploadBooks }
+            .sorted { lhs, rhs in
+                // Prefer Storyteller (active LAN/public route) for Import.
+                if lhs.kind == .storyteller && rhs.kind != .storyteller { return true }
+                if lhs.kind != .storyteller && rhs.kind == .storyteller { return false }
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
         await MainActor.run {
             bookSources = sources
             if let selectedSourceID,
@@ -403,7 +461,8 @@ public struct UploadNewBookView: View {
         guard hasAnyFileSelected, let sourceID = selectedSourceID else { return }
 
         await MainActor.run {
-            isUploading = true
+            isBusy = true
+            uploadResult = nil
             uploadProgress = "Preparing..."
             uploadProgressFraction = 0.0
         }
@@ -465,14 +524,15 @@ public struct UploadNewBookView: View {
             }
 
             let uploadBookUUID = UUID().uuidString
+            let bookID = BookID(sourceID: sourceID, uuid: uploadBookUUID)
             let success = await BookServiceActor.shared.uploadBookAssets(
-                bookID: BookID(sourceID: sourceID, uuid: uploadBookUUID),
+                bookID: bookID,
                 ebook: ebookAsset,
                 audiobooks: audiobookAssets,
                 readaloud: readaloudAsset,
                 onProgress: { fraction in
                     Task { @MainActor in
-                        guard isUploading else { return }
+                        guard isBusy else { return }
                         let scaled = 0.1 + 0.9 * min(max(fraction, 0), 1)
                         if scaled > (uploadProgressFraction ?? 0) {
                             uploadProgressFraction = scaled
@@ -481,26 +541,120 @@ public struct UploadNewBookView: View {
                 },
             )
 
-            await MainActor.run {
-                isUploading = false
-                uploadProgress = nil
-                uploadProgressFraction = success ? 1.0 : nil
-                uploadResult =
-                    success
-                    ? .success
-                    : .failure(
-                        "Failed to add files to the selected source."
-                    )
-            }
             await BookServiceActor.shared.fetchLibraryInformation()
+
+            guard success else {
+                await MainActor.run {
+                    isBusy = false
+                    uploadProgress = nil
+                    uploadProgressFraction = nil
+                    uploadResult = .failure(
+                        "Couldn't upload to Storyteller. Check Wi‑Fi / LAN and Retry."
+                    )
+                }
+                return
+            }
+
+            let shouldAlign =
+                selectedSource?.kind == .storyteller
+                && ebookAsset != nil
+                && !audiobookAssets.isEmpty
+                && readaloudAsset == nil
+
+            if shouldAlign {
+                await MainActor.run {
+                    pendingAlignBookID = bookID
+                    uploadProgressFraction = 1.0
+                }
+                await startAndAwaitAlignment(for: bookID)
+            } else {
+                await MainActor.run {
+                    isBusy = false
+                    uploadProgress = nil
+                    uploadProgressFraction = 1.0
+                    pendingAlignBookID = nil
+                    uploadResult = .success
+                }
+            }
         } catch {
             await MainActor.run {
-                isUploading = false
+                isBusy = false
                 uploadProgress = nil
                 uploadProgressFraction = nil
                 uploadResult = .failure("Failed to read files: \(error.localizedDescription)")
             }
             await BookServiceActor.shared.fetchLibraryInformation()
+        }
+    }
+
+    private func retryImport() async {
+        if let bookID = pendingAlignBookID {
+            await startAndAwaitAlignment(for: bookID)
+        } else {
+            await uploadBook()
+        }
+    }
+
+    /// Storyteller server process: ebook + audiobook → read-aloud (home Wi‑Fi / LAN OK).
+    private func startAndAwaitAlignment(for bookID: BookID) async {
+        await MainActor.run {
+            isBusy = true
+            uploadResult = .aligning
+            uploadProgress = "Aligning…"
+            uploadProgressFraction = nil
+        }
+
+        let started = await BookServiceActor.shared.startAlignment(for: bookID)
+        guard started else {
+            await MainActor.run {
+                isBusy = false
+                uploadProgress = nil
+                uploadResult = .failure(
+                    "Upload OK, but Aligning didn't start. Retry when on home Wi‑Fi / LAN."
+                )
+            }
+            return
+        }
+
+        // Poll library until ALIGNED (or error). Soft ceiling — server may keep going.
+        let maxAttempts = 90
+        for attempt in 0..<maxAttempts {
+            try? await Task.sleep(for: .seconds(attempt == 0 ? 2 : 4))
+            await BookServiceActor.shared.fetchLibraryInformation()
+            let book = await MainActor.run {
+                mediaViewModel.library.bookMetaData.first { $0.id == bookID }
+            }
+            if let book, book.hasAvailableReadaloud {
+                await MainActor.run {
+                    isBusy = false
+                    uploadProgress = nil
+                    uploadProgressFraction = 1.0
+                    uploadResult = .aligned
+                }
+                return
+            }
+            let status = book?.readaloud?.status?.uppercased()
+            if status == "ERROR" || status == "STOPPED" {
+                await MainActor.run {
+                    isBusy = false
+                    uploadProgress = nil
+                    uploadResult = .failure(
+                        "Aligning failed on the server. Retry, or open the book card."
+                    )
+                }
+                return
+            }
+            await MainActor.run {
+                uploadProgress = "Aligning… (\(attempt + 1))"
+            }
+        }
+
+        // Still processing after poll window — leave Creating Readaloud… on the book card.
+        await MainActor.run {
+            isBusy = false
+            uploadProgress = nil
+            uploadProgressFraction = 1.0
+            uploadResult = .success
         }
     }
 

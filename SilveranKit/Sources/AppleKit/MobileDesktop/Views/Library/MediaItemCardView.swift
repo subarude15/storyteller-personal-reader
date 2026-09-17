@@ -1,5 +1,6 @@
 #if os(iOS) || os(macOS)
 import SwiftUI
+import SilveranKit
 
 #if os(iOS)
 private struct MediaNavigationPathKey: EnvironmentKey {
@@ -86,58 +87,100 @@ struct MediaItemCardView: View {
     @State private var doubleCoverSwapping = false
     #endif
     #if os(iOS)
-    @Environment(\.mediaNavigationPath) private var mediaNavigationPath
-    @Environment(\.editMetadataAction) private var editMetadataAction
-    @State private var pendingDetailsNavigation = false
-    @State private var copyBookData: CopyBookData?
-    @State private var pendingFolderDelete: FolderDeleteRequest?
-    #endif
-
-    var body: some View {
-        #if os(iOS)
-        if let playerData = preferredPlayerBookData {
-            Button {
-                PlayerPresenter.shared.present(playerData)
-            } label: {
-                cardContent
-            }
-            .buttonStyle(.plain)
-            .background(deferredNavigationLinks)
-            .contextMenu { iOSCardContextMenu }
-            .sheet(item: $copyBookData) { copyBookSheet($0) }
-            .confirmationDialog(
-                folderDeleteTitle,
-                isPresented: folderDeletePresented,
-                titleVisibility: .visible,
-                presenting: pendingFolderDelete,
-            ) { request in
-                Button("Delete", role: .destructive) { performFolderDelete(request) }
-            } message: { request in
-                Text(folderDeleteMessage(request))
-            }
-        } else {
-            NavigationLink(value: item) {
-                cardContent
-            }
-            .buttonStyle(.plain)
-            .background(deferredNavigationLinks)
-            .contextMenu { iOSCardContextMenu }
-            .sheet(item: $copyBookData) { copyBookSheet($0) }
-            .confirmationDialog(
-                folderDeleteTitle,
-                isPresented: folderDeletePresented,
-                titleVisibility: .visible,
-                presenting: pendingFolderDelete,
-            ) { request in
-                Button("Delete", role: .destructive) { performFolderDelete(request) }
-            } message: { request in
-                Text(folderDeleteMessage(request))
-            }
-        }
-        #else
-        cardContent
+        @Environment(\.mediaNavigationPath) private var mediaNavigationPath
+        @Environment(\.editMetadataAction) private var editMetadataAction
+        @Environment(\.mediaGridTapOpensPlayer) private var mediaGridTapOpensPlayer
+        @State private var pendingDetailsNavigation = false
+        @State private var copyBookData: CopyBookData?
+        @State private var pendingFolderDelete: FolderDeleteRequest?
         #endif
-    }
+
+        var body: some View {
+            #if os(iOS)
+            if mediaGridTapOpensPlayer {
+                // ink+amp: tapping a downloaded ebook/audiobook/readaloud opens
+                // it in the player/reader. An undownloaded tap opens the book
+                // detail (download UI) — no toast. The toast fires only when a
+                // downloaded title can't resolve/open its local media.
+                Button {
+                    openForPlayback()
+                } label: {
+                    cardContent
+                }
+                .buttonStyle(.plain)
+                .background(deferredNavigationLinks)
+                .contextMenu { iOSCardContextMenu }
+                .sheet(item: $copyBookData) { copyBookSheet($0) }
+                .confirmationDialog(
+                    folderDeleteTitle,
+                    isPresented: folderDeletePresented,
+                    titleVisibility: .visible,
+                    presenting: pendingFolderDelete,
+                ) { request in
+                    Button("Delete", role: .destructive) { performFolderDelete(request) }
+                } message: { request in
+                    Text(folderDeleteMessage(request))
+                }
+            } else if let playerData = preferredPlayerBookData {
+                Button {
+                    PlayerPresenter.shared.present(playerData)
+                } label: {
+                    cardContent
+                }
+                .buttonStyle(.plain)
+                .background(deferredNavigationLinks)
+                .contextMenu { iOSCardContextMenu }
+                .sheet(item: $copyBookData) { copyBookSheet($0) }
+                .confirmationDialog(
+                    folderDeleteTitle,
+                    isPresented: folderDeletePresented,
+                    titleVisibility: .visible,
+                    presenting: pendingFolderDelete,
+                ) { request in
+                    Button("Delete", role: .destructive) { performFolderDelete(request) }
+                } message: { request in
+                    Text(folderDeleteMessage(request))
+                }
+            } else {
+                NavigationLink(value: item) {
+                    cardContent
+                }
+                .buttonStyle(.plain)
+                .background(deferredNavigationLinks)
+                .contextMenu { iOSCardContextMenu }
+                .sheet(item: $copyBookData) { copyBookSheet($0) }
+                .confirmationDialog(
+                    folderDeleteTitle,
+                    isPresented: folderDeletePresented,
+                    titleVisibility: .visible,
+                    presenting: pendingFolderDelete,
+                ) { request in
+                    Button("Delete", role: .destructive) { performFolderDelete(request) }
+                } message: { request in
+                    Text(folderDeleteMessage(request))
+                }
+            }
+            #else
+            cardContent
+            #endif
+        }
+
+        #if os(iOS)
+                private func openForPlayback() {
+                    if PunkRallyPlayerHost.shouldOpenPlayer(for: item, mediaViewModel: mediaViewModel) {
+                        Task {
+                            await PunkRallyPlayerHost.open(
+                                item,
+                                mediaViewModel: mediaViewModel
+                            )
+                        }
+                    } else {
+                        // Nothing downloaded yet: open the book detail (download UI)
+                        // instead of toasting — an undownloaded tap is not a failure.
+                        handleDetailsNavigation()
+                    }
+                }
+                #endif
 
     #if os(iOS)
     @ViewBuilder
@@ -503,8 +546,6 @@ struct MediaItemCardView: View {
                     .overlay(alignment: .bottomTrailing) {
                         let progress = mediaViewModel.progress(for: item.id)
                         if progress > 0 {
-                            // Circle progress lives in the bottom notch for double covers; over a
-                            // single cover it gets a dark backing disc for contrast.
                             if progressStyle == .circle && !shouldRenderDoubleCover {
                                 CoverThemedProgressBadge(
                                     item: item,
@@ -513,11 +554,16 @@ struct MediaItemCardView: View {
                                 )
                                 .padding(.trailing, 4)
                                 .padding(.bottom, 4)
-                            } else if progressStyle == .text {
-                                ProgressTextBadge(progress: progress)
-                                    .padding(.trailing, 4)
-                                    .padding(.bottom, 4)
                             }
+                            ProgressTextBadge(
+                                progress: progress,
+                                durationSeconds: item.durationValue
+                            )
+                            .padding(
+                                .trailing,
+                                progressStyle == .circle && !shouldRenderDoubleCover ? 24 : 4
+                            )
+                            .padding(.bottom, 4)
                         }
                     }
                     .overlay(alignment: .topLeading) {
@@ -766,10 +812,13 @@ struct CoverThemedProgressBadge: View {
 
 struct ProgressTextBadge: View {
     let progress: Double
+    var durationSeconds: TimeInterval? = nil
 
     var body: some View {
-        let clamped = min(max(progress, 0), 1)
-        Text("\(Int((clamped * 100).rounded()))%")
+        let text =
+            PlaybackFinishabilityCopy.label(progress: progress, durationSeconds: durationSeconds)
+            ?? "\(Int((min(max(progress, 0), 1) * 100).rounded()))%"
+        Text(text)
             .font(.system(size: 11, weight: .bold))
             .foregroundStyle(.white)
             .padding(.horizontal, 6)
