@@ -104,7 +104,9 @@ public actor ExploreBookCache {
             throw ExploreCatalogError.httpStatus(http.statusCode)
         }
 
-        if let expected = http.expectedContentLength, expected > Self.maxDownloadBytes {
+        if http.expectedContentLength > 0,
+            http.expectedContentLength > Self.maxDownloadBytes
+        {
             try? fileManager.removeItem(at: tempURL)
             throw ExploreCatalogError.downloadTooLarge
         }
