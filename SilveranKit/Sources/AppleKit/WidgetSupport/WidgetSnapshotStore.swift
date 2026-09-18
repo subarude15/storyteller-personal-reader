@@ -19,13 +19,18 @@ public enum SilveranWidgetConstants {
     /// paid team) — Sideload + ink+amp use group.com.punkrally.reader.
     public static let fallbackAppGroupIdentifier = "group.com.punkrally.reader"
     public static let readingWidgetKind = "SilveranReadingWidget"
-    /// ink+amp Continue widget (cover + progress + transport controls). One kind
-    /// for every build that ships the tile — Sideload appex, paid Xcode target.
-    public static let continueWidgetKind = "InkAmpContinueWidget"
-    /// Kinds of the retired static Sideload tiles that painted blank on AltStore.
-    /// Kept for assertions only: never register or reload these, or a dead tile
-    /// comes back.
-    public static let legacySideloadContinueWidgetKinds = ["inkamp.continue.v3", "inkamp.continue.v4"]
+    /// ink+amp Continue + Up next. A new kind so iOS drops the stale
+    /// Continue-only instance of `InkAmpContinueWidget` (WidgetKit binds an
+    /// installed tile to its kind and will not repaint it under a new layout).
+    public static let continueWidgetKind = "inkamp.continue.upnext.v1"
+    /// Retired Continue kinds. Never register or reload these, or a dead tile
+    /// comes back. `InkAmpContinueWidget` is the Continue-only tile this kind
+    /// replaces; v3/v4 were the blank AltStore tiles.
+    public static let legacySideloadContinueWidgetKinds = [
+        "inkamp.continue.v3",
+        "inkamp.continue.v4",
+        "InkAmpContinueWidget",
+    ]
 }
 
 public enum SilveranWidgetReadingKind: String, Codable, Sendable, Hashable {
