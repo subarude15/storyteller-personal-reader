@@ -489,7 +489,7 @@ public enum ReadingHabitIdeas {
             .prefix(8)
             .map { entry in
                 let topAuthor = entry.authors.max { $0.value < $1.value }?.key
-                ReadingIdeaQuery(
+                return ReadingIdeaQuery(
                     kind: .tag,
                     term: entry.display,
                     weight: entry.weight * (1 + 0.2 * Double(entry.books - 1)),
