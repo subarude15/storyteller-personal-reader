@@ -78,15 +78,6 @@ public struct UploadNewBookView: View {
                     }
                 }
 
-                Section("Import") {
-                    NavigationLink {
-                        TorBoxMagnetImportView()
-                    } label: {
-                        Label("Import via TorBox/Magnet", systemImage: "bolt.horizontal.circle")
-                    }
-                    .disabled(isBusy)
-                }
-
                 Section {
                     fileRow(
                         label: "Ebook",

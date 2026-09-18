@@ -9,7 +9,6 @@ public actor AuthenticationActor {
     private let usernameKey = "username"
     private let passwordKey = "password"
     private let hardcoverTokenKey = "hardcoverToken"
-    private let torBoxAPIKeyAccount = "torboxAPIKey"
 
     private init() {}
 
@@ -106,23 +105,6 @@ public actor AuthenticationActor {
 
     public func deleteHardcoverToken() async throws {
         try await keychain.removeItem(account: hardcoverTokenKey)
-    }
-
-    public func saveTorBoxAPIKey(_ key: String) async throws {
-        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            try await deleteTorBoxAPIKey()
-            return
-        }
-        try await saveString(trimmed, for: torBoxAPIKeyAccount)
-    }
-
-    public func loadTorBoxAPIKey() async throws -> String? {
-        try await loadString(for: torBoxAPIKeyAccount)
-    }
-
-    public func deleteTorBoxAPIKey() async throws {
-        try await keychain.removeItem(account: torBoxAPIKeyAccount)
     }
 
     private func saveString(_ value: String, for account: String) async throws {

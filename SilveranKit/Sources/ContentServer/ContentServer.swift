@@ -139,17 +139,6 @@ public actor ContentServer: ContentServerControlling {
             try await handlers.postPosition(request, context)
         }
 
-        // Playtorio discovery (metadata + public URLs only)
-        router.get("api/books") { request, context in
-            try await handlers.playtorioBooks(request, context)
-        }
-        router.get("api/settings/adapters") { request, context in
-            try await handlers.getPlaytorioAdapters(request, context)
-        }
-        router.put("api/settings/adapters") { request, context in
-            try await handlers.putPlaytorioAdapters(request, context)
-        }
-
         return router
     }
 }

@@ -1,60 +1,6 @@
 // swift-tools-version: 6.2
 import PackageDescription
 
-// PlaytorioFetcher is Linux-buildable on its own. The rest of Silveran still
-// assumes Apple SDKs / resources, so on Linux we only expose the Playtorio
-// targets so `swift build` / `swift test` stay green for this package slice.
-let playtorioProducts: [Product] = [
-    .library(name: "PlaytorioFetcher", targets: ["PlaytorioFetcher"]),
-    .executable(name: "playtorio-fetcher", targets: ["playtorio-fetcher"]),
-]
-
-#if os(Linux)
-let sqliteTargets: [Target] = [
-    .systemLibrary(
-        name: "SQLite3",
-        path: "SilveranKit/CSQLite",
-        pkgConfig: "sqlite3",
-        providers: [
-            .apt(["libsqlite3-dev"]),
-            .brew(["sqlite"]),
-        ]
-    ),
-]
-let playtorioDependencies: [Target.Dependency] = ["SQLite3"]
-#else
-// Apple SDKs already provide SQLite3. Registering our Linux module map on
-// Apple platforms would declare SQLite3 twice and break Clang's module scan.
-let sqliteTargets: [Target] = []
-let playtorioDependencies: [Target.Dependency] = []
-#endif
-
-let playtorioTargets: [Target] = sqliteTargets + [
-    .target(
-        name: "PlaytorioFetcher",
-        dependencies: playtorioDependencies,
-        path: "SilveranKit/Utilities"
-    ),
-    .executableTarget(
-        name: "playtorio-fetcher",
-        dependencies: ["PlaytorioFetcher"],
-        path: "playtorio-fetcher"
-    ),
-    .testTarget(
-        name: "PlaytorioFetcherTests",
-        dependencies: ["PlaytorioFetcher"],
-        path: "SilveranKit/Tests/PlaytorioFetcherTests",
-        exclude: ["Fixtures"]
-    ),
-]
-
-#if os(Linux)
-let package = Package(
-    name: "Silveran",
-    products: playtorioProducts,
-    targets: playtorioTargets
-)
-#else
 let package = Package(
     name: "Silveran",
     platforms: [
@@ -70,7 +16,7 @@ let package = Package(
         .library(name: "SilveranAppleWidgets", targets: ["SilveranAppleWidgets"]),
         .library(name: "SilveranReadaloud", targets: ["SilveranReadaloud"]),
         .library(name: "SilveranNode", type: .dynamic, targets: ["SilveranNode"]),
-    ] + playtorioProducts,
+    ],
     dependencies: [
         // Fork pinned past 0.9.20: upstream's development branch gained Android
         // cross-compile support (platform-conditional CZLib + Bionic fixes) that
@@ -90,7 +36,6 @@ let package = Package(
             dependencies: [
                 .product(name: "ZIPFoundation", package: "ZIPFoundation"),
                 .product(name: "SwiftSoup", package: "SwiftSoup"),
-                "PlaytorioFetcher",
             ],
             path: "SilveranKit/Sources/Kit",
             exclude: [
@@ -113,7 +58,7 @@ let package = Package(
         ),
         .target(
             name: "SilveranAppleKit",
-            dependencies: ["SilveranKit", "SilveranAppleWidgets", "PlaytorioFetcher"],
+            dependencies: ["SilveranKit", "SilveranAppleWidgets"],
             path: "SilveranKit/Sources/AppleKit",
             exclude: [
                 "WidgetSupport"
@@ -128,7 +73,6 @@ let package = Package(
             name: "SilveranContentServer",
             dependencies: [
                 "SilveranKit",
-                "PlaytorioFetcher",
                 .product(name: "Hummingbird", package: "hummingbird"),
             ],
             path: "SilveranKit/Sources/ContentServer",
@@ -168,6 +112,5 @@ let package = Package(
                 .copy("Fixtures"),
             ],
         ),
-    ] + playtorioTargets
+    ]
 )
-#endif
