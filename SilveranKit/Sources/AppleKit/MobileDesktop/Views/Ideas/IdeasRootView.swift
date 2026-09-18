@@ -195,7 +195,7 @@ struct IdeaDetailView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("No description on Open Library")
+                    Text("No English description on Open Library")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }

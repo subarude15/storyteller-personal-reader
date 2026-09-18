@@ -237,6 +237,64 @@ import Testing
     #expect(detail?.year == nil)
 }
 
+@Test func openLibraryIdeaParseDropsNonEnglishFirstSentence() throws {
+    let json = """
+    {"docs":[{"key":"/works/OL9W","title":"Das Buch","author_name":["A. Author"],"first_sentence":["Ein erstes Satz."],"language":["ger"]}]}
+    """.data(using: .utf8)!
+    let works = OpenLibraryIdeaLookup.parse(json)
+    #expect(works.count == 1)
+    #expect(works[0].blurb == nil)
+}
+
+@Test func openLibraryIdeaParseKeepsEnglishFirstSentence() throws {
+    let json = """
+    {"docs":[{"key":"/works/OL9W","title":"The Book","author_name":["A. Author"],"first_sentence":["A first sentence."],"language":["eng"]}]}
+    """.data(using: .utf8)!
+    let works = OpenLibraryIdeaLookup.parse(json)
+    #expect(works[0].blurb == "A first sentence.")
+}
+
+@Test func openLibraryIdeaParseKeepsBlurbWhenLanguageUnknown() throws {
+    let json = """
+    {"docs":[{"key":"/works/OL9W","title":"The Book","author_name":["A. Author"],"first_sentence":["A first sentence."]}]}
+    """.data(using: .utf8)!
+    let works = OpenLibraryIdeaLookup.parse(json)
+    #expect(works[0].blurb == "A first sentence.")
+}
+
+@Test func openLibraryIdeaParseWorkDetailFlagsNonEnglishLanguages() throws {
+    let json = """
+    {"description":{"value":"Una descripción."},"languages":[{"key":"/languages/spa"}]}
+    """.data(using: .utf8)!
+    let detail = OpenLibraryIdeaLookup.parseWorkDetail(json)
+    #expect(detail?.description == "Una descripción.")
+    #expect(detail?.isEnglish == false)
+}
+
+@Test func openLibraryIdeaParseWorkDetailFlagsEnglishLanguages() throws {
+    let json = """
+    {"description":{"value":"A description."},"languages":[{"key":"/languages/eng"}]}
+    """.data(using: .utf8)!
+    let detail = OpenLibraryIdeaLookup.parseWorkDetail(json)
+    #expect(detail?.isEnglish == true)
+}
+
+@Test func openLibraryIdeaParseWorkDetailUnknownLanguageDefaultsEnglish() throws {
+    let json = """
+    {"description":{"value":"A description."}}
+    """.data(using: .utf8)!
+    let detail = OpenLibraryIdeaLookup.parseWorkDetail(json)
+    #expect(detail?.isEnglish == true)
+}
+
+@Test func openLibraryIdeaParseWorkDetailDescriptionLanguageTagOverrides() throws {
+    let json = """
+    {"description":{"value":"A description.","language":"eng"},"languages":[{"key":"/languages/fre"}]}
+    """.data(using: .utf8)!
+    let detail = OpenLibraryIdeaLookup.parseWorkDetail(json)
+    #expect(detail?.isEnglish == true)
+}
+
 @Test func readingIdeasDropEmptyReasonRows() {
     let query = ReadingIdeaQuery(
         kind: .author,

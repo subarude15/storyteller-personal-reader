@@ -693,12 +693,17 @@ public enum OpenLibraryIdeaLookup {
             let isbn = (doc["isbn"] as? [String])?.compactMap(LibraryIdentity.isbn13).first
             let subjects = stringArray(doc["subject"], cap: 4)
             let year = intValue(doc["first_publish_year"])
+            // English-first: only surface the search first_sentence as a blurb when
+            // the doc is English (or language unknown) so a foreign sentence never
+            // becomes the summary.
+            let docLangs = stringArray(doc["language"], cap: 8)
+            let englishDoc = docLangs.isEmpty || docLangs.contains { $0 == "eng" || $0 == "en" }
             return OpenLibraryWork(
                 key: key,
                 title: title,
                 author: author,
                 coverURL: cover,
-                blurb: blurb(doc["first_sentence"]),
+                blurb: englishDoc ? blurb(doc["first_sentence"]) : nil,
                 isbn: isbn,
                 subjects: subjects,
                 year: year,
@@ -715,9 +720,10 @@ public enum OpenLibraryIdeaLookup {
         }
         var items = [
             URLQueryItem(name: "limit", value: limit),
+            URLQueryItem(name: "language", value: "eng"),
             URLQueryItem(
                 name: "fields",
-                value: "key,title,author_name,cover_i,first_sentence,isbn,first_publish_year,subject",
+                value: "key,title,author_name,cover_i,first_sentence,isbn,first_publish_year,subject,language",
             ),
         ]
         switch query.kind {
@@ -759,27 +765,35 @@ public enum OpenLibraryIdeaLookup {
         let path = trimmed.hasPrefix("/") ? trimmed : "/" + trimmed
         let work = await fetchAndParseDetail(urlString: "https://openlibrary.org\(path).json")
 
-        // Prefer the work description. When a work carries no synopsis, fall back
-        // to the first edition's description (many works only have one there).
-        if (work?.description ?? "").isEmpty {
-            if let editionKey = await fetchFirstEditionKey(workKey: trimmed) {
-                let editionPath = editionKey.hasPrefix("/") ? editionKey : "/" + editionKey
-                if let edition = await fetchAndParseDetail(urlString: "https://openlibrary.org\(editionPath).json") {
-                    let desc = (edition.description?.isEmpty ?? true) ? work?.description : edition.description
-                    let subjects = edition.subjects.isEmpty ? (work?.subjects ?? []) : edition.subjects
-                    let year = edition.year ?? work?.year
-                    return OpenLibraryWorkDetail(description: desc, subjects: subjects, year: year)
-                }
+        // Work synopsis wins when it's English (or language unknown).
+        if let work, let desc = work.description, !desc.isEmpty, work.isEnglish {
+            return work
+        }
+
+        // Otherwise prefer an English edition's synopsis.
+        if let editionKey = await fetchFirstEditionKey(workKey: trimmed) {
+            let editionPath = editionKey.hasPrefix("/") ? editionKey : "/" + editionKey
+            if let edition = await fetchAndParseDetail(urlString: "https://openlibrary.org\(editionPath).json"),
+                let desc = edition.description, !desc.isEmpty, edition.isEnglish
+            {
+                let subjects = edition.subjects.isEmpty ? (work?.subjects ?? []) : edition.subjects
+                let year = edition.year ?? work?.year
+                return OpenLibraryWorkDetail(description: desc, subjects: subjects, year: year, isEnglish: true)
             }
         }
-        return work
+
+        // No English synopsis — keep subjects/year but never a foreign-language wall.
+        if let work {
+            return OpenLibraryWorkDetail(description: nil, subjects: work.subjects, year: work.year, isEnglish: false)
+        }
+        return nil
     }
 
     private static func fetchFirstEditionKey(workKey: String) async -> String? {
         let trimmed = workKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         let path = trimmed.hasPrefix("/") ? trimmed : "/" + trimmed
-        guard let url = URL(string: "https://openlibrary.org\(path)/editions.json?limit=1") else { return nil }
+        guard let url = URL(string: "https://openlibrary.org\(path)/editions.json?limit=50") else { return nil }
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
         do {
@@ -788,6 +802,10 @@ public enum OpenLibraryIdeaLookup {
                 let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                 let entries = object["entries"] as? [[String: Any]]
             else { return nil }
+            // Prefer an English edition; fall back to the first when none is tagged.
+            if let english = entries.first(where: { isEnglish(languageCodes($0)) }) {
+                return english["key"] as? String
+            }
             return entries.first?["key"] as? String
         } catch {
             return nil
@@ -810,7 +828,8 @@ public enum OpenLibraryIdeaLookup {
     }
 
     /// Parses a `/works/{key}.json` body: description (string or `{value}` object),
-    /// subjects, and first publication year.
+    /// subjects, and first publication year. `isEnglish` reflects whether the text
+    /// is English or its language is unknown (non-English is flagged false).
     public static func parseWorkDetail(_ data: Data) -> OpenLibraryWorkDetail? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
@@ -829,7 +848,44 @@ public enum OpenLibraryIdeaLookup {
         }()
         let subjects = stringArray(object["subjects"], cap: 6)
         let year = intValue(object["first_publish_year"])
-        return OpenLibraryWorkDetail(description: description, subjects: subjects, year: year)
+
+        // The description's own language tag is authoritative; the work/edition's
+        // `languages` array is the fallback signal.
+        var english = isEnglish(languageCodes(object))
+        if let tagged = descriptionLanguage(object["description"]) {
+            english = tagged == "eng" || tagged == "en"
+        }
+        return OpenLibraryWorkDetail(description: description, subjects: subjects, year: year, isEnglish: english)
+    }
+
+    /// Language codes on a work/edition object (e.g. `languages` → `eng`).
+    private static func languageCodes(_ object: [String: Any]) -> Set<String> {
+        guard let langs = object["languages"] as? [[String: Any]] else { return [] }
+        var codes: Set<String> = []
+        for lang in langs {
+            if let key = lang["key"] as? String {
+                let parts = key.split(separator: "/")
+                if let code = parts.last {
+                    codes.insert(String(code).lowercased())
+                }
+            }
+        }
+        return codes
+    }
+
+    /// True when text is English or its language is unknown (never block on missing
+    /// language info); false only when Open Library marks it as another language.
+    private static func isEnglish(_ codes: Set<String>) -> Bool {
+        codes.isEmpty || codes.contains("eng") || codes.contains("en")
+    }
+
+    /// Language tag embedded on a description value object, if any.
+    private static func descriptionLanguage(_ raw: Any?) -> String? {
+        guard let wrapper = raw as? [String: Any],
+            let lang = wrapper["language"] as? String
+        else { return nil }
+        let trimmed = lang.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func intValue(_ value: Any?) -> Int? {
@@ -865,11 +921,14 @@ public struct OpenLibraryWorkDetail: Equatable, Sendable {
     public let description: String?
     public let subjects: [String]
     public let year: Int?
+    /// True when the description is English or its language is unknown.
+    public let isEnglish: Bool
 
-    public init(description: String?, subjects: [String] = [], year: Int? = nil) {
+    public init(description: String?, subjects: [String] = [], year: Int? = nil, isEnglish: Bool = true) {
         self.description = description
         self.subjects = subjects
         self.year = year
+        self.isEnglish = isEnglish
     }
 }
 
