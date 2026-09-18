@@ -35,15 +35,39 @@ struct MediaCompactCardView: View {
         @Environment(\.editMetadataAction) private var editMetadataAction
         @Environment(\.mediaGridTapOpensPlayer) private var mediaGridTapOpensPlayer
         @State private var pendingDetailsNavigation = false
+        @State private var confirmServerDelete = false
+        @State private var serverDeleteFailed = false
         #endif
 
         var body: some View {
             #if os(iOS)
+            iOSInteractiveCard
+                .confirmationDialog(
+                    "Delete \(item.title)?",
+                    isPresented: $confirmServerDelete,
+                    titleVisibility: .visible,
+                ) {
+                    Button("Delete", role: .destructive) {
+                        Task { await deleteFromLibrary() }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text(
+                        "This permanently deletes the book and all its media from the Storyteller server and removes local downloads. This cannot be undone."
+                    )
+                }
+                .alert("Couldn't delete book", isPresented: $serverDeleteFailed) {
+                    Button("OK", role: .cancel) {}
+                }
+            #else
+            cardContent
+            #endif
+        }
+
+        #if os(iOS)
+        @ViewBuilder
+        private var iOSInteractiveCard: some View {
             if mediaGridTapOpensPlayer {
-                // ink+amp: tapping a downloaded ebook/audiobook/readaloud opens
-                // it in the player/reader. An undownloaded tap opens the book
-                // detail (download UI) — no toast. The toast fires only when a
-                // downloaded title can't resolve/open its local media.
                 Button {
                     openForPlayback()
                 } label: {
@@ -69,10 +93,15 @@ struct MediaCompactCardView: View {
                 .background(deferredNavigationLinks)
                 .contextMenu { iOSContextMenu }
             }
-            #else
-            cardContent
-            #endif
         }
+
+        private func deleteFromLibrary() async {
+            let deleted = await mediaViewModel.deleteStorytellerLibraryBook(item.id)
+            if !deleted {
+                serverDeleteFailed = true
+            }
+        }
+        #endif
 
         #if os(iOS)
                 private func openForPlayback() {
@@ -270,6 +299,14 @@ struct MediaCompactCardView: View {
 
         iOSStatusContextMenu
         iOSReadaloudContextMenuContent(item: item)
+
+        if mediaViewModel.isServerBook(item.id) {
+            Button(role: .destructive) {
+                confirmServerDelete = true
+            } label: {
+                Label("Delete from Library", systemImage: "trash")
+            }
+        }
     }
 
     private var iOSCurrentItem: BookMetadata {

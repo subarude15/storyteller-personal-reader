@@ -26,6 +26,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ## Shipped
 
 ### Product / sync
+- [x] **Delete from Library (iOS)** — Options → Delete from Library → Storyteller `deleteBook`. Confirm, then the book leaves Library, Home Continue, and the Continue widget. Folder delete is unchanged.
 - [x] **Purge unpaid ingest + Ideas for later v1** — removed Playtorio, TorBox, magnets, LibGen, Audible scrape, RaveBookSearch, and free-catalog Explore (Standard Ebooks / public OPDS browse / Download / Import). Library segment is **Library | Ideas**: habit-ranked metadata suggestions (series gaps, same authors, overlapping tags; recency-weighted) with optional Open Library lookup and local Save idea. No download. **More like this** stays on owned book detail. Storyteller sync, LAN failover, podcasts, player, and local Import stay.
 - [x] **Streaming Books Phase 1: Explore ebooks + lawful source foundation** — tip `0d71be3`;
   `Library | Explore` segment; Standard Ebooks (public Atom new-releases) + user OPDS + direct
