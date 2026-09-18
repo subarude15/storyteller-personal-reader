@@ -274,6 +274,82 @@ import Testing
     #expect(SavedReadingIdeas.load(defaults: defaults).isEmpty)
 }
 
+@Test func dismissedReadingIdeasRoundTripAndFilter() {
+    let defaults = UserDefaults(suiteName: "ideas-test-\(UUID().uuidString)")!
+    let idea = ReadingIdea(
+        id: "ol:/works/OL2W",
+        title: "God Emperor of Dune",
+        author: "Frank Herbert",
+        coverURL: nil,
+        blurb: nil,
+        reason: "Because you like Dune, Frank Herbert",
+        score: 1,
+    )
+    #expect(DismissedReadingIdeas.load(defaults: defaults).isEmpty)
+    DismissedReadingIdeas.dismiss(ReadingHabitIdeas.dismissKey(for: idea), defaults: defaults)
+    #expect(DismissedReadingIdeas.load(defaults: defaults).contains("ol:/works/OL2W"))
+    #expect(ReadingHabitIdeas.excludingDismissed([idea], dismissed: DismissedReadingIdeas.load(defaults: defaults)).isEmpty)
+    DismissedReadingIdeas.remove(ReadingHabitIdeas.dismissKey(for: idea), defaults: defaults)
+    #expect(DismissedReadingIdeas.load(defaults: defaults).isEmpty)
+}
+
+@Test func readingIdeasDismissKeyPrefersWorkKeyThenISBNThenTitle() {
+    let byWork = ReadingIdea(id: "ol:/works/OL9W", title: "T", author: "A", coverURL: nil, blurb: nil, reason: "r", score: 1, isbn: "9781476717715")
+    #expect(ReadingHabitIdeas.dismissKey(for: byWork) == "ol:/works/OL9W")
+
+    let byISBN = ReadingIdea(id: "title:x", title: "The Troop", author: "Nick Cutter", coverURL: nil, blurb: nil, reason: "r", score: 1, isbn: "9781476717715")
+    #expect(ReadingHabitIdeas.dismissKey(for: byISBN) == "isbn:9781476717715")
+
+    let byTitle = ReadingIdea(id: "title:x", title: "The Deep", author: "Nick Cutter", coverURL: nil, blurb: nil, reason: "r", score: 1)
+    #expect(ReadingHabitIdeas.dismissKey(for: byTitle).hasPrefix("title:"))
+}
+
+@Test func readingIdeasBecauseYouLikeAnchors() {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let stamp = "2023-11-14T22:13:20Z"
+    let dune = ideaBook(
+        id: "dune-1",
+        title: "Dune",
+        authors: ["Frank Herbert"],
+        series: [("Dune", 1)],
+        tags: ["Science Fiction"],
+        status: "Read",
+        updatedAt: stamp,
+    )
+    let children = ideaBook(
+        id: "dune-3",
+        title: "Children of Dune",
+        authors: ["Frank Herbert"],
+        series: [("Dune", 3)],
+        tags: ["Science Fiction"],
+        status: "Read",
+        updatedAt: stamp,
+    )
+    let queries = ReadingHabitIdeas.queries(from: [dune, children], now: now)
+    let authorQuery = queries.first { $0.kind == .author }
+    #expect(authorQuery != nil)
+    #expect((authorQuery?.reason ?? "").hasPrefix("Because you like"))
+    #expect((authorQuery?.reason ?? "").contains("Frank Herbert"))
+}
+
+@Test func readingIdeasDenserListKeepsMoreIdeas() {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let stamp = "2023-11-14T22:13:20Z"
+    var books: [BookMetadata] = []
+    for i in 1 ... 8 {
+        books.append(ideaBook(
+            id: "b\(i)",
+            title: "Book \(i)",
+            authors: ["Author \(i)"],
+            status: "Read",
+            updatedAt: stamp,
+        ))
+    }
+    let queries = ReadingHabitIdeas.queries(from: books, now: now)
+    // 8 authors → all 8 become author queries (denser than the old 6 cap).
+    #expect(queries.filter { $0.kind == .author }.count == 8)
+}
+
 private func ideaBook(
     id: String,
     title: String,

@@ -143,7 +143,7 @@ public enum ReadingHabitIdeas {
     public static func queries(
         from library: [BookMetadata],
         now: Date = Date(),
-        limit: Int = 20,
+        limit: Int = 28,
     ) -> [ReadingIdeaQuery] {
         let habits = library.compactMap { book -> (BookMetadata, Habit)? in
             guard let habit = habit(for: book, now: now) else { return nil }
@@ -166,7 +166,7 @@ public enum ReadingHabitIdeas {
         queries: [ReadingIdeaQuery],
         worksByQuery: [[OpenLibraryWork]],
         owned: [BookMetadata],
-        limit: Int = 32,
+        limit: Int = 48,
     ) -> [ReadingIdea] {
         guard limit > 0 else { return [] }
         let identity = LibraryIdentity(books: owned)
@@ -206,7 +206,7 @@ public enum ReadingHabitIdeas {
             } else {
                 ranked = fresh
             }
-            let take = query.kind == .author ? 3 : 2
+            let take = query.kind == .author ? 4 : 3
             for work in ranked.prefix(take) {
                 // Dedupe by ISBN when present, else title+author.
                 let key: String
@@ -261,6 +261,18 @@ public enum ReadingHabitIdeas {
         return ideas.filter {
             !identity.contains(title: $0.title, author: $0.author, isbn: $0.isbn)
         }
+    }
+
+    /// Stable key for "Not interested": Open Library work key first, then ISBN,
+    /// then normalized title+author.
+    public static func dismissKey(for idea: ReadingIdea) -> String {
+        if idea.id.hasPrefix("ol:") { return idea.id }
+        if let isbn = idea.isbn, !isbn.isEmpty { return "isbn:\(isbn)" }
+        return "title:\(normalize(idea.title))|\(LibraryIdentity.authorKey(idea.author))"
+    }
+
+    public static func excludingDismissed(_ ideas: [ReadingIdea], dismissed: Set<String>) -> [ReadingIdea] {
+        ideas.filter { !dismissed.contains(dismissKey(for: $0)) }
     }
 
     public static func normalize(_ value: String) -> String {
@@ -392,11 +404,9 @@ public enum ReadingHabitIdeas {
                 missing.append((max + 1, true))
             }
             let author = bucket.authors.max { $0.value < $1.value }?.key
-            // ponytail: two missing slots per series. Upgrade by listing the rest.
-            for (number, isNext) in missing.prefix(2) {
-                let reason = isNext
-                    ? "Next in \(bucket.display)"
-                    : "Missing #\(number) in \(bucket.display)"
+            // Denser: list up to three missing slots per series.
+            for (number, isNext) in missing.prefix(3) {
+                let reason = becauseYouLike([bucket.display, author].compactMap { $0 })
                 queries.append(
                     ReadingIdeaQuery(
                         kind: .seriesGap,
@@ -412,25 +422,31 @@ public enum ReadingHabitIdeas {
         return queries
     }
 
-    private struct WeightedName {
+    private struct AuthorAccum {
         var display: String
         var weight: Double
-        var books: Int = 1
+        var topTitle: String?
+        var topTitleWeight: Double = 0
     }
 
     private static func authorQueries(_ habits: [(BookMetadata, Habit)]) -> [ReadingIdeaQuery] {
-        var weights: [String: WeightedName] = [:]
+        var weights: [String: AuthorAccum] = [:]
         for (book, habit) in habits {
             for name in authorNames(book) {
                 let key = normalize(name)
-                var entry = weights[key] ?? WeightedName(display: name, weight: 0)
+                var entry = weights[key] ?? AuthorAccum(display: name, weight: 0)
                 entry.weight += habit.weight
+                let title = book.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !title.isEmpty, habit.weight > entry.topTitleWeight {
+                    entry.topTitle = title
+                    entry.topTitleWeight = habit.weight
+                }
                 weights[key] = entry
             }
         }
         return weights.values
             .sorted { $0.weight > $1.weight }
-            .prefix(6)
+            .prefix(8)
             .map { entry in
                 ReadingIdeaQuery(
                     kind: .author,
@@ -438,39 +454,58 @@ public enum ReadingHabitIdeas {
                     weight: entry.weight,
                     missingPosition: nil,
                     authorHint: entry.display,
-                    reason: "More by \(entry.display)",
+                    reason: becauseYouLike([entry.topTitle, entry.display].compactMap { $0 }),
                 )
             }
     }
 
+    private struct TagAccum {
+        var display: String
+        var weight: Double
+        var books: Int
+        var authors: [String: Double] = [:]
+    }
+
     private static func tagQueries(_ habits: [(BookMetadata, Habit)]) -> [ReadingIdeaQuery] {
-        var weights: [String: WeightedName] = [:]
+        var weights: [String: TagAccum] = [:]
         for (book, habit) in habits {
             var seen: Set<String> = []
             for raw in book.tagNames {
                 let display = raw.trimmingCharacters(in: .whitespacesAndNewlines)
                 let key = normalize(display)
                 guard !key.isEmpty, seen.insert(key).inserted else { continue }
-                var entry = weights[key] ?? WeightedName(display: display, weight: 0, books: 0)
+                var entry = weights[key] ?? TagAccum(display: display, weight: 0, books: 0)
                 entry.weight += habit.weight
                 entry.books += 1
+                for name in authorNames(book) {
+                    entry.authors[name, default: 0] += habit.weight
+                }
                 weights[key] = entry
             }
         }
         return weights.values
             .filter { $0.books >= 2 }
             .sorted { $0.weight > $1.weight }
-            .prefix(5)
+            .prefix(8)
             .map { entry in
+                let topAuthor = entry.authors.max { $0.value < $1.value }?.key
                 ReadingIdeaQuery(
                     kind: .tag,
                     term: entry.display,
                     weight: entry.weight * (1 + 0.2 * Double(entry.books - 1)),
                     missingPosition: nil,
                     authorHint: nil,
-                    reason: "Because you read \(entry.display)",
+                    reason: becauseYouLike([entry.display, topAuthor].compactMap { $0 }),
                 )
             }
+    }
+
+    /// Builds an explicit "Because you like X, Y" callout (2 anchors max). Never
+    /// a vague one-word reason.
+    private static func becauseYouLike(_ anchors: [String]) -> String {
+        let cleaned = anchors.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !cleaned.isEmpty else { return "Recommended for you" }
+        return "Because you like " + cleaned.joined(separator: ", ")
     }
 
     private static func seriesPlaceholder(_ query: ReadingIdeaQuery, position: Int, reason: String) -> ReadingIdea {
@@ -675,8 +710,8 @@ public enum OpenLibraryIdeaLookup {
         var components = URLComponents(string: "https://openlibrary.org/search.json")
         let limit: String
         switch query.kind {
-        case .author: limit = "12"
-        case .seriesGap, .tag: limit = "10"
+        case .author: limit = "15"
+        case .seriesGap, .tag: limit = "15"
         }
         var items = [
             URLQueryItem(name: "limit", value: limit),
@@ -722,7 +757,45 @@ public enum OpenLibraryIdeaLookup {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         let path = trimmed.hasPrefix("/") ? trimmed : "/" + trimmed
-        guard let url = URL(string: "https://openlibrary.org\(path).json") else { return nil }
+        let work = await fetchAndParseDetail(urlString: "https://openlibrary.org\(path).json")
+
+        // Prefer the work description. When a work carries no synopsis, fall back
+        // to the first edition's description (many works only have one there).
+        if (work?.description ?? "").isEmpty {
+            if let editionKey = await fetchFirstEditionKey(workKey: trimmed) {
+                let editionPath = editionKey.hasPrefix("/") ? editionKey : "/" + editionKey
+                if let edition = await fetchAndParseDetail(urlString: "https://openlibrary.org\(editionPath).json") {
+                    let desc = (edition.description?.isEmpty ?? true) ? work?.description : edition.description
+                    let subjects = edition.subjects.isEmpty ? (work?.subjects ?? []) : edition.subjects
+                    let year = edition.year ?? work?.year
+                    return OpenLibraryWorkDetail(description: desc, subjects: subjects, year: year)
+                }
+            }
+        }
+        return work
+    }
+
+    private static func fetchFirstEditionKey(workKey: String) async -> String? {
+        let trimmed = workKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let path = trimmed.hasPrefix("/") ? trimmed : "/" + trimmed
+        guard let url = URL(string: "https://openlibrary.org\(path)/editions.json?limit=1") else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode),
+                let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let entries = object["entries"] as? [[String: Any]]
+            else { return nil }
+            return entries.first?["key"] as? String
+        } catch {
+            return nil
+        }
+    }
+
+    private static func fetchAndParseDetail(urlString: String) async -> OpenLibraryWorkDetail? {
+        guard let url = URL(string: urlString) else { return nil }
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
         do {
@@ -844,6 +917,35 @@ public enum CachedReadingIdeas {
         guard ideas.contains(where: { $0.id.hasPrefix("ol:") }),
             let data = try? JSONEncoder().encode(ideas)
         else { return }
+        defaults.set(data, forKey: key)
+    }
+}
+
+/// "Not interested" dismissals, keyed by a stable id (work key / ISBN / title+author).
+public enum DismissedReadingIdeas {
+    private static let key = "inkamp.dismissedReadingIdeas.v1"
+
+    public static func load(defaults: UserDefaults = .standard) -> Set<String> {
+        guard let data = defaults.data(forKey: key),
+            let ids = try? JSONDecoder().decode([String].self, from: data)
+        else { return [] }
+        return Set(ids)
+    }
+
+    public static func dismiss(_ id: String, defaults: UserDefaults = .standard) {
+        var all = load(defaults: defaults)
+        all.insert(id)
+        persist(all, defaults: defaults)
+    }
+
+    public static func remove(_ id: String, defaults: UserDefaults = .standard) {
+        var all = load(defaults: defaults)
+        all.remove(id)
+        persist(all, defaults: defaults)
+    }
+
+    private static func persist(_ ids: Set<String>, defaults: UserDefaults) {
+        guard let data = try? JSONEncoder().encode(Array(ids)) else { return }
         defaults.set(data, forKey: key)
     }
 }

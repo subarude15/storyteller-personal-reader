@@ -8,6 +8,7 @@ struct IdeasRootView: View {
     @Environment(MediaViewModel.self) private var mediaViewModel
     @State private var suggestions: [ReadingIdea] = []
     @State private var saved: [ReadingIdea] = []
+    @State private var dismissed: Set<String> = []
     @State private var loaded = false
 
     var body: some View {
@@ -31,6 +32,13 @@ struct IdeasRootView: View {
                                 NavigationLink(value: idea) {
                                     IdeaRow(idea: idea)
                                 }
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button(role: .destructive) {
+                                        dismissIdea(idea)
+                                    } label: {
+                                        Label("Not interested", systemImage: "hand.thumbsdown")
+                                    }
+                                }
                             }
                         }
                     }
@@ -39,6 +47,13 @@ struct IdeasRootView: View {
                             ForEach(visibleSaved) { idea in
                                 NavigationLink(value: idea) {
                                     IdeaRow(idea: idea)
+                                }
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button(role: .destructive) {
+                                        dismissIdea(idea)
+                                    } label: {
+                                        Label("Not interested", systemImage: "hand.thumbsdown")
+                                    }
                                 }
                             }
                         }
@@ -51,7 +66,7 @@ struct IdeasRootView: View {
             await reload()
         }
         .navigationDestination(for: ReadingIdea.self) { idea in
-            IdeaDetailView(idea: idea) {
+            IdeaDetailView(idea: idea, onDismiss: { dismissIdea(idea) }) {
                 saved = ReadingHabitIdeas.excludingOwned(
                     SavedReadingIdeas.load(),
                     library: mediaViewModel.library.bookMetaData,
@@ -63,11 +78,11 @@ struct IdeasRootView: View {
     private var savedIDs: Set<String> { Set(saved.map(\.id)) }
 
     private var visibleSuggestions: [ReadingIdea] {
-        suggestions.filter { !savedIDs.contains($0.id) && matches($0) }
+        suggestions.filter { !savedIDs.contains($0.id) && !dismissed.contains(ReadingHabitIdeas.dismissKey(for: $0)) && matches($0) }
     }
 
     private var visibleSaved: [ReadingIdea] {
-        saved.filter(matches)
+        saved.filter { !dismissed.contains(ReadingHabitIdeas.dismissKey(for: $0)) && matches($0) }
     }
 
     private func matches(_ idea: ReadingIdea) -> Bool {
@@ -75,6 +90,17 @@ struct IdeasRootView: View {
         guard !query.isEmpty else { return true }
         let haystack = "\(idea.title) \(idea.author) \(idea.reason)"
         return haystack.localizedCaseInsensitiveContains(query)
+    }
+
+    private func dismissIdea(_ idea: ReadingIdea) {
+        let key = ReadingHabitIdeas.dismissKey(for: idea)
+        DismissedReadingIdeas.dismiss(key)
+        dismissed = DismissedReadingIdeas.load()
+        SavedReadingIdeas.remove(idea.id)
+        saved = ReadingHabitIdeas.excludingOwned(
+            SavedReadingIdeas.load(),
+            library: mediaViewModel.library.bookMetaData,
+        )
     }
 
     private func reload() async {
@@ -90,23 +116,30 @@ struct IdeasRootView: View {
         if !lookupFailed {
             CachedReadingIdeas.save(fresh)
         }
-        suggestions = ReadingHabitIdeas.present(
+        dismissed = DismissedReadingIdeas.load()
+        let presented = ReadingHabitIdeas.present(
             fresh: fresh,
             lookupFailed: lookupFailed,
             cached: CachedReadingIdeas.load(),
             owned: library,
         )
-        saved = ReadingHabitIdeas.excludingOwned(SavedReadingIdeas.load(), library: library)
+        suggestions = ReadingHabitIdeas.excludingDismissed(presented, dismissed: dismissed)
+        saved = ReadingHabitIdeas.excludingDismissed(
+            ReadingHabitIdeas.excludingOwned(SavedReadingIdeas.load(), library: library),
+            dismissed: dismissed,
+        )
         loaded = true
     }
 }
 
 struct IdeaDetailView: View {
     let idea: ReadingIdea
+    var onDismiss: (() -> Void)? = nil
     var onChange: () -> Void = {}
 
     @State private var isSaved = false
     @State private var fetched: OpenLibraryWorkDetail?
+    @State private var loadingSummary = false
 
     private var description: String? {
         if let fetched, let desc = fetched.description, !desc.isEmpty { return desc }
@@ -147,7 +180,14 @@ struct IdeaDetailView: View {
                         .padding(.vertical, 6)
                         .background(Color.secondary.opacity(0.12), in: Capsule())
                 }
-                if let description, !description.isEmpty {
+                if loadingSummary {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text("Loading summary…")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if let description, !description.isEmpty {
                     Text(description)
                         .font(.body)
                 } else if !subjects.isEmpty {
@@ -185,6 +225,16 @@ struct IdeaDetailView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .accessibilityIdentifier("save-idea")
+
+                if let onDismiss {
+                    Button(role: .destructive) {
+                        onDismiss()
+                    } label: {
+                        Label("Not interested", systemImage: "hand.thumbsdown")
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("not-interested")
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(20)
@@ -195,7 +245,9 @@ struct IdeaDetailView: View {
             isSaved = SavedReadingIdeas.contains(idea.id)
             // Backfill a real description when search.json gave no first_sentence.
             if (idea.blurb ?? "").isEmpty, let workKey {
+                loadingSummary = true
                 fetched = await OpenLibraryIdeaLookup.fetchDetail(forKey: workKey)
+                loadingSummary = false
             }
         }
     }
