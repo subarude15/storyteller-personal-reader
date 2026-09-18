@@ -10,6 +10,8 @@ public struct ReadingIdea: Identifiable, Hashable, Codable, Sendable {
     /// Why this title was suggested from the local library.
     public let reason: String
     public let score: Double
+    /// ISBN-13 when Open Library sent one. Used only to drop owned/finished matches.
+    public let isbn: String?
 
     public init(
         id: String,
@@ -19,6 +21,7 @@ public struct ReadingIdea: Identifiable, Hashable, Codable, Sendable {
         blurb: String?,
         reason: String,
         score: Double,
+        isbn: String? = nil,
     ) {
         self.id = id
         self.title = title
@@ -27,6 +30,7 @@ public struct ReadingIdea: Identifiable, Hashable, Codable, Sendable {
         self.blurb = blurb
         self.reason = reason
         self.score = score
+        self.isbn = isbn
     }
 }
 
@@ -36,13 +40,22 @@ public struct OpenLibraryWork: Equatable, Sendable {
     public let author: String
     public let coverURL: URL?
     public let blurb: String?
+    public let isbn: String?
 
-    public init(key: String, title: String, author: String, coverURL: URL?, blurb: String?) {
+    public init(
+        key: String,
+        title: String,
+        author: String,
+        coverURL: URL?,
+        blurb: String?,
+        isbn: String? = nil,
+    ) {
         self.key = key
         self.title = title
         self.author = author
         self.coverURL = coverURL
         self.blurb = blurb
+        self.isbn = isbn
     }
 }
 
@@ -77,14 +90,14 @@ public struct ReadingIdeaQuery: Equatable, Sendable {
     }
 }
 
-/// Ranks “ideas for later” from books already in the Storyteller library.
-/// Series gaps can stand alone. Author and tag ideas need metadata hits for
-/// titles that are not already owned.
+/// Ranks unowned “ideas for later” from books already in the Storyteller library.
+/// Series next-unread first, then same authors, then shared tags. Owned and finished
+/// rows drop out by title+author, or by ISBN when one is present.
 public enum ReadingHabitIdeas {
     public static func queries(
         from library: [BookMetadata],
         now: Date = Date(),
-        limit: Int = 8,
+        limit: Int = 12,
     ) -> [ReadingIdeaQuery] {
         let habits = library.compactMap { book -> (BookMetadata, Habit)? in
             guard let habit = habit(for: book, now: now) else { return nil }
@@ -107,10 +120,10 @@ public enum ReadingHabitIdeas {
         queries: [ReadingIdeaQuery],
         worksByQuery: [[OpenLibraryWork]],
         owned: [BookMetadata],
-        limit: Int = 12,
+        limit: Int = 18,
     ) -> [ReadingIdea] {
         guard limit > 0 else { return [] }
-        let ownedTitles = Set(owned.map { normalize($0.title) }.filter { !$0.isEmpty })
+        let identity = LibraryIdentity(books: owned)
         let ordered = queries.enumerated().sorted { lhs, rhs in
             if lhs.element.weight != rhs.element.weight { return lhs.element.weight > rhs.element.weight }
             return kindRank(lhs.element.kind) < kindRank(rhs.element.kind)
@@ -121,20 +134,33 @@ public enum ReadingHabitIdeas {
         for (index, query) in ordered {
             let works = index < worksByQuery.count ? worksByQuery[index] : []
             let fresh = works.filter { work in
-                let title = normalize(work.title)
-                return !title.isEmpty && !ownedTitles.contains(title)
+                !identity.contains(title: work.title, author: work.author, isbn: work.isbn)
             }
             if fresh.isEmpty {
                 guard query.kind == .seriesGap, let position = query.missingPosition else { continue }
                 let idea = seriesPlaceholder(query, position: position)
+                guard !identity.contains(title: idea.title, author: idea.author, isbn: nil) else {
+                    continue
+                }
                 let key = normalize(idea.title)
                 guard !key.isEmpty, seen.insert(key).inserted else { continue }
                 ideas.append(idea)
                 continue
             }
+            let ranked: [OpenLibraryWork]
+            if query.kind == .seriesGap, let position = query.missingPosition {
+                ranked = fresh.sorted { lhs, rhs in
+                    let left = matchesSeriesPosition(lhs.title, position)
+                    let right = matchesSeriesPosition(rhs.title, position)
+                    if left != right { return left && !right }
+                    return false
+                }
+            } else {
+                ranked = fresh
+            }
             let take = query.kind == .author ? 2 : 1
-            for work in fresh.prefix(take) {
-                let key = "\(normalize(work.title))|\(normalize(work.author))"
+            for work in ranked.prefix(take) {
+                let key = "\(normalize(work.title))|\(LibraryIdentity.authorKey(work.author))"
                 guard seen.insert(key).inserted else { continue }
                 let id = work.key.isEmpty
                     ? "title:\(key)"
@@ -148,6 +174,7 @@ public enum ReadingHabitIdeas {
                         blurb: work.blurb,
                         reason: query.reason,
                         score: query.weight,
+                        isbn: work.isbn,
                     )
                 )
             }
@@ -161,6 +188,23 @@ public enum ReadingHabitIdeas {
                 return lhs.id < rhs.id
             }.prefix(limit)
         )
+    }
+
+    /// Offline / failed lookup keeps the last good list. Never substitutes owned library titles.
+    public static func present(
+        fresh: [ReadingIdea],
+        lookupFailed: Bool,
+        cached: [ReadingIdea],
+        owned: [BookMetadata],
+    ) -> [ReadingIdea] {
+        excludingOwned(lookupFailed ? cached : fresh, library: owned)
+    }
+
+    public static func excludingOwned(_ ideas: [ReadingIdea], library: [BookMetadata]) -> [ReadingIdea] {
+        let identity = LibraryIdentity(books: library)
+        return ideas.filter {
+            !identity.contains(title: $0.title, author: $0.author, isbn: $0.isbn)
+        }
     }
 
     public static func normalize(_ value: String) -> String {
@@ -409,6 +453,115 @@ public enum ReadingHabitIdeas {
         case .tag: return 2
         }
     }
+
+    private static func matchesSeriesPosition(_ title: String, _ position: Int) -> Bool {
+        let name = normalize(title)
+        if name.contains("#\(position)") || name.hasSuffix(" \(position)") { return true }
+        if name.contains("book \(position)") || name.contains("volume \(position)") { return true }
+        return name.contains("vol \(position)")
+    }
+}
+
+/// Owned and finished library rows. Match title+author when both exist, title alone
+/// when an author is missing, and ISBN-13 when either side has one.
+private struct LibraryIdentity {
+    var pairs: Set<String>
+    var titles: Set<String>
+    var titleOnly: Set<String>
+    var isbns: Set<String>
+
+    init(books: [BookMetadata]) {
+        pairs = []
+        titles = []
+        titleOnly = []
+        isbns = []
+        for book in books {
+            let title = ReadingHabitIdeas.normalize(book.title)
+            guard !title.isEmpty else { continue }
+            titles.insert(title)
+            let authors = Self.authorKeys(book)
+            if authors.isEmpty {
+                titleOnly.insert(title)
+            } else {
+                for author in authors {
+                    pairs.insert("\(title)|\(author)")
+                }
+            }
+            for isbn in Self.isbn13s(in: book.description) {
+                isbns.insert(isbn)
+            }
+        }
+    }
+
+    func contains(title: String, author: String, isbn: String?) -> Bool {
+        if let isbn, let normalized = Self.isbn13(isbn), isbns.contains(normalized) {
+            return true
+        }
+        let titleKey = ReadingHabitIdeas.normalize(title)
+        guard !titleKey.isEmpty else { return false }
+        if titleOnly.contains(titleKey) { return true }
+        let authorKey = Self.authorKey(author)
+        if authorKey.isEmpty { return titles.contains(titleKey) }
+        return pairs.contains("\(titleKey)|\(authorKey)")
+    }
+
+    static func authorKey(_ name: String) -> String {
+        ReadingHabitIdeas.normalize(name)
+            .split { $0 == "," || $0.isWhitespace }
+            .map(String.init)
+            .filter { !$0.isEmpty }
+            .sorted()
+            .joined(separator: " ")
+    }
+
+    static func authorKeys(_ book: BookMetadata) -> [String] {
+        var seen: Set<String> = []
+        return (book.authors ?? []).compactMap { creator in
+            let raw = (creator.name ?? creator.fileAs)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let key = authorKey(raw)
+            guard !key.isEmpty, seen.insert(key).inserted else { return nil }
+            return key
+        }
+    }
+
+    static func isbn13s(in text: String?) -> [String] {
+        guard let text else { return [] }
+        var found: [String] = []
+        var buffer = ""
+        func flush() {
+            if let isbn = isbn13(buffer) { found.append(isbn) }
+            buffer.removeAll(keepingCapacity: true)
+        }
+        for character in text {
+            if character.isNumber || character == "-" || character == " " || character == "X"
+                || character == "x"
+            {
+                buffer.append(character)
+            } else {
+                flush()
+            }
+        }
+        flush()
+        return found
+    }
+
+    /// ponytail: ISBN-10 → 13 without checksum verify. Upgrade by rejecting bad check digits.
+    static func isbn13(_ raw: String) -> String? {
+        let compact = raw.uppercased().filter { $0.isNumber || $0 == "X" }
+        if compact.count == 13, compact.hasPrefix("978") || compact.hasPrefix("979") {
+            return String(compact.filter(\.isNumber))
+        }
+        guard compact.count == 10, compact.dropLast().allSatisfy(\.isNumber) else { return nil }
+        let core = "978" + compact.prefix(9)
+        var sum = 0
+        for (index, character) in core.enumerated() {
+            let digit = Int(String(character)) ?? 0
+            sum += index.isMultiple(of: 2) ? digit : digit * 3
+        }
+        let check = (10 - (sum % 10)) % 10
+        return core + String(check)
+    }
 }
 
 /// Open Library search for titles the library does not already own.
@@ -446,12 +599,14 @@ public enum OpenLibraryIdeaLookup {
                 guard let id = intValue(doc["cover_i"]) else { return nil }
                 return URL(string: "https://covers.openlibrary.org/b/id/\(id)-M.jpg")
             }()
+            let isbn = (doc["isbn"] as? [String])?.compactMap(LibraryIdentity.isbn13).first
             return OpenLibraryWork(
                 key: key,
                 title: title,
                 author: author,
                 coverURL: cover,
                 blurb: blurb(doc["first_sentence"]),
+                isbn: isbn,
             )
         }
     }
@@ -460,11 +615,12 @@ public enum OpenLibraryIdeaLookup {
         var components = URLComponents(string: "https://openlibrary.org/search.json")
         var items = [
             URLQueryItem(name: "limit", value: query.kind == .author ? "6" : "5"),
-            URLQueryItem(name: "fields", value: "key,title,author_name,cover_i,first_sentence"),
+            URLQueryItem(name: "fields", value: "key,title,author_name,cover_i,first_sentence,isbn"),
         ]
         switch query.kind {
         case .seriesGap:
-            items.append(URLQueryItem(name: "q", value: query.term))
+            let position = query.missingPosition.map { " \($0)" } ?? ""
+            items.append(URLQueryItem(name: "q", value: query.term + position))
             if let author = query.authorHint, !author.isEmpty {
                 items.append(URLQueryItem(name: "author", value: author))
             }
@@ -539,6 +695,23 @@ public enum SavedReadingIdeas {
 
     private static func persist(_ ideas: [ReadingIdea], defaults: UserDefaults) {
         guard let data = try? JSONEncoder().encode(ideas) else { return }
+        defaults.set(data, forKey: key)
+    }
+}
+
+/// Last Open Library-backed Ideas list. Shown when lookup fails so we don't invent owned titles.
+public enum CachedReadingIdeas {
+    private static let key = "inkamp.readingIdeas.cache.v1"
+
+    public static func load(defaults: UserDefaults = .standard) -> [ReadingIdea] {
+        guard let data = defaults.data(forKey: key) else { return [] }
+        return (try? JSONDecoder().decode([ReadingIdea].self, from: data)) ?? []
+    }
+
+    public static func save(_ ideas: [ReadingIdea], defaults: UserDefaults = .standard) {
+        guard ideas.contains(where: { $0.id.hasPrefix("ol:") }),
+            let data = try? JSONEncoder().encode(ideas)
+        else { return }
         defaults.set(data, forKey: key)
     }
 }

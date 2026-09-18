@@ -52,7 +52,10 @@ struct IdeasRootView: View {
         }
         .navigationDestination(for: ReadingIdea.self) { idea in
             IdeaDetailView(idea: idea) {
-                saved = SavedReadingIdeas.load()
+                saved = ReadingHabitIdeas.excludingOwned(
+                    SavedReadingIdeas.load(),
+                    library: mediaViewModel.library.bookMetaData,
+                )
             }
         }
     }
@@ -78,12 +81,22 @@ struct IdeasRootView: View {
         let library = mediaViewModel.library.bookMetaData
         let queries = ReadingHabitIdeas.queries(from: library)
         let works = await OpenLibraryIdeaLookup.works(for: queries)
-        suggestions = ReadingHabitIdeas.ideas(
+        let fresh = ReadingHabitIdeas.ideas(
             queries: queries,
             worksByQuery: works,
             owned: library,
         )
-        saved = SavedReadingIdeas.load()
+        let lookupFailed = !queries.isEmpty && works.allSatisfy(\.isEmpty)
+        if !lookupFailed {
+            CachedReadingIdeas.save(fresh)
+        }
+        suggestions = ReadingHabitIdeas.present(
+            fresh: fresh,
+            lookupFailed: lookupFailed,
+            cached: CachedReadingIdeas.load(),
+            owned: library,
+        )
+        saved = ReadingHabitIdeas.excludingOwned(SavedReadingIdeas.load(), library: library)
         loaded = true
     }
 }

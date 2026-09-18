@@ -24,6 +24,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ## Shipped
 
 ### Product / sync
+- [x] **Ideas v2** — Library | Ideas recommends titles not already in the Storyteller library (title/author/ISBN). Cover, why-line, blurb, Save idea only. Open Library lookup; last-good cache when offline. **More like this** stays library-only.
 - [x] **Finish tonight + Couldn’t save server** — Settings Bedtime (default 10:30 PM, local only); Home card up to 3 in-progress picks that fit the remaining window (hide when empty or past bedtime); Storyteller save failures show **Couldn’t save server** (Test Connection keeps distinct copy).
 - [x] **Delete from Library (iOS)** — Options → Delete from Library → Storyteller `deleteBook`. Confirm, then the book leaves Library, Home Continue, and the Continue widget. Folder delete is unchanged.
 - [x] **Purge unpaid ingest + Ideas for later v1** — removed Playtorio, TorBox, magnets, LibGen, Audible scrape, RaveBookSearch, and free-catalog Explore (Standard Ebooks / public OPDS browse / Download / Import). Library segment is **Library | Ideas**: habit-ranked metadata suggestions (series gaps, same authors, overlapping tags; recency-weighted) with optional Open Library lookup and local Save idea. No download. **More like this** stays on owned book detail. Storyteller sync, LAN failover, podcasts, player, and local Import stay.
@@ -109,7 +110,8 @@ Now is Story Timeline. Do not pull later items ahead of that.
 
 ## Later / ideas (not blocking)
 
-**Ideas for later v1 is shipped** (metadata + local save only). Wrapped, series strip, and Shortcuts stay later.
+**Ideas v2 is shipped** (unowned titles, why-lines, local Save idea; no download). Wrapped, series strip, and Shortcuts stay later.
+**Soft Later:** Home tap / long-press medium picker.
 **Second player** remains parked (shared NP stays).
 
 Strict order (Smokey / Nas-ty):
