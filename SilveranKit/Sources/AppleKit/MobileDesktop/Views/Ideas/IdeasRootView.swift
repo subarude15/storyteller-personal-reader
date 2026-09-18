@@ -5,15 +5,54 @@ import SwiftUI
 struct IdeasRootView: View {
     let searchText: String
 
+    private enum IdeasMode: String, CaseIterable, Identifiable {
+        case ideas = "Ideas"
+        case saved = "Saved"
+        var id: String { rawValue }
+    }
+
     @Environment(MediaViewModel.self) private var mediaViewModel
     @State private var suggestions: [ReadingIdea] = []
     @State private var saved: [ReadingIdea] = []
     @State private var dismissed: Set<String> = []
     @State private var loaded = false
+    @State private var mode: IdeasMode = .ideas
 
     var body: some View {
-        Group {
-            if visibleSuggestions.isEmpty && visibleSaved.isEmpty {
+        VStack(spacing: 0) {
+            Picker("Ideas section", selection: $mode) {
+                ForEach(IdeasMode.allCases) { value in
+                    Text(value.rawValue).tag(value)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+
+            if mode == .saved {
+                savedContent
+            } else {
+                suggestionsContent
+            }
+        }
+        .task(id: mediaViewModel.libraryVersion) {
+            await reload()
+        }
+        .navigationDestination(for: ReadingIdea.self) { idea in
+            IdeaDetailView(idea: idea) {
+                saved = loadSaved()
+            } onNotInterested: {
+                dismissIdea(idea)
+            }
+        }
+    }
+
+    // MARK: Suggestions
+
+    @ViewBuilder
+    private var suggestionsContent: some View {
+        if visibleSuggestions.isEmpty {
+            Group {
                 if loaded {
                     Text("No ideas yet")
                         .font(.subheadline)
@@ -24,65 +63,109 @@ struct IdeasRootView: View {
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-            } else {
-                List {
-                    if !visibleSuggestions.isEmpty {
-                        Section("Ideas for later") {
-                            ForEach(visibleSuggestions) { idea in
-                                NavigationLink(value: idea) {
-                                    IdeaRow(idea: idea)
-                                }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                    Button(role: .destructive) {
-                                        dismissIdea(idea)
-                                    } label: {
-                                        Label("Not interested", systemImage: "hand.thumbsdown")
-                                    }
-                                }
-                            }
+            }
+        } else {
+            List {
+                Section("Ideas for later") {
+                    ForEach(visibleSuggestions) { idea in
+                        NavigationLink(value: idea) {
+                            IdeaRow(idea: idea, isSaved: false)
                         }
-                    }
-                    if !visibleSaved.isEmpty {
-                        Section("Saved") {
-                            ForEach(visibleSaved) { idea in
-                                NavigationLink(value: idea) {
-                                    IdeaRow(idea: idea)
-                                }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                    Button(role: .destructive) {
-                                        dismissIdea(idea)
-                                    } label: {
-                                        Label("Not interested", systemImage: "hand.thumbsdown")
-                                    }
-                                }
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            Button {
+                                saveIdea(idea)
+                            } label: {
+                                Label("Save", systemImage: "bookmark")
+                            }
+                            .tint(.blue)
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                dismissIdea(idea)
+                            } label: {
+                                Label("Not interested", systemImage: "hand.thumbsdown")
                             }
                         }
                     }
                 }
-                .listStyle(.plain)
             }
-        }
-        .task(id: mediaViewModel.libraryVersion) {
-            await reload()
-        }
-        .navigationDestination(for: ReadingIdea.self) { idea in
-            IdeaDetailView(idea: idea, onDismiss: { dismissIdea(idea) }) {
-                saved = ReadingHabitIdeas.excludingOwned(
-                    SavedReadingIdeas.load(),
-                    library: mediaViewModel.library.bookMetaData,
-                )
-            }
+            .listStyle(.plain)
         }
     }
+
+    // MARK: Saved
+
+    @ViewBuilder
+    private var savedContent: some View {
+        if visibleSaved.isEmpty {
+            VStack(spacing: 8) {
+                Image(systemName: "bookmark")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                Text("Nothing saved yet")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text("Tap a book, then Save idea to keep it here.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityIdentifier("saved-empty")
+        } else {
+            List {
+                Section {
+                    ForEach(visibleSaved) { idea in
+                        NavigationLink(value: idea) {
+                            IdeaRow(idea: idea, isSaved: true)
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                unsaveIdea(idea)
+                            } label: {
+                                Label("Remove", systemImage: "bookmark.slash")
+                            }
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                dismissIdea(idea)
+                            } label: {
+                                Label("Not interested", systemImage: "hand.thumbsdown")
+                            }
+                        }
+                    }
+                } header: {
+                    HStack {
+                        Text("Saved")
+                        Spacer()
+                        Button("Clear all") {
+                            clearAllSaved()
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.tint)
+                    }
+                }
+            }
+            .listStyle(.plain)
+        }
+    }
+
+    // MARK: Derived state
 
     private var savedIDs: Set<String> { Set(saved.map(\.id)) }
 
     private var visibleSuggestions: [ReadingIdea] {
-        suggestions.filter { !savedIDs.contains($0.id) && !dismissed.contains(ReadingHabitIdeas.dismissKey(for: $0)) && matches($0) }
+        suggestions.filter {
+            !savedIDs.contains($0.id)
+                && !dismissed.contains(ReadingHabitIdeas.dismissKey(for: $0))
+                && matches($0)
+        }
     }
 
     private var visibleSaved: [ReadingIdea] {
-        saved.filter { !dismissed.contains(ReadingHabitIdeas.dismissKey(for: $0)) && matches($0) }
+        saved.filter {
+            !dismissed.contains(ReadingHabitIdeas.dismissKey(for: $0))
+                && matches($0)
+        }
     }
 
     private func matches(_ idea: ReadingIdea) -> Bool {
@@ -92,16 +175,52 @@ struct IdeasRootView: View {
         return haystack.localizedCaseInsensitiveContains(query)
     }
 
+    // MARK: Actions
+
+    private func saveIdea(_ idea: ReadingIdea) {
+        SavedReadingIdeas.save(idea)
+        saved = loadSaved()
+    }
+
+    private func unsaveIdea(_ idea: ReadingIdea) {
+        SavedReadingIdeas.remove(idea.id)
+        saved = loadSaved()
+    }
+
+    private func clearAllSaved() {
+        for idea in saved {
+            SavedReadingIdeas.remove(idea.id)
+        }
+        saved = loadSaved()
+    }
+
     private func dismissIdea(_ idea: ReadingIdea) {
         let key = ReadingHabitIdeas.dismissKey(for: idea)
         DismissedReadingIdeas.dismiss(key)
         dismissed = DismissedReadingIdeas.load()
+        // Also drop it from the saved list (already read / don't want).
         SavedReadingIdeas.remove(idea.id)
-        saved = ReadingHabitIdeas.excludingOwned(
-            SavedReadingIdeas.load(),
-            library: mediaViewModel.library.bookMetaData,
+        saved = loadSaved()
+        // Remove from the in-memory pool immediately so the row leaves at once.
+        suggestions.removeAll { ReadingHabitIdeas.dismissKey(for: $0) == key }
+        // Refill: if the pool has thinned out, re-run the lookup so the list
+        // doesn't shrink.
+        if suggestions.count < 12, !loadedSearchFailed {
+            Task { await reload() }
+        }
+    }
+
+    private func loadSaved() -> [ReadingIdea] {
+        let library = mediaViewModel.library.bookMetaData
+        return ReadingHabitIdeas.excludingDismissed(
+            ReadingHabitIdeas.excludingOwned(SavedReadingIdeas.load(), library: library),
+            dismissed: dismissed,
         )
     }
+
+    // MARK: Reload
+
+    @State private var loadedSearchFailed = false
 
     private func reload() async {
         let library = mediaViewModel.library.bookMetaData
@@ -113,6 +232,7 @@ struct IdeasRootView: View {
             owned: library,
         )
         let lookupFailed = !queries.isEmpty && works.allSatisfy(\.isEmpty)
+        loadedSearchFailed = lookupFailed
         if !lookupFailed {
             CachedReadingIdeas.save(fresh)
         }
@@ -123,20 +243,20 @@ struct IdeasRootView: View {
             cached: CachedReadingIdeas.load(),
             owned: library,
         )
-        suggestions = ReadingHabitIdeas.excludingDismissed(presented, dismissed: dismissed)
-        saved = ReadingHabitIdeas.excludingDismissed(
-            ReadingHabitIdeas.excludingOwned(SavedReadingIdeas.load(), library: library),
-            dismissed: dismissed,
-        )
+        // Keep the full pool here; dismissal filtering happens at render time so
+        // dismissing reveals the next pool item (refill) until we reload.
+        suggestions = presented
+        saved = loadSaved()
         loaded = true
     }
 }
 
 struct IdeaDetailView: View {
     let idea: ReadingIdea
-    var onDismiss: (() -> Void)? = nil
     var onChange: () -> Void = {}
+    var onNotInterested: (() -> Void)? = nil
 
+    @Environment(\.dismiss) private var dismiss
     @State private var isSaved = false
     @State private var fetched: OpenLibraryWorkDetail?
     @State private var loadingSummary = false
@@ -214,7 +334,7 @@ struct IdeaDetailView: View {
                         }
                     }
                 }
-                Button(isSaved ? "Saved" : "Save idea") {
+                Button {
                     if isSaved {
                         SavedReadingIdeas.remove(idea.id)
                     } else {
@@ -222,15 +342,20 @@ struct IdeaDetailView: View {
                     }
                     isSaved.toggle()
                     onChange()
+                } label: {
+                    Label(isSaved ? "Saved" : "Save idea", systemImage: isSaved ? "bookmark.fill" : "bookmark")
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .accessibilityIdentifier("save-idea")
 
-                if let onDismiss {
+                if let onNotInterested {
                     Button(role: .destructive) {
-                        onDismiss()
+                        onNotInterested()
+                        dismiss()
                     } label: {
                         Label("Not interested", systemImage: "hand.thumbsdown")
+                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("not-interested")
@@ -255,6 +380,7 @@ struct IdeaDetailView: View {
 
 private struct IdeaRow: View {
     let idea: ReadingIdea
+    let isSaved: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -274,6 +400,13 @@ private struct IdeaRow: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+            }
+            Spacer(minLength: 0)
+            if isSaved {
+                Image(systemName: "bookmark.fill")
+                    .font(.caption)
+                    .foregroundStyle(.blue)
+                    .accessibilityLabel("Saved")
             }
         }
         .padding(.vertical, 4)
