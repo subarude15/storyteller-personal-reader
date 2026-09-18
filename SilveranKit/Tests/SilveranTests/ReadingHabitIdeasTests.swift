@@ -452,6 +452,11 @@ import Testing
     #expect(ReadingHabitIdeas.excludingOwned([idea], library: [owned]).isEmpty)
 }
 
+@Test func openLibrarySearchTitlesEmptyQueryReturnsNothing() async {
+    let works = await OpenLibraryIdeaLookup.searchTitles("   ")
+    #expect(works.isEmpty)
+}
+
 private func ideaBook(
     id: String,
     title: String,

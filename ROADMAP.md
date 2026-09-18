@@ -109,6 +109,7 @@ Story Timeline is shipped. Now is OL browse rails; next = Continue + Up next wid
 2. ~~**Story Timeline**~~ → **Shipped**
 3. ~~Soft: **Couldn't save server**~~ → **Shipped** (same PR as Finish tonight)
 4. **Open Library browse rails** → **Now** (current PR)
+   - **Ideas/Browse OL search** → typing in the Ideas search field runs a debounced Open Library title+author search (unowned cards; Save / Not interested; Saved stays local-filter only).
 5. **Continue + Up next widget** → next after Browse greens
 6. ~~Continue widget restore~~ → **smoke** tip `cc910d9` (PR #26)
 

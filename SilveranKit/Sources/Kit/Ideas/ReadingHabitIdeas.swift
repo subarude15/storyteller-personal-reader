@@ -757,6 +757,35 @@ public enum OpenLibraryIdeaLookup {
         }
     }
 
+    /// Free-text title + author search (Ideas/Browse search field). English-first,
+    /// same parse path as habit queries. Returns [] on failure/empty query.
+    public static func searchTitles(_ query: String) async -> [OpenLibraryWork] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        var components = URLComponents(string: "https://openlibrary.org/search.json")
+        components?.queryItems = [
+            URLQueryItem(name: "q", value: trimmed),
+            URLQueryItem(name: "limit", value: "30"),
+            URLQueryItem(name: "language", value: "eng"),
+            URLQueryItem(
+                name: "fields",
+                value: "key,title,author_name,cover_i,first_sentence,isbn,first_publish_year,subject,language",
+            ),
+        ]
+        guard let url = components?.url else { return [] }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
+                return []
+            }
+            return parse(data)
+        } catch {
+            return []
+        }
+    }
+
     /// Fetches a single work's description/subjects/year from `/works/{key}.json`,
     /// used to backfill a detail blurb when `first_sentence` was missing on search.json.
     public static func fetchDetail(forKey key: String) async -> OpenLibraryWorkDetail? {
