@@ -89,7 +89,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ### Widgets
 - [x] **Continue home widget** — tip `cc910d9` (PR #26; Arena `ALTAppGroups` resolve); Josh confirmed green. Wipe old blank tiles on install.
-- [x] **Continue + Up next (3)** — same `InkAmpContinueWidget` / same App Group (`ALTAppGroups` → configured → `group.com.punkrally.reader`). Medium tile: Now (cover, title, progress, existing play/pause) + up to 3 Up next from `HomeMixedQueue`. Up next taps `punkrally://continue?item=`. Empty queue: "Nothing in progress". Free AltStore WidgetKit can stay flaky; layout + snapshot still ship. See `docs/CONTINUE_WIDGET.md`.
+- [x] **Continue + Up next (3)** — tip `482fe8b`; medium tile shows HomeMixedQueue Now (cover, title, progress, existing play/pause) + up to 3 Up next. Same `InkAmpContinueWidget` / App Group (`ALTAppGroups` → configured → fallback). Up next taps `punkrally://continue?item=`. Empty: "Nothing in progress". Free AltStore WidgetKit can stay flaky. Sideload green [35390329291](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35390329291). See `docs/CONTINUE_WIDGET.md`.
 
 ### Stats
 - [x] **SessionTracker local** — ebook / audiobook / readaloud / podcast → Home + Stats tab (`c627bbe`, Sideload [35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694))
@@ -110,7 +110,7 @@ Story Timeline is shipped. Ideas/Browse search landed on `6e5ecae` and stays as-
 2. ~~**Story Timeline**~~ → **Shipped**
 3. ~~Soft: **Couldn't save server**~~ → **Shipped** (same PR as Finish tonight)
 4. ~~**Ideas/Browse OL search**~~ → **Shipped** (`6e5ecae`; unowned cards, Save / Not interested; Saved stays local-filter only)
-5. ~~**Continue + Up next widget**~~ → **Shipped** (medium Now + 3 Up next from `HomeMixedQueue`; same Continue widget kind + App Group)
+5. ~~**Continue + Up next widget**~~ → **Shipped** (`482fe8b`; medium Now + 3 Up next from `HomeMixedQueue`; Sideload [35390329291](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35390329291))
 6. ~~Continue widget restore~~ → **smoke** tip `cc910d9` (PR #26)
 
 ### Soft UX polish (anytime)
