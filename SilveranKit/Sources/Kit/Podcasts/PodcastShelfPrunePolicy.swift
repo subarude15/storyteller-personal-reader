@@ -188,12 +188,21 @@ public enum PlaybackFinishabilityCopy {
     public static func label(progress: Double, durationSeconds: TimeInterval?) -> String? {
         guard progress > 0.001 else { return nil }
         if progress >= 0.95 { return "Played" }
-        if let durationSeconds, durationSeconds > 0 {
-            let left = max(0, durationSeconds * (1 - min(max(progress, 0), 1)))
+        if let left = remainingSeconds(progress: progress, durationSeconds: durationSeconds) {
             return "\(compactDuration(left)) left"
         }
         let pct = Int((min(max(progress, 0), 1) * 100).rounded())
         return "\(pct)%"
+    }
+
+    /// Remaining play/read time when duration is known; nil when unknown or already “Played”.
+    public static func remainingSeconds(
+        progress: Double,
+        durationSeconds: TimeInterval?
+    ) -> TimeInterval? {
+        guard progress > 0.001, progress < 0.95 else { return nil }
+        guard let durationSeconds, durationSeconds > 0 else { return nil }
+        return max(0, durationSeconds * (1 - min(max(progress, 0), 1)))
     }
 
     public static func compactDuration(_ seconds: TimeInterval) -> String {

@@ -124,7 +124,7 @@ public final class TVSettingsViewModel {
                 )
             else {
                 connectionStatus = .error("Save failed")
-                connectionError = "Failed to save server."
+                connectionError = "Couldn't save server"
                 isSaving = false
                 return false
             }
@@ -143,7 +143,7 @@ public final class TVSettingsViewModel {
             )
             guard saved else {
                 connectionStatus = .error("Save failed")
-                connectionError = "Failed to save server."
+                connectionError = "Couldn't save server"
                 isSaving = false
                 return false
             }

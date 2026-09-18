@@ -17,15 +17,14 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-1. **Finish tonight** — Home quick win
-2. **Story Timeline** — distinctive ink+amp cut
-3. Soft: **Couldn't save server** copy (≠ “Connection failed”)
+1. **Story Timeline** — distinctive ink+amp cut
 
 **Explicit reject:** Playtorio, TorBox, magnets, LibGen, Audible scrape, DRM strip, and free-catalog Explore browse. Do not start second player, CarPlay, or DSM/SMB unless Josh reorders.
 
 ## Shipped
 
 ### Product / sync
+- [x] **Finish tonight + Couldn’t save server** — Settings Bedtime (default 10:30 PM, local only); Home card up to 3 in-progress picks that fit the remaining window (hide when empty or past bedtime); Storyteller save failures show **Couldn’t save server** (Test Connection keeps distinct copy).
 - [x] **Delete from Library (iOS)** — Options → Delete from Library → Storyteller `deleteBook`. Confirm, then the book leaves Library, Home Continue, and the Continue widget. Folder delete is unchanged.
 - [x] **Purge unpaid ingest + Ideas for later v1** — removed Playtorio, TorBox, magnets, LibGen, Audible scrape, RaveBookSearch, and free-catalog Explore (Standard Ebooks / public OPDS browse / Download / Import). Library segment is **Library | Ideas**: habit-ranked metadata suggestions (series gaps, same authors, overlapping tags; recency-weighted) with optional Open Library lookup and local Save idea. No download. **More like this** stays on owned book detail. Storyteller sync, LAN failover, podcasts, player, and local Import stay.
 - [x] **Streaming Books Phase 1: Explore ebooks + lawful source foundation** — tip `0d71be3`;
@@ -96,17 +95,17 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-Now is Finish tonight → Story Timeline → soft Couldn't save server. Do not pull later items ahead of that.
+Now is Story Timeline. Do not pull later items ahead of that.
 
 ### After Ideas for later
-1. **Finish tonight** — Home quick win
+1. ~~**Finish tonight**~~ → **Shipped** (this PR)
 2. **Story Timeline** — distinctive ink+amp cut
-3. Soft: **Couldn't save server** copy anytime
+3. ~~Soft: **Couldn't save server**~~ → **Shipped** (same PR as Finish tonight)
 4. ~~Continue widget restore~~ → **smoke** tip `cc910d9` (PR #26)
 
 ### Soft UX polish (anytime)
 - Soft polish pack → **Shipped** (`b9b07ea` / PR #22)
-- Distinct **Couldn't save server** copy (≠ “Connection failed”) — still soft
+- ~~Distinct **Couldn't save server** copy (≠ “Connection failed”)~~ → **Shipped**
 
 ## Later / ideas (not blocking)
 

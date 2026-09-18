@@ -621,7 +621,7 @@ struct WatchSettingsView: View {
                 case .noSourceSelected:
                     return "No server selected"
                 case .saveFailed:
-                    return "Failed to save server"
+                    return "Couldn't save server"
             }
         }
     }
