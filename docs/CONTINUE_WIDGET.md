@@ -1,13 +1,20 @@
 # ink+amp Continue widget — how it works and how to verify it
 
-The Home Screen / Lock Screen tile that shows what you were last on (cover, title,
-progress) with play/pause and ±15s that act **without opening the app**.
+The Home Screen tile that shows **Now** (the current Continue item: cover, title,
+progress) and up to **three Up next** rows from the same Home mixed queue
+(books and podcasts, last-touched). Play/pause and ±15s on Now still act
+**without opening the app** while a live audio session exists.
 
 - Widget kind: `InkAmpContinueWidget` (`SilveranWidgetConstants.continueWidgetKind`)
+  — unchanged, so an installed Continue tile picks up this layout without a new kind.
+- Families: small (Now only) and medium (Now + Up next). Medium is the one to add.
+  Lock Screen accessories stay the existing Now glance.
 - Sources: `SilveranWidgets/Sources/InkAmpContinueWidget.swift` (paint),
   `SilveranKit/Sources/AppleKit/WidgetSupport/ContinueWidget{SnapshotStore,Intents}.swift`
   (shared state + transport), publisher in
   `SilveranKit/Sources/AppleKit/MobileDesktop/ContinueWidgetPublisher.swift`
+- Queue: `HomeMixedQueue` in the app. `ContinueWidgetPublisher.publishHomeContinue`
+  writes Continue plus the next 3 whenever Home republishes. There is no second queue.
 
 ---
 
@@ -87,14 +94,30 @@ Continue.
 ## 3. Payload and write coalescing
 
 `ContinueWidgetSnapshot` is stored as JSON (`continue-now.json`) in the App
-Group container, covers as `ContinueCovers/continue_cover.dat`:
-title, subtitle, cover filename, `isPlaying`, kind, deep link, whole-item
-progress, elapsed/duration seconds, `hasLiveSession`, rate.
+Group container. Now's cover is `ContinueCovers/continue_cover.dat`. Each Up
+next row stores id, title, kind, deep link, optional progress, and a cover file
+`ContinueCovers/upnext_<hash>.dat` (at most 3).
 
-The snapshot is only rewritten when something the widget paints changed, and
-WidgetKit reloads are throttled to at most one per 20s while playback advances
-(immediate on transport changes), so a playing audiobook does not burn the
-widget reload budget.
+Now fields: title, subtitle, cover filename, `isPlaying`, kind, deep link,
+whole-item progress, elapsed/duration seconds, `hasLiveSession`, rate.
+
+Up next is replaced only when Home publishes a list (including an empty list,
+which clears the rows). Live-session ticks pass `upNext: nil` so playback
+progress does not wipe the queue. A queue change reloads WidgetKit immediately;
+progress ticks stay throttled to one reload per 20s.
+
+While audio is live, the Now card follows that session so play/pause matches
+what is actually playing. Up next still comes from `HomeMixedQueue`. With no
+live session, Now is the Home Continue item. An empty queue publishes no title
+and no Up next — the tile says **Nothing in progress** and does not invent
+Ideas or Open Library titles.
+
+Taps:
+
+- Now → `punkrally://continue` (existing host: Now Playing if live, else Home Continue).
+- Up next row → `punkrally://continue?item=<HomeMixedItem.id>` (`book:…` or `pod:…`).
+  The host opens that row through the same Continue / podcast bridge. No new player.
+  Up next does not send transport intents.
 
 ## 4. Verifying on device
 
@@ -103,10 +126,15 @@ widget reload budget.
 2. Long-press the Home Screen → **Add Widget** → *ink+amp Continue*. Delete any
    old blank tile from the parked build first — the previous kinds
    (`inkamp.continue.v3` / `.v4`) are retired and never reloaded.
-3. Start a book or an episode, then background the app. The tile should show
-   cover + title + progress, and play/pause/±15s should act without bringing
-   the app forward.
-4. Console probe (Mac → Window → Devices → Console, filter `ContinueWidget`):
+3. Start a book or an episode, then background the app. The **medium** tile
+   should show Now (cover, title, progress) and up to three Up next rows
+   (thumb + title) from Home. The small tile stays Now only.
+4. Play/pause/±15s on Now should act without bringing the app forward while
+   audio is live. Tapping Now opens `punkrally://continue`. Tapping an Up next
+   row opens that book or episode (same player / podcast bridge as Home).
+5. With nothing in progress and nothing playing, the tile says
+   "Nothing in progress" — not a made-up title.
+6. Console probe (Mac → Window → Devices → Console, filter `ContinueWidget`):
 
    ```
    [ContinueWidget] publish altGroups=["group.com.punkrally.reader.ABCDE12345"] candidates=[…] resolved=ok
@@ -131,3 +159,22 @@ widget reload budget.
 In-app Home Continue, the `punkrally://continue` deep link (Shortcuts, widgets
 from other apps) and the system Lock Screen Now Playing controls are unchanged;
 if the appex ever fails to install, nothing else regresses.
+
+## 7. Free AltStore and richer WidgetKit
+
+The layout and the snapshot ship on the same Sideload IPA as the Continue tile.
+App Group resolution is unchanged: one group, `ALTAppGroups` first, then
+`SILVERAN_WIDGET_APP_GROUP`, then `group.com.punkrally.reader`. Entitlements
+still have to be inside the IPA (`scripts/package-ipa` ad-hoc sign + assert) or
+AltStore never creates the group.
+
+Free personal teams can still be flaky about WidgetKit itself — timeline
+reloads, multi-link taps, and interactive buttons sometimes stall even when the
+snapshot on disk is correct. That is a signing/runtime limit, not a second
+queue. If the medium tile looks stale or a row tap does nothing:
+
+- Delete the old tile and add **Continue** again (kind stays `InkAmpContinueWidget`).
+- Confirm the console line shows `resolved=ok` with the team-suffixed group.
+- Home Continue and `punkrally://continue` still work without the tile.
+  Lock Screen / StandBy are not part of this cut; the existing accessory
+  families only glance at Now.

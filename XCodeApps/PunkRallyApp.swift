@@ -137,9 +137,13 @@ public struct PunkRallyTabView: View {
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowStats)) { _ in
                 selectedTab = .stats
             }
-            .onReceive(NotificationCenter.default.publisher(for: .punkRallyOpenContinue)) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: .punkRallyOpenContinue)) { note in
                 selectedTab = .home
-                NotificationCenter.default.post(name: .punkRallyPerformContinue, object: nil)
+                NotificationCenter.default.post(
+                    name: .punkRallyPerformContinue,
+                    object: nil,
+                    userInfo: note.userInfo
+                )
             }
             .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyRetryStatsSync)
@@ -365,6 +369,15 @@ private struct HomeTabView: View {
         return (items.first, Array(items.dropFirst().prefix(5)))
     }
 
+    /// Continue id + the three Up next ids the widget paints. Home queue changes
+    /// republish even when the Continue item itself stays put.
+    private var widgetQueueKey: String {
+        let queue = mixedQueue
+        let next = queue.upNext.prefix(ContinueWidgetSnapshot.upNextLimit).map(\.id)
+            .joined(separator: ",")
+        return "\(queue.continueItem?.id ?? "")#\(next)"
+    }
+
     private var finishTonightPicks: (minutes: Int, items: [HomeMixedItem])? {
         let _ = queueTick
         guard let minutes = BedtimeSettings.minutesUntilBedtime() else { return nil }
@@ -433,7 +446,7 @@ private struct HomeTabView: View {
                 Task { await mediaViewModel?.refreshMetadata(source: "HomeMixed") }
                 Task { await publishContinueWidget() }
             }
-            .onChange(of: mixedQueue.continueItem?.id) { _, _ in
+            .onChange(of: widgetQueueKey) { _, _ in
                 Task { await publishContinueWidget() }
             }
             .onReceive(
@@ -451,8 +464,9 @@ private struct HomeTabView: View {
             }
             .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyPerformContinue)
-            ) { _ in
-                Task { await performContinueFromWidget() }
+            ) { note in
+                let itemID = note.userInfo?[InkAmpContinueLink.queueItemUserInfoKey] as? String
+                Task { await performContinueFromWidget(queueItemID: itemID) }
             }
             .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyStatsSessionStart)
@@ -862,9 +876,16 @@ private struct HomeTabView: View {
         )
     }
 
-    /// Widget / deep link: expand Now Playing if live, else open Home Continue.
+    /// Widget / deep link: a specific Up next row opens that item; otherwise
+    /// expand Now Playing if live, else open Home Continue.
     @MainActor
-    private func performContinueFromWidget() async {
+    private func performContinueFromWidget(queueItemID: String? = nil) async {
+        if let queueItemID {
+            if let item = mixedItem(id: queueItemID) {
+                await openMixedItem(item)
+            }
+            return
+        }
         if await AudioSessionActor.shared.currentSnapshot() != nil {
             if case .podcast = await AudioSessionActor.shared.currentSnapshot()?.kind {
                 PodcastPlayerPresenter.shared.expandFromMiniPlayer()
@@ -879,43 +900,64 @@ private struct HomeTabView: View {
         await openMixedItem(mixedQueue.continueItem)
     }
 
+    /// Queue id from the widget snapshot, then the same stores Home mixes.
+    private func mixedItem(id: String) -> HomeMixedItem? {
+        if let match = inProgressItems.first(where: { $0.id == id }) {
+            return match
+        }
+        if let episodeID = InkAmpContinueLink.podcastEpisodeID(fromQueueItemID: id) {
+            if let entry = PodcastRecentStore.shared.all().first(where: { $0.episodeID == episodeID })
+            {
+                return .podcast(entry)
+            }
+            if let record = podcastStore.record(for: episodeID),
+                let remote = record.remoteAudioURL,
+                let lastPlayed = record.lastPlayedAt
+            {
+                return .podcast(
+                    PodcastRecentEntry(
+                        episodeID: record.episodeID,
+                        title: record.title,
+                        showTitle: record.showTitle,
+                        coverURL: nil,
+                        audioURL: remote,
+                        durationSeconds: record.durationSeconds,
+                        feedURL: record.feedURL,
+                        mediaKind: .audio,
+                        lastTouched: lastPlayed,
+                        progress: record.progress,
+                    )
+                )
+            }
+        }
+        if let bookID = InkAmpContinueLink.bookID(fromQueueItemID: id),
+            let book = mediaViewModel?.library.bookMetaData.first(where: { $0.id == bookID })
+        {
+            let fraction = mediaViewModel?.bookProgressCache[bookID]?.progressFraction ?? book.progress
+            return .book(book, lastTouched: .distantPast, progress: fraction, badge: .ebook)
+        }
+        return nil
+    }
+
     @MainActor
     private func publishContinueWidget() async {
-        let item = mixedQueue.continueItem
-        guard let item else {
+        let queue = mixedQueue
+        let upNext = await widgetDrafts(
+            for: Array(queue.upNext.prefix(ContinueWidgetSnapshot.upNextLimit))
+        )
+        guard let item = queue.continueItem else {
             ContinueWidgetPublisher.publishHomeContinue(
                 title: nil,
                 subtitle: nil,
                 kind: nil,
                 coverData: nil,
+                upNext: [],
             )
             return
         }
 
-        let kind: ContinueWidgetKindTag
-        var coverData: Data?
-        switch item {
-            case .book(let book, _, _, let badge):
-                switch badge {
-                    case .ebook: kind = .ebook
-                    case .audiobook: kind = .audiobook
-                    case .readaloud: kind = .readaloud
-                    case .podcast: kind = .podcast
-                }
-                coverData = await BookServiceActor.shared.cachedCoverData(for: book.id, audio: true)
-                if coverData == nil {
-                    coverData = await BookServiceActor.shared.cachedCoverData(
-                        for: book.id,
-                        audio: false,
-                    )
-                }
-            case .podcast(let entry):
-                kind = .podcast
-                if let url = entry.coverURL {
-                    coverData = try? await URLSession.shared.data(from: url).0
-                }
-        }
-
+        let kind = widgetKind(for: item)
+        let coverData = await widgetCoverData(for: item)
         ContinueWidgetPublisher.publishHomeContinue(
             title: item.title,
             subtitle: item.subtitle,
@@ -923,7 +965,53 @@ private struct HomeTabView: View {
             coverData: coverData,
             progress: item.progress,
             durationSeconds: item.durationSeconds,
+            upNext: upNext,
         )
+    }
+
+    private func widgetDrafts(for items: [HomeMixedItem]) async -> [ContinueWidgetUpNextDraft] {
+        var drafts: [ContinueWidgetUpNextDraft] = []
+        for item in items {
+            drafts.append(
+                ContinueWidgetUpNextDraft(
+                    id: item.id,
+                    title: item.title,
+                    subtitle: item.subtitle,
+                    kind: widgetKind(for: item),
+                    deepLink: InkAmpContinueLink.queueItemURL(id: item.id).absoluteString,
+                    progress: item.progress,
+                    coverData: await widgetCoverData(for: item),
+                )
+            )
+        }
+        return drafts
+    }
+
+    private func widgetKind(for item: HomeMixedItem) -> ContinueWidgetKindTag {
+        switch item {
+            case .book(_, _, _, let badge):
+                switch badge {
+                    case .ebook: return .ebook
+                    case .audiobook: return .audiobook
+                    case .readaloud: return .readaloud
+                    case .podcast: return .podcast
+                }
+            case .podcast:
+                return .podcast
+        }
+    }
+
+    private func widgetCoverData(for item: HomeMixedItem) async -> Data? {
+        switch item {
+            case .book(let book, _, _, _):
+                if let audio = await BookServiceActor.shared.cachedCoverData(for: book.id, audio: true) {
+                    return audio
+                }
+                return await BookServiceActor.shared.cachedCoverData(for: book.id, audio: false)
+            case .podcast(let entry):
+                guard let url = entry.coverURL else { return nil }
+                return try? await URLSession.shared.data(from: url).0
+        }
     }
 }
 

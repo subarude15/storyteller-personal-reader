@@ -100,10 +100,11 @@ To provide a flawless 1-click install on free Apple IDs, the **Silveran Reader S
 Full write-up + on-device verification steps: `docs/CONTINUE_WIDGET.md`.
 
 **What the tile does now:**
-- Cover art, title, subtitle, progress bar and "42% · 12m left" caption.
-- Play/pause and ±15s when a live audio session exists. The buttons are `AudioPlaybackIntent` App Intents compiled into *both* the app and the extension, so WidgetKit performs them in the app's process — no foregrounding, no app-group-free workaround needed.
-- With no live session (cold launch / nothing playing) the tile paints the last item and a tap-to-continue deep link instead of a dead transport button.
-- Tap → `punkrally://continue` → Now Playing if live, else Home Continue.
+- Medium: Now (cover, title, progress) plus up to three Up next rows from the same Home mixed queue. Small stays Now only.
+- Play/pause and ±15s on Now when a live audio session exists. The buttons are `AudioPlaybackIntent` App Intents compiled into *both* the app and the extension, so WidgetKit performs them in the app's process — no foregrounding, no app-group-free workaround needed.
+- Up next taps open that book or episode via `punkrally://continue?item=…` (same Continue host / podcast bridge). No second player.
+- With no live session the Now card is Home Continue, and a tap opens `punkrally://continue`. An empty queue says "Nothing in progress" instead of a made-up title.
+- Free AltStore can still be flaky about WidgetKit reloads and multi-link taps. The snapshot and layout ship anyway; Home Continue still works if the tile stalls. See `docs/CONTINUE_WIDGET.md`.
 
 **Still works without a Home Screen tile:** in-app Home Continue and the `punkrally://continue` deep link are unchanged; the system Lock Screen Now Playing controls remain the fallback if the appex ever fails to install.
 

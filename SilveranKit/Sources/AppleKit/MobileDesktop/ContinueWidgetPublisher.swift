@@ -45,9 +45,11 @@ public enum ContinueWidgetPublisher {
         }
     }
 
-    /// Refresh from Home Continue. Live audio session always wins (books via
-    /// cachedCoverData); otherwise write the Home continueItem even when cover
-    /// bytes are nil. Never silently no-op when `title` is non-nil.
+    /// Refresh from Home Continue. Live audio session always wins the Now card
+    /// (books via cachedCoverData); otherwise write the Home continueItem even
+    /// when cover bytes are nil. `upNext` is the following Home mixed-queue rows
+    /// (at most 3). Pass `[]` to clear them. Session-only republishes keep the
+    /// last Up next by calling the snapshot store with `upNext: nil`.
     public static func publishHomeContinue(
         title: String?,
         subtitle: String?,
@@ -55,11 +57,12 @@ public enum ContinueWidgetPublisher {
         coverData: Data?,
         progress: Double? = nil,
         durationSeconds: Double? = nil,
+        upNext: [ContinueWidgetUpNextDraft] = [],
     ) {
         Task { @MainActor in
             let session = await AudioSessionActor.shared.currentSnapshot()
             if session != nil {
-                await publishSession(session)
+                await publishSession(session, upNext: upNext)
                 return
             }
             ContinueWidgetSnapshotStore.publish(
@@ -71,6 +74,7 @@ public enum ContinueWidgetPublisher {
                 progress: progress,
                 durationSeconds: durationSeconds,
                 hasLiveSession: false,
+                upNext: upNext,
             )
         }
     }
@@ -89,15 +93,19 @@ public enum ContinueWidgetPublisher {
         publishTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else { return }
-            await publishSession(snapshot)
+            // Keep the Home queue rows already in the snapshot.
+            await publishSession(snapshot, upNext: nil)
         }
     }
 
-    private static func publishSession(_ snapshot: AudioSessionSnapshot?) async {
+    private static func publishSession(
+        _ snapshot: AudioSessionSnapshot?,
+        upNext: [ContinueWidgetUpNextDraft]? = nil,
+    ) async {
         guard let snapshot else {
             // Session ended — keep title/cover, clear playing so the tile isn't stuck.
             let last = ContinueWidgetSnapshotStore.loadSnapshot()
-            guard last.isPlaying || (last.hasLiveSession ?? false) else { return }
+            guard last.isPlaying || (last.hasLiveSession ?? false) || upNext != nil else { return }
             ContinueWidgetSnapshotStore.publish(
                 title: last.title,
                 subtitle: last.subtitle,
@@ -109,6 +117,7 @@ public enum ContinueWidgetPublisher {
                 durationSeconds: last.durationSeconds,
                 hasLiveSession: false,
                 rate: last.rate,
+                upNext: upNext,
             )
             return
         }
@@ -136,6 +145,9 @@ public enum ContinueWidgetPublisher {
             }
         }
 
+        let queue = upNext?.filter { draft in
+            draft.title.trimmingCharacters(in: .whitespacesAndNewlines) != snapshot.title
+        }
         ContinueWidgetSnapshotStore.publish(
             title: snapshot.title,
             subtitle: snapshot.author ?? snapshot.chapterLabel,
@@ -147,6 +159,7 @@ public enum ContinueWidgetPublisher {
             durationSeconds: snapshot.durationSeconds,
             hasLiveSession: true,
             rate: snapshot.playbackRate,
+            upNext: queue,
         )
     }
 

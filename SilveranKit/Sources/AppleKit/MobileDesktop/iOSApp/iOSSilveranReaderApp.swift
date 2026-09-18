@@ -318,7 +318,15 @@ private struct iOSRootView: View {
             if InkAmpContinueLink.wantsToggle(url) {
                 ContinueWidgetBridge.postToggle()
             } else {
-                NotificationCenter.default.post(name: .punkRallyOpenContinue, object: nil)
+                var info: [AnyHashable: Any]?
+                if let itemID = InkAmpContinueLink.queueItemID(from: url) {
+                    info = [InkAmpContinueLink.queueItemUserInfoKey: itemID]
+                }
+                NotificationCenter.default.post(
+                    name: .punkRallyOpenContinue,
+                    object: nil,
+                    userInfo: info
+                )
             }
             return
         }
