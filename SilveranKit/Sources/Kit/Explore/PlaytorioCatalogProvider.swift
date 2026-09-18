@@ -29,9 +29,12 @@ public struct PlaytorioCatalogProvider: ExploreCatalogProvider {
 
     public static func mapBook(_ book: NormalizedBook, source: ExploreCatalogSource) -> ExploreBook {
         let itemID = PlaytorioLibraryStore.bookKey(for: book)
-        // Split acquisitions: ebook formats → epubURL, audio formats → audioURL.
+        // Split acquisitions: ebook formats → epubURL, audio formats → audioURL/magnet.
         let ebookURL = preferredAcquisitionURL(from: book.formats, kind: .ebook)
         let audioURL = preferredAcquisitionURL(from: book.formats, kind: .audiobook)
+        let audioMagnet = book.formats
+            .first { Self.formatKind($0.format) == .audiobook && !($0.magnet ?? "").isEmpty }?
+            .magnet
         let summaryParts: [String] = {
             var parts: [String] = []
             if !book.narrator.isEmpty { parts.append("Narrated by \(book.narrator)") }
@@ -54,6 +57,7 @@ public struct PlaytorioCatalogProvider: ExploreCatalogProvider {
             coverURL: URL(string: book.cover_url),
             epubURL: ebookURL,
             audioURL: audioURL,
+            audioMagnet: audioMagnet,
             language: nil,
             subjects: book.metadata_sources,
             publishedAt: nil,

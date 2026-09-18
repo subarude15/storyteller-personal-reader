@@ -25,6 +25,9 @@ public struct ExploreBook: Identifiable, Hashable, Codable, Sendable {
     /// Audiobook acquisition URL (m4b / mp3). Mutually exclusive with `epubURL`
     /// in practice — a row is one media kind.
     public let audioURL: URL?
+    /// Torrent magnet link for audiobook acquisition (AudiobookBay-style sources
+    /// with no direct file URL). Resolved through TorBox before import.
+    public let audioMagnet: String?
     public let language: String?
     public let subjects: [String]
     public let publishedAt: Date?
@@ -34,8 +37,8 @@ public struct ExploreBook: Identifiable, Hashable, Codable, Sendable {
 
     public var id: String { ExploreBookIdentity.stableID(sourceID: sourceID, itemID: itemID) }
 
-    /// True when this row is an audiobook acquisition (audio without an ebook).
-    public var isAudiobook: Bool { audioURL != nil && epubURL == nil }
+    /// True when this row is an audiobook acquisition (audio or magnet, no ebook).
+    public var isAudiobook: Bool { (audioURL != nil || audioMagnet != nil) && epubURL == nil }
 
     public init(
         itemID: String,
@@ -47,6 +50,7 @@ public struct ExploreBook: Identifiable, Hashable, Codable, Sendable {
         coverURL: URL? = nil,
         epubURL: URL? = nil,
         audioURL: URL? = nil,
+        audioMagnet: String? = nil,
         language: String? = nil,
         subjects: [String] = [],
         publishedAt: Date? = nil,
@@ -63,6 +67,7 @@ public struct ExploreBook: Identifiable, Hashable, Codable, Sendable {
         self.coverURL = coverURL
         self.epubURL = epubURL
         self.audioURL = audioURL
+        self.audioMagnet = audioMagnet
         self.language = language
         self.subjects = subjects
         self.publishedAt = publishedAt

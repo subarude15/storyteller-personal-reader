@@ -151,13 +151,42 @@ public struct RaveBookSearchAdapter: BookAdapter {
         let source = stringValue(row["source"]).isEmpty ? "ravebooksearch" : stringValue(row["source"])
         let sizeBytes = doubleValue(row["filesize"])
         let sizeMB = sizeBytes > 0 ? sizeBytes / 1_000_000.0 : 0
-        var urls: [String] = []
-        let direct = stringValue(row["directUrl"])
-        let download = stringValue(row["downloadUrl"])
-        if !direct.isEmpty { urls.append(direct) }
-        if !download.isEmpty, download != direct { urls.append(download) }
+        let magnet = stringValue(row["magnet"]).trimmingCharacters(in: .whitespacesAndNewlines)
         let fmt = format.isEmpty ? "unknown" : format
-        return urls.map { BookFormat(source: source, format: fmt, url: $0, size_mb: sizeMB) }
+
+        // Magnet-first: AudiobookBay results carry a magnet + infoHash but no direct
+        // file. Emit a magnet-backed format so the ingest layer can resolve it via
+        // a debrid service instead of trying (and failing) to fetch an HTML page.
+        if !magnet.isEmpty {
+            return [BookFormat(source: source, format: fmt, url: "", size_mb: sizeMB, magnet: magnet)]
+        }
+
+        // Direct-download sources (Internet Archive et al.) expose a real file URL.
+        let direct = stringValue(row["directUrl"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !direct.isEmpty {
+            return [BookFormat(source: source, format: fmt, url: direct, size_mb: sizeMB)]
+        }
+
+        // Fall back to `downloadUrl` only when it looks like a direct media file
+        // (recognized extension). Forum-thread / ad-wall / detail pages
+        // (viewtopic.php, ads.php, /abss/…) carry no usable extension and are dropped.
+        let download = stringValue(row["downloadUrl"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !download.isEmpty, looksLikeMediaFile(download) {
+            return [BookFormat(source: source, format: fmt, url: download, size_mb: sizeMB)]
+        }
+        return []
+    }
+
+    /// True when the URL's last path component ends in a recognized ebook/audio
+    /// extension (a direct file), false for pages/forums/redirects.
+    private static func looksLikeMediaFile(_ urlString: String) -> Bool {
+        guard let url = URL(string: urlString) else { return false }
+        let ext = url.pathExtension.lowercased()
+        let mediaExtensions: Set<String> = [
+            "epub", "pdf", "mobi", "azw3", "azw", "cbz", "cbr", "fb2", "txt", "html",
+            "m4b", "mp3", "m4a", "aac", "ogg", "opus", "wav", "flac", "mp4", "mka",
+        ]
+        return mediaExtensions.contains(ext)
     }
 
     // MARK: - HTML (.worker-item)

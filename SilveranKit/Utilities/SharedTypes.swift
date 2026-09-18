@@ -40,12 +40,16 @@ public struct BookFormat: Codable, Equatable, Sendable {
     public var format: String
     public var url: String
     public var size_mb: Double
+    /// Torrent magnet link (AudiobookBay-style results). Present when the source
+    /// exposes no direct file URL — must be resolved through a debrid service.
+    public var magnet: String?
 
-    public init(source: String, format: String, url: String, size_mb: Double) {
+    public init(source: String, format: String, url: String, size_mb: Double, magnet: String? = nil) {
         self.source = source
         self.format = format
         self.url = url
         self.size_mb = size_mb
+        self.magnet = magnet
     }
 }
 

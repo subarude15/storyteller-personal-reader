@@ -1,4 +1,5 @@
 #if os(iOS)
+import PlaytorioFetcher
 import SilveranKit
 import SwiftUI
 
@@ -210,7 +211,40 @@ public struct ExploreBookDetailView: View {
             let sourceID = try await resolveUploadSourceID()
 
             let asset: StorytellerUploadAsset
-            if let audioURL = book.audioURL {
+            if let magnet = book.audioMagnet, !magnet.isEmpty {
+                // Magnet-backed audiobook (AudiobookBay et al.) — resolve via TorBox.
+                importProgressLabel = "Resolving via TorBox…"
+                importProgress = 0.10
+                guard let apiKey = try await AuthenticationActor.shared.loadTorBoxAPIKey(),
+                      !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                else {
+                    throw TorBoxError.missingAPIKey
+                }
+                let resolved = try await TorBoxMagnetResolver.resolve(
+                    magnet: magnet,
+                    apiKey: apiKey,
+                    onPhase: { phase in
+                        Task { @MainActor in
+                            switch phase {
+                            case .resolving: importProgressLabel = "Resolving via TorBox…"
+                            case .waitingForCache: importProgressLabel = "Waiting for TorBox to cache…"
+                            case .ready: importProgressLabel = "Downloading from TorBox…"
+                            }
+                        }
+                    }
+                )
+                importProgressLabel = "Downloading audiobook…"
+                importProgress = 0.30
+                let data = try await TorBoxMagnetResolver.downloadFile(from: resolved.downloadURL)
+                let filename = sanitizedTorBoxFilename(resolved.file.name)
+                asset = StorytellerUploadAsset(
+                    format: .audiobook,
+                    filename: filename,
+                    data: data,
+                    contentType: TorBoxMagnetResolver.contentType(for: filename),
+                    relativePath: nil
+                )
+            } else if let audioURL = book.audioURL {
                 let fileURL = try await ExploreBookCache.shared.downloadAudio(
                     sourceID: book.sourceID,
                     itemID: book.itemID,
@@ -333,6 +367,14 @@ public struct ExploreBookDetailView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let base = cleaned.isEmpty ? "book" : String(cleaned.prefix(80))
         return base.lowercased().hasSuffix(".epub") ? base : "\(base).epub"
+    }
+
+    private func sanitizedTorBoxFilename(_ raw: String) -> String {
+        let cleaned = raw
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? "audiobook.m4b" : String(cleaned.prefix(120))
     }
 
     private func safeAudioFilename(for book: ExploreBook, fallbackURL: URL) -> String {
