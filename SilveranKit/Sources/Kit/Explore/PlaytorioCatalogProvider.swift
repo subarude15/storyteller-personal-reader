@@ -29,8 +29,9 @@ public struct PlaytorioCatalogProvider: ExploreCatalogProvider {
 
     public static func mapBook(_ book: NormalizedBook, source: ExploreCatalogSource) -> ExploreBook {
         let itemID = PlaytorioLibraryStore.bookKey(for: book)
-        // Prefer EPUB for Storyteller ingest; fall back to any http(s) format URL.
-        let acquisition = preferredAcquisitionURL(from: book.formats)
+        // Split acquisitions: ebook formats → epubURL, audio formats → audioURL.
+        let ebookURL = preferredAcquisitionURL(from: book.formats, kind: .ebook)
+        let audioURL = preferredAcquisitionURL(from: book.formats, kind: .audiobook)
         let summaryParts: [String] = {
             var parts: [String] = []
             if !book.narrator.isEmpty { parts.append("Narrated by \(book.narrator)") }
@@ -51,7 +52,8 @@ public struct PlaytorioCatalogProvider: ExploreCatalogProvider {
             authors: book.author.isEmpty ? [] : [ExploreBookAuthor(name: book.author)],
             summary: summaryParts.isEmpty ? nil : summaryParts.joined(separator: " · "),
             coverURL: URL(string: book.cover_url),
-            epubURL: acquisition,
+            epubURL: ebookURL,
+            audioURL: audioURL,
             language: nil,
             subjects: book.metadata_sources,
             publishedAt: nil,
@@ -61,11 +63,19 @@ public struct PlaytorioCatalogProvider: ExploreCatalogProvider {
         )
     }
 
-    /// Picks the best download URL from adapter `formats` for Explore Read / Import.
-    public static func preferredAcquisitionURL(from formats: [BookFormat]) -> URL? {
-        let ranked = formats.sorted { lhs, rhs in
-            Self.formatRank(lhs.format) < Self.formatRank(rhs.format)
-        }
+    /// Acquisition media kind: ebook (epub/pdf/mobi/azw3) or audiobook (m4b/mp3/m4a).
+    public enum AcquisitionKind {
+        case ebook
+        case audiobook
+    }
+
+    /// Picks the best download URL of `kind` from adapter `formats` for Explore Read / Import.
+    public static func preferredAcquisitionURL(from formats: [BookFormat], kind: AcquisitionKind) -> URL? {
+        let ranked = formats
+            .filter { Self.formatKind($0.format) == kind }
+            .sorted { lhs, rhs in
+                Self.formatRank(lhs.format) < Self.formatRank(rhs.format)
+            }
         for format in ranked {
             if let url = URL(string: format.url),
                let scheme = url.scheme?.lowercased(),
@@ -77,11 +87,26 @@ public struct PlaytorioCatalogProvider: ExploreCatalogProvider {
         return nil
     }
 
+    /// Classifies a format string as ebook or audiobook (or nil if neither).
+    public static func formatKind(_ format: String) -> AcquisitionKind? {
+        switch format.lowercased() {
+        case "epub", "pdf", "mobi", "azw3", "azw", "cbz", "cbr", "fb2", "txt", "html":
+            return .ebook
+        case "m4b", "mp3", "m4a", "aac", "ogg", "opus", "wav", "flac", "mp4", "mka":
+            return .audiobook
+        default:
+            return nil
+        }
+    }
+
     private static func formatRank(_ format: String) -> Int {
         switch format.lowercased() {
         case "epub": return 0
-        case "pdf": return 1
-        case "mobi", "azw3": return 2
+        case "m4b": return 0
+        case "mp3": return 1
+        case "m4a": return 2
+        case "pdf": return 3
+        case "mobi", "azw3": return 4
         default: return 10
         }
     }

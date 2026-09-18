@@ -11,7 +11,7 @@ public struct ExploreBookAuthor: Hashable, Codable, Sendable {
     }
 }
 
-/// One discoverable ebook from a catalog source (not a Storyteller library book).
+/// One discoverable ebook or audiobook from a catalog source (not a Storyteller library book).
 public struct ExploreBook: Identifiable, Hashable, Codable, Sendable {
     /// Stable item id within its catalog source.
     public let itemID: String
@@ -22,6 +22,9 @@ public struct ExploreBook: Identifiable, Hashable, Codable, Sendable {
     public let summary: String?
     public let coverURL: URL?
     public let epubURL: URL?
+    /// Audiobook acquisition URL (m4b / mp3). Mutually exclusive with `epubURL`
+    /// in practice — a row is one media kind.
+    public let audioURL: URL?
     public let language: String?
     public let subjects: [String]
     public let publishedAt: Date?
@@ -30,6 +33,9 @@ public struct ExploreBook: Identifiable, Hashable, Codable, Sendable {
     public let webpageURL: URL?
 
     public var id: String { ExploreBookIdentity.stableID(sourceID: sourceID, itemID: itemID) }
+
+    /// True when this row is an audiobook acquisition (audio without an ebook).
+    public var isAudiobook: Bool { audioURL != nil && epubURL == nil }
 
     public init(
         itemID: String,
@@ -40,6 +46,7 @@ public struct ExploreBook: Identifiable, Hashable, Codable, Sendable {
         summary: String? = nil,
         coverURL: URL? = nil,
         epubURL: URL? = nil,
+        audioURL: URL? = nil,
         language: String? = nil,
         subjects: [String] = [],
         publishedAt: Date? = nil,
@@ -55,6 +62,7 @@ public struct ExploreBook: Identifiable, Hashable, Codable, Sendable {
         self.summary = summary
         self.coverURL = coverURL
         self.epubURL = epubURL
+        self.audioURL = audioURL
         self.language = language
         self.subjects = subjects
         self.publishedAt = publishedAt

@@ -45,11 +45,15 @@ public struct FetcherService: Sendable {
 
     /// Fetch + merge. When `persist` is true, upserts into the durable Playtorio library
     /// store (visible to Explore) and refreshes the query cache.
-    public func fetch(query: String, persist: Bool = true) async throws -> NormalizedBook? {
+    /// `mode` (ebooks / audiobooks / comics) overrides the RaveBookSearch adapter's
+    /// search mode for this call and scopes the cache key so a title searched as an
+    /// ebook and again as an audiobook don't collide.
+    public func fetch(query: String, persist: Bool = true, mode: String? = nil) async throws -> NormalizedBook? {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        if let cached = cache.get(query: trimmed) {
+        let cacheKey = mode.map { "\(trimmed) [mode:\($0)]" } ?? trimmed
+        if let cached = cache.get(query: cacheKey) {
             if persist {
                 library.upsert(cached)
             }
@@ -58,9 +62,12 @@ public struct FetcherService: Sendable {
 
         // Always reload settings so user CRUD changes take effect without restart.
         let planned = try plannedAdapters()
-        log?("[FetcherService] fetch '\(trimmed)' via \(planned.count) adapter(s): \(planned.map(\.id).joined(separator: ", "))")
+        log?("[FetcherService] fetch '\(trimmed)' mode=\(mode ?? "default") via \(planned.count) adapter(s): \(planned.map(\.id).joined(separator: ", "))")
         var results: [AdapterResult] = []
-        for config in planned {
+        for var config in planned {
+            if let mode, Self.isModeAwareAdapter(config) {
+                config.config["mode"] = mode
+            }
             let adapter: any BookAdapter
             do {
                 adapter = try makeAdapter(for: config)
@@ -90,11 +97,23 @@ public struct FetcherService: Sendable {
         if merged.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             merged.title = trimmed
         }
-        cache.set(query: trimmed, book: merged)
+        cache.set(query: cacheKey, book: merged)
         if persist {
             library.upsert(merged)
         }
         return merged
+    }
+
+    /// Adapters that understand a search `mode` override (currently RaveBookSearch).
+    /// Matches by id/type so user-added Rave-style sources also honor the mode.
+    private static func isModeAwareAdapter(_ config: AdapterConfig) -> Bool {
+        let loweredId = config.id.lowercased()
+        let loweredType = config.type.lowercased()
+        return config.id == RaveBookSearchAdapter.defaultId
+            || loweredId == "ravebook-search"
+            || loweredId == "rave-book-search"
+            || loweredId.contains("rave")
+            || loweredType.contains("rave")
     }
 
     /// Builds an adapter for `config`. Re-reads nothing — callers must pass the

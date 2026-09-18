@@ -19,6 +19,18 @@ public struct ExploreRootView: View {
             content
         }
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                Picker("Search mode", selection: Binding(
+                    get: { store.searchMode },
+                    set: { store.setSearchMode($0) }
+                )) {
+                    Text("eBooks").tag("ebooks")
+                    Text("Audiobooks").tag("audiobooks")
+                    Text("Comics").tag("comics")
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 220)
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Section("Source") {

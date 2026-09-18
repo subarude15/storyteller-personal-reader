@@ -70,12 +70,113 @@ public actor ExploreBookCache {
         return try await task.value
     }
 
+    /// Downloads an audiobook file (m4b/mp3) with a size/HTML guard but no EPUB
+    /// ZIP validation — audio is a raw media file, not an archive. Coalesces
+    /// concurrent requests and caches by acquisition URL.
+    public func downloadAudio(
+        sourceID: String,
+        itemID: String,
+        from url: URL,
+        progress: (@Sendable (Double) -> Void)? = nil
+    ) async throws -> URL {
+        guard let scheme = url.scheme?.lowercased(), scheme == "https" else {
+            throw ExploreCatalogError.httpsRequired
+        }
+        let key = Self.cacheKey(sourceID: sourceID, itemID: itemID, acquisitionURL: url)
+        if let existing = cachedAudioFileURL(for: key) {
+            progress?(1)
+            return existing
+        }
+
+        if let existing = inFlight[key] {
+            return try await existing.value
+        }
+
+        let task = Task<URL, Error> {
+            try await self.performAudioDownload(key: key, from: url, progress: progress)
+        }
+        inFlight[key] = task
+        defer { inFlight[key] = nil }
+        return try await task.value
+    }
+
     public func removeCachedFile(for key: String) {
         let url = fileURL(for: key)
         try? fileManager.removeItem(at: url)
     }
 
     // MARK: - Private
+
+    private func cachedAudioFileURL(for key: String) -> URL? {
+        let url = audioFileURL(for: key)
+        guard fileManager.fileExists(atPath: url.path) else { return nil }
+        return url
+    }
+
+    private func performAudioDownload(
+        key: String,
+        from url: URL,
+        progress: (@Sendable (Double) -> Void)?
+    ) async throws -> URL {
+        var request = URLRequest(url: url)
+        request.setValue("audio/*, application/octet-stream;q=0.9, */*;q=0.1", forHTTPHeaderField: "Accept")
+        request.setValue("ink+amp-explore/1.0", forHTTPHeaderField: "User-Agent")
+
+        let (tempURL, response): (URL, URLResponse)
+        do {
+            (tempURL, response) = try await session.download(for: request)
+        } catch is CancellationError {
+            throw ExploreCatalogError.cancelled
+        } catch {
+            throw ExploreCatalogError.network(error.localizedDescription)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            try? fileManager.removeItem(at: tempURL)
+            throw ExploreCatalogError.network("No HTTP response.")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            try? fileManager.removeItem(at: tempURL)
+            throw ExploreCatalogError.httpStatus(http.statusCode)
+        }
+
+        if http.expectedContentLength > 0,
+            http.expectedContentLength > Self.maxDownloadBytes
+        {
+            try? fileManager.removeItem(at: tempURL)
+            throw ExploreCatalogError.downloadTooLarge
+        }
+
+        let values = try tempURL.resourceValues(forKeys: [.fileSizeKey])
+        if let size = values.fileSize, Int64(size) > Self.maxDownloadBytes {
+            try? fileManager.removeItem(at: tempURL)
+            throw ExploreCatalogError.downloadTooLarge
+        }
+
+        // Reject obvious HTML/JSON error pages (e.g. an ad-wall or login page).
+        let handle = try FileHandle(forReadingFrom: tempURL)
+        defer { try? handle.close() }
+        let prefix = try handle.read(upToCount: 512) ?? Data()
+        if ExploreEPUBValidator.looksLikeHTML(prefix) || ExploreEPUBValidator.looksLikeJSON(prefix) {
+            try? fileManager.removeItem(at: tempURL)
+            throw ExploreCatalogError.validationFailed(
+                "Download looked like a web page or error response, not an audiobook."
+            )
+        }
+
+        let destination = audioFileURL(for: key)
+        try fileManager.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let staging = destination.appendingPathExtension("tmp")
+        try? fileManager.removeItem(at: staging)
+        try fileManager.moveItem(at: tempURL, to: staging)
+        try? fileManager.removeItem(at: destination)
+        try fileManager.moveItem(at: staging, to: destination)
+        progress?(1)
+        return destination
+    }
 
     private func performDownload(
         key: String,
@@ -147,5 +248,9 @@ public actor ExploreBookCache {
 
     private func fileURL(for key: String) -> URL {
         cachesRoot().appendingPathComponent("\(key).epub", isDirectory: false)
+    }
+
+    private func audioFileURL(for key: String) -> URL {
+        cachesRoot().appendingPathComponent("\(key).audio", isDirectory: false)
     }
 }

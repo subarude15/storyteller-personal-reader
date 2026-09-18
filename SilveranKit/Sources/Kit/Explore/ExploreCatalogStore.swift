@@ -64,6 +64,8 @@ public final class ExploreCatalogStore {
     public private(set) var books: [ExploreBook] = []
     public private(set) var filteredBooks: [ExploreBook] = []
     public private(set) var searchText: String = ""
+    /// Data Sources search mode: ebooks / audiobooks / comics (RaveBookSearch).
+    public private(set) var searchMode: String = "ebooks"
     public private(set) var isLoading = false
     public private(set) var isLoadingMore = false
     public private(set) var isSearchingExternalSources = false
@@ -113,6 +115,12 @@ public final class ExploreCatalogStore {
         applyLocalFilter()
     }
 
+    /// Sets the Data Sources search mode (ebooks / audiobooks / comics).
+    public func setSearchMode(_ mode: String) {
+        guard !mode.isEmpty else { return }
+        searchMode = mode
+    }
+
     /// Runs the configured Data Sources adapters for the current Explore search,
     /// persists the best merged result into the Playtorio index, switches Explore
     /// to Playtorio, and reloads so the result appears in this same surface.
@@ -124,11 +132,11 @@ public final class ExploreCatalogStore {
         errorMessage = nil
         externalSearchMessage = nil
         defer { isSearchingExternalSources = false }
-        debugLog("[Explore] searchExternalSources query=“\(query)”")
+        debugLog("[Explore] searchExternalSources query=“\(query)” mode=\(searchMode)")
 
         do {
             let service = Self.makeFetcherService()
-            guard let book = try await service.fetch(query: query, persist: true) else {
+            guard let book = try await service.fetch(query: query, persist: true, mode: searchMode) else {
                 externalSearchMessage = "No Data Sources results for “\(query)”."
                 debugLog("[Explore] searchExternalSources -> no results for “\(query)”")
                 applyLocalFilter()
