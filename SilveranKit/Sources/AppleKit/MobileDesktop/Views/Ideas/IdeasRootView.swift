@@ -20,6 +20,9 @@ struct IdeasRootView: View {
     @State private var mode: IdeasMode = .ideas
     @State private var rails: [BrowseRail] = []
     @State private var browseLoaded = false
+    @State private var searchResults: [ReadingIdea] = []
+    @State private var searchLoading = false
+    @State private var searchTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,9 +39,17 @@ struct IdeasRootView: View {
             case .saved:
                 savedContent
             case .browse:
-                browseContent
+                if isSearching {
+                    searchContent
+                } else {
+                    browseContent
+                }
             case .ideas:
-                suggestionsContent
+                if isSearching {
+                    searchContent
+                } else {
+                    suggestionsContent
+                }
             }
         }
         .task(id: mediaViewModel.libraryVersion) {
@@ -48,6 +59,13 @@ struct IdeasRootView: View {
             if newMode == .browse {
                 Task { await reloadBrowse() }
             }
+            runSearch(searchText)
+        }
+        .onChange(of: searchText) { _, newValue in
+            runSearch(newValue)
+        }
+        .onDisappear {
+            searchTask?.cancel()
         }
         .navigationDestination(for: ReadingIdea.self) { idea in
             IdeaDetailView(idea: idea) {
@@ -101,6 +119,94 @@ struct IdeasRootView: View {
                 }
             }
             .listStyle(.plain)
+        }
+    }
+
+    // MARK: Search
+
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    @ViewBuilder
+    private var searchContent: some View {
+        if searchLoading && searchResults.isEmpty {
+            ProgressView("Searching Open Library…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if searchResults.isEmpty {
+            Text("No Open Library matches.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier("search-empty")
+        } else {
+            List {
+                Section("Open Library") {
+                    ForEach(searchResults) { idea in
+                        NavigationLink(value: idea) {
+                            IdeaRow(idea: idea, isSaved: savedIDs.contains(idea.id))
+                        }
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            Button {
+                                saveIdea(idea)
+                            } label: {
+                                Label("Save", systemImage: "bookmark")
+                            }
+                            .tint(.blue)
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                dismissIdea(idea)
+                            } label: {
+                                Label("Not interested", systemImage: "hand.thumbsdown")
+                            }
+                        }
+                    }
+                }
+            }
+            .listStyle(.plain)
+        }
+    }
+
+    /// Debounce ~300ms, then run an Open Library title+author search. Owned /
+    /// finished / Not-interested results are filtered out; Saved keeps its local
+    /// filter (no OL search).
+    private func runSearch(_ raw: String) {
+        searchTask?.cancel()
+        let query = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, mode != .saved else {
+            searchResults = []
+            searchLoading = false
+            return
+        }
+        searchLoading = true
+        searchTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            let library = mediaViewModel.library.bookMetaData
+            let works = await OpenLibraryIdeaLookup.searchTitles(query)
+            guard !Task.isCancelled else { return }
+            let ideas = works.compactMap { work -> ReadingIdea? in
+                guard !work.key.isEmpty else { return nil }
+                return ReadingIdea(
+                    id: "ol:\(work.key)",
+                    title: work.title,
+                    author: work.author,
+                    coverURL: work.coverURL,
+                    blurb: work.blurb,
+                    reason: "Open Library search",
+                    score: 1.0,
+                    isbn: work.isbn,
+                    subjects: work.subjects,
+                    year: work.year,
+                )
+            }
+            let ownedFiltered = ReadingHabitIdeas.excludingOwned(ideas, library: library)
+            searchResults = ReadingHabitIdeas.excludingDismissed(
+                ownedFiltered,
+                dismissed: DismissedReadingIdeas.load(),
+            )
+            searchLoading = false
         }
     }
 
@@ -268,6 +374,7 @@ struct IdeasRootView: View {
         saved = loadSaved()
         // Remove from the in-memory pool immediately so the row leaves at once.
         suggestions.removeAll { ReadingHabitIdeas.dismissKey(for: $0) == key }
+        searchResults.removeAll { ReadingHabitIdeas.dismissKey(for: $0) == key }
         // Refill: if the pool has thinned out, re-run the lookup so the list
         // doesn't shrink.
         if suggestions.count < 12, !loadedSearchFailed {

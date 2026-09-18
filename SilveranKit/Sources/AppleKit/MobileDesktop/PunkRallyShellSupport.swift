@@ -739,7 +739,7 @@ public struct PunkRallyLibraryView: View {
             .searchable(
                 text: searchBinding,
                 placement: .navigationBarDrawer(displayMode: .always),
-                prompt: segment == .library ? "Search" : "Search ideas"
+                prompt: segment == .library ? "Search" : "Search Open Library"
             )
             .onChange(of: segment) { _, _ in
                 navigationPath = NavigationPath()
