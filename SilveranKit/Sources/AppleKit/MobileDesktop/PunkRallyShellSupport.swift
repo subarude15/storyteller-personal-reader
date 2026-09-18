@@ -111,15 +111,24 @@ extension Notification.Name {
 
 /// Posts SessionTracker lifecycle events from AppleKit players into the app target.
 public enum PunkRallyStatsEvents {
-    public static func sessionStart(kind: String, mediaID: String, mediaTitle: String) {
+    public static func sessionStart(
+        kind: String,
+        mediaID: String,
+        mediaTitle: String,
+        medium: String? = nil
+    ) {
+        var info: [String: Any] = [
+            "kind": kind,
+            "mediaID": mediaID,
+            "mediaTitle": mediaTitle,
+        ]
+        if let medium {
+            info["medium"] = medium
+        }
         NotificationCenter.default.post(
             name: .punkRallyStatsSessionStart,
             object: nil,
-            userInfo: [
-                "kind": kind,
-                "mediaID": mediaID,
-                "mediaTitle": mediaTitle,
-            ]
+            userInfo: info
         )
     }
 

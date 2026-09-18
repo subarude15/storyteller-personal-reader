@@ -27,6 +27,9 @@ public struct PRMediaSession: Identifiable, Codable, Equatable, Sendable {
     public var durationSeconds: TimeInterval
     /// Where the session left off, 0...1
     public var endProgress: Double?
+    /// The actual medium played: "ebook" | "audiobook" | "readaloud" | "podcast".
+    /// `nil` only for sessions recorded before medium capture was added.
+    public var medium: String?
 
     public init(
         id: UUID = UUID(),
@@ -36,7 +39,8 @@ public struct PRMediaSession: Identifiable, Codable, Equatable, Sendable {
         startedAt: Date,
         endedAt: Date = Date(),
         durationSeconds: TimeInterval = 0,
-        endProgress: Double? = nil
+        endProgress: Double? = nil,
+        medium: String? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -46,6 +50,7 @@ public struct PRMediaSession: Identifiable, Codable, Equatable, Sendable {
         self.endedAt = endedAt
         self.durationSeconds = durationSeconds
         self.endProgress = endProgress
+        self.medium = medium
     }
 }
 

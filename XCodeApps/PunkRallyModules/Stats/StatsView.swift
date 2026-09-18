@@ -18,6 +18,13 @@ struct StatsView: View {
     @State private var tracker = SessionTracker.shared
     @State private var sync = StatsSyncCoordinator.shared
     @State private var tick = 0
+    @State private var segment: Segment = .stats
+
+    private enum Segment: String, CaseIterable, Identifiable {
+        case stats = "Stats"
+        case timeline = "Timeline"
+        var id: String { rawValue }
+    }
 
     private var chrome: PunkRallyTheme.Chrome {
         PunkRallyTheme.Chrome(scheme: colorScheme)
@@ -30,10 +37,13 @@ struct StatsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    heroCard
-                    streakAndFinishedRow
-                    weekChart
-                    syncFooter
+                    segmentPicker
+                    switch segment {
+                        case .stats:
+                            statsBody
+                        case .timeline:
+                            StoryTimelineView()
+                    }
                 }
                 .padding(.horizontal, PunkRallyTheme.Metric.screenInset)
                 .padding(.vertical, 12)
@@ -53,6 +63,24 @@ struct StatsView: View {
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in
             // Live active-session seconds — revision may be unchanged while elapsed grows.
             tick &+= 1
+        }
+    }
+
+    private var segmentPicker: some View {
+        Picker("Stats section", selection: $segment) {
+            ForEach(Segment.allCases) { segment in
+                Text(segment.rawValue).tag(segment)
+            }
+        }
+        .pickerStyle(.segmented)
+    }
+
+    private var statsBody: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            heroCard
+            streakAndFinishedRow
+            weekChart
+            syncFooter
         }
     }
 

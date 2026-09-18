@@ -33,10 +33,12 @@ enum SessionTrackerWiring {
                         let mediaID = note.userInfo?["mediaID"] as? String,
                         let title = note.userInfo?["mediaTitle"] as? String
                     else { return }
+                    let medium = note.userInfo?["medium"] as? String
                     SessionTracker.shared.startSession(
                         kind: kind,
                         mediaID: mediaID,
-                        mediaTitle: title
+                        mediaTitle: title,
+                        medium: medium
                     )
                 }
             }

@@ -24,6 +24,8 @@ public struct InkampStatsSessionRecord: Identifiable, Codable, Equatable, Sendab
     public var endedAt: Date
     public var durationSeconds: TimeInterval
     public var endProgress: Double?
+    /// Actual medium played: "ebook" | "audiobook" | "readaloud" | "podcast".
+    public var medium: String?
 
     public init(
         id: UUID = UUID(),
@@ -33,7 +35,8 @@ public struct InkampStatsSessionRecord: Identifiable, Codable, Equatable, Sendab
         startedAt: Date,
         endedAt: Date,
         durationSeconds: TimeInterval,
-        endProgress: Double? = nil
+        endProgress: Double? = nil,
+        medium: String? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -43,6 +46,7 @@ public struct InkampStatsSessionRecord: Identifiable, Codable, Equatable, Sendab
         self.endedAt = endedAt
         self.durationSeconds = durationSeconds
         self.endProgress = endProgress
+        self.medium = medium
     }
 }
 
