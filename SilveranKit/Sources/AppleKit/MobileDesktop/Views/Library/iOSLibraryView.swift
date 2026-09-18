@@ -597,7 +597,6 @@ struct MoreMenuView: View {
         case ratings
         case currentlyDownloading
         case addBook
-        case importViaTorBox
         case createReadaloud
         case appleWatch
     }
@@ -679,9 +678,6 @@ struct MoreMenuView: View {
                 }
                 NavigationLink(value: MoreDestination.addBook) {
                     Label("Add Book", systemImage: "plus.circle")
-                }
-                NavigationLink(value: MoreDestination.importViaTorBox) {
-                    Label("Import via TorBox/Magnet", systemImage: "bolt.horizontal.circle")
                 }
                 if AppLaunchContext.environment.readaloudAligner != nil {
                     NavigationLink(value: MoreDestination.createReadaloud) {
@@ -823,12 +819,6 @@ struct MoreMenuView: View {
                     UploadNewBookView()
                         .navigationTitle("Add Book")
                         .navigationBarTitleDisplayMode(.inline)
-                        .iOSLibraryToolbar(
-                            showSettings: $showSettings,
-                            showOfflineSheet: $showOfflineSheet,
-                        )
-                case .importViaTorBox:
-                    TorBoxMagnetImportView()
                         .iOSLibraryToolbar(
                             showSettings: $showSettings,
                             showOfflineSheet: $showOfflineSheet,

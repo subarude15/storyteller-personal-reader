@@ -17,17 +17,16 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- **Playtorio Fetcher** — user-managed Data Sources CRUD + high-priority RaveBookSearch adapter; formats → Explore Download/Import → Storyteller ingest. Persist metadata + public URLs in Playtorio library index; Settings → Data Sources; CLI + `GET /api/books` / `GET|PUT /api/settings/adapters`.
-- **TorBox Debrid** — Settings → Debrid Settings (API key in Keychain); More / Add Book → Import via TorBox/Magnet; resolve magnet → direct URL → Storyteller Tus upload (background toast).
+1. **Finish tonight** — Home quick win
+2. **Story Timeline** — distinctive ink+amp cut
+3. Soft: **Couldn't save server** copy (≠ “Connection failed”)
 
-**Next:** Finish tonight → Story Timeline → soft Couldn't save server copy.
+**Explicit reject:** Playtorio, TorBox, magnets, LibGen, Audible scrape, DRM strip, and free-catalog Explore browse. Do not start second player, CarPlay, or DSM/SMB unless Josh reorders.
 
-**Later:** External discover books you don’t have. No Playtorio scrape / DRM strip / Audible login path.
-
-**Do not start second player, CarPlay, DSM/SMB, pirate indexes, or DRM strip unless Josh reorders.**
 ## Shipped
 
 ### Product / sync
+- [x] **Purge unpaid ingest + Ideas for later v1** — removed Playtorio, TorBox, magnets, LibGen, Audible scrape, RaveBookSearch, and free-catalog Explore (Standard Ebooks / public OPDS browse / Download / Import). Library segment is **Library | Ideas**: habit-ranked metadata suggestions (series gaps, same authors, overlapping tags; recency-weighted) with optional Open Library lookup and local Save idea. No download. **More like this** stays on owned book detail. Storyteller sync, LAN failover, podcasts, player, and local Import stay.
 - [x] **Streaming Books Phase 1: Explore ebooks + lawful source foundation** — tip `0d71be3`;
   `Library | Explore` segment; Standard Ebooks (public Atom new-releases) + user OPDS + direct
   HTTPS EPUB; Read now via existing Silveran reader; Add to Library via Storyteller upload;
@@ -96,7 +95,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Next (strict order — do not reorder)
 
-### After More like this + Explore smoke
+Now is Finish tonight → Story Timeline → soft Couldn't save server. Do not pull later items ahead of that.
+
+### After Ideas for later
 1. **Finish tonight** — Home quick win
 2. **Story Timeline** — distinctive ink+amp cut
 3. Soft: **Couldn't save server** copy anytime
@@ -108,11 +109,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Later / ideas (not blocking)
 
-**Streaming Books Phase 3** — optional bring-your-own-link transport adapters for authorized
-torrent/debrid downloads after the OPDS/direct-HTTPS foundation is proven. No bundled torrent
-index, search scraper, or piracy catalog. **Discover books you don't have** remains a later
-Goodreads-style, metadata-only discovery idea, intentionally separate from acquisition and from
-the local-library **More like this** rail. Also later: Wrapped, series strip, Shortcuts.
+**Ideas for later v1 is shipped** (metadata + local save only). Wrapped, series strip, and Shortcuts stay later.
 **Second player** remains parked (shared NP stays).
 
 Strict order (Smokey / Nas-ty):
@@ -132,19 +129,14 @@ Strict order (Smokey / Nas-ty):
 
 **Cancelled (Josh 2026-09-16):** DSM/SMB/WebDAV folder dump — happy with Storyteller Import as-is.
 
-**Later toys (only if reordered):** Story Timeline; Finish tonight; Wrapped/heat map; series strip; Shortcuts Continue; widgets; second player.
+**Later toys (only if reordered):** Wrapped/heat map; series strip; Shortcuts Continue; widgets; second player.
 ## Constraints
 
 - Keep `SilveranKit`; do not merge Enve tree (modules + AGPL only)
 - Storyteller = ebook / audiobook / readaloud; podcasts = RSS rail
-- Streaming catalogs must be authorized/public-domain or explicitly user-controlled. Never bundle
-  AudiobookBay, Bookracy, torrent indexes, debrid search catalogs, or HTML-scraper acquisition;
-  never disable TLS validation. Any later torrent/debrid adapter is transport-only for an explicit
-  user-supplied authorized link and must feed the same validation/import pipeline.
-- EPUB **Read now** means a complete, validated temporary download before opening — do not present
-  it as progressive page streaming. Imported titles become normal Storyteller books.
-- Explore-only items must not enter Library/Shelf or `LocalBookRecommendations`; they appear there
-  only after explicit **Add to Library**. **More like this** remains Storyteller-library-only.
+- **Explicit reject:** Playtorio, TorBox, magnets, LibGen, Audible scrape, DRM strip, and free-catalog Explore browse (Standard Ebooks, public OPDS shelves, Download / Import from remote catalogs). Ideas are metadata and a local save list only — no download, no full-book fetch, no unpaid source links.
+- EPUB files the user already has still open in the existing reader. Imported titles become normal Storyteller books via the existing local / phone import.
+- **Ideas for later** must not enter Library, Shelf, or sync. **More like this** remains Storyteller-library-only (series → author → tags) on owned book detail.
 - Reuse the existing ebook reader and shared audio session/player. Preserve Storyteller Read ↔ Listen
   position sync for imported/owned books; do not add a second player.
 - AltStore unsigned IPA; no Apple Developer until we choose to

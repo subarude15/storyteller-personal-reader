@@ -89,14 +89,6 @@ extension Notification.Name {
     public static let punkRallyYouTubeNoMatches = Notification.Name(
         "punkRallyYouTubeNoMatches"
     )
-    /// TorBox magnet ingest succeeded — host toast (userInfo.message).
-    public static let punkRallyTorBoxIngestSucceeded = Notification.Name(
-        "punkRallyTorBoxIngestSucceeded"
-    )
-    /// TorBox magnet ingest failed — host toast (userInfo.message).
-    public static let punkRallyTorBoxIngestFailed = Notification.Name(
-        "punkRallyTorBoxIngestFailed"
-    )
     /// Podcast / YouTube playhead just persisted — host updates Continue progress.
     /// userInfo: episodeID (String), progress (Double 0...1)
     public static let punkRallyPodcastProgressDidPersist = Notification.Name(
@@ -638,33 +630,32 @@ private struct PodcastShelfDownloadRow: View {
 
 /// Full catalogue browser ("Library" tab) without Silveran's inner tab bar:
 /// searchable cover grid with book-detail navigation destinations wired.
-/// Wrapper around Silveran's internal `BooksContentView`, plus Explore catalogs.
+/// Wrapper around Silveran's internal `BooksContentView`, plus habit-based Ideas.
 public struct PunkRallyLibraryView: View {
     private enum LibrarySegment: String, CaseIterable, Identifiable {
         case library = "Library"
-        case explore = "Explore"
+        case ideas = "Ideas"
         var id: String { rawValue }
     }
 
     @State private var segment: LibrarySegment = .library
     @State private var searchText = ""
-    @State private var exploreSearchText = ""
+    @State private var ideasSearchText = ""
     @State private var showSettings = false
     @State private var showOfflineSheet = false
     @State private var showImport = false
-    @State private var exploreStore = ExploreCatalogStore()
     @State private var navigationPath = NavigationPath()
 
     public init() {}
 
     private var searchBinding: Binding<String> {
         Binding(
-            get: { segment == .library ? searchText : exploreSearchText },
+            get: { segment == .library ? searchText : ideasSearchText },
             set: { newValue in
                 if segment == .library {
                     searchText = newValue
                 } else {
-                    exploreSearchText = newValue
+                    ideasSearchText = newValue
                 }
             }
         )
@@ -687,8 +678,8 @@ public struct PunkRallyLibraryView: View {
                     case .library:
                         BooksContentView(searchText: searchText)
                             .environment(\.mediaGridTapOpensPlayer, true)
-                    case .explore:
-                        ExploreRootView(store: exploreStore)
+                    case .ideas:
+                        IdeasRootView(searchText: ideasSearchText)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -714,23 +705,10 @@ public struct PunkRallyLibraryView: View {
             .searchable(
                 text: searchBinding,
                 placement: .navigationBarDrawer(displayMode: .always),
-                prompt: segment == .library ? "Search" : "Search catalog"
+                prompt: segment == .library ? "Search" : "Search ideas"
             )
-            .onChange(of: exploreSearchText) { _, newValue in
-                exploreStore.setSearchText(newValue)
-            }
-            .onChange(of: segment) { _, newValue in
+            .onChange(of: segment) { _, _ in
                 navigationPath = NavigationPath()
-                if newValue == .explore {
-                    exploreStore.setSearchText(exploreSearchText)
-                }
-            }
-            .onSubmit(of: .search) {
-                guard segment == .explore else { return }
-                Task { await exploreStore.searchExternalSources(query: exploreSearchText) }
-            }
-            .navigationDestination(for: ExploreBook.self) { book in
-                ExploreBookDetailView(book: book)
             }
             .libraryNavigationDestinations(
                 showSettings: $showSettings,

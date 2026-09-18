@@ -41,20 +41,15 @@ public final class PlayerPresenter {
         dismissalKeepsSession = false
         let replacingCard = card != nil
         card = PresentedPlayerCard(data: data)
-        let isExplore = ExploreBookIdentity.isExplore(data.metadata.id)
-        if !isExplore {
-            BookRecentStore.shared.record(data.metadata.id)
-            NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
-        }
+        BookRecentStore.shared.record(data.metadata.id)
+        NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
         let statsKind = data.category == .ebook ? "reading" : "listening"
         PunkRallyStatsEvents.sessionStart(
             kind: statsKind,
             mediaID: "\(data.metadata.id)",
             mediaTitle: data.metadata.title
         )
-        if !isExplore {
-            Task { await LastOpenBookStore.save(bookData: data) }
-        }
+        Task { await LastOpenBookStore.save(bookData: data) }
         if !replacingCard {
             // A replaced card ends its own session through its view teardown;
             // a live headless session (mini player, CarPlay) has no view to do
@@ -66,11 +61,8 @@ public final class PlayerPresenter {
     public func dismissCard() {
         guard let current = card else { return }
         let bookID = current.data.metadata.id
-        let isExplore = ExploreBookIdentity.isExplore(bookID)
-        if !isExplore {
-            BookRecentStore.shared.record(bookID)
-            NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
-        }
+        BookRecentStore.shared.record(bookID)
+        NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
         Task { @MainActor in
             let kind = await AudioSessionActor.shared.currentSessionKind()
             let snapshot = await AudioSessionActor.shared.currentSnapshot()
@@ -80,12 +72,10 @@ public final class PlayerPresenter {
             )
             self.dismissalKeepsSession = keepsSession
             if !keepsSession {
-                if !isExplore {
-                    LastOpenBookStore.clearIfMatching(
-                        bookId: bookID,
-                        category: current.data.category,
-                    )
-                }
+                LastOpenBookStore.clearIfMatching(
+                    bookId: bookID,
+                    category: current.data.category,
+                )
                 PunkRallyStatsEvents.sessionEnd(
                     mediaID: "\(bookID)",
                     progress: snapshot?.bookProgress
