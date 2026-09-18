@@ -7,6 +7,7 @@ struct iOSBookDetailView: View {
     let mediaKind: MediaKind
 
     @Environment(MediaViewModel.self) private var mediaViewModel
+    @Environment(\.dismiss) private var dismissDetail
     @Environment(\.editMetadataAction) private var editMetadataAction
     @State private var selectedStatusName: String?
     @State private var isUpdatingStatus = false
@@ -55,6 +56,10 @@ struct iOSBookDetailView: View {
                 isUpdatingStatus: $isUpdatingStatus,
                 showOfflineError: $showOfflineError,
                 editMetadataAction: editMetadataAction,
+                onDeleted: {
+                    showingOptionsSheet = false
+                    dismissDetail()
+                },
             )
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
@@ -99,10 +104,14 @@ private struct BookOptionsSheet: View {
     @Binding var isUpdatingStatus: Bool
     @Binding var showOfflineError: Bool
     let editMetadataAction: MetadataEditorAction?
+    let onDeleted: () -> Void
 
     @Environment(MediaViewModel.self) private var mediaViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var showDeleteConfirmation = false
+    @State private var showServerDeleteConfirmation = false
+    @State private var showServerDeleteError = false
+    @State private var isDeletingServerBook = false
 
     private var currentItem: BookMetadata {
         mediaViewModel.library.bookMetaData.first { $0.id == item.id } ?? item
@@ -151,7 +160,16 @@ private struct BookOptionsSheet: View {
                     }
                 }
 
-                if mediaViewModel.isLocalFolderBook(item.id) {
+                if mediaViewModel.isServerBook(item.id) {
+                    Section {
+                        Button(role: .destructive) {
+                            showServerDeleteConfirmation = true
+                        } label: {
+                            Label("Delete from Library", systemImage: "trash")
+                        }
+                        .disabled(isDeletingServerBook)
+                    }
+                } else if mediaViewModel.isLocalFolderBook(item.id) {
                     Section {
                         Button(role: .destructive) {
                             showDeleteConfirmation = true
@@ -180,6 +198,23 @@ private struct BookOptionsSheet: View {
                     "This permanently deletes \(currentItem.title) and all its files from the folder source."
                 )
             }
+            .confirmationDialog(
+                "Delete \(currentItem.title)?",
+                isPresented: $showServerDeleteConfirmation,
+                titleVisibility: .visible,
+            ) {
+                Button("Delete", role: .destructive) {
+                    Task { await deleteFromLibrary() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(
+                    "This permanently deletes the book and all its media from the Storyteller server and removes local downloads. This cannot be undone."
+                )
+            }
+            .alert("Couldn't delete book", isPresented: $showServerDeleteError) {
+                Button("OK", role: .cancel) {}
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") {
@@ -192,6 +227,18 @@ private struct BookOptionsSheet: View {
             if selectedStatusName == nil {
                 selectedStatusName = currentItem.status?.name
             }
+        }
+    }
+
+    private func deleteFromLibrary() async {
+        isDeletingServerBook = true
+        let deleted = await mediaViewModel.deleteStorytellerLibraryBook(currentItem.id)
+        if deleted {
+            dismiss()
+            onDeleted()
+        } else {
+            isDeletingServerBook = false
+            showServerDeleteError = true
         }
     }
 }

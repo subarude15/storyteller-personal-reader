@@ -167,6 +167,9 @@ public final class MediaViewModel {
     /// Book progress map for Home Continue / Up next last-touched ordering.
     public private(set) var bookProgressCache: [BookID: BookProgress] = [:]
     @ObservationIgnored private var readBookIds: Set<BookID> = []
+    /// Ids removed this session. Stale library refreshes started before the
+    /// server list returns must not put the row back.
+    @ObservationIgnored private var deletedBookIDs: Set<BookID> = []
 
     @ObservationIgnored private let libraryDerivationActor = LibraryDerivationActor()
     @ObservationIgnored private var libraryDerivationTask: Task<Void, Never>?
@@ -589,6 +592,7 @@ public final class MediaViewModel {
             Set(
                 libraryMetadata.filter { book in
                     sourceKindsByID[book.sourceID] == .storyteller
+                        && !deletedBookIDs.contains(book.id)
                 }.map(\.id)
             ),
         )
@@ -787,7 +791,11 @@ public final class MediaViewModel {
         removableCachedBookPaths = snapshot.cachedMediaPaths
     }
 
-    private func applyLibraryMetadata(_ metadata: [BookMetadata]) {
+    private func applyLibraryMetadata(_ incoming: [BookMetadata]) {
+        let metadata =
+            deletedBookIDs.isEmpty
+            ? incoming
+            : incoming.filter { !deletedBookIDs.contains($0.id) }
         guard metadata != library.bookMetaData else {
             debugLog(
                 "[PerfTrace][MediaViewModel] applyLibraryMetadata unchanged skip count=\(metadata.count)"
@@ -1918,6 +1926,27 @@ public final class MediaViewModel {
             )
         )
         return didDelete
+    }
+
+    /// Storyteller library delete. Same server call as Mac `ServerMediaManagementView`.
+    @discardableResult
+    public func deleteStorytellerLibraryBook(_ bookID: BookID) async -> Bool {
+        deletedBookIDs.insert(bookID)
+        let success = await BookServiceActor.shared.deleteBook(bookID)
+        guard success else {
+            deletedBookIDs.remove(bookID)
+            await refreshMetadata(source: "iOS.DeleteFromLibrary.failed")
+            return false
+        }
+        _ = await BookServiceActor.shared.fetchLibraryInformation()
+        await refreshMetadata(source: "iOS.DeleteFromLibrary")
+        #if os(iOS)
+        if LastOpenBookStore.load()?.bookID == bookID {
+            LastOpenBookStore.clear()
+        }
+        NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
+        #endif
+        return true
     }
 
     public func deleteFolderBook(_ item: BookMetadata) async -> Bool {
