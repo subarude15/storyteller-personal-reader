@@ -104,13 +104,13 @@ import Testing
     }
 }
 
-@Test func testFetchSurfacesSourceConfigurationError() async throws {
+@Test func testFetchSkipsBrokenAdapterInsteadOfThrowing() async throws {
     let dir = FileManager.default.temporaryDirectory
         .appendingPathComponent("playtorio-cfgerr-\(UUID().uuidString)", isDirectory: true)
     defer { try? FileManager.default.removeItem(at: dir) }
 
     let settings = AdapterSettings(directory: dir)
-    // Only a broken custom source enabled.
+    // Only a broken custom source enabled (unsupported scheme).
     let configs = [
         AdapterConfig(
             id: "user-broken",
@@ -129,14 +129,10 @@ import Testing
         library: PlaytorioLibraryStore(databasePath: dir.appendingPathComponent("library.sqlite"))
     )
 
-    do {
-        _ = try await service.fetch(query: "anything", persist: false)
-        Issue.record("expected Source configuration error")
-    } catch let error as AdapterConfigurationError {
-        #expect(error.localizedDescription == "Source configuration error")
-    } catch {
-        Issue.record("unexpected error \(error)")
-    }
+    // A broken adapter must not abort the search — it's skipped, yielding no
+    // usable result rather than a thrown configuration error.
+    let result = try await service.fetch(query: "anything", persist: false)
+    #expect(result == nil)
 }
 
 @Test func testDynamicReloadPicksUpNewUserSource() async throws {

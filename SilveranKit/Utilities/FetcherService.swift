@@ -6,17 +6,22 @@ public struct FetcherService: Sendable {
     public var cache: BookCache
     public var library: PlaytorioLibraryStore
     public var http: any HTTPClient
+    /// Optional logger so the iOS layer can pipe search diagnostics into its
+    /// `debugLog` stream; nil (silent) on Linux where no logging backend exists.
+    public var log: (@Sendable (String) -> Void)?
 
     public init(
         settings: AdapterSettings = AdapterSettings(),
         cache: BookCache = BookCache(),
         library: PlaytorioLibraryStore = PlaytorioLibraryStore(),
-        http: any HTTPClient = URLSessionHTTPClient()
+        http: any HTTPClient = URLSessionHTTPClient(),
+        log: (@Sendable (String) -> Void)? = nil
     ) {
         self.settings = settings
         self.cache = cache
         self.library = library
         self.http = http
+        self.log = log
     }
 
     /// Adapters that would run for the current settings (enabled, sorted by priority).
@@ -53,19 +58,27 @@ public struct FetcherService: Sendable {
 
         // Always reload settings so user CRUD changes take effect without restart.
         let planned = try plannedAdapters()
+        log?("[FetcherService] fetch '\(trimmed)' via \(planned.count) adapter(s): \(planned.map(\.id).joined(separator: ", "))")
         var results: [AdapterResult] = []
         for config in planned {
             let adapter: any BookAdapter
             do {
                 adapter = try makeAdapter(for: config)
-            } catch is AdapterConfigurationError {
-                throw AdapterConfigurationError.malformedURL
+            } catch {
+                // A malformed adapter is not fatal — skip it and keep the search alive.
+                log?("[FetcherService] adapter \(config.id) failed to build: \(error.localizedDescription)")
+                continue
             }
             do {
                 let result = try await adapter.fetch(query: trimmed)
                 results.append(result)
-            } catch is AdapterConfigurationError {
-                throw AdapterConfigurationError.malformedURL
+                log?("[FetcherService] adapter \(config.id) -> \(result.summary)")
+            } catch {
+                // A dead or slow backend (timeout, network drop, malformed response)
+                // must never abort the whole search: other adapters may still return
+                // usable results, so treat this one as "no result" and continue.
+                log?("[FetcherService] adapter \(config.id) failed: \(error.localizedDescription)")
+                continue
             }
         }
 

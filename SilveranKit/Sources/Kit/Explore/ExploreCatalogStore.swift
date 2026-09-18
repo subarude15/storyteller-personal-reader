@@ -124,11 +124,13 @@ public final class ExploreCatalogStore {
         errorMessage = nil
         externalSearchMessage = nil
         defer { isSearchingExternalSources = false }
+        debugLog("[Explore] searchExternalSources query=“\(query)”")
 
         do {
             let service = Self.makeFetcherService()
             guard let book = try await service.fetch(query: query, persist: true) else {
                 externalSearchMessage = "No Data Sources results for “\(query)”."
+                debugLog("[Explore] searchExternalSources -> no results for “\(query)”")
                 applyLocalFilter()
                 return
             }
@@ -140,10 +142,13 @@ public final class ExploreCatalogStore {
             pageCache.removeValue(forKey: ExploreCatalogSource.playtorio.id)
             await reload(forceNetwork: true)
             externalSearchMessage = "Saved “\(book.title.isEmpty ? query : book.title)” from Data Sources."
+            debugLog("[Explore] searchExternalSources -> saved “\(book.title)”")
         } catch is AdapterConfigurationError {
             errorMessage = "Source configuration error"
+            debugLog("[Explore] searchExternalSources -> Source configuration error")
         } catch {
             errorMessage = "Data Sources search failed: \(error.localizedDescription)"
+            debugLog("[Explore] searchExternalSources failed: \(error.localizedDescription)")
         }
     }
 
@@ -306,7 +311,8 @@ public final class ExploreCatalogStore {
         return FetcherService(
             settings: AdapterSettings(directory: dir),
             cache: BookCache(databasePath: dir.appendingPathComponent("cache.sqlite")),
-            library: PlaytorioLibraryStore(databasePath: PlaytorioLibraryStore.applicationSupportPath())
+            library: PlaytorioLibraryStore(databasePath: PlaytorioLibraryStore.applicationSupportPath()),
+            log: { debugLog($0) }
         )
         #else
         return FetcherService()

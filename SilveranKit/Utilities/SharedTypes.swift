@@ -84,4 +84,20 @@ public enum AdapterResult: Equatable, Sendable {
         adapterId: String
     )
     case none
+
+    /// Human-readable outcome for logs / dry-run output.
+    public var summary: String {
+        switch self {
+        case .definitive(let book):
+            return "definitive(\(book.title.isEmpty ? "untitled" : book.title), \(book.formats.count) formats)"
+        case .enrichment(let formats, let cover, let sample, let adapterId):
+            let bits = [formats.isEmpty ? nil : "\(formats.count) formats",
+                        cover == nil ? nil : "cover",
+                        sample == nil ? nil : "sample"]
+                .compactMap { $0 }
+            return "enrichment(\(adapterId), \(bits.isEmpty ? "empty" : bits.joined(separator: ", ")))"
+        case .none:
+            return "none"
+        }
+    }
 }
