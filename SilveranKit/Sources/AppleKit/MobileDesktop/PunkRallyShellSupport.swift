@@ -188,6 +188,31 @@ public enum PunkRallyPlayerHost {
         PlayerPresenter.shared.present(bookData)
     }
 
+    /// Opens a specific medium category (ebook / audiobook / readaloud), used by
+    /// the Home long-press medium picker. Resolves local media for that category
+    /// and presents the same player/reader host as `open` — no new player stack.
+    public static func open(
+        _ item: BookMetadata,
+        mediaViewModel: MediaViewModel?,
+        category: LocalMediaCategory
+    ) async {
+        guard let mediaViewModel else {
+            postOpenFailure()
+            return
+        }
+        guard
+            await BookServiceActor.shared.resolveLocalMedia(
+                for: item.id,
+                category: category
+            ) != nil
+        else {
+            postOpenFailure()
+            return
+        }
+        let bookData = mediaViewModel.makePlayerBookData(for: item, category: category)
+        PlayerPresenter.shared.present(bookData)
+    }
+
     /// Whether the card should open the player (title already has local media)
     /// vs navigate to the book detail (nothing downloaded yet → download UI).
     public static func shouldOpenPlayer(

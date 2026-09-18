@@ -313,6 +313,22 @@ private struct HomeTabView: View {
     @State private var queueTick = 0
     @State private var tracker = SessionTracker.shared
     @State private var statsTick = 0
+    @State private var mediumPickerItem: HomeMixedItem? = nil
+
+    /// Media a Home item actually has, in a stable pick order (readaloud, audiobook, ebook).
+    private struct AvailableMedium: Identifiable {
+        let id: String
+        let label: String
+        let category: LocalMediaCategory?
+        let isPodcastVideo: Bool
+    }
+
+    private var mediumPickerPresented: Binding<Bool> {
+        Binding(
+            get: { mediumPickerItem != nil },
+            set: { if !$0 { mediumPickerItem = nil } }
+        )
+    }
 
     private var chrome: PunkRallyTheme.Chrome {
         PunkRallyTheme.Chrome(scheme: colorScheme)
@@ -449,6 +465,25 @@ private struct HomeTabView: View {
                 statsTick &+= 1
             }
         }
+        .confirmationDialog(
+            mediumPickerItem.map { "Open \($0.title) as" } ?? "",
+            isPresented: mediumPickerPresented,
+            titleVisibility: .visible
+        ) {
+            if let item = mediumPickerItem {
+                let media = availableMedia(for: item)
+                if media.isEmpty {
+                    Button("Nothing available", role: .cancel) {}
+                } else {
+                    ForEach(media) { medium in
+                        Button(medium.label) {
+                            Task { await openMedium(medium, for: item) }
+                        }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                }
+            }
+        }
         .punkRallySheets(
             showSettings: $showSettings,
             showOfflineSheet: $showOfflineSheet
@@ -521,6 +556,14 @@ private struct HomeTabView: View {
         }
         .buttonStyle(.plain)
         .disabled(item == nil)
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.5)
+                .onEnded { _ in
+                    if let item {
+                        mediumPickerItem = item
+                    }
+                }
+        )
     }
 
     private var upNextRow: some View {
@@ -562,6 +605,12 @@ private struct HomeTabView: View {
                                 }
                             }
                             .buttonStyle(.plain)
+                            .simultaneousGesture(
+                                LongPressGesture(minimumDuration: 0.5)
+                                    .onEnded { _ in
+                                        mediumPickerItem = item
+                                    }
+                            )
                         }
                     }
                 }
@@ -627,6 +676,12 @@ private struct HomeTabView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .simultaneousGesture(
+                        LongPressGesture(minimumDuration: 0.5)
+                            .onEnded { _ in
+                                mediumPickerItem = item
+                            }
+                    )
                 }
             }
             .padding(PunkRallyTheme.Metric.cardPadding)
@@ -713,6 +768,111 @@ private struct HomeTabView: View {
                     userInfo: userInfo
                 )
         }
+    }
+
+    /// Media a Home item actually has, for the long-press medium picker. Books
+    /// list readaloud / audiobook / ebook; a podcast row lists audio and, when a
+    /// video URL is matched, video. Never lists a format the item doesn't have.
+    private func availableMedia(for item: HomeMixedItem) -> [AvailableMedium] {
+        switch item {
+            case .book(let book, _, _, _):
+                var media: [AvailableMedium] = []
+                if book.hasAvailableReadaloud {
+                    media.append(
+                        AvailableMedium(
+                            id: "readaloud",
+                            label: "Readaloud",
+                            category: .synced,
+                            isPodcastVideo: false,
+                        )
+                    )
+                }
+                if book.hasAvailableAudiobook {
+                    media.append(
+                        AvailableMedium(
+                            id: "audiobook",
+                            label: "Audiobook",
+                            category: .audio,
+                            isPodcastVideo: false,
+                        )
+                    )
+                }
+                if book.hasAvailableEbook {
+                    media.append(
+                        AvailableMedium(
+                            id: "ebook",
+                            label: "Ebook",
+                            category: .ebook,
+                            isPodcastVideo: false,
+                        )
+                    )
+                }
+                return media
+            case .podcast(let entry):
+                var media = [
+                    AvailableMedium(
+                        id: "audio",
+                        label: "Audio",
+                        category: nil,
+                        isPodcastVideo: false,
+                    )
+                ]
+                let watchURL =
+                    entry.youtubeURL
+                    ?? PodcastMatchedYouTubeStore.shared.watchURL(for: entry.episodeID)
+                if watchURL != nil {
+                    media.append(
+                        AvailableMedium(
+                            id: "video",
+                            label: "Video",
+                            category: nil,
+                            isPodcastVideo: true,
+                        )
+                    )
+                }
+                return media
+        }
+    }
+
+    @MainActor
+    private func openMedium(_ medium: AvailableMedium, for item: HomeMixedItem) async {
+        switch item {
+            case .book(let book, _, _, _):
+                guard let vm = mediaViewModel, let category = medium.category else { return }
+                await PunkRallyPlayerHost.open(book, mediaViewModel: vm, category: category)
+            case .podcast(let entry):
+                if medium.isPodcastVideo {
+                    // Reuse the same video-open path as a normal tap.
+                    await openMixedItem(.podcast(entry))
+                } else {
+                    await openPodcastAudio(entry)
+                }
+        }
+    }
+
+    @MainActor
+    private func openPodcastAudio(_ entry: PodcastRecentEntry) async {
+        var userInfo: [String: Any] = [
+            "episodeID": entry.episodeID,
+            "title": entry.title,
+            "audioURL": entry.audioURL,
+            "mediaKind": entry.mediaKind.rawValue,
+        ]
+        userInfo["showTitle"] = entry.showTitle
+        if let duration = entry.durationSeconds {
+            userInfo["durationSeconds"] = duration
+        }
+        if let cover = entry.coverURL {
+            userInfo["coverURL"] = cover
+        }
+        if let feed = entry.feedURL {
+            userInfo["feedURL"] = feed
+        }
+        NotificationCenter.default.post(
+            name: .punkRallyPlayPodcastEpisode,
+            object: nil,
+            userInfo: userInfo
+        )
     }
 
     /// Widget / deep link: expand Now Playing if live, else open Home Continue.
