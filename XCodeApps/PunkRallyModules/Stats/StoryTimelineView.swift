@@ -102,6 +102,7 @@ struct StoryTimelineView: View {
         let beats: [TimelineBeat]
     }
 
+    @MainActor
     private var daySections: [DaySection] {
         let calendar = Calendar.current
         let grouped = Dictionary(grouping: beats) {
@@ -113,10 +114,17 @@ struct StoryTimelineView: View {
     }
 
     /// Resolved beats for every recorded session, newest first.
+    @MainActor
     private var beats: [TimelineBeat] {
         let resolver = TimelineBeatResolver(mediaViewModel: mediaViewModel)
         let sessions = tracker.allSessions.sorted { $0.endedAt > $1.endedAt }
-        return sessions.map { TimelineBeat(session: $0, resolver: resolver) }
+        return sessions.map { session in
+            TimelineBeat(
+                id: session.id.uuidString,
+                session: session,
+                source: resolver.resolve(session)
+            )
+        }
     }
 
     // MARK: - Section / rows
@@ -212,16 +220,11 @@ private struct TimelineBeat: Identifiable {
     let id: String
     let session: PRMediaSession
     let source: Source?
-
-    init(session: PRMediaSession, resolver: TimelineBeatResolver) {
-        self.id = session.id.uuidString
-        self.session = session
-        self.source = resolver.resolve(session)
-    }
 }
 
 /// Resolves a session's `mediaID` back to a book/podcast for cover + Continue.
 /// Built once per render so dictionary lookups are cheap.
+@MainActor
 private struct TimelineBeatResolver {
     let booksByID: [String: BookMetadata]
     let podcastsByID: [String: PodcastRecentEntry]
