@@ -324,12 +324,13 @@ private struct HomeTabView: View {
         return tracker.snapshot
     }
 
-    private var mixedQueue: (continueItem: HomeMixedItem?, upNext: [HomeMixedItem]) {
+    /// In-progress books + podcasts (Continue sources), last-touched order.
+    private var inProgressItems: [HomeMixedItem] {
         let _ = queueTick
         let vm = mediaViewModel
         let books = vm?.library.bookMetaData ?? []
         let progress = vm?.bookProgressCache ?? [:]
-        return HomeMixedQueue.build(
+        let queue = HomeMixedQueue.build(
             books: books,
             progress: progress,
             preferredCategory: { book in
@@ -338,8 +339,25 @@ private struct HomeTabView: View {
             podcastRecents: PodcastRecentStore.shared.all(),
             podcastDownloads: podcastStore.allDownloads(),
             bookLocalTouches: BookRecentStore.shared.all(),
-            upNextLimit: 5
+            upNextLimit: 40
         )
+        return ([queue.continueItem].compactMap { $0 }) + queue.upNext
+    }
+
+    private var mixedQueue: (continueItem: HomeMixedItem?, upNext: [HomeMixedItem]) {
+        let items = inProgressItems
+        return (items.first, Array(items.dropFirst().prefix(5)))
+    }
+
+    private var finishTonightPicks: (minutes: Int, items: [HomeMixedItem])? {
+        let _ = queueTick
+        guard let minutes = BedtimeSettings.minutesUntilBedtime() else { return nil }
+        let items = FinishTonight.picks(
+            from: inProgressItems,
+            minutesUntilBedtime: minutes
+        )
+        guard !items.isEmpty else { return nil }
+        return (minutes, items)
     }
 
     private var syncState: SyncChipView.SyncState {
@@ -362,6 +380,7 @@ private struct HomeTabView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     greetingHeader
+                    finishTonightCard
                     continueHero
                     upNextRow
                     statsStrip
@@ -426,6 +445,7 @@ private struct HomeTabView: View {
                 NotificationCenter.default.publisher(for: .punkRallyStatsSessionEnd)
             ) { _ in statsTick &+= 1 }
             .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in
+                queueTick &+= 1
                 statsTick &+= 1
             }
         }
@@ -577,6 +597,47 @@ private struct HomeTabView: View {
         .padding(.vertical, 12)
         .background(chrome.surface)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private var finishTonightCard: some View {
+        if let picks = finishTonightPicks {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(FinishTonight.header(minutesUntilBedtime: picks.minutes))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(chrome.text)
+                ForEach(picks.items) { item in
+                    Button {
+                        Task { await openMixedItem(item) }
+                    } label: {
+                        HStack(spacing: 12) {
+                            HomeMixedCoverView(item: item, width: 44, height: 66, chrome: chrome)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.title)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(chrome.text)
+                                    .lineLimit(2)
+                                if let why = item.finishabilityLabel {
+                                    Text(why)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(PunkRallyTheme.Accent.primary)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(PunkRallyTheme.Metric.cardPadding)
+            .background(chrome.surface)
+            .clipShape(RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius)
+                    .stroke(chrome.border, lineWidth: 1)
+            )
+            .accessibilityIdentifier("finish-tonight")
+        }
     }
 
     @MainActor

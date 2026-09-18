@@ -338,6 +338,16 @@ extension SettingsView {
 
                 GeneralSettingsFields(sync: $config.sync).autoNavigateSection
 
+                Section {
+                    BedtimeSettingsRow()
+                } header: {
+                    Text("Bedtime")
+                } footer: {
+                    Text(
+                        "Used for Finish tonight on Home. Stored on this device only."
+                    )
+                }
+
                 Section("Tab Bar") {
                     Picker("First Tab", selection: $config.library.tabBarSlot1) {
                         ForEach(ConfigurableTab.allCases) { tab in
@@ -442,6 +452,30 @@ extension SettingsView {
 }
 
 #if os(iOS)
+private struct BedtimeSettingsRow: View {
+    @State private var bedtime = BedtimeSettings.date(
+        fromMinutesFromMidnight: BedtimeSettings.minutesFromMidnight
+    )
+
+    var body: some View {
+        DatePicker(
+            "Bedtime",
+            selection: $bedtime,
+            displayedComponents: .hourAndMinute
+        )
+        .onChange(of: bedtime) { _, newValue in
+            BedtimeSettings.minutesFromMidnight = BedtimeSettings.minutesFromMidnight(
+                from: newValue
+            )
+        }
+        .onAppear {
+            bedtime = BedtimeSettings.date(
+                fromMinutesFromMidnight: BedtimeSettings.minutesFromMidnight
+            )
+        }
+    }
+}
+
 private struct StatsLastSyncSettingsRow: View {
     @State private var lastSync: Date?
     @State private var isSyncing = false
