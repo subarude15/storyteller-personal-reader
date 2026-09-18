@@ -1436,7 +1436,7 @@ public actor BookServiceActor {
 
     // MARK: - ink+amp Stats sync (first Storyteller source)
 
-    /// Primary configured Storyteller source (same account as place sync).
+    /// Primary configured Storyteller source (same account as progress sync).
     public func primaryStorytellerSourceID() async -> BookSourceID? {
         await ensureSourceRegistryLoaded()
         return sourceRecords.first(where: { $0.kind == .storyteller })?.id

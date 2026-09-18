@@ -66,7 +66,7 @@ public struct InkampYouTubePlayheadRecord: Codable, Equatable, Sendable, Identif
 }
 
 /// Blob stored on Storyteller (private collection description) for phone ↔ iPad
-/// YouTube playheads. Same auth as Stats / place sync.
+/// YouTube playheads. Same auth as Stats / progress sync.
 public struct InkampYouTubePlayheadSyncDocument: Codable, Equatable, Sendable {
     public static let schemaVersion = 1
     public static let collectionName = ".inkamp.youtubePlayheads.v1"

@@ -2437,7 +2437,7 @@ public actor StorytellerActor {
     private static let inkampStatsCollectionUUIDKey = "punkRally.stats.collectionUUID.v1"
 
     /// Fetches the Stats sync document from a private Storyteller collection
-    /// (same auth as place sync). Tolerates unrelated collections that fail to
+    /// (same auth as progress sync). Tolerates unrelated collections that fail to
     /// decode — Stats only needs `.inkamp.stats.v1`.
     public func fetchInkampStatsDocument() async -> InkampStatsFetchResult {
         guard await ensureAuthentication() != nil else {
@@ -2531,7 +2531,7 @@ public actor StorytellerActor {
         return .failure(reason: "createCollection failed name=\(InkampStatsSyncDocument.collectionName)")
     }
 
-    /// True when Storyteller credentials can authenticate (shared with place sync).
+    /// True when Storyteller credentials can authenticate (shared with progress sync).
     public func canReachStorytellerForStatsSync() async -> Bool {
         await ensureAuthentication() != nil
     }
@@ -2579,7 +2579,7 @@ public actor StorytellerActor {
         "punkRally.youtubePlayheads.collectionUUID.v1"
 
     /// Fetches YouTube playheads from a private Storyteller collection
-    /// (same auth as Stats / place sync).
+    /// (same auth as Stats / progress sync).
     public func fetchInkampYouTubePlayheadsDocument() async -> InkampYouTubePlayheadFetchResult {
         guard await ensureAuthentication() != nil else {
             return .unavailable(reason: "auth failed")

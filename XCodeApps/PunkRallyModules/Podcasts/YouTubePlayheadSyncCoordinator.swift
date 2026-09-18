@@ -3,7 +3,7 @@
 //  ink+amp
 //
 //  Pull/push YouTube playheads via Storyteller private collection
-//  `.inkamp.youtubePlayheads.v1` (same auth as Stats / place sync).
+//  `.inkamp.youtubePlayheads.v1` (same auth as Stats / progress sync).
 //  Settings: Synced / Syncing… / Offline · local only
 //
 //  SPDX-License-Identifier: AGPL-3.0-only

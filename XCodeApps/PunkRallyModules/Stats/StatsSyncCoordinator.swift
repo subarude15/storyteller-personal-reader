@@ -2,7 +2,7 @@
 //  StatsSyncCoordinator.swift
 //  ink+amp
 //
-//  Pull/push Stats via Storyteller private collection (same auth as place sync).
+//  Pull/push Stats via Storyteller private collection (same auth as progress sync).
 //  Footer: Synced across your devices · Syncing… · Offline · local only
 //
 //  SPDX-License-Identifier: AGPL-3.0-only

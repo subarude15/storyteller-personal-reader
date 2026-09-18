@@ -426,7 +426,7 @@ extension SettingsView {
                     Text("Stats")
                 } footer: {
                     Text(
-                        "Minutes sync across your devices when Storyteller is signed in (same account as place sync). Tap the row to retry sync."
+                        "Minutes sync across your devices when Storyteller is signed in (same account as progress sync). Tap the row to retry sync."
                     )
                 }
 

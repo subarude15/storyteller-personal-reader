@@ -16,7 +16,7 @@ import SilveranKit
 
 /// Tracks reading/listening sessions locally and computes home/Stats aggregates.
 /// Local recording always works offline; `StatsSyncCoordinator` merges a shared
-/// Storyteller blob (same account as place sync) so phone ↔ iPad share totals.
+/// Storyteller blob (same account as progress sync) so phone ↔ iPad share totals.
 @MainActor
 @Observable
 final class SessionTracker {
