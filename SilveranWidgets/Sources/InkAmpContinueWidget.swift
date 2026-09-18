@@ -119,7 +119,7 @@ struct InkAmpContinueWidget: Widget {
         ) { entry in
             InkAmpContinueWidgetView(entry: entry)
         }
-        .configurationDisplayName("Continue")
+        .configurationDisplayName("Continue + Up next")
         .description("Now, plus the next three from Home — books and podcasts.")
         .supportedFamilies(supportedFamilies)
         .contentMarginsDisabled()
@@ -581,18 +581,13 @@ private struct InkAmpContinueWidgetView: View {
 
 enum InkAmpWidgetPalette {
     static let accent = Color(red: 0.91, green: 0.365, blue: 0.016)  // #E85D04
-    // Explicit ink colors — Color.primary can wash out on some WidgetKit surfaces.
-    static let primary = Color(red: 0.102, green: 0.094, blue: 0.078)  // #1A1814
-    static let secondary = Color(red: 0.420, green: 0.396, blue: 0.376)  // #6B6560
+    // Dark-chrome ink. Color.primary washes out on WidgetKit, and a clear
+    // container lets the wallpaper through so the tile looks blank.
+    static let primary = Color(red: 0.957, green: 0.945, blue: 0.918)  // #F4F1EA
+    static let secondary = Color(red: 0.604, green: 0.584, blue: 0.549)  // #9A958C
     static let coverFallback = Color(white: 0.2)
-    static let background = LinearGradient(
-        colors: [
-            Color(red: 0.97, green: 0.96, blue: 0.95),
-            Color(red: 0.93, green: 0.91, blue: 0.88),
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing,
-    )
+    /// Opaque charcoal (#0B0B0C). Never `Color.clear`.
+    static let background = Color(red: 0.043, green: 0.043, blue: 0.047)
 }
 
 extension Image {

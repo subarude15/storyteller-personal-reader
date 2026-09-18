@@ -89,7 +89,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ### Widgets
 - [x] **Continue home widget** — tip `cc910d9` (PR #26; Arena `ALTAppGroups` resolve); Josh confirmed green. Wipe old blank tiles on install.
-- [x] **Continue + Up next (3)** — tip `482fe8b`; medium tile shows HomeMixedQueue Now (cover, title, progress, existing play/pause) + up to 3 Up next. Same `InkAmpContinueWidget` / App Group (`ALTAppGroups` → configured → fallback). Up next taps `punkrally://continue?item=`. Empty: "Nothing in progress". Free AltStore WidgetKit can stay flaky. Sideload green [35390329291](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35390329291). See `docs/CONTINUE_WIDGET.md`.
+- [x] **Continue + Up next (3)** — medium tile shows HomeMixedQueue Now (cover, title, progress, existing play/pause) + up to 3 Up next. Kind is now `inkamp.continue.upnext.v1` (gallery **Continue + Up next**); the old `InkAmpContinueWidget` kind is retired so iOS cannot keep the Continue-only tile. App Group (`ALTAppGroups` → configured → fallback). Up next taps `punkrally://continue?item=`. Empty: "Nothing in progress". Free AltStore WidgetKit can stay flaky. See `docs/CONTINUE_WIDGET.md`.
 
 ### Stats
 - [x] **SessionTracker local** — ebook / audiobook / readaloud / podcast → Home + Stats tab (`c627bbe`, Sideload [35006016694](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35006016694))

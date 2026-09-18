@@ -5,16 +5,25 @@ progress) and up to **three Up next** rows from the same Home mixed queue
 (books and podcasts, last-touched). Play/pause and ±15s on Now still act
 **without opening the app** while a live audio session exists.
 
-- Widget kind: `InkAmpContinueWidget` (`SilveranWidgetConstants.continueWidgetKind`)
-  — unchanged, so an installed Continue tile picks up this layout without a new kind.
+- Widget kind: `inkamp.continue.upnext.v1` (`SilveranWidgetConstants.continueWidgetKind`).
+  This is a **new** kind. The previous kind `InkAmpContinueWidget` is retired
+  (with `inkamp.continue.v3` / `.v4`) and is never reloaded. WidgetKit keeps an
+  already-installed tile bound to the old kind, so that tile stays the old
+  Continue-only paint even after this build. After install, **remove the old
+  Continue tile** and add the new **Continue + Up next** (medium).
 - Families: small (Now only) and medium (Now + Up next). Medium is the one to add.
   Lock Screen accessories stay the existing Now glance.
+- Background: opaque charcoal `containerBackground` (`#0B0B0C`, `InkAmpWidgetPalette.background`).
+  Never `Color.clear`.
 - Sources: `SilveranWidgets/Sources/InkAmpContinueWidget.swift` (paint),
   `SilveranKit/Sources/AppleKit/WidgetSupport/ContinueWidget{SnapshotStore,Intents}.swift`
   (shared state + transport), publisher in
   `SilveranKit/Sources/AppleKit/MobileDesktop/ContinueWidgetPublisher.swift`
 - Queue: `HomeMixedQueue` in the app. `ContinueWidgetPublisher.publishHomeContinue`
-  writes Continue plus the next 3 whenever Home republishes. There is no second queue.
+  writes Continue plus the next 3 (`ContinueWidgetSnapshot.upNextLimit`) whenever
+  Home republishes: Home appear, a queue-key change, and `punkRallyHomeQueueDidChange`.
+  Opening the app (foreground, `scenePhase == .active`) posts that notification,
+  so one launch writes `upNext` into the App Group snapshot. There is no second queue.
 
 ---
 
@@ -123,9 +132,11 @@ Taps:
 
 1. Install the IPA from the `punkrally-sideload-unsigned-ipa` artifact
    (build log should show `==> App Group entitlement present on app + appex`).
-2. Long-press the Home Screen → **Add Widget** → *ink+amp Continue*. Delete any
-   old blank tile from the parked build first — the previous kinds
-   (`inkamp.continue.v3` / `.v4`) are retired and never reloaded.
+2. Open the app once so Home writes Now + Up next into the App Group snapshot.
+   Then long-press the Home Screen → **Add Widget** → **Continue + Up next**
+   (medium). **Remove the old Continue tile first.** That tile is kind
+   `InkAmpContinueWidget` (and older `inkamp.continue.v3` / `.v4`); those kinds
+   are retired and never reloaded, so iOS will not repaint them as Now + Up next.
 3. Start a book or an episode, then background the app. The **medium** tile
    should show Now (cover, title, progress) and up to three Up next rows
    (thumb + title) from Home. The small tile stays Now only.
@@ -173,7 +184,8 @@ reloads, multi-link taps, and interactive buttons sometimes stall even when the
 snapshot on disk is correct. That is a signing/runtime limit, not a second
 queue. If the medium tile looks stale or a row tap does nothing:
 
-- Delete the old tile and add **Continue** again (kind stays `InkAmpContinueWidget`).
+- Remove the old Continue tile and add **Continue + Up next** (medium). The kind
+  is `inkamp.continue.upnext.v1`, not `InkAmpContinueWidget`.
 - Confirm the console line shows `resolved=ok` with the team-suffixed group.
 - Home Continue and `punkrally://continue` still work without the tile.
   Lock Screen / StandBy are not part of this cut; the existing accessory

@@ -53,7 +53,8 @@ struct ContinueWidgetAppGroupTests {
 
     @Test func continueKindNeverCollidesWithRetiredTiles() {
         let kind = SilveranWidgetConstants.continueWidgetKind
-        #expect(kind == "InkAmpContinueWidget")
+        #expect(kind == "inkamp.continue.upnext.v1")
+        #expect(kind != "InkAmpContinueWidget")
         #expect(kind != SilveranWidgetConstants.readingWidgetKind)
         // The parked static tiles must never be registered or reloaded again.
         for legacy in SilveranWidgetConstants.legacySideloadContinueWidgetKinds {

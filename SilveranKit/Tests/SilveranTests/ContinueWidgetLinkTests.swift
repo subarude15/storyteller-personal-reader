@@ -21,7 +21,12 @@ struct ContinueWidgetLinkTests {
         #expect(
             SilveranWidgetConstants.fallbackAppGroupIdentifier == "group.com.punkrally.reader"
         )
-        #expect(SilveranWidgetConstants.continueWidgetKind == "InkAmpContinueWidget")
+        #expect(SilveranWidgetConstants.continueWidgetKind == "inkamp.continue.upnext.v1")
+        #expect(
+            SilveranWidgetConstants.legacySideloadContinueWidgetKinds.contains(
+                "InkAmpContinueWidget"
+            )
+        )
         #expect(
             SilveranWidgetConstants.continueWidgetKind
                 != SilveranWidgetConstants.readingWidgetKind
