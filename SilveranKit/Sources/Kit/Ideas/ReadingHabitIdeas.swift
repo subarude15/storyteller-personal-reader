@@ -12,6 +12,10 @@ public struct ReadingIdea: Identifiable, Hashable, Codable, Sendable {
     public let score: Double
     /// ISBN-13 when Open Library sent one. Used only to drop owned/finished matches.
     public let isbn: String?
+    /// Subject headings (Open Library), capped at a handful for display.
+    public let subjects: [String]
+    /// First publication year (Open Library), when known.
+    public let year: Int?
 
     public init(
         id: String,
@@ -22,6 +26,8 @@ public struct ReadingIdea: Identifiable, Hashable, Codable, Sendable {
         reason: String,
         score: Double,
         isbn: String? = nil,
+        subjects: [String] = [],
+        year: Int? = nil,
     ) {
         self.id = id
         self.title = title
@@ -31,6 +37,40 @@ public struct ReadingIdea: Identifiable, Hashable, Codable, Sendable {
         self.reason = reason
         self.score = score
         self.isbn = isbn
+        self.subjects = subjects
+        self.year = year
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, author, coverURL, blurb, reason, score, isbn, subjects, year
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        author = try c.decode(String.self, forKey: .author)
+        coverURL = try c.decodeIfPresent(URL.self, forKey: .coverURL)
+        blurb = try c.decodeIfPresent(String.self, forKey: .blurb)
+        reason = try c.decode(String.self, forKey: .reason)
+        score = try c.decode(Double.self, forKey: .score)
+        isbn = try c.decodeIfPresent(String.self, forKey: .isbn)
+        subjects = try c.decodeIfPresent([String].self, forKey: .subjects) ?? []
+        year = try c.decodeIfPresent(Int.self, forKey: .year)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(title, forKey: .title)
+        try c.encode(author, forKey: .author)
+        try c.encodeIfPresent(coverURL, forKey: .coverURL)
+        try c.encodeIfPresent(blurb, forKey: .blurb)
+        try c.encode(reason, forKey: .reason)
+        try c.encode(score, forKey: .score)
+        try c.encodeIfPresent(isbn, forKey: .isbn)
+        try c.encode(subjects, forKey: .subjects)
+        try c.encodeIfPresent(year, forKey: .year)
     }
 }
 
@@ -41,6 +81,8 @@ public struct OpenLibraryWork: Equatable, Sendable {
     public let coverURL: URL?
     public let blurb: String?
     public let isbn: String?
+    public let subjects: [String]
+    public let year: Int?
 
     public init(
         key: String,
@@ -49,6 +91,8 @@ public struct OpenLibraryWork: Equatable, Sendable {
         coverURL: URL?,
         blurb: String?,
         isbn: String? = nil,
+        subjects: [String] = [],
+        year: Int? = nil,
     ) {
         self.key = key
         self.title = title
@@ -56,6 +100,8 @@ public struct OpenLibraryWork: Equatable, Sendable {
         self.coverURL = coverURL
         self.blurb = blurb
         self.isbn = isbn
+        self.subjects = subjects
+        self.year = year
     }
 }
 
@@ -97,7 +143,7 @@ public enum ReadingHabitIdeas {
     public static func queries(
         from library: [BookMetadata],
         now: Date = Date(),
-        limit: Int = 12,
+        limit: Int = 20,
     ) -> [ReadingIdeaQuery] {
         let habits = library.compactMap { book -> (BookMetadata, Habit)? in
             guard let habit = habit(for: book, now: now) else { return nil }
@@ -120,7 +166,7 @@ public enum ReadingHabitIdeas {
         queries: [ReadingIdeaQuery],
         worksByQuery: [[OpenLibraryWork]],
         owned: [BookMetadata],
-        limit: Int = 18,
+        limit: Int = 32,
     ) -> [ReadingIdea] {
         guard limit > 0 else { return [] }
         let identity = LibraryIdentity(books: owned)
@@ -132,13 +178,15 @@ public enum ReadingHabitIdeas {
         var ideas: [ReadingIdea] = []
         var seen: Set<String> = []
         for (index, query) in ordered {
+            let reason = query.reason.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !reason.isEmpty else { continue }
             let works = index < worksByQuery.count ? worksByQuery[index] : []
             let fresh = works.filter { work in
                 !identity.contains(title: work.title, author: work.author, isbn: work.isbn)
             }
             if fresh.isEmpty {
                 guard query.kind == .seriesGap, let position = query.missingPosition else { continue }
-                let idea = seriesPlaceholder(query, position: position)
+                let idea = seriesPlaceholder(query, position: position, reason: reason)
                 guard !identity.contains(title: idea.title, author: idea.author, isbn: nil) else {
                     continue
                 }
@@ -158,9 +206,15 @@ public enum ReadingHabitIdeas {
             } else {
                 ranked = fresh
             }
-            let take = query.kind == .author ? 2 : 1
+            let take = query.kind == .author ? 3 : 2
             for work in ranked.prefix(take) {
-                let key = "\(normalize(work.title))|\(LibraryIdentity.authorKey(work.author))"
+                // Dedupe by ISBN when present, else title+author.
+                let key: String
+                if let isbn = work.isbn {
+                    key = "isbn:\(isbn)"
+                } else {
+                    key = "\(normalize(work.title))|\(LibraryIdentity.authorKey(work.author))"
+                }
                 guard seen.insert(key).inserted else { continue }
                 let id = work.key.isEmpty
                     ? "title:\(key)"
@@ -172,9 +226,11 @@ public enum ReadingHabitIdeas {
                         author: work.author,
                         coverURL: work.coverURL,
                         blurb: work.blurb,
-                        reason: query.reason,
+                        reason: reason,
                         score: query.weight,
                         isbn: work.isbn,
+                        subjects: work.subjects,
+                        year: work.year,
                     )
                 )
             }
@@ -374,7 +430,7 @@ public enum ReadingHabitIdeas {
         }
         return weights.values
             .sorted { $0.weight > $1.weight }
-            .prefix(4)
+            .prefix(6)
             .map { entry in
                 ReadingIdeaQuery(
                     kind: .author,
@@ -404,7 +460,7 @@ public enum ReadingHabitIdeas {
         return weights.values
             .filter { $0.books >= 2 }
             .sorted { $0.weight > $1.weight }
-            .prefix(3)
+            .prefix(5)
             .map { entry in
                 ReadingIdeaQuery(
                     kind: .tag,
@@ -417,7 +473,7 @@ public enum ReadingHabitIdeas {
             }
     }
 
-    private static func seriesPlaceholder(_ query: ReadingIdeaQuery, position: Int) -> ReadingIdea {
+    private static func seriesPlaceholder(_ query: ReadingIdeaQuery, position: Int, reason: String) -> ReadingIdea {
         let title = "\(query.term) #\(position)"
         return ReadingIdea(
             id: "series:\(normalize(query.term)):\(position)",
@@ -425,7 +481,7 @@ public enum ReadingHabitIdeas {
             author: query.authorHint ?? "",
             coverURL: nil,
             blurb: nil,
-            reason: query.reason,
+            reason: reason,
             score: query.weight,
         )
     }
@@ -600,6 +656,8 @@ public enum OpenLibraryIdeaLookup {
                 return URL(string: "https://covers.openlibrary.org/b/id/\(id)-M.jpg")
             }()
             let isbn = (doc["isbn"] as? [String])?.compactMap(LibraryIdentity.isbn13).first
+            let subjects = stringArray(doc["subject"], cap: 4)
+            let year = intValue(doc["first_publish_year"])
             return OpenLibraryWork(
                 key: key,
                 title: title,
@@ -607,15 +665,25 @@ public enum OpenLibraryIdeaLookup {
                 coverURL: cover,
                 blurb: blurb(doc["first_sentence"]),
                 isbn: isbn,
+                subjects: subjects,
+                year: year,
             )
         }
     }
 
     static func url(for query: ReadingIdeaQuery) -> URL? {
         var components = URLComponents(string: "https://openlibrary.org/search.json")
+        let limit: String
+        switch query.kind {
+        case .author: limit = "12"
+        case .seriesGap, .tag: limit = "10"
+        }
         var items = [
-            URLQueryItem(name: "limit", value: query.kind == .author ? "6" : "5"),
-            URLQueryItem(name: "fields", value: "key,title,author_name,cover_i,first_sentence,isbn"),
+            URLQueryItem(name: "limit", value: limit),
+            URLQueryItem(
+                name: "fields",
+                value: "key,title,author_name,cover_i,first_sentence,isbn,first_publish_year,subject",
+            ),
         ]
         switch query.kind {
         case .seriesGap:
@@ -648,11 +716,62 @@ public enum OpenLibraryIdeaLookup {
         }
     }
 
+    /// Fetches a single work's description/subjects/year from `/works/{key}.json`,
+    /// used to backfill a detail blurb when `first_sentence` was missing on search.json.
+    public static func fetchDetail(forKey key: String) async -> OpenLibraryWorkDetail? {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let path = trimmed.hasPrefix("/") ? trimmed : "/" + trimmed
+        guard let url = URL(string: "https://openlibrary.org\(path).json") else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
+                return nil
+            }
+            return parseWorkDetail(data)
+        } catch {
+            return nil
+        }
+    }
+
+    /// Parses a `/works/{key}.json` body: description (string or `{value}` object),
+    /// subjects, and first publication year.
+    public static func parseWorkDetail(_ data: Data) -> OpenLibraryWorkDetail? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        let description: String? = {
+            let raw = object["description"]
+            if let text = raw as? String {
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : trimmed
+            }
+            if let wrapper = raw as? [String: Any], let value = wrapper["value"] as? String {
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : trimmed
+            }
+            return nil
+        }()
+        let subjects = stringArray(object["subjects"], cap: 6)
+        let year = intValue(object["first_publish_year"])
+        return OpenLibraryWorkDetail(description: description, subjects: subjects, year: year)
+    }
+
     private static func intValue(_ value: Any?) -> Int? {
         if let value = value as? Int { return value }
         if let value = value as? Double { return Int(value) }
         if let value = value as? String { return Int(value) }
         return nil
+    }
+
+    private static func stringArray(_ value: Any?, cap: Int) -> [String] {
+        guard let raw = value as? [String] else { return [] }
+        return raw.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .prefix(cap)
+            .map { $0 }
     }
 
     private static func blurb(_ value: Any?) -> String? {
@@ -665,6 +784,19 @@ public enum OpenLibraryIdeaLookup {
             return trimmed.isEmpty ? nil : trimmed
         }
         return nil
+    }
+}
+
+/// Work-level metadata fetched from `/works/{key}.json` (description, subjects, year).
+public struct OpenLibraryWorkDetail: Equatable, Sendable {
+    public let description: String?
+    public let subjects: [String]
+    public let year: Int?
+
+    public init(description: String?, subjects: [String] = [], year: Int? = nil) {
+        self.description = description
+        self.subjects = subjects
+        self.year = year
     }
 }
 

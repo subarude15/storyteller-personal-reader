@@ -205,7 +205,7 @@ import Testing
 
 @Test func openLibraryIdeaParseReadsCoverAndFirstSentence() throws {
     let json = """
-    {"docs":[{"key":"/works/OL9W","title":"The Dispossessed","author_name":["Ursula K. Le Guin"],"cover_i":42,"first_sentence":["She was a visitor."]}]}
+    {"docs":[{"key":"/works/OL9W","title":"The Dispossessed","author_name":["Ursula K. Le Guin"],"cover_i":42,"first_sentence":["She was a visitor."],"first_publish_year":1974,"subject":["Science fiction","Anarchism"]}]}
     """.data(using: .utf8)!
     let works = OpenLibraryIdeaLookup.parse(json)
     #expect(works.count == 1)
@@ -213,6 +213,47 @@ import Testing
     #expect(works[0].author == "Ursula K. Le Guin")
     #expect(works[0].coverURL?.absoluteString == "https://covers.openlibrary.org/b/id/42-M.jpg")
     #expect(works[0].blurb == "She was a visitor.")
+    #expect(works[0].year == 1974)
+    #expect(works[0].subjects == ["Science fiction", "Anarchism"])
+}
+
+@Test func openLibraryIdeaParseWorkDetailReadsDescriptionSubjectsYear() throws {
+    let json = """
+    {"description":{"value":"A description of the work."},"subjects":["Science fiction","Anarchism","Utopias"],"first_publish_year":1974}
+    """.data(using: .utf8)!
+    let detail = OpenLibraryIdeaLookup.parseWorkDetail(json)
+    #expect(detail?.description == "A description of the work.")
+    #expect(detail?.subjects == ["Science fiction", "Anarchism", "Utopias"])
+    #expect(detail?.year == 1974)
+}
+
+@Test func openLibraryIdeaParseWorkDetailHandlesStringDescription() throws {
+    let json = """
+    {"description":"A plain string description."}
+    """.data(using: .utf8)!
+    let detail = OpenLibraryIdeaLookup.parseWorkDetail(json)
+    #expect(detail?.description == "A plain string description.")
+    #expect(detail?.subjects == [])
+    #expect(detail?.year == nil)
+}
+
+@Test func readingIdeasDropEmptyReasonRows() {
+    let query = ReadingIdeaQuery(
+        kind: .author,
+        term: "Frank Herbert",
+        weight: 1,
+        missingPosition: nil,
+        authorHint: "Frank Herbert",
+        reason: "   ",
+    )
+    let ideas = ReadingHabitIdeas.ideas(
+        queries: [query],
+        worksByQuery: [[
+            OpenLibraryWork(key: "/works/OL2W", title: "God Emperor of Dune", author: "Frank Herbert", coverURL: nil, blurb: nil),
+        ]],
+        owned: [],
+    )
+    #expect(ideas.isEmpty)
 }
 
 @Test func savedReadingIdeasRoundTrip() {

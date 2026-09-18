@@ -106,6 +106,27 @@ struct IdeaDetailView: View {
     var onChange: () -> Void = {}
 
     @State private var isSaved = false
+    @State private var fetched: OpenLibraryWorkDetail?
+
+    private var description: String? {
+        if let fetched, let desc = fetched.description, !desc.isEmpty { return desc }
+        return idea.blurb
+    }
+
+    private var subjects: [String] {
+        if let fetched, !fetched.subjects.isEmpty { return fetched.subjects }
+        return idea.subjects
+    }
+
+    private var year: Int? {
+        fetched?.year ?? idea.year
+    }
+
+    private var workKey: String? {
+        guard idea.id.hasPrefix("ol:") else { return nil }
+        let key = String(idea.id.dropFirst(3))
+        return key.isEmpty ? nil : key
+    }
 
     var body: some View {
         ScrollView {
@@ -119,11 +140,39 @@ struct IdeaDetailView: View {
                         .font(.body)
                         .foregroundStyle(.secondary)
                 }
-                Text(idea.reason)
-                    .font(.subheadline.weight(.medium))
-                if let blurb = idea.blurb, !blurb.isEmpty {
-                    Text(blurb)
+                if !idea.reason.isEmpty {
+                    Text("Why: \(idea.reason)")
+                        .font(.subheadline.weight(.medium))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.secondary.opacity(0.12), in: Capsule())
+                }
+                if let description, !description.isEmpty {
+                    Text(description)
                         .font(.body)
+                } else if !subjects.isEmpty {
+                    Text(subjects.joined(separator: " · "))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("No description on Open Library")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                if !subjects.isEmpty || year != nil {
+                    HStack(spacing: 8) {
+                        if !subjects.isEmpty {
+                            Text(subjects.prefix(3).joined(separator: " · "))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        if let year {
+                            Text(String(year))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 Button(isSaved ? "Saved" : "Save idea") {
                     if isSaved {
@@ -142,8 +191,12 @@ struct IdeaDetailView: View {
         }
         .navigationTitle("Idea")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
+        .task {
             isSaved = SavedReadingIdeas.contains(idea.id)
+            // Backfill a real description when search.json gave no first_sentence.
+            if (idea.blurb ?? "").isEmpty, let workKey {
+                fetched = await OpenLibraryIdeaLookup.fetchDetail(forKey: workKey)
+            }
         }
     }
 }
@@ -163,9 +216,12 @@ private struct IdeaRow: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-                Text(idea.reason)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if !idea.reason.isEmpty {
+                    Text(idea.reason)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
         }
         .padding(.vertical, 4)
