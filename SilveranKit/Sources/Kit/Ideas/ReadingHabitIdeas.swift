@@ -1008,3 +1008,191 @@ public enum DismissedReadingIdeas {
         defaults.set(data, forKey: key)
     }
 }
+
+/// A horizontal rail of browse suggestions (subject or author).
+public struct BrowseRail: Identifiable, Equatable, Sendable, Codable {
+    public let id: String
+    public let title: String
+    public let ideas: [ReadingIdea]
+
+    public init(id: String, title: String, ideas: [ReadingIdea]) {
+        self.id = id
+        self.title = title
+        self.ideas = ideas
+    }
+}
+
+/// Open Library browse rails: subject shelves (from library tags + staples) and
+/// "more by authors you like". Metadata + wishlist only — no download, no import,
+/// never padded with owned titles.
+public enum OpenLibraryBrowseRails {
+    /// Sensible subject defaults shown even when the library has no matching tags.
+    public static let stapleSubjects = [
+        "Horror", "Science Fiction", "Mystery", "Fantasy", "Thriller", "Romance",
+    ]
+
+    /// Subjects derived from library tags, then staples to fill any remaining slots.
+    public static func subjectTerms(from library: [BookMetadata], limit: Int = 6) -> [String] {
+        var counts: [String: Double] = [:]
+        var order: [String] = []
+        for book in library {
+            let status = ReadingHabitIdeas.normalize(book.status?.name ?? "")
+            let finished = status == "read" || status == "finished" || status == "complete"
+                || status == "completed" || book.progress >= 0.98
+            let weight = finished ? 1.0 : 0.6
+            for raw in book.tagNames {
+                let tag = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                let key = ReadingHabitIdeas.normalize(tag)
+                guard !key.isEmpty else { continue }
+                if counts[key] == nil { order.append(tag) }
+                counts[key, default: 0] += weight
+            }
+        }
+        let ranked = order.sorted { (counts[ReadingHabitIdeas.normalize($0)] ?? 0) > (counts[ReadingHabitIdeas.normalize($1)] ?? 0) }
+        var terms = Array(ranked.prefix(limit))
+        // Fill remaining slots with staples not already present.
+        var seen = Set(terms.map(ReadingHabitIdeas.normalize))
+        for staple in stapleSubjects {
+            if terms.count >= limit { break }
+            guard seen.insert(ReadingHabitIdeas.normalize(staple)).inserted else { continue }
+            terms.append(staple)
+        }
+        return Array(terms.prefix(limit))
+    }
+
+    /// Authors weighted by finished/recent library books, highest first.
+    public static func authorTerms(from library: [BookMetadata], limit: Int = 4) -> [String] {
+        var weights: [String: Double] = [:]
+        var order: [String] = []
+        for book in library {
+            let status = ReadingHabitIdeas.normalize(book.status?.name ?? "")
+            let finished = status == "read" || status == "finished" || status == "complete"
+                || status == "completed" || book.progress >= 0.98
+            let started = finished || book.progress > 0.01 || status.contains("reading")
+                || status.contains("progress") || status == "started"
+            guard started else { continue }
+            let weight = finished ? 1.0 : 0.7
+            for creator in book.authors ?? [] {
+                let name = (creator.name ?? creator.fileAs)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let name, !name.isEmpty else { continue }
+                let key = ReadingHabitIdeas.normalize(name)
+                if weights[key] == nil { order.append(name) }
+                weights[key, default: 0] += weight
+            }
+        }
+        return order.sorted { (weights[ReadingHabitIdeas.normalize($0)] ?? 0) > (weights[ReadingHabitIdeas.normalize($1)] ?? 0) }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    /// Fetches browse rails for a library. Subject rails first, then "more by" author
+    /// rails. Owned titles are filtered out; callers apply the dismissed set.
+    public static func fetch(library: [BookMetadata]) async -> [BrowseRail] {
+        let subjects = subjectTerms(from: library)
+        let authors = authorTerms(from: library)
+
+        var queries: [ReadingIdeaQuery] = []
+        var subjectIDs: [String] = []
+        for subject in subjects {
+            subjectIDs.append("subject:\(ReadingHabitIdeas.normalize(subject))")
+            queries.append(
+                ReadingIdeaQuery(
+                    kind: .tag,
+                    term: subject,
+                    weight: 1.0,
+                    missingPosition: nil,
+                    authorHint: nil,
+                    reason: "Because you like \(subject)"
+                )
+            )
+        }
+        var authorIDs: [String] = []
+        for author in authors {
+            authorIDs.append("author:\(ReadingHabitIdeas.normalize(author))")
+            queries.append(
+                ReadingIdeaQuery(
+                    kind: .author,
+                    term: author,
+                    weight: 1.0,
+                    missingPosition: nil,
+                    authorHint: author,
+                    reason: "Because you like \(author)"
+                )
+            )
+        }
+        guard !queries.isEmpty else { return [] }
+
+        let worksByQuery = await OpenLibraryIdeaLookup.works(for: queries)
+
+        var rails: [BrowseRail] = []
+        var seenTitles: Set<String> = []
+
+        func appendRail(id: String, title: String, reason: String, queryIndex: Int, perRail: Int) {
+            let works = queryIndex < worksByQuery.count ? worksByQuery[queryIndex] : []
+            let ownedFiltered = ReadingHabitIdeas.excludingOwned(
+                works.map {
+                    ReadingIdea(
+                        id: $0.key.isEmpty ? "" : "ol:\($0.key)",
+                        title: $0.title,
+                        author: $0.author,
+                        coverURL: $0.coverURL,
+                        blurb: $0.blurb,
+                        reason: reason,
+                        score: 1.0,
+                        isbn: $0.isbn,
+                        subjects: $0.subjects,
+                        year: $0.year
+                    )
+                },
+                library: library
+            )
+            var ideas: [ReadingIdea] = []
+            for idea in ownedFiltered {
+                guard !idea.id.isEmpty else { continue }
+                let dedupe = ReadingHabitIdeas.dismissKey(for: idea)
+                guard seenTitles.insert(dedupe).inserted else { continue }
+                ideas.append(idea)
+                if ideas.count >= perRail { break }
+            }
+            guard !ideas.isEmpty else { return }
+            rails.append(BrowseRail(id: id, title: title, ideas: ideas))
+        }
+
+        for (index, subject) in subjects.enumerated() {
+            appendRail(
+                id: subjectIDs[index],
+                title: subject,
+                reason: "Because you like \(subject)",
+                queryIndex: index,
+                perRail: 12
+            )
+        }
+        for (index, author) in authors.enumerated() {
+            appendRail(
+                id: authorIDs[index],
+                title: "More by \(author)",
+                reason: "Because you like \(author)",
+                queryIndex: subjects.count + index,
+                perRail: 8
+            )
+        }
+        return rails
+    }
+}
+
+/// Last Open Library-backed browse rails. Shown when the live lookup fails so we
+/// never substitute owned-library shelves.
+public enum CachedBrowseRails {
+    private static let key = "inkamp.browseRails.cache.v1"
+
+    public static func load(defaults: UserDefaults = .standard) -> [BrowseRail] {
+        guard let data = defaults.data(forKey: key) else { return [] }
+        return (try? JSONDecoder().decode([BrowseRail].self, from: data)) ?? []
+    }
+
+    public static func save(_ rails: [BrowseRail], defaults: UserDefaults = .standard) {
+        guard !rails.isEmpty, let data = try? JSONEncoder().encode(rails) else { return }
+        defaults.set(data, forKey: key)
+    }
+}
