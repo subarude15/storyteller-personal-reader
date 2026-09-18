@@ -12,6 +12,8 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
     public var sync: Sync
     public var library: Library
     public var themes: Themes
+    public var shelfarrBaseURL: String = ""
+    public var shelfarrAPIToken: String = ""
 
     public init(
         reading: Reading = Reading(),

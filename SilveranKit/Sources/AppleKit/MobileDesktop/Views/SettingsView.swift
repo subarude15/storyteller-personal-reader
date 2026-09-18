@@ -57,9 +57,23 @@ public struct SettingsView: View {
     @State private var isReloadingFromActor = false
     @State private var lastPersistTime: Date = .distantPast
     @StateObject private var reloader = SettingsReloader()
-    #if os(macOS)
-    @State private var selectedTab: SettingsTab = .readerSettings
-    #endif
+        private enum ShelfarrConnectionStatus {
+            case success
+            case failed(errorMessage: String?)
+        
+            var errorMessage: String? {
+                switch self {
+                case .success: return nil
+                case .failed(let msg): return msg
+                }
+            }
+        }
+        @State private var shelfarrBaseURL = ""
+        @State private var shelfarrAPIToken = ""
+        @State private var shelfarrConnectionStatus: ShelfarrConnectionStatus? = nil
+        #if os(macOS)
+        @State private var selectedTab: SettingsTab = .readerSettings
+        #endif
 
     public init() {}
 
@@ -154,83 +168,131 @@ public struct SettingsView: View {
     }
 
     private func persistConfig(newValue: SilveranGlobalConfig) {
-        guard isLoaded, !isReloadingFromActor else { return }
+            guard isLoaded, !isReloadingFromActor else { return }
 
-        lastPersistTime = Date()
-        persistTask?.cancel()
-        persistTask = Task {
-            defer { persistTask = nil }
-            try? await Task.sleep(for: .milliseconds(300))
-            guard !Task.isCancelled else { return }
+            lastPersistTime = Date()
+            persistTask?.cancel()
+            persistTask = Task {
+                defer { persistTask = nil }
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
 
-            do {
-                try await SettingsActor.shared.updateConfig(
-                    fontSize: newValue.reading.fontSize,
-                    fontFamily: newValue.reading.fontFamily,
-                    lineSpacing: newValue.reading.lineSpacing,
-                    marginLeftRight: newValue.reading.marginLeftRight,
-                    marginTopBottom: newValue.reading.marginTopBottom,
-                    wordSpacing: newValue.reading.wordSpacing,
-                    letterSpacing: newValue.reading.letterSpacing,
-                    textAlignment: newValue.reading.textAlignment,
-                    highlightColor: .some(newValue.reading.highlightColor),
-                    highlightThickness: newValue.reading.highlightThickness,
-                    backgroundColor: .some(newValue.reading.backgroundColor),
-                    foregroundColor: .some(newValue.reading.foregroundColor),
-                    customCSS: .some(newValue.reading.customCSS),
-                    enableMarginClickNavigation: newValue.reading.enableMarginClickNavigation,
-                    singleColumnMode: newValue.reading.singleColumnMode,
-                    scrollingMode: newValue.reading.scrollingMode,
-                    defaultPlaybackSpeed: newValue.playback.defaultPlaybackSpeed,
-                    enableReadingBar: newValue.readingBar.enabled,
-                    showPlayerControls: newValue.readingBar.showPlayerControls,
-                    showProgressBar: newValue.readingBar.showProgressBar,
-                    showProgress: newValue.readingBar.showProgress,
-                    showTimeRemainingInBook: newValue.readingBar.showTimeRemainingInBook,
-                    showTimeRemainingInChapter: newValue.readingBar.showTimeRemainingInChapter,
-                    showPageNumber: newValue.readingBar.showPageNumber,
-                    overlayTransparency: newValue.readingBar.overlayTransparency,
-                    alwaysShowMiniPlayer: newValue.readingBar.alwaysShowMiniPlayer,
-                    progressSyncIntervalSeconds: newValue.sync.progressSyncIntervalSeconds,
-                    metadataRefreshIntervalSeconds: newValue.sync.metadataRefreshIntervalSeconds,
-                    autoSyncToNewerServerPosition: newValue.sync.autoSyncToNewerServerPosition,
-                    showAudioIndicator: newValue.library.showAudioIndicator,
-                    tapToPlayPreferredPlayer: newValue.library.tapToPlayPreferredPlayer,
-                    preferAudioOverEbook: newValue.library.preferAudioOverEbook,
-                    accentColorHex: newValue.library.accentColorHex,
-                    userHighlightColor1: newValue.reading.userHighlightColor1,
-                    userHighlightColor2: newValue.reading.userHighlightColor2,
-                    userHighlightColor3: newValue.reading.userHighlightColor3,
-                    userHighlightColor4: newValue.reading.userHighlightColor4,
-                    userHighlightColor5: newValue.reading.userHighlightColor5,
-                    userHighlightColor6: newValue.reading.userHighlightColor6,
-                    userHighlightLabel1: newValue.reading.userHighlightLabel1,
-                    userHighlightLabel2: newValue.reading.userHighlightLabel2,
-                    userHighlightLabel3: newValue.reading.userHighlightLabel3,
-                    userHighlightLabel4: newValue.reading.userHighlightLabel4,
-                    userHighlightLabel5: newValue.reading.userHighlightLabel5,
-                    userHighlightLabel6: newValue.reading.userHighlightLabel6,
-                    userHighlightMode: newValue.reading.userHighlightMode,
-                    readaloudHighlightMode: newValue.reading.readaloudHighlightMode,
-                    tabBarSlot1: newValue.library.tabBarSlot1,
-                    tabBarSlot2: newValue.library.tabBarSlot2,
-                    tvSubtitleFontSize: newValue.reading.tvSubtitleFontSize,
-                    tvBackgroundStyle: newValue.reading.tvReaderAppearance.backgroundStyle,
-                    selectedLightThemeId: newValue.themes.selectedLightThemeId,
-                    selectedDarkThemeId: newValue.themes.selectedDarkThemeId,
-                    customThemes: newValue.themes.customThemes,
-                )
-            } catch {
-                await MainActor.run {
-                    saveError = error.localizedDescription
+                do {
+                    try await SettingsActor.shared.updateConfig(
+                        fontSize: newValue.reading.fontSize,
+                        fontFamily: newValue.reading.fontFamily,
+                        lineSpacing: newValue.reading.lineSpacing,
+                        marginLeftRight: newValue.reading.marginLeftRight,
+                        marginTopBottom: newValue.reading.marginTopBottom,
+                        wordSpacing: newValue.reading.wordSpacing,
+                        letterSpacing: newValue.reading.letterSpacing,
+                        textAlignment: newValue.reading.textAlignment,
+                        highlightColor: .some(newValue.reading.highlightColor),
+                        highlightThickness: newValue.reading.highlightThickness,
+                        backgroundColor: .some(newValue.reading.backgroundColor),
+                        foregroundColor: .some(newValue.reading.foregroundColor),
+                        customCSS: .some(newValue.reading.customCSS),
+                        enableMarginClickNavigation: newValue.reading.enableMarginClickNavigation,
+                        singleColumnMode: newValue.reading.singleColumnMode,
+                        scrollingMode: newValue.reading.scrollingMode,
+                        defaultPlaybackSpeed: newValue.playback.defaultPlaybackSpeed,
+                        enableReadingBar: newValue.readingBar.enabled,
+                        showPlayerControls: newValue.readingBar.showPlayerControls,
+                        showProgressBar: newValue.readingBar.showProgressBar,
+                        showProgress: newValue.readingBar.showProgress,
+                        showTimeRemainingInBook: newValue.readingBar.showTimeRemainingInBook,
+                        showTimeRemainingInChapter: newValue.readingBar.showTimeRemainingInChapter,
+                        showPageNumber: newValue.readingBar.showPageNumber,
+                        overlayTransparency: newValue.readingBar.overlayTransparency,
+                        alwaysShowMiniPlayer: newValue.readingBar.alwaysShowMiniPlayer,
+                        progressSyncIntervalSeconds: newValue.sync.progressSyncIntervalSeconds,
+                        metadataRefreshIntervalSeconds: newValue.sync.metadataRefreshIntervalSeconds,
+                        autoSyncToNewerServerPosition: newValue.sync.autoSyncToNewerServerPosition,
+                        showAudioIndicator: newValue.library.showAudioIndicator,
+                        tapToPlayPreferredPlayer: newValue.library.tapToPlayPreferredPlayer,
+                        preferAudioOverEbook: newValue.library.preferAudioOverEbook,
+                        accentColorHex: newValue.library.accentColorHex,
+                        userHighlightColor1: newValue.reading.userHighlightColor1,
+                        userHighlightColor2: newValue.reading.userHighlightColor2,
+                        userHighlightColor3: newValue.reading.userHighlightColor3,
+                        userHighlightColor4: newValue.reading.userHighlightColor4,
+                        userHighlightColor5: newValue.reading.userHighlightColor5,
+                        userHighlightColor6: newValue.reading.userHighlightColor6,
+                        userHighlightLabel1: newValue.reading.userHighlightLabel1,
+                        userHighlightLabel2: newValue.reading.userHighlightLabel2,
+                        userHighlightLabel3: newValue.reading.userHighlightLabel3,
+                        userHighlightLabel4: newValue.reading.userHighlightLabel4,
+                        userHighlightLabel5: newValue.reading.userHighlightLabel5,
+                        userHighlightLabel6: newValue.reading.userHighlightLabel6,
+                        userHighlightMode: newValue.reading.userHighlightMode,
+                        readaloudHighlightMode: newValue.reading.readaloudHighlightMode,
+                        tabBarSlot1: newValue.library.tabBarSlot1,
+                        tabBarSlot2: newValue.library.tabBarSlot2,
+                        tvSubtitleFontSize: newValue.reading.tvSubtitleFontSize,
+                        tvBackgroundStyle: newValue.reading.tvReaderAppearance.backgroundStyle,
+                        selectedLightThemeId: newValue.themes.selectedLightThemeId,
+                        selectedDarkThemeId: newValue.themes.selectedDarkThemeId,
+                        customThemes: newValue.themes.customThemes,
+                        builtInThemeOverrides: newValue.themes.builtInThemeOverrides,
+                        shelfarrBaseURL: newValue.shelfarrBaseURL,
+                        shelfarrAPIToken: newValue.shelfarrAPIToken
+                    )
+                } catch {
+                    await MainActor.run {
+                        saveError = error.localizedDescription
+                    }
                 }
             }
         }
-    }
 
     private func resetAllSettings() {
-        config = SilveranGlobalConfig()
-    }
+            config = SilveranGlobalConfig()
+        }
+
+        private func testShelfarrConnection() {
+            guard !shelfarrBaseURL.isEmpty, !shelfarrAPIToken.isEmpty else {
+                shelfarrConnectionStatus = .failed(errorMessage: "Base URL and token are required")
+                return
+            }
+            // Build URL: ensure no double slash
+            let base = shelfarrBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            let urlString = base.hasSuffix("/") ? base + "api/v1/status" : base + "/api/v1/status"
+            guard let url = URL(string: urlString) else {
+                shelfarrConnectionStatus = .failed(errorMessage: "Invalid URL")
+                return
+            }
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            request.setValue("Bearer \(shelfarrAPIToken)", forHTTPHeaderField: "Authorization")
+            request.timeoutInterval = 5.0
+        
+            shelfarrConnectionStatus = nil // reset while testing
+        
+            Task {
+                do {
+                    let (_, response) = try await URLSession.shared.data(for: request)
+                    if let httpResponse = response as? HTTPURLResponse {
+                        if (200...299).contains(httpResponse.statusCode) {
+                            await MainActor.run {
+                                shelfarrConnectionStatus = .success
+                            }
+                        } else {
+                            await MainActor.run {
+                                shelfarrConnectionStatus = .failed(errorMessage: "HTTP \(httpResponse.statusCode)")
+                            }
+                        }
+                    } else {
+                        await MainActor.run {
+                            shelfarrConnectionStatus = .failed(errorMessage: "Invalid response")
+                        }
+                    }
+                } catch {
+                    await MainActor.run {
+                        shelfarrConnectionStatus = .failed(errorMessage: error.localizedDescription)
+                    }
+                }
+            }
+        }
 }
 
 #if os(macOS)
@@ -432,13 +494,43 @@ extension SettingsView {
                     )
                 }
 
-                Section {
-                    NavigationLink {
-                        IOSDebugLogView()
-                    } label: {
-                        Label("Debug Log", systemImage: "doc.text")
-                    }
-                }
+                Section("Shelfarr") {
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        TextField("Base URL", text: $shelfarrBaseURL)
+                                            .placeholder(when: shelfarrBaseURL.isEmpty) {
+                                                Text("http://192.168.1.2:5057").foregroundColor(.secondary)
+                                            }
+                                            .textContentType(.URL)
+                                            .keyboardType(.URL)
+                                        SecureField("API Token", text: $shelfarrAPIToken)
+                                            .placeholder(when: shelfarrAPIToken.isEmpty) {
+                                                Text("••••••••").foregroundColor(.secondary)
+                                            }
+                                            .textContentType(.password)
+                                        Button(action: testShelfarrConnection) {
+                                            Label("Test Connection", systemImage: "network")
+                                                .frame(maxWidth: .infinity)
+                                        }
+                                        .buttonStyle(.borderedProminent)
+                                        if let connectionStatus = shelfarrConnectionStatus {
+                                            HStack {
+                                                Image(systemName: connectionStatus == .success ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                                    .foregroundColor(connectionStatus == .success ? .green : .red)
+                                                Text(connectionStatus == .success ? "Connected" : "Failed: \(connectionStatus.errorMessage ?? "Unknown error")")
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Section {
+                                    NavigationLink {
+                                        IOSDebugLogView()
+                                    } label: {
+                                        Label("Debug Log", systemImage: "doc.text")
+                                    }
+                                }
 
                 Section {
                     LabeledContent("Build", value: PunkRallyBuildIdentity.stamp)
