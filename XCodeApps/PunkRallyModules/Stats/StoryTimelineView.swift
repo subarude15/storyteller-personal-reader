@@ -299,6 +299,9 @@ private struct TimelineBeatRow: View {
                         .lineLimit(2)
                     HStack(spacing: 6) {
                         KindBadgeView(kind: medium.badge, scheme: scheme)
+                        if beat.source == nil {
+                            UnavailableChip(scheme: scheme)
+                        }
                         Text(timeAndProgressLine)
                             .font(.caption)
                             .foregroundStyle(chrome.textMuted)
@@ -313,7 +316,6 @@ private struct TimelineBeatRow: View {
         }
         .buttonStyle(.plain)
         .disabled(beat.source == nil)
-        .opacity(beat.source == nil ? 0.55 : 1)
     }
 
     /// e.g. "8:42 PM · 32 min" (+ " · 63%" when a progress was recorded).
@@ -401,6 +403,36 @@ private struct TimelineCoverView: View {
             }
             try? await Task.sleep(for: .milliseconds(200))
         }
+    }
+}
+
+// MARK: - Unavailable chip
+
+/// Capsule chip in the same family as `KindBadgeView`, marking an orphan beat
+/// whose book/podcast can no longer be resolved (so tap is a no-op).
+private struct UnavailableChip: View {
+    let scheme: ColorScheme
+
+    var body: some View {
+        Text("Unavailable")
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(background)
+            .clipShape(Capsule())
+    }
+
+    private var foreground: Color {
+        scheme == .dark
+            ? Color(red: 0.604, green: 0.584, blue: 0.549)
+            : Color(red: 0.420, green: 0.396, blue: 0.376)
+    }
+
+    private var background: Color {
+        scheme == .dark
+            ? Color(red: 0.165, green: 0.165, blue: 0.180)
+            : Color(red: 0.878, green: 0.855, blue: 0.824)
     }
 }
 
