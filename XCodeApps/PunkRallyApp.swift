@@ -313,6 +313,22 @@ private struct HomeTabView: View {
     @State private var queueTick = 0
     @State private var tracker = SessionTracker.shared
     @State private var statsTick = 0
+    @State private var mediumPickerItem: HomeMixedItem? = nil
+
+    /// Media a Home item actually has, in a stable pick order (readaloud, audiobook, ebook).
+    private struct AvailableMedium: Identifiable {
+        let id: String
+        let label: String
+        let category: LocalMediaCategory?
+        let isPodcastVideo: Bool
+    }
+
+    private var mediumPickerPresented: Binding<Bool> {
+        Binding(
+            get: { mediumPickerItem != nil },
+            set: { if !$0 { mediumPickerItem = nil } }
+        )
+    }
 
     private var chrome: PunkRallyTheme.Chrome {
         PunkRallyTheme.Chrome(scheme: colorScheme)
@@ -449,6 +465,25 @@ private struct HomeTabView: View {
                 statsTick &+= 1
             }
         }
+        .confirmationDialog(
+            mediumPickerItem.map { "Open \($0.title) as" } ?? "",
+            isPresented: mediumPickerPresented,
+            titleVisibility: .visible
+        ) {
+            if let item = mediumPickerItem {
+                let media = availableMedia(for: item)
+                if media.isEmpty {
+                    Button("Nothing available", role: .cancel) {}
+                } else {
+                    ForEach(media) { medium in
+                        Button(medium.label) {
+                            Task { await openMedium(medium, for: item) }
+                        }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                }
+            }
+        }
         .punkRallySheets(
             showSettings: $showSettings,
             showOfflineSheet: $showOfflineSheet
@@ -476,51 +511,54 @@ private struct HomeTabView: View {
 
     private var continueHero: some View {
         let item = mixedQueue.continueItem
-        return Button {
-            Task { await openMixedItem(item) }
-        } label: {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
-                    HomeMixedCoverView(item: item, width: 72, height: 108, chrome: chrome)
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 8) {
-                            Text("Continue")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(PunkRallyTheme.Accent.primary)
-                            if let item {
-                                KindBadgeView(kind: item.badge, scheme: colorScheme)
-                            }
-                        }
-                        Text(item?.title ?? "Nothing in progress")
-                            .font(.headline)
-                            .foregroundStyle(chrome.text)
-                            .lineLimit(2)
-                        Text(
-                            item?.subtitle
-                                ?? "Browse Library or Podcasts to pick up where you left off."
-                        )
-                        .font(.subheadline)
-                        .foregroundStyle(chrome.textMuted)
-                        .lineLimit(1)
-                        if let item, let label = item.finishabilityLabel {
-                            Text(label)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(PunkRallyTheme.Accent.primary)
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                HomeMixedCoverView(item: item, width: 72, height: 108, chrome: chrome)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text("Continue")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(PunkRallyTheme.Accent.primary)
+                        if let item {
+                            KindBadgeView(kind: item.badge, scheme: colorScheme)
                         }
                     }
-                    Spacer(minLength: 0)
+                    Text(item?.title ?? "Nothing in progress")
+                        .font(.headline)
+                        .foregroundStyle(chrome.text)
+                        .lineLimit(2)
+                    Text(
+                        item?.subtitle
+                            ?? "Browse Library or Podcasts to pick up where you left off."
+                    )
+                    .font(.subheadline)
+                    .foregroundStyle(chrome.textMuted)
+                    .lineLimit(1)
+                    if let item, let label = item.finishabilityLabel {
+                        Text(label)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(PunkRallyTheme.Accent.primary)
+                    }
                 }
+                Spacer(minLength: 0)
             }
-            .padding(PunkRallyTheme.Metric.cardPadding)
-            .background(chrome.surface)
-            .clipShape(RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius)
-                    .stroke(chrome.border, lineWidth: 1)
-            )
         }
-        .buttonStyle(.plain)
-        .disabled(item == nil)
+        .padding(PunkRallyTheme.Metric.cardPadding)
+        .background(chrome.surface)
+        .clipShape(RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius)
+                .stroke(chrome.border, lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            Task { await openMixedItem(item) }
+        }
+        .onLongPressGesture(minimumDuration: 0.5) {
+            if let item {
+                mediumPickerItem = item
+            }
+        }
     }
 
     private var upNextRow: some View {
@@ -537,31 +575,33 @@ private struct HomeTabView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
                         ForEach(items) { item in
-                            Button {
-                                Task { await openMixedItem(item) }
-                            } label: {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HomeMixedCoverView(
-                                        item: item,
-                                        width: 96,
-                                        height: 144,
-                                        chrome: chrome
-                                    )
-                                    KindBadgeView(kind: item.badge, scheme: colorScheme)
-                                    Text(item.title)
-                                        .font(.caption.weight(.medium))
-                                        .foregroundStyle(chrome.text)
-                                        .lineLimit(2)
+                            VStack(alignment: .leading, spacing: 6) {
+                                HomeMixedCoverView(
+                                    item: item,
+                                    width: 96,
+                                    height: 144,
+                                    chrome: chrome
+                                )
+                                KindBadgeView(kind: item.badge, scheme: colorScheme)
+                                Text(item.title)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(chrome.text)
+                                    .lineLimit(2)
+                                    .frame(width: 96, alignment: .leading)
+                                if let label = item.finishabilityLabel {
+                                    Text(label)
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(chrome.textMuted)
                                         .frame(width: 96, alignment: .leading)
-                                    if let label = item.finishabilityLabel {
-                                        Text(label)
-                                            .font(.caption2.weight(.semibold))
-                                            .foregroundStyle(chrome.textMuted)
-                                            .frame(width: 96, alignment: .leading)
-                                    }
                                 }
                             }
-                            .buttonStyle(.plain)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                Task { await openMixedItem(item) }
+                            }
+                            .onLongPressGesture(minimumDuration: 0.5) {
+                                mediumPickerItem = item
+                            }
                         }
                     }
                 }
@@ -607,26 +647,28 @@ private struct HomeTabView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(chrome.text)
                 ForEach(picks.items) { item in
-                    Button {
-                        Task { await openMixedItem(item) }
-                    } label: {
-                        HStack(spacing: 12) {
-                            HomeMixedCoverView(item: item, width: 44, height: 66, chrome: chrome)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(item.title)
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(chrome.text)
-                                    .lineLimit(2)
-                                if let why = item.finishabilityLabel {
-                                    Text(why)
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(PunkRallyTheme.Accent.primary)
-                                }
+                    HStack(spacing: 12) {
+                        HomeMixedCoverView(item: item, width: 44, height: 66, chrome: chrome)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.title)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(chrome.text)
+                                .lineLimit(2)
+                            if let why = item.finishabilityLabel {
+                                Text(why)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(PunkRallyTheme.Accent.primary)
                             }
-                            Spacer(minLength: 0)
                         }
+                        Spacer(minLength: 0)
                     }
-                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        Task { await openMixedItem(item) }
+                    }
+                    .onLongPressGesture(minimumDuration: 0.5) {
+                        mediumPickerItem = item
+                    }
                 }
             }
             .padding(PunkRallyTheme.Metric.cardPadding)
@@ -713,6 +755,111 @@ private struct HomeTabView: View {
                     userInfo: userInfo
                 )
         }
+    }
+
+    /// Media a Home item actually has, for the long-press medium picker. Books
+    /// list readaloud / audiobook / ebook; a podcast row lists audio and, when a
+    /// video URL is matched, video. Never lists a format the item doesn't have.
+    private func availableMedia(for item: HomeMixedItem) -> [AvailableMedium] {
+        switch item {
+            case .book(let book, _, _, _):
+                var media: [AvailableMedium] = []
+                if book.hasAvailableReadaloud {
+                    media.append(
+                        AvailableMedium(
+                            id: "readaloud",
+                            label: "Readaloud",
+                            category: .synced,
+                            isPodcastVideo: false,
+                        )
+                    )
+                }
+                if book.hasAvailableAudiobook {
+                    media.append(
+                        AvailableMedium(
+                            id: "audiobook",
+                            label: "Audiobook",
+                            category: .audio,
+                            isPodcastVideo: false,
+                        )
+                    )
+                }
+                if book.hasAvailableEbook {
+                    media.append(
+                        AvailableMedium(
+                            id: "ebook",
+                            label: "Ebook",
+                            category: .ebook,
+                            isPodcastVideo: false,
+                        )
+                    )
+                }
+                return media
+            case .podcast(let entry):
+                var media = [
+                    AvailableMedium(
+                        id: "audio",
+                        label: "Audio",
+                        category: nil,
+                        isPodcastVideo: false,
+                    )
+                ]
+                let watchURL =
+                    entry.youtubeURL
+                    ?? PodcastMatchedYouTubeStore.shared.watchURL(for: entry.episodeID)
+                if watchURL != nil {
+                    media.append(
+                        AvailableMedium(
+                            id: "video",
+                            label: "Video",
+                            category: nil,
+                            isPodcastVideo: true,
+                        )
+                    )
+                }
+                return media
+        }
+    }
+
+    @MainActor
+    private func openMedium(_ medium: AvailableMedium, for item: HomeMixedItem) async {
+        switch item {
+            case .book(let book, _, _, _):
+                guard let vm = mediaViewModel, let category = medium.category else { return }
+                await PunkRallyPlayerHost.open(book, mediaViewModel: vm, category: category)
+            case .podcast(let entry):
+                if medium.isPodcastVideo {
+                    // Reuse the same video-open path as a normal tap.
+                    await openMixedItem(.podcast(entry))
+                } else {
+                    await openPodcastAudio(entry)
+                }
+        }
+    }
+
+    @MainActor
+    private func openPodcastAudio(_ entry: PodcastRecentEntry) async {
+        var userInfo: [String: Any] = [
+            "episodeID": entry.episodeID,
+            "title": entry.title,
+            "audioURL": entry.audioURL,
+            "mediaKind": entry.mediaKind.rawValue,
+        ]
+        userInfo["showTitle"] = entry.showTitle
+        if let duration = entry.durationSeconds {
+            userInfo["durationSeconds"] = duration
+        }
+        if let cover = entry.coverURL {
+            userInfo["coverURL"] = cover
+        }
+        if let feed = entry.feedURL {
+            userInfo["feedURL"] = feed
+        }
+        NotificationCenter.default.post(
+            name: .punkRallyPlayPodcastEpisode,
+            object: nil,
+            userInfo: userInfo
+        )
     }
 
     /// Widget / deep link: expand Now Playing if live, else open Home Continue.

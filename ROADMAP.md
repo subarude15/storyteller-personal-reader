@@ -24,6 +24,10 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ## Shipped
 
 ### Product / sync
+- [x] **Ideas v2 (polish)** — Library | Ideas recommends titles not already in the Storyteller library (title/author/ISBN), deduped by title+author or ISBN. Every row shows a why-line (never blank); empty-reason paths are dropped. Detail shows cover, title, author, a labeled **Why** chip, and a real description — `first_sentence` from search.json, backfilled from `/works/{key}.json` description, with subjects + year when present and a graceful "No description on Open Library" fallback. Denser: author 12 / series-tag 10 hits, ~24–36 kept; last-good cache when offline. Save idea only — no download. **More like this** stays library-only.
+- [x] **Ideas v3** — **Not interested** (swipe + button) dismisses by stable id (work key / ISBN / title+author) and refills; explicit **Because you like…** anchors on every row/detail; real synopsis (work → edition → `first_sentence`); denser (author 15 / series-tag 15 hits, 8+8 queries, ~24–36 kept). No download — Save idea only. **More like this** stays library-only.
+- [x] **Ideas English-first summaries** — Open Library description/edition text prefers `eng`/`en` (language-tagged values + `languages` array); search biased `language:eng`; English editions preferred for work→edition synopsis; non-English blurbs never surface as the main summary (English subjects / "No English description on Open Library" fallback). Ideas aren't dropped for lacking an English blurb.
+- [x] **Home long-press medium picker** — Home Continue / Up next / Finish tonight: tap = last-used medium; long-press = action sheet of only the media the item actually has (Readaloud / Audiobook / Ebook, or podcast Audio / Video), opening the existing player/reader host — no new player stack.
 - [x] **Finish tonight + Couldn’t save server** — Settings Bedtime (default 10:30 PM, local only); Home card up to 3 in-progress picks that fit the remaining window (hide when empty or past bedtime); Storyteller save failures show **Couldn’t save server** (Test Connection keeps distinct copy).
 - [x] **Delete from Library (iOS)** — Options → Delete from Library → Storyteller `deleteBook`. Confirm, then the book leaves Library, Home Continue, and the Continue widget. Folder delete is unchanged.
 - [x] **Purge unpaid ingest + Ideas for later v1** — removed Playtorio, TorBox, magnets, LibGen, Audible scrape, RaveBookSearch, and free-catalog Explore (Standard Ebooks / public OPDS browse / Download / Import). Library segment is **Library | Ideas**: habit-ranked metadata suggestions (series gaps, same authors, overlapping tags; recency-weighted) with optional Open Library lookup and local Save idea. No download. **More like this** stays on owned book detail. Storyteller sync, LAN failover, podcasts, player, and local Import stay.
@@ -109,7 +113,8 @@ Now is Story Timeline. Do not pull later items ahead of that.
 
 ## Later / ideas (not blocking)
 
-**Ideas for later v1 is shipped** (metadata + local save only). Wrapped, series strip, and Shortcuts stay later.
+**Ideas v2 is shipped** (unowned titles, why-lines, local Save idea; no download). Wrapped, series strip, and Shortcuts stay later.
+**Soft Later:** Home tap / long-press medium picker.
 **Second player** remains parked (shared NP stays).
 
 Strict order (Smokey / Nas-ty):
