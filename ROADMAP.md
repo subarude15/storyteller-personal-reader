@@ -17,7 +17,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-1. **Story Timeline** — distinctive ink+amp cut
+_(nothing blocking — Story Timeline shipped in the current PR; next pick comes from Later / Josh reorder.)_
 
 **Explicit reject:** Playtorio, TorBox, magnets, LibGen, Audible scrape, DRM strip, and free-catalog Explore browse. Do not start second player, CarPlay, or DSM/SMB unless Josh reorders.
 
@@ -95,16 +95,17 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **Cross-device Stats sync** — tip `c5791ec` (`a5226d6` + BookServiceActor fix); private Storyteller collection `.inkamp.stats.v1` blob (same auth as progress sync); session-id LWW merge (no double-count / no drop); footer Synced / Syncing… / Offline · local only; Settings last sync time; Sideload green [35028364424](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35028364424)
 - [x] **Stats Retry sync** — tip `fdb5560`; Settings last-sync row + Stats footer tappable → Syncing… then Synced / Offline · local only; soft overall + per-step timeouts; Sideload green [35033759537](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35033759537)
 - [x] **Stats push / description decode** — tip ``cf5c663``; Josh confirmed syncing; tolerate collection ``description`` objects (String or dict); isolate stats blob; ``pushed=false`` reason log; fail toast; Sideload green [35035504839](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35035504839)
+- [x] **Story Timeline** — Stats now has a **Stats | Timeline** segmented control. Timeline shows day-grouped reading/listening history (owned books + podcasts, newest first): cover thumb, title, medium chip (Ebook / Audiobook / Readaloud / Podcast), and a time · duration · % line. Tapping Continues that item in its recorded medium via the existing player/reader host (same path as Home long-press). Sessions record their actual medium (`ebook`/`audiobook`/`readaloud`/`podcast`); legacy sessions fall back to kind + `podcast/` prefix. Offline = last-known local ledger; empty state = "Sessions show up here as you read and listen."
 
 ---
 
 ## Next (strict order — do not reorder)
 
-Now is Story Timeline. Do not pull later items ahead of that.
+Story Timeline is shipped (current PR). Do not pull Later items ahead of that.
 
-### After Ideas for later
-1. ~~**Finish tonight**~~ → **Shipped** (this PR)
-2. **Story Timeline** — distinctive ink+amp cut
+### After Story Timeline
+1. ~~**Finish tonight**~~ → **Shipped**
+2. ~~**Story Timeline**~~ → **Shipped** (current PR)
 3. ~~Soft: **Couldn't save server**~~ → **Shipped** (same PR as Finish tonight)
 4. ~~Continue widget restore~~ → **smoke** tip `cc910d9` (PR #26)
 

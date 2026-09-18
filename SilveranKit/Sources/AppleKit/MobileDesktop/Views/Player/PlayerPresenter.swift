@@ -44,10 +44,12 @@ public final class PlayerPresenter {
         BookRecentStore.shared.record(data.metadata.id)
         NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
         let statsKind = data.category == .ebook ? "reading" : "listening"
+        let medium = Self.statsMedium(for: data.category)
         PunkRallyStatsEvents.sessionStart(
             kind: statsKind,
             mediaID: "\(data.metadata.id)",
-            mediaTitle: data.metadata.title
+            mediaTitle: data.metadata.title,
+            medium: medium
         )
         Task { await LastOpenBookStore.save(bookData: data) }
         if !replacingCard {
@@ -187,6 +189,15 @@ public final class PlayerPresenter {
             let uiImage = UIImage(data: data)
         else { return nil }
         return Image(uiImage: uiImage)
+    }
+
+    /// Maps a book's local-media category to the Stats timeline medium tag.
+    private static func statsMedium(for category: LocalMediaCategory) -> String {
+        switch category {
+            case .ebook: return "ebook"
+            case .audio: return "audiobook"
+            case .synced: return "readaloud"
+        }
     }
 }
 #endif

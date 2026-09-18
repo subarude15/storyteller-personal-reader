@@ -139,7 +139,8 @@ public final class PodcastPlayerPresenter {
         PunkRallyStatsEvents.sessionStart(
             kind: "listening",
             mediaID: "podcast/\(episode.id)",
-            mediaTitle: episode.title
+            mediaTitle: episode.title,
+            medium: "podcast"
         )
         var startInfo: [String: Any] = [
             "episodeID": episode.id,

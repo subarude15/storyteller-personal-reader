@@ -51,7 +51,12 @@ final class SessionTracker {
     }
 
     /// Begin a session for a media item.
-    func startSession(kind: PRMediaSession.Kind, mediaID: String, mediaTitle: String) {
+    func startSession(
+        kind: PRMediaSession.Kind,
+        mediaID: String,
+        mediaTitle: String,
+        medium: String? = nil
+    ) {
         if let active = activeSession, active.mediaID == mediaID, active.kind == kind {
             return
         }
@@ -60,7 +65,8 @@ final class SessionTracker {
             kind: kind,
             mediaID: mediaID,
             mediaTitle: mediaTitle,
-            startedAt: Date()
+            startedAt: Date(),
+            medium: medium
         )
         revision &+= 1
     }
@@ -295,7 +301,8 @@ final class SessionTracker {
             startedAt: session.startedAt,
             endedAt: session.endedAt,
             durationSeconds: session.durationSeconds,
-            endProgress: session.endProgress
+            endProgress: session.endProgress,
+            medium: session.medium
         )
     }
 
@@ -308,7 +315,8 @@ final class SessionTracker {
             startedAt: record.startedAt,
             endedAt: record.endedAt,
             durationSeconds: record.durationSeconds,
-            endProgress: record.endProgress
+            endProgress: record.endProgress,
+            medium: record.medium
         )
     }
 
