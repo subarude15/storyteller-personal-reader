@@ -53,7 +53,8 @@ struct ContinueWidgetAppGroupTests {
 
     @Test func continueKindNeverCollidesWithRetiredTiles() {
         let kind = SilveranWidgetConstants.continueWidgetKind
-        #expect(kind == "InkAmpContinueWidget")
+        #expect(kind == "inkamp.continue.upnext.v1")
+        #expect(kind != "InkAmpContinueWidget")
         #expect(kind != SilveranWidgetConstants.readingWidgetKind)
         // The parked static tiles must never be registered or reloaded again.
         for legacy in SilveranWidgetConstants.legacySideloadContinueWidgetKinds {
@@ -122,5 +123,50 @@ struct ContinueWidgetSnapshotTests {
         #expect(snapshot.hasLiveSession == nil)
         // A legacy payload must not render dead transport buttons.
         #expect(!snapshot.supportsTransportControls)
+        #expect(snapshot.upNext == nil)
+        #expect(snapshot.upNextItems.isEmpty)
+    }
+
+    @Test func upNextPaintsAtMostThree() {
+        let items = (0..<5).map { index in
+            ContinueWidgetQueueItem(
+                id: "pod:\(index)",
+                title: "Episode \(index)",
+                kind: .podcast,
+                deepLink: InkAmpContinueLink.queueItemURL(id: "pod:\(index)").absoluteString,
+            )
+        }
+        let snapshot = ContinueWidgetSnapshot(title: "Piranesi", upNext: items)
+        #expect(snapshot.upNextItems.count == ContinueWidgetSnapshot.upNextLimit)
+        #expect(snapshot.upNextItems.map(\.id) == ["pod:0", "pod:1", "pod:2"])
+        #expect(snapshot.upNextItems.allSatisfy { !$0.deepLink.isEmpty })
+    }
+
+    @Test func upNextRoundTripsThroughJSON() throws {
+        let snapshot = ContinueWidgetSnapshot(
+            title: "Piranesi",
+            kind: .audiobook,
+            deepLink: InkAmpContinueLink.continueURL.absoluteString,
+            upNext: [
+                ContinueWidgetQueueItem(
+                    id: "pod:ep-1",
+                    title: "Cold Open",
+                    kind: .podcast,
+                    deepLink: InkAmpContinueLink.queueItemURL(id: "pod:ep-1").absoluteString,
+                    progress: 0.2,
+                )
+            ],
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(snapshot)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(ContinueWidgetSnapshot.self, from: data)
+        #expect(decoded.upNextItems.count == 1)
+        #expect(decoded.upNextItems[0].id == "pod:ep-1")
+        #expect(decoded.upNextItems[0].title == "Cold Open")
+        #expect(decoded.upNextItems[0].kind == .podcast)
+        #expect(decoded.deepLink == InkAmpContinueLink.continueURL.absoluteString)
     }
 }

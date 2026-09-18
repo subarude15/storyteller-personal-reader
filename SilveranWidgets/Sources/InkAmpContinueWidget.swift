@@ -50,6 +50,27 @@ struct InkAmpContinueEntry: TimelineEntry {
                 durationSeconds: 12_600,
                 hasLiveSession: true,
                 rate: 1.0,
+                upNext: [
+                    ContinueWidgetQueueItem(
+                        id: "pod:preview-1",
+                        title: "Next in the queue",
+                        kind: .podcast,
+                        deepLink: InkAmpContinueLink.queueItemURL(id: "pod:preview-1").absoluteString,
+                    ),
+                    ContinueWidgetQueueItem(
+                        id: "book:preview/two",
+                        title: "The Following Book",
+                        kind: .ebook,
+                        deepLink: InkAmpContinueLink.queueItemURL(id: "book:preview/two")
+                            .absoluteString,
+                    ),
+                    ContinueWidgetQueueItem(
+                        id: "pod:preview-3",
+                        title: "One More Episode",
+                        kind: .audiobook,
+                        deepLink: InkAmpContinueLink.queueItemURL(id: "pod:preview-3").absoluteString,
+                    ),
+                ],
             ),
         )
     }
@@ -98,8 +119,8 @@ struct InkAmpContinueWidget: Widget {
         ) { entry in
             InkAmpContinueWidgetView(entry: entry)
         }
-        .configurationDisplayName("Continue")
-        .description("Pick up where you left off — cover, progress, play/pause and ±15s.")
+        .configurationDisplayName("Continue + Up next")
+        .description("Now, plus the next three from Home — books and podcasts.")
         .supportedFamilies(supportedFamilies)
         .contentMarginsDisabled()
     }
@@ -140,7 +161,7 @@ private struct InkAmpContinueWidgetView: View {
         .containerBackground(for: .widget) {
             InkAmpWidgetPalette.background
         }
-        .widgetURL(tapURL)
+        .widgetURL(usesRowLinks ? nil : tapURL)
     }
 
     @ViewBuilder
@@ -153,18 +174,32 @@ private struct InkAmpContinueWidgetView: View {
     }
 
     private var tapURL: URL {
-        if let deepLink = snapshot.deepLink, let url = URL(string: deepLink) {
+        if snapshot.hasItem, let deepLink = snapshot.deepLink, let url = URL(string: deepLink) {
             return url
         }
         return InkAmpContinueLink.continueURL
     }
 
+    /// Medium with Up next rows uses `Link` per row. A widget-wide URL would swallow them.
+    private var usesRowLinks: Bool {
+        family == .systemMedium && snapshot.hasItem && !snapshot.upNextItems.isEmpty
+    }
+
     // MARK: System small
 
+    @ViewBuilder
     private var smallBody: some View {
+        if snapshot.hasItem {
+            smallNow
+        } else {
+            emptyState
+        }
+    }
+
+    private var smallNow: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 8) {
-                cover(size: 54)
+                cover(filename: snapshot.coverFilename, kind: snapshot.kind, size: 54)
                 Spacer(minLength: 0)
                 if snapshot.supportsTransportControls {
                     playPauseButton(size: 36)
@@ -190,9 +225,20 @@ private struct InkAmpContinueWidgetView: View {
 
     // MARK: System medium
 
+    @ViewBuilder
     private var mediumBody: some View {
+        if !snapshot.hasItem {
+            emptyState
+        } else if snapshot.upNextItems.isEmpty {
+            mediumNowOnly
+        } else {
+            mediumWithQueue
+        }
+    }
+
+    private var mediumNowOnly: some View {
         HStack(alignment: .top, spacing: 12) {
-            cover(size: 84)
+            cover(filename: snapshot.coverFilename, kind: snapshot.kind, size: 84)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text("Continue")
@@ -240,6 +286,99 @@ private struct InkAmpContinueWidgetView: View {
             }
         }
         .padding(14)
+    }
+
+    private var mediumWithQueue: some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Link(destination: tapURL) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .top, spacing: 8) {
+                            cover(filename: snapshot.coverFilename, kind: snapshot.kind, size: 44)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Now")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(InkAmpWidgetPalette.accent)
+                                titleBlock(lineLimit: 2, titleFont: .subheadline.weight(.semibold))
+                            }
+                        }
+                        if let progress = snapshot.clampedProgress {
+                            InkAmpProgressBar(progress: progress, height: 3)
+                        }
+                        if let caption = snapshot.progressCaption {
+                            Text(caption)
+                                .font(.system(size: 9, weight: .medium, design: .rounded))
+                                .foregroundStyle(InkAmpWidgetPalette.secondary)
+                                .monospacedDigit()
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                compactTransport
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Up next")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(InkAmpWidgetPalette.secondary)
+                ForEach(snapshot.upNextItems) { item in
+                    upNextRow(item)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(width: 132, alignment: .leading)
+        }
+        .padding(12)
+    }
+
+    private func upNextRow(_ item: ContinueWidgetQueueItem) -> some View {
+        let destination = URL(string: item.deepLink) ?? InkAmpContinueLink.queueItemURL(id: item.id)
+        return Link(destination: destination) {
+            HStack(spacing: 6) {
+                cover(filename: item.coverFilename, kind: item.kind, size: 28)
+                Text(item.title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(InkAmpWidgetPalette.primary)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Up next, \(item.title)")
+    }
+
+    @ViewBuilder
+    private var compactTransport: some View {
+        if snapshot.supportsTransportControls {
+            HStack(spacing: 6) {
+                transportButton(symbol: "gobackward.15", size: 26, intent: ContinueSkipBackwardIntent())
+                playPauseButton(size: 30)
+                transportButton(symbol: "goforward.15", size: 26, intent: ContinueSkipForwardIntent())
+                Spacer(minLength: 0)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Continue")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(InkAmpWidgetPalette.accent)
+            Spacer(minLength: 0)
+            Text("Nothing in progress")
+                .font(.headline)
+                .foregroundStyle(InkAmpWidgetPalette.primary)
+                .lineLimit(2)
+            Text("Books and podcasts you start show up here.")
+                .font(.caption)
+                .foregroundStyle(InkAmpWidgetPalette.secondary)
+                .lineLimit(2)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -360,17 +499,21 @@ private struct InkAmpContinueWidgetView: View {
             .lineLimit(lineLimit)
     }
 
-    private func cover(size: CGFloat) -> some View {
+    private func cover(
+        filename: String?,
+        kind: ContinueWidgetKindTag?,
+        size: CGFloat,
+    ) -> some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(InkAmpWidgetPalette.coverFallback)
-            if let image = coverImage {
+            if let image = coverImage(filename: filename) {
                 image
                     .resizable()
                     .inkAmpFullColorRendering()
                     .scaledToFill()
             } else {
-                Image(systemName: coverSymbol)
+                Image(systemName: coverSymbol(kind))
                     .font(.system(size: size * 0.32, weight: .semibold))
                     .foregroundStyle(InkAmpWidgetPalette.secondary)
             }
@@ -383,8 +526,8 @@ private struct InkAmpContinueWidgetView: View {
         )
     }
 
-    private var coverImage: Image? {
-        guard let filename = snapshot.coverFilename,
+    private func coverImage(filename: String?) -> Image? {
+        guard let filename,
             let url = ContinueWidgetSnapshotStore.coverURL(for: filename)
         else { return nil }
         #if canImport(UIKit)
@@ -400,23 +543,21 @@ private struct InkAmpContinueWidgetView: View {
         #endif
     }
 
-    private var coverSymbol: String {
-        switch snapshot.kind {
+    private func coverSymbol(_ kind: ContinueWidgetKindTag?) -> String {
+        switch kind {
             case .podcast: return "mic.fill"
             case .audiobook, .readaloud: return "headphones"
             case .ebook, .none: return "book.closed.fill"
         }
     }
 
-    /// Never blank: live snapshot, else this process's last known title, else invite.
+    /// Live snapshot, else an honest empty. A missing App Group still paints the
+    /// last item via `localFallbackSnapshot` (that path sets `hasItem`).
     private var displayTitle: String {
         if snapshot.hasItem, let title = snapshot.title {
             return title
         }
-        if let fallback = ContinueWidgetSnapshotStore.lastTitleFallback() {
-            return fallback
-        }
-        return "Open ink+amp"
+        return "Nothing in progress"
     }
 
     private var displaySubtitleIfAny: String? {
@@ -432,10 +573,7 @@ private struct InkAmpContinueWidgetView: View {
         if snapshot.hasItem {
             return snapshot.remainingText ?? "Tap to continue"
         }
-        if ContinueWidgetSnapshotStore.lastTitleFallback() != nil {
-            return "Open ink+amp"
-        }
-        return "Tap to continue"
+        return "Books and podcasts you start show up here."
     }
 }
 
@@ -443,18 +581,13 @@ private struct InkAmpContinueWidgetView: View {
 
 enum InkAmpWidgetPalette {
     static let accent = Color(red: 0.91, green: 0.365, blue: 0.016)  // #E85D04
-    // Explicit ink colors — Color.primary can wash out on some WidgetKit surfaces.
-    static let primary = Color(red: 0.102, green: 0.094, blue: 0.078)  // #1A1814
-    static let secondary = Color(red: 0.420, green: 0.396, blue: 0.376)  // #6B6560
+    // Dark-chrome ink. Color.primary washes out on WidgetKit, and a clear
+    // container lets the wallpaper through so the tile looks blank.
+    static let primary = Color(red: 0.957, green: 0.945, blue: 0.918)  // #F4F1EA
+    static let secondary = Color(red: 0.604, green: 0.584, blue: 0.549)  // #9A958C
     static let coverFallback = Color(white: 0.2)
-    static let background = LinearGradient(
-        colors: [
-            Color(red: 0.97, green: 0.96, blue: 0.95),
-            Color(red: 0.93, green: 0.91, blue: 0.88),
-        ],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing,
-    )
+    /// Opaque charcoal (#0B0B0C). Never `Color.clear`.
+    static let background = Color(red: 0.043, green: 0.043, blue: 0.047)
 }
 
 extension Image {

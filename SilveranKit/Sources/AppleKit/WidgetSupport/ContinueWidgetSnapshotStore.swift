@@ -21,6 +21,66 @@ public enum ContinueWidgetKindTag: String, Codable, Sendable {
     }
 }
 
+/// One Up next row in the Continue widget. Same identity string as `HomeMixedItem.id`
+/// (`book:<source>/<uuid>` or `pod:<episodeID>`).
+public struct ContinueWidgetQueueItem: Codable, Sendable, Hashable, Identifiable {
+    public var id: String
+    public var title: String
+    public var subtitle: String?
+    public var coverFilename: String?
+    public var kind: ContinueWidgetKindTag?
+    public var deepLink: String
+    public var progress: Double?
+
+    public init(
+        id: String,
+        title: String,
+        subtitle: String? = nil,
+        coverFilename: String? = nil,
+        kind: ContinueWidgetKindTag? = nil,
+        deepLink: String,
+        progress: Double? = nil,
+    ) {
+        self.id = id
+        self.title = title
+        self.subtitle = subtitle
+        self.coverFilename = coverFilename
+        self.kind = kind
+        self.deepLink = deepLink
+        self.progress = progress
+    }
+}
+
+/// App-side draft for an Up next row. Cover bytes are written into the shared
+/// container by `ContinueWidgetSnapshotStore`; the widget only sees the filename.
+public struct ContinueWidgetUpNextDraft: Sendable {
+    public var id: String
+    public var title: String
+    public var subtitle: String?
+    public var kind: ContinueWidgetKindTag?
+    public var deepLink: String
+    public var progress: Double?
+    public var coverData: Data?
+
+    public init(
+        id: String,
+        title: String,
+        subtitle: String? = nil,
+        kind: ContinueWidgetKindTag? = nil,
+        deepLink: String,
+        progress: Double? = nil,
+        coverData: Data? = nil,
+    ) {
+        self.id = id
+        self.title = title
+        self.subtitle = subtitle
+        self.kind = kind
+        self.deepLink = deepLink
+        self.progress = progress
+        self.coverData = coverData
+    }
+}
+
 /// Home-screen Continue card payload shared via App Group (not Keychain).
 ///
 /// The App Group identifier must be resolved at runtime — see
@@ -45,6 +105,11 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
     /// actually do something. False for the "Home Continue" fallback card.
     public var hasLiveSession: Bool?
     public var rate: Double?
+    /// Following Home mixed-queue rows (not a second queue). Nil on snapshots
+    /// written before Up next existed.
+    public var upNext: [ContinueWidgetQueueItem]?
+
+    public static let upNextLimit = 3
 
     public init(
         generatedAt: Date = Date(),
@@ -59,6 +124,7 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         durationSeconds: Double? = nil,
         hasLiveSession: Bool? = nil,
         rate: Double? = nil,
+        upNext: [ContinueWidgetQueueItem]? = nil,
     ) {
         self.generatedAt = generatedAt
         self.title = title
@@ -72,6 +138,7 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         self.durationSeconds = durationSeconds
         self.hasLiveSession = hasLiveSession
         self.rate = rate
+        self.upNext = upNext
     }
 
     public static let empty = ContinueWidgetSnapshot()
@@ -134,6 +201,11 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         return "\(max(minutes, 1))m"
     }
 
+    /// Up next rows the tile actually paints (at most `upNextLimit`).
+    public var upNextItems: [ContinueWidgetQueueItem] {
+        Array((upNext ?? []).prefix(Self.upNextLimit))
+    }
+
     /// Identity for "did anything the widget paints change?" comparisons —
     /// deliberately excludes `generatedAt`.
     var paintSignature: String {
@@ -146,7 +218,22 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
             deepLink ?? "",
             (hasLiveSession ?? false) ? "1" : "0",
             percentComplete.map(String.init) ?? "",
+            queueSignature,
         ].joined(separator: "|")
+    }
+
+    /// Up next identity. Changes reload the tile immediately (not on the
+    /// progress-tick budget).
+    var queueSignature: String {
+        upNextItems.map { item in
+            [
+                item.id,
+                item.title,
+                item.coverFilename ?? "",
+                item.deepLink,
+                item.kind?.rawValue ?? "",
+            ].joined(separator: ":")
+        }.joined(separator: ";")
     }
 
     /// Transport state identity — changes flip the play/pause glyph right away.
@@ -169,6 +256,7 @@ public enum ContinueWidgetSnapshotStore {
     private static let publishLock = NSLock()
     nonisolated(unsafe) private static var lastPublishedPaintSignature: String?
     nonisolated(unsafe) private static var lastPublishedTransportSignature: String?
+    nonisolated(unsafe) private static var lastPublishedQueueSignature: String?
     nonisolated(unsafe) private static var lastReloadDate: Date = .distantPast
 
     public static func loadSnapshot(bundle: Bundle = .main) -> ContinueWidgetSnapshot {
@@ -254,6 +342,7 @@ public enum ContinueWidgetSnapshotStore {
         durationSeconds: Double? = nil,
         hasLiveSession: Bool = false,
         rate: Double? = nil,
+        upNext: [ContinueWidgetUpNextDraft]? = nil,
     ) {
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "publish")
         guard let container = SilveranWidgetSnapshotStore.sharedContainerURL() else {
@@ -285,6 +374,12 @@ public enum ContinueWidgetSnapshotStore {
                 coverFilename = existing
             }
 
+            let previousSnapshot = readSnapshotFile(in: container)
+            let resolvedUpNext = try resolveUpNext(
+                drafts: upNext,
+                previous: previousSnapshot?.upNext,
+                coversDirectory: covers,
+            )
             let snapshot = ContinueWidgetSnapshot(
                 generatedAt: Date(),
                 title: title,
@@ -298,16 +393,19 @@ public enum ContinueWidgetSnapshotStore {
                 durationSeconds: durationSeconds,
                 hasLiveSession: hasLiveSession,
                 rate: rate,
+                upNext: resolvedUpNext,
             )
 
             publishLock.lock()
             let previousPaint = lastPublishedPaintSignature
             let previousTransport = lastPublishedTransportSignature
+            let previousQueue = lastPublishedQueueSignature
             let previousReload = lastReloadDate
             publishLock.unlock()
 
             let paintChanged = previousPaint != snapshot.paintSignature
             let transportChanged = previousTransport != snapshot.transportSignature
+            let queueChanged = previousQueue != snapshot.queueSignature
             let now = Date()
 
             guard paintChanged || transportChanged else { return }
@@ -322,11 +420,13 @@ public enum ContinueWidgetSnapshotStore {
             let progressTickDue =
                 now.timeIntervalSince(previousReload) >= progressReloadInterval
             let reloadNow =
-                transportChanged || (paintChanged && progressTickDue) || now.timeIntervalSince(previousReload) >= 300
+                transportChanged || queueChanged || (paintChanged && progressTickDue)
+                || now.timeIntervalSince(previousReload) >= 300
 
             publishLock.lock()
             lastPublishedPaintSignature = snapshot.paintSignature
             lastPublishedTransportSignature = snapshot.transportSignature
+            lastPublishedQueueSignature = snapshot.queueSignature
             if reloadNow { lastReloadDate = now }
             publishLock.unlock()
 
@@ -409,12 +509,84 @@ public enum ContinueWidgetSnapshotStore {
     private static func coversDirectory(in container: URL) -> URL {
         container.appendingPathComponent(coversDirectoryName, isDirectory: true)
     }
+
+    /// `nil` drafts keep the rows already on disk (live-session ticks). A non-nil
+    /// array, including empty, replaces them — Home is the only writer of the queue.
+    private static func resolveUpNext(
+        drafts: [ContinueWidgetUpNextDraft]?,
+        previous: [ContinueWidgetQueueItem]?,
+        coversDirectory: URL,
+    ) throws -> [ContinueWidgetQueueItem] {
+        guard let drafts else {
+            return Array((previous ?? []).prefix(ContinueWidgetSnapshot.upNextLimit))
+        }
+
+        var items: [ContinueWidgetQueueItem] = []
+        for draft in drafts.prefix(ContinueWidgetSnapshot.upNextLimit) {
+            let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty, !draft.id.isEmpty else { continue }
+            var filename = previous?.first(where: { $0.id == draft.id })?.coverFilename
+            if let coverData = draft.coverData, !coverData.isEmpty {
+                let name = upNextCoverFilename(id: draft.id)
+                let url = coversDirectory.appendingPathComponent(name, isDirectory: false)
+                try coverData.write(to: url, options: [.atomic])
+                filename = name
+            }
+            let link = draft.deepLink.trimmingCharacters(in: .whitespacesAndNewlines)
+            items.append(
+                ContinueWidgetQueueItem(
+                    id: draft.id,
+                    title: title,
+                    subtitle: draft.subtitle,
+                    coverFilename: filename,
+                    kind: draft.kind,
+                    deepLink: link.isEmpty
+                        ? InkAmpContinueLink.queueItemURL(id: draft.id).absoluteString
+                        : link,
+                    progress: draft.progress,
+                )
+            )
+        }
+        pruneUpNextCovers(
+            in: coversDirectory,
+            keeping: Set(items.compactMap(\.coverFilename)),
+        )
+        return items
+    }
+
+    /// Stable across processes — `Hasher` is not. Covers for different rows must
+    /// not overwrite each other when a later row still points at the old file.
+    private static func upNextCoverFilename(id: String) -> String {
+        var hash: UInt64 = 5381
+        for byte in id.utf8 {
+            hash = ((hash << 5) &+ hash) &+ UInt64(byte)
+        }
+        return "upnext_\(String(hash, radix: 16)).dat"
+    }
+
+    private static func pruneUpNextCovers(in directory: URL, keeping names: Set<String>) {
+        guard
+            let files = try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: nil,
+            )
+        else { return }
+        for url in files {
+            let name = url.lastPathComponent
+            guard name.hasPrefix("upnext_"), !names.contains(name) else { continue }
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
 }
 
 /// Deep links for the Continue widget (`punkrally` scheme — already registered).
 public enum InkAmpContinueLink {
     public static let continueURL = URL(string: "punkrally://continue")!
     public static let toggleURL = URL(string: "punkrally://continue?action=toggle")!
+    /// Query on `punkrally://continue` that opens one Home queue row (Up next).
+    public static let queueItemQueryName = "item"
+    /// Notification userInfo key carrying `HomeMixedItem.id` from a widget tap.
+    public static let queueItemUserInfoKey = "continueQueueItemID"
 
     public static func isContinueURL(_ url: URL) -> Bool {
         guard url.scheme == "punkrally" else { return false }
@@ -426,5 +598,41 @@ public enum InkAmpContinueLink {
         guard isContinueURL(url) else { return false }
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
         return items?.contains(where: { $0.name == "action" && $0.value == "toggle" }) == true
+    }
+
+    /// `punkrally://continue?item=<HomeMixedItem.id>` — same host as Continue, not a new player.
+    public static func queueItemURL(id: String) -> URL {
+        var components = URLComponents(url: continueURL, resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: queueItemQueryName, value: id)]
+        return components?.url ?? continueURL
+    }
+
+    public static func queueItemID(from url: URL) -> String? {
+        guard isContinueURL(url), !wantsToggle(url) else { return nil }
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+        let value = items?.first(where: { $0.name == queueItemQueryName })?.value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value, !value.isEmpty else { return nil }
+        return value
+    }
+
+    /// `book:<sourceID>/<uuid>`. Source ids may contain `/`; the uuid is the last segment.
+    public static func bookID(fromQueueItemID id: String) -> BookID? {
+        let prefix = "book:"
+        guard id.hasPrefix(prefix) else { return nil }
+        let rest = String(id.dropFirst(prefix.count))
+        guard let slash = rest.lastIndex(of: "/") else { return nil }
+        let source = String(rest[..<slash])
+        let uuid = String(rest[rest.index(after: slash)...])
+        guard !source.isEmpty, !uuid.isEmpty else { return nil }
+        return BookID(sourceID: source, uuid: uuid)
+    }
+
+    public static func podcastEpisodeID(fromQueueItemID id: String) -> String? {
+        let prefix = "pod:"
+        guard id.hasPrefix(prefix) else { return nil }
+        let episodeID = String(id.dropFirst(prefix.count))
+        guard !episodeID.isEmpty else { return nil }
+        return episodeID
     }
 }
