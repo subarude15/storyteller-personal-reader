@@ -408,6 +408,50 @@ import Testing
     #expect(queries.filter { $0.kind == .author }.count == 8)
 }
 
+@Test func browseRailsSubjectTermsRankLibraryTagsAndFillWithStaples() {
+    let books = [
+        ideaBook(id: "a", title: "A", authors: ["X"], tags: ["Horror", "Horror"], status: "Read"),
+        ideaBook(id: "b", title: "B", authors: ["Y"], tags: ["Horror"], status: "Read"),
+        ideaBook(id: "c", title: "C", authors: ["Z"], tags: ["Mystery"], status: "Reading"),
+    ]
+    let terms = OpenLibraryBrowseRails.subjectTerms(from: books, limit: 4)
+    // Horror is the most-weighted library tag, so it leads; the rest fill with staples.
+    #expect(terms.first == "Horror")
+    #expect(terms.count == 4)
+    // No duplicates.
+    #expect(Set(terms.map(ReadingHabitIdeas.normalize)).count == terms.count)
+}
+
+@Test func browseRailsSubjectTermsUseStaplesWhenLibraryEmpty() {
+    let terms = OpenLibraryBrowseRails.subjectTerms(from: [], limit: 3)
+    #expect(terms.count == 3)
+    #expect(terms == Array(OpenLibraryBrowseRails.stapleSubjects.prefix(3)))
+}
+
+@Test func browseRailsAuthorTermsRankFinishedAuthorsFirst() {
+    let books = [
+        ideaBook(id: "a", title: "A", authors: ["Ada"], status: "Read"),
+        ideaBook(id: "b", title: "B", authors: ["Bob"], status: "Reading"),
+    ]
+    let terms = OpenLibraryBrowseRails.authorTerms(from: books, limit: 4)
+    #expect(terms.first == "Ada")
+    #expect(terms.contains("Bob"))
+}
+
+@Test func browseRailsDropOwned() {
+    let owned = ideaBook(id: "owned", title: "Dune", authors: ["Frank Herbert"])
+    let idea = ReadingIdea(
+        id: "ol:/works/OL1W",
+        title: "Dune",
+        author: "Frank Herbert",
+        coverURL: nil,
+        blurb: nil,
+        reason: "Because you like Horror",
+        score: 1,
+    )
+    #expect(ReadingHabitIdeas.excludingOwned([idea], library: [owned]).isEmpty)
+}
+
 private func ideaBook(
     id: String,
     title: String,

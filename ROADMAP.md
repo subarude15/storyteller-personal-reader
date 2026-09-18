@@ -17,9 +17,9 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-_(nothing blocking — Story Timeline shipped in the current PR; next pick comes from Later / Josh reorder.)_
+1. **Open Library browse rails** — in-app discovery (metadata + wishlist only); next = Continue + Up next widget.
 
-**Explicit reject:** Playtorio, TorBox, magnets, LibGen, Audible scrape, DRM strip, and free-catalog Explore browse. Do not start second player, CarPlay, or DSM/SMB unless Josh reorders.
+**Explicit reject:** Playtorio, TorBox, magnets, LibGen, Audible scrape, DRM strip, and free-catalog Explore browse (Standard Ebooks / public OPDS shelves / Download / Import). Do not start second player, CarPlay, or DSM/SMB unless Josh reorders.
 
 ## Shipped
 
@@ -101,13 +101,15 @@ _(nothing blocking — Story Timeline shipped in the current PR; next pick comes
 
 ## Next (strict order — do not reorder)
 
-Story Timeline is shipped (current PR). Do not pull Later items ahead of that.
+Story Timeline is shipped. Now is OL browse rails; next = Continue + Up next widget.
 
 ### After Story Timeline
 1. ~~**Finish tonight**~~ → **Shipped**
-2. ~~**Story Timeline**~~ → **Shipped** (current PR)
+2. ~~**Story Timeline**~~ → **Shipped**
 3. ~~Soft: **Couldn't save server**~~ → **Shipped** (same PR as Finish tonight)
-4. ~~Continue widget restore~~ → **smoke** tip `cc910d9` (PR #26)
+4. **Open Library browse rails** → **Now** (current PR)
+5. **Continue + Up next widget** → next after Browse greens
+6. ~~Continue widget restore~~ → **smoke** tip `cc910d9` (PR #26)
 
 ### Soft UX polish (anytime)
 - Soft polish pack → **Shipped** (`b9b07ea` / PR #22)

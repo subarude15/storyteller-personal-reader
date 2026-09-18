@@ -8,6 +8,7 @@ struct IdeasRootView: View {
     private enum IdeasMode: String, CaseIterable, Identifiable {
         case ideas = "Ideas"
         case saved = "Saved"
+        case browse = "Browse"
         var id: String { rawValue }
     }
 
@@ -17,6 +18,8 @@ struct IdeasRootView: View {
     @State private var dismissed: Set<String> = []
     @State private var loaded = false
     @State private var mode: IdeasMode = .ideas
+    @State private var rails: [BrowseRail] = []
+    @State private var browseLoaded = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -29,14 +32,22 @@ struct IdeasRootView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
 
-            if mode == .saved {
+            switch mode {
+            case .saved:
                 savedContent
-            } else {
+            case .browse:
+                browseContent
+            case .ideas:
                 suggestionsContent
             }
         }
         .task(id: mediaViewModel.libraryVersion) {
             await reload()
+        }
+        .onChange(of: mode) { _, newMode in
+            if newMode == .browse {
+                Task { await reloadBrowse() }
+            }
         }
         .navigationDestination(for: ReadingIdea.self) { idea in
             IdeaDetailView(idea: idea) {
@@ -91,6 +102,60 @@ struct IdeasRootView: View {
             }
             .listStyle(.plain)
         }
+    }
+
+    // MARK: Browse
+
+    @ViewBuilder
+    private var browseContent: some View {
+        if visibleRails.isEmpty {
+            Group {
+                if browseLoaded {
+                    Text("No browse suggestions yet")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    ForEach(visibleRails) { rail in
+                        BrowseRailView(rail: rail)
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+        }
+    }
+
+    /// Rails with dismissed titles removed (and any rail that became empty dropped).
+    private var visibleRails: [BrowseRail] {
+        rails.compactMap { rail in
+            let ideas = rail.ideas.filter {
+                !dismissed.contains(ReadingHabitIdeas.dismissKey(for: $0))
+                    && matches($0)
+            }
+            guard !ideas.isEmpty else { return nil }
+            return BrowseRail(id: rail.id, title: rail.title, ideas: ideas)
+        }
+    }
+
+    private func reloadBrowse() async {
+        let library = mediaViewModel.library.bookMetaData
+        let fresh = await OpenLibraryBrowseRails.fetch(library: library)
+        let failed = fresh.isEmpty
+        if failed {
+            rails = CachedBrowseRails.load()
+        } else {
+            CachedBrowseRails.save(fresh)
+            rails = fresh
+        }
+        dismissed = DismissedReadingIdeas.load()
+        browseLoaded = true
     }
 
     // MARK: Saved
@@ -411,6 +476,51 @@ private struct IdeaRow: View {
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct BrowseRailView: View {
+    let rail: BrowseRail
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(rail.title)
+                .font(.headline)
+                .padding(.horizontal, 16)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(rail.ideas) { idea in
+                        NavigationLink(value: idea) {
+                            BrowseCardView(idea: idea)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+    }
+}
+
+private struct BrowseCardView: View {
+    let idea: ReadingIdea
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            IdeaCover(url: idea.coverURL)
+                .frame(width: 100, height: 150)
+            Text(idea.title)
+                .font(.caption.weight(.medium))
+                .lineLimit(2)
+                .frame(width: 100, alignment: .leading)
+            if !idea.author.isEmpty {
+                Text(idea.author)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(width: 100, alignment: .leading)
+            }
+        }
     }
 }
 
