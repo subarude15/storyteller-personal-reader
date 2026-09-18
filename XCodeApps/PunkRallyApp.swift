@@ -511,59 +511,54 @@ private struct HomeTabView: View {
 
     private var continueHero: some View {
         let item = mixedQueue.continueItem
-        return Button {
-            Task { await openMixedItem(item) }
-        } label: {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
-                    HomeMixedCoverView(item: item, width: 72, height: 108, chrome: chrome)
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 8) {
-                            Text("Continue")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(PunkRallyTheme.Accent.primary)
-                            if let item {
-                                KindBadgeView(kind: item.badge, scheme: colorScheme)
-                            }
-                        }
-                        Text(item?.title ?? "Nothing in progress")
-                            .font(.headline)
-                            .foregroundStyle(chrome.text)
-                            .lineLimit(2)
-                        Text(
-                            item?.subtitle
-                                ?? "Browse Library or Podcasts to pick up where you left off."
-                        )
-                        .font(.subheadline)
-                        .foregroundStyle(chrome.textMuted)
-                        .lineLimit(1)
-                        if let item, let label = item.finishabilityLabel {
-                            Text(label)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(PunkRallyTheme.Accent.primary)
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                HomeMixedCoverView(item: item, width: 72, height: 108, chrome: chrome)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text("Continue")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(PunkRallyTheme.Accent.primary)
+                        if let item {
+                            KindBadgeView(kind: item.badge, scheme: colorScheme)
                         }
                     }
-                    Spacer(minLength: 0)
+                    Text(item?.title ?? "Nothing in progress")
+                        .font(.headline)
+                        .foregroundStyle(chrome.text)
+                        .lineLimit(2)
+                    Text(
+                        item?.subtitle
+                            ?? "Browse Library or Podcasts to pick up where you left off."
+                    )
+                    .font(.subheadline)
+                    .foregroundStyle(chrome.textMuted)
+                    .lineLimit(1)
+                    if let item, let label = item.finishabilityLabel {
+                        Text(label)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(PunkRallyTheme.Accent.primary)
+                    }
                 }
+                Spacer(minLength: 0)
             }
-            .padding(PunkRallyTheme.Metric.cardPadding)
-            .background(chrome.surface)
-            .clipShape(RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius)
-                    .stroke(chrome.border, lineWidth: 1)
-            )
         }
-        .buttonStyle(.plain)
-        .disabled(item == nil)
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.5)
-                .onEnded { _ in
-                    if let item {
-                        mediumPickerItem = item
-                    }
-                }
+        .padding(PunkRallyTheme.Metric.cardPadding)
+        .background(chrome.surface)
+        .clipShape(RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius)
+                .stroke(chrome.border, lineWidth: 1)
         )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            Task { await openMixedItem(item) }
+        }
+        .onLongPressGesture(minimumDuration: 0.5) {
+            if let item {
+                mediumPickerItem = item
+            }
+        }
     }
 
     private var upNextRow: some View {
@@ -580,37 +575,33 @@ private struct HomeTabView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
                         ForEach(items) { item in
-                            Button {
-                                Task { await openMixedItem(item) }
-                            } label: {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HomeMixedCoverView(
-                                        item: item,
-                                        width: 96,
-                                        height: 144,
-                                        chrome: chrome
-                                    )
-                                    KindBadgeView(kind: item.badge, scheme: colorScheme)
-                                    Text(item.title)
-                                        .font(.caption.weight(.medium))
-                                        .foregroundStyle(chrome.text)
-                                        .lineLimit(2)
+                            VStack(alignment: .leading, spacing: 6) {
+                                HomeMixedCoverView(
+                                    item: item,
+                                    width: 96,
+                                    height: 144,
+                                    chrome: chrome
+                                )
+                                KindBadgeView(kind: item.badge, scheme: colorScheme)
+                                Text(item.title)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(chrome.text)
+                                    .lineLimit(2)
+                                    .frame(width: 96, alignment: .leading)
+                                if let label = item.finishabilityLabel {
+                                    Text(label)
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(chrome.textMuted)
                                         .frame(width: 96, alignment: .leading)
-                                    if let label = item.finishabilityLabel {
-                                        Text(label)
-                                            .font(.caption2.weight(.semibold))
-                                            .foregroundStyle(chrome.textMuted)
-                                            .frame(width: 96, alignment: .leading)
-                                    }
                                 }
                             }
-                            .buttonStyle(.plain)
-                            .simultaneousGesture(
-                                LongPressGesture(minimumDuration: 0.5)
-                                    .onEnded { _ in
-                                        mediumPickerItem = item
-                                    }
-                            )
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                Task { await openMixedItem(item) }
+                            }
+                            .onLongPressGesture(minimumDuration: 0.5) {
+                                mediumPickerItem = item
+                            }
                         }
                     }
                 }
@@ -656,32 +647,28 @@ private struct HomeTabView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(chrome.text)
                 ForEach(picks.items) { item in
-                    Button {
-                        Task { await openMixedItem(item) }
-                    } label: {
-                        HStack(spacing: 12) {
-                            HomeMixedCoverView(item: item, width: 44, height: 66, chrome: chrome)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(item.title)
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(chrome.text)
-                                    .lineLimit(2)
-                                if let why = item.finishabilityLabel {
-                                    Text(why)
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(PunkRallyTheme.Accent.primary)
-                                }
+                    HStack(spacing: 12) {
+                        HomeMixedCoverView(item: item, width: 44, height: 66, chrome: chrome)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.title)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(chrome.text)
+                                .lineLimit(2)
+                            if let why = item.finishabilityLabel {
+                                Text(why)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(PunkRallyTheme.Accent.primary)
                             }
-                            Spacer(minLength: 0)
                         }
+                        Spacer(minLength: 0)
                     }
-                    .buttonStyle(.plain)
-                    .simultaneousGesture(
-                        LongPressGesture(minimumDuration: 0.5)
-                            .onEnded { _ in
-                                mediumPickerItem = item
-                            }
-                    )
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        Task { await openMixedItem(item) }
+                    }
+                    .onLongPressGesture(minimumDuration: 0.5) {
+                        mediumPickerItem = item
+                    }
                 }
             }
             .padding(PunkRallyTheme.Metric.cardPadding)
