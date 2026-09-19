@@ -1,4 +1,5 @@
 #if os(iOS)
+import SilveranKit
 import SwiftUI
 
 /// Habit-based ideas. Metadata and a local save list only — no download or import.
@@ -432,6 +433,7 @@ struct IdeaDetailView: View {
     @State private var isSaved = false
     @State private var fetched: OpenLibraryWorkDetail?
     @State private var loadingSummary = false
+    @State private var showingAudiobookOptions = false
 
     private var description: String? {
         if let fetched, let desc = fetched.description, !desc.isEmpty { return desc }
@@ -507,6 +509,15 @@ struct IdeaDetailView: View {
                     }
                 }
                 Button {
+                    showingAudiobookOptions = true
+                } label: {
+                    Label("Find audiobook options", systemImage: "headphones")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("find-audiobook-options")
+                .accessibilityHint("Searches audiobook providers for this book only after you tap.")
+                Button {
                     if isSaved {
                         SavedReadingIdeas.remove(idea.id)
                     } else {
@@ -538,6 +549,14 @@ struct IdeaDetailView: View {
         }
         .navigationTitle("Idea")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showingAudiobookOptions) {
+            AudiobookOptionsSheet(
+                work: CanonicalBookWork.idea(idea),
+                book: CanonicalBookWork.idea(idea).playbackBook(),
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
         .task {
             isSaved = SavedReadingIdeas.contains(idea.id)
             // Backfill a real description when search.json gave no first_sentence.

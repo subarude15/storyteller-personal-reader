@@ -1,4 +1,5 @@
 #if os(iOS) || os(macOS)
+import SilveranKit
 import SwiftUI
 
 public struct AudiobookPlayerView: View {
@@ -205,7 +206,15 @@ public struct AudiobookPlayerView: View {
 
     @MainActor
     private func openSession() async {
-        guard let bookData, let mediaURL = bookData.localMediaPath else {
+        guard let bookData else {
+            errorMessage = "No audiobook file available"
+            return
+        }
+        if bookData.resolvedAudiobookID != nil {
+            await openResolvedSession(bookData)
+            return
+        }
+        guard let mediaURL = bookData.localMediaPath else {
             errorMessage = "No audiobook file available"
             return
         }
@@ -215,18 +224,42 @@ public struct AudiobookPlayerView: View {
                 book: bookData.metadata,
                 mediaURL: mediaURL,
             )
-
-            if stateObserverID == nil {
-                stateObserverID = await AudioSessionActor.shared.addStateObserver { state in
-                    Task { @MainActor in
-                        applySessionState(state)
-                    }
-                }
-            }
-            applySessionState(await AudioSessionActor.shared.currentState())
+            await observeSession()
         } catch {
             errorMessage = "Failed to load audiobook: \(error.localizedDescription)"
         }
+    }
+
+    @MainActor
+    private func openResolvedSession(_ bookData: PlayerBookData) async {
+        guard let context = await ResolvedAudiobookLaunch.shared.context(for: bookData.metadata.id)
+        else {
+            errorMessage = AudiobookResolutionFailure.playbackSourceUnavailable.message
+            return
+        }
+        do {
+            try await AudioSessionActor.shared.openResolvedAudiobook(
+                book: bookData.metadata,
+                prepared: context.metadata,
+                playback: context.playback,
+                startAt: context.startAt,
+            )
+            await observeSession()
+        } catch {
+            errorMessage = AudiobookResolutionFailure.playbackSourceUnavailable.message
+        }
+    }
+
+    @MainActor
+    private func observeSession() async {
+        if stateObserverID == nil {
+            stateObserverID = await AudioSessionActor.shared.addStateObserver { state in
+                Task { @MainActor in
+                    applySessionState(state)
+                }
+            }
+        }
+        applySessionState(await AudioSessionActor.shared.currentState())
     }
 
     @MainActor

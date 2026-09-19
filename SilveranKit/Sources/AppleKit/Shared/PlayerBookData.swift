@@ -5,6 +5,8 @@ public struct PlayerBookData: Codable, Hashable, Sendable {
     public let metadata: BookMetadata
     public let localMediaPath: URL?
     public let category: LocalMediaCategory
+    /// Set when this card plays a matched provider audiobook instead of a local file.
+    public let resolvedAudiobookID: String?
     public var coverArt: Image?
     public var ebookCoverArt: Image?
 
@@ -20,12 +22,14 @@ public struct PlayerBookData: Codable, Hashable, Sendable {
         category: LocalMediaCategory,
         coverArt: Image? = nil,
         ebookCoverArt: Image? = nil,
+        resolvedAudiobookID: String? = nil,
     ) {
         self.metadata = metadata
         self.localMediaPath = localMediaPath
         self.category = category
         self.coverArt = coverArt
         self.ebookCoverArt = ebookCoverArt
+        self.resolvedAudiobookID = resolvedAudiobookID
     }
 
     public init(from decoder: Decoder) throws {
@@ -33,6 +37,7 @@ public struct PlayerBookData: Codable, Hashable, Sendable {
         metadata = try container.decode(BookMetadata.self, forKey: .metadata)
         localMediaPath = try container.decodeIfPresent(URL.self, forKey: .localMediaPath)
         category = try container.decode(LocalMediaCategory.self, forKey: .category)
+        resolvedAudiobookID = nil
         coverArt = nil
         ebookCoverArt = nil
     }
@@ -51,11 +56,13 @@ public struct PlayerBookData: Codable, Hashable, Sendable {
         hasher.combine(metadata.id)
         hasher.combine(localMediaPath)
         hasher.combine(category)
+        hasher.combine(resolvedAudiobookID)
     }
 
     public static func == (lhs: PlayerBookData, rhs: PlayerBookData) -> Bool {
         lhs.metadata.id == rhs.metadata.id
             && lhs.localMediaPath == rhs.localMediaPath
             && lhs.category == rhs.category
+            && lhs.resolvedAudiobookID == rhs.resolvedAudiobookID
     }
 }

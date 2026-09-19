@@ -199,6 +199,9 @@ public actor AudioSessionActor {
     private var book: BookMetadata?
     private var mediaURL: URL?
     private var metadata: AudiobookMetadata?
+    /// Set only for a user-chosen provider stream. Local books keep Storyteller sync.
+    private var resolvedPlayback: ResolvedAudiobookPlayback?
+    private var lastResumeWrite = Date.distantPast
     private var activeSessionID: UUID?
     private var playbackObserverID: UUID?
     private var playbackEventContinuation: AsyncStream<AudiobookPlaybackState>.Continuation?
@@ -720,6 +723,7 @@ public actor AudioSessionActor {
         activeSessionID = sessionID
         self.book = book
         self.mediaURL = mediaURL
+        self.resolvedPlayback = nil
         currentKind = .audiobook(book.id)
 
         do {
@@ -771,6 +775,79 @@ public actor AudioSessionActor {
             notifyObservers(nil)
             throw error
         }
+    }
+
+    /// Plays a matched provider audiobook through the existing audiobook session.
+    /// Position stays on device. This does not write Storyteller progress.
+    public func openResolvedAudiobook(
+        book: BookMetadata,
+        prepared: AudiobookMetadata,
+        playback: ResolvedAudiobookPlayback,
+        startAt: TimeInterval?,
+    ) async throws {
+        if self.book?.id == book.id,
+            resolvedPlayback?.provider == playback.provider,
+            resolvedPlayback?.providerItemID == playback.providerItemID,
+            metadata != nil
+        {
+            await publishState()
+            return
+        }
+
+        await teardown(syncReason: self.book == nil ? nil : .userClosedBook)
+
+        let sessionID = UUID()
+        activeSessionID = sessionID
+        self.book = book
+        self.mediaURL = prepared.tracks.first?.url
+        self.resolvedPlayback = playback
+        currentKind = .audiobook(book.id)
+        lastResumeWrite = .distantPast
+
+        do {
+            await closeReadaloudArm(onlyIfEngineActive: true)
+            await AudiobookActor.shared.cleanup()
+            metadata = try await AudiobookActor.shared.loadPreparedAudiobook(prepared)
+
+            let config = await SettingsActor.shared.config
+            syncInterval = config.sync.progressSyncIntervalSeconds
+            await AudiobookActor.shared.setPlaybackRate(config.playback.defaultPlaybackSpeed)
+            await AudiobookActor.shared.setVolume(config.playback.defaultVolume)
+
+            if let startAt, startAt > 1 {
+                try await AudiobookActor.shared.preparePlayer(at: startAt)
+            } else {
+                try await AudiobookActor.shared.preparePlayer()
+            }
+            if let state = await AudiobookActor.shared.getCurrentState() {
+                lastObservedIsPlaying = state.isPlaying
+            }
+
+            await installPlaybackObserver(for: sessionID)
+            nextPeriodicSync = .distantFuture
+            startRefreshTask()
+            await configureNowPlayingCommands(for: .audiobook(book.id))
+            await publishState()
+            if let artworkURL = playback.artworkURL {
+                startRemoteCoverTask(url: artworkURL, sessionID: sessionID)
+            } else {
+                startCoverTask(for: book, sessionID: sessionID)
+            }
+        } catch {
+            await teardown(syncReason: nil)
+            notifyObservers(nil)
+            throw error
+        }
+    }
+
+    public func flushResolvedResume() async {
+        guard resolvedPlayback != nil else { return }
+        await persistResolvedResume()
+    }
+
+    public func currentResolvedAudiobookID() -> String? {
+        guard let resolvedPlayback else { return nil }
+        return "\(resolvedPlayback.provider.rawValue):\(resolvedPlayback.providerItemID)"
     }
 
     public func openReadaloud(
@@ -1289,6 +1366,10 @@ public actor AudioSessionActor {
         if state.isPlaying, syncInterval > 0, Date() >= nextPeriodicSync {
             await syncProgress(reason: .periodicDuringActivePlayback)
             nextPeriodicSync = Date().addingTimeInterval(syncInterval)
+        } else if resolvedPlayback != nil, state.isPlaying,
+            Date().timeIntervalSince(lastResumeWrite) >= 5
+        {
+            await persistResolvedResume(using: state)
         }
         await publishState(using: state)
     }
@@ -1394,6 +1475,10 @@ public actor AudioSessionActor {
     }
 
     private func syncProgress(reason: SyncReason) async {
+        if resolvedPlayback != nil {
+            await persistResolvedResume()
+            return
+        }
         guard let book, let metadata,
             let state = await AudiobookActor.shared.getCurrentState()
         else { return }
@@ -1488,6 +1573,47 @@ public actor AudioSessionActor {
         return nil
     }
 
+    private func persistResolvedResume(using suppliedState: AudiobookPlaybackState? = nil) async {
+        guard let playback = resolvedPlayback, let metadata else { return }
+        let state: AudiobookPlaybackState?
+        if let suppliedState {
+            state = suppliedState
+        } else {
+            state = await AudiobookActor.shared.getCurrentState()
+        }
+        guard let state else { return }
+        let index = state.currentChapterIndex ?? 0
+        let chapter = metadata.chapters[safe: index]
+        let position = chapter.map { max(0, state.currentTime - $0.startTime) } ?? 0
+        let completed = state.duration > 30 && state.currentTime >= max(0, state.duration - 10)
+        AudiobookResumeStore.shared.save(
+            AudiobookResumeState(
+                workID: playback.workID,
+                provider: playback.provider,
+                providerItemID: playback.providerItemID,
+                chapterIndex: index,
+                chapterPosition: position,
+                completed: completed,
+                updatedAt: Date(),
+            )
+        )
+        lastResumeWrite = Date()
+    }
+
+    private func startRemoteCoverTask(url: URL, sessionID: UUID) {
+        coverTask?.cancel()
+        coverTask = Task { [weak self] in
+            var request = URLRequest(url: url, timeoutInterval: 15)
+            guard
+                let (data, response) = try? await URLSession.shared.data(for: request),
+                let http = response as? HTTPURLResponse,
+                (200..<300).contains(http.statusCode),
+                !Task.isCancelled
+            else { return }
+            await self?.applyCover(data, sessionID: sessionID)
+        }
+    }
+
     private func startCoverTask(for book: BookMetadata, sessionID: UUID) {
         coverTask?.cancel()
         coverTask = Task { [weak self] in
@@ -1531,6 +1657,8 @@ public actor AudioSessionActor {
         book = nil
         mediaURL = nil
         metadata = nil
+        resolvedPlayback = nil
+        lastResumeWrite = .distantPast
         playbackObserverID = nil
         incomingPositionObserverID = nil
         lastObservedIsPlaying = false
