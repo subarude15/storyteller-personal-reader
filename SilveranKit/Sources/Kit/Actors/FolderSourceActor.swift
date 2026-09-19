@@ -1575,7 +1575,11 @@ public actor FolderSourceActor: BookSourceActor {
             in: destinationDirectory,
             usedFilenames: &usedFilenames,
         )
-        try asset.data.write(to: destinationURL, options: .atomic)
+        if let fileURL = asset.fileURL {
+            try FileManager.default.copyItem(at: fileURL, to: destinationURL)
+        } else {
+            try asset.data.write(to: destinationURL, options: .atomic)
+        }
         return destinationURL
     }
 
@@ -1598,13 +1602,7 @@ public actor FolderSourceActor: BookSourceActor {
         _ asset: StorytellerUploadAsset,
         to filename: String,
     ) -> StorytellerUploadAsset {
-        StorytellerUploadAsset(
-            format: asset.format,
-            filename: filename,
-            data: asset.data,
-            contentType: asset.contentType,
-            relativePath: asset.relativePath,
-        )
+        asset.withFilename(filename)
     }
 
     private func fileExtension(for asset: StorytellerUploadAsset) -> String {

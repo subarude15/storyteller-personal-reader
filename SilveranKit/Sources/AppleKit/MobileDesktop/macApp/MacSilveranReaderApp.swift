@@ -284,7 +284,7 @@ struct SilveranReaderApp: App {
     }
 
     private var uploadNewBookScene: some Scene {
-        WindowGroup("Upload New Book", id: "UploadNewBook", for: UploadNewBookData.self) { data in
+        WindowGroup("Upload to Storyteller", id: "UploadNewBook", for: UploadNewBookData.self) { data in
             UploadNewBookView(initialSourceID: data.wrappedValue?.sourceID)
                 .environment(AppLaunchContext.environment)
                 .environment(mediaViewModel)
