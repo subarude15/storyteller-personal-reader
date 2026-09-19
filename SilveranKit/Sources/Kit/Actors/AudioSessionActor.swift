@@ -1575,7 +1575,12 @@ public actor AudioSessionActor {
 
     private func persistResolvedResume(using suppliedState: AudiobookPlaybackState? = nil) async {
         guard let playback = resolvedPlayback, let metadata else { return }
-        let state = suppliedState ?? await AudiobookActor.shared.getCurrentState()
+        let state: AudiobookPlaybackState?
+        if let suppliedState {
+            state = suppliedState
+        } else {
+            state = await AudiobookActor.shared.getCurrentState()
+        }
         guard let state else { return }
         let index = state.currentChapterIndex ?? 0
         let chapter = metadata.chapters[safe: index]
