@@ -5,7 +5,12 @@ import UIKit
 
 public struct PresentedPlayerCard: Identifiable {
     public let data: PlayerBookData
-    public var id: String { "\(data.metadata.id)-\(data.category.rawValue)" }
+    public var id: String {
+        if let resolvedAudiobookID = data.resolvedAudiobookID {
+            return "\(data.metadata.id)-\(data.category.rawValue)-\(resolvedAudiobookID)"
+        }
+        return "\(data.metadata.id)-\(data.category.rawValue)"
+    }
 }
 
 /// Owns the single full-screen player card and the one-card rule: presenting a
@@ -41,17 +46,24 @@ public final class PlayerPresenter {
         dismissalKeepsSession = false
         let replacingCard = card != nil
         card = PresentedPlayerCard(data: data)
-        BookRecentStore.shared.record(data.metadata.id)
-        NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
-        let statsKind = data.category == .ebook ? "reading" : "listening"
-        let medium = Self.statsMedium(for: data.category)
-        PunkRallyStatsEvents.sessionStart(
-            kind: statsKind,
-            mediaID: "\(data.metadata.id)",
-            mediaTitle: data.metadata.title,
-            medium: medium
-        )
-        Task { await LastOpenBookStore.save(bookData: data) }
+        let isResolved = data.resolvedAudiobookID != nil
+        if !isResolved {
+            BookRecentStore.shared.record(data.metadata.id)
+            NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
+            let statsKind = data.category == .ebook ? "reading" : "listening"
+            let medium = Self.statsMedium(for: data.category)
+            PunkRallyStatsEvents.sessionStart(
+                kind: statsKind,
+                mediaID: "\(data.metadata.id)",
+                mediaTitle: data.metadata.title,
+                medium: medium
+            )
+            Task { await LastOpenBookStore.save(bookData: data) }
+        } else {
+            // Don't start a Stats session Continue can't reopen, but stop a previous Read
+            // from counting while this stream plays.
+            PunkRallyStatsEvents.sessionEnd()
+        }
         if !replacingCard {
             // A replaced card ends its own session through its view teardown;
             // a live headless session (mini player, CarPlay) has no view to do
@@ -73,7 +85,7 @@ public final class PlayerPresenter {
                 "[PlayerPresenter] Dismissing card for \(bookID), keepsSession=\(keepsSession)"
             )
             self.dismissalKeepsSession = keepsSession
-            if !keepsSession {
+            if !keepsSession, current.data.resolvedAudiobookID == nil {
                 LastOpenBookStore.clearIfMatching(
                     bookId: bookID,
                     category: current.data.category,
@@ -163,6 +175,17 @@ public final class PlayerPresenter {
         category: LocalMediaCategory,
     ) async -> PlayerBookData? {
         let snapshot = await BookServiceActor.shared.librarySnapshot(policy: .cachedOnly)
+        if let liveID = await AudioSessionActor.shared.currentResolvedAudiobookID(),
+            let context = await ResolvedAudiobookLaunch.shared.context(for: bookID),
+            liveID == "\(context.playback.provider.rawValue):\(context.playback.providerItemID)"
+        {
+            return PlayerBookData(
+                metadata: context.book,
+                localMediaPath: nil,
+                category: .audio,
+                resolvedAudiobookID: liveID,
+            )
+        }
         guard let metadata = snapshot.books.first(where: { $0.id == bookID }) else { return nil }
         let localMediaPath = await BookServiceActor.shared.resolveLocalMedia(
             for: bookID,

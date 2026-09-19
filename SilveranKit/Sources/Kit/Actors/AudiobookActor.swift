@@ -158,6 +158,21 @@ public actor AudiobookActor {
         return source
     }
 
+    /// Loads chapters that are already normalized (including remote provider tracks).
+    /// Playback still goes through this actor, not a second player.
+    public func loadPreparedAudiobook(_ source: AudiobookMetadata) async throws -> AudiobookMetadata {
+        guard !source.tracks.isEmpty, !source.chapters.isEmpty else {
+            throw AudiobookError.failedToLoadMetadata
+        }
+        metadata = source
+        currentPackageRootURL = nil
+        currentTrackIndex = 0
+        await player?.stop()
+        player = nil
+        isPlaying = false
+        return source
+    }
+
     private struct Manifest: Decodable {
         struct Metadata: Decodable {
             let title: String?
@@ -478,7 +493,10 @@ public actor AudiobookActor {
         try? await factory.prepareSession(longForm: true)
 
         let track = metadata.tracks[currentTrackIndex]
-        let player = self.player ?? factory.makePlayer(profile: .audiobookTrack)
+        // Local packages stay on AVAudioPlayer. Remote provider tracks use the
+        // same AVPlayer profile podcasts already stream with.
+        let profile: AudioPlaybackProfile = track.url.isFileURL ? .audiobookTrack : .smilSegment
+        let player = self.player ?? factory.makePlayer(profile: profile)
         do {
             _ = try await player.load(url: track.url)
         } catch {

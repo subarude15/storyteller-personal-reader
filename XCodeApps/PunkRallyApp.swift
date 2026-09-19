@@ -174,6 +174,7 @@ public struct PunkRallyTabView: View {
                 } else if phase == .background {
                     Task {
                         await AudioSessionActor.shared.refreshNowPlaying()
+                        await AudioSessionActor.shared.flushResolvedResume()
                         await PodcastPlayerPresenter.persistPodcastProgress(markFinished: false)
                         if let progress = await AudioSessionActor.shared.podcastPlaybackProgress() {
                             PodcastRecentStore.shared.updateProgress(

@@ -1,4 +1,5 @@
 #if os(iOS) || os(macOS)
+import SilveranKit
 import SwiftUI
 
 #if canImport(AppKit)
@@ -34,6 +35,7 @@ struct MediaGridInfoSidebar: View {
     @State private var relatedItemOverride: BookMetadata?
     @State private var coverPalette = CoverDerivedPalette.fallback()
     @State private var showingFormatLink = false
+    @State private var showingAudiobookOptions = false
     @State private var alignmentOverride: ReadaloudAlignment?
     @State private var formatActionError: String?
 
@@ -108,6 +110,16 @@ struct MediaGridInfoSidebar: View {
         .sheet(isPresented: $showingFormatLink) {
             BookFormatLinkSheet(item: currentItem)
         }
+        .sheet(isPresented: $showingAudiobookOptions) {
+            AudiobookOptionsSheet(
+                work: CanonicalBookWork.library(currentItem),
+                book: currentItem,
+            )
+            #if os(iOS)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            #endif
+        }
         .alert("Couldn't update formats", isPresented: formatErrorPresented) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -129,6 +141,7 @@ struct MediaGridInfoSidebar: View {
             isNarratorSummaryExpanded = false
             alignmentOverride = nil
             formatActionError = nil
+            showingAudiobookOptions = false
             prepareForDisplay()
             loadDescription()
         }
@@ -224,6 +237,7 @@ struct MediaGridInfoSidebar: View {
                     MacBookDetailMediaControls(item: currentItem, presentation: .hero)
                 }
                 formatLinkButton
+                findAudiobookButton
                 formatAlignmentNote
 
                 let tags = currentItem.tagNames
@@ -590,6 +604,7 @@ struct MediaGridInfoSidebar: View {
                     iOSBookDetailCompactMediaControls(item: currentItem)
                 }
                 formatLinkButton
+                findAudiobookButton
                 formatAlignmentNote
 
                 if !currentItem.tagNames.isEmpty {
@@ -815,6 +830,28 @@ struct MediaGridInfoSidebar: View {
             get: { formatActionError != nil },
             set: { if !$0 { formatActionError = nil } },
         )
+    }
+
+    private var formatGroupHasAudiobook: Bool {
+        formatMembers.contains { book in
+            guard let audiobook = book.audiobook else { return false }
+            return !audiobook.isMissing
+        }
+    }
+
+    @ViewBuilder
+    private var findAudiobookButton: some View {
+        if !formatGroupHasAudiobook {
+            Button {
+                showingAudiobookOptions = true
+            } label: {
+                Label("Find audiobook options", systemImage: "headphones")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("find-audiobook-options")
+            .accessibilityHint("Searches audiobook providers for this book only after you tap.")
+        }
     }
 
     @ViewBuilder

@@ -268,6 +268,9 @@ public enum PunkRallyPlayerHost {
     }
 
     private static func isOpenable(_ bookData: PlayerBookData) -> Bool {
+        if bookData.resolvedAudiobookID != nil {
+            return true
+        }
         guard let path = bookData.localMediaPath else { return false }
         let exists = FileManager.default.fileExists(atPath: path.path)
         if !exists {
