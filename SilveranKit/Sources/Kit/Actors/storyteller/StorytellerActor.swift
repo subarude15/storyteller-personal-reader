@@ -116,7 +116,7 @@ public actor StorytellerActor {
             delegate: delegate,
             delegateQueue: nil,
         )
-        var uploadConfiguration = URLSessionConfiguration.default
+        let uploadConfiguration = URLSessionConfiguration.default
         uploadConfiguration.timeoutIntervalForRequest = 120
         uploadConfiguration.timeoutIntervalForResource = 6 * 60 * 60
         uploadConfiguration.requestCachePolicy = .reloadIgnoringLocalCacheData

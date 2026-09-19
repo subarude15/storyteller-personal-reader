@@ -570,7 +570,7 @@ public struct UploadNewBookView: View {
 
     /// Inspection already rejected bad files. This rebuilds the same request for the coordinator.
     private func requestFile(_ url: URL, role: StorytellerUploadFileRole) -> StorytellerUploadRequestFile {
-        if case .success(let file) = StorytellerUploadFileStaging.inspect(role: role, url: url) {
+        if case .file(let file) = StorytellerUploadFileStaging.inspect(role: role, url: url) {
             return file
         }
         let format: StorytellerBookFormat =
@@ -646,10 +646,10 @@ public struct UploadNewBookView: View {
 
     private func remember(_ url: URL, role: StorytellerUploadFileRole) {
         switch StorytellerUploadFileStaging.inspect(role: role, url: url) {
-            case .success(let file):
+            case .file(let file):
                 let size = ByteCountFormatter.string(fromByteCount: file.byteCount, countStyle: .file)
                 fileSummaries[url] = "\(file.filename) · \(size)"
-            case .failure(let message):
+            case .rejected(let message):
                 fileSummaries[url] = message
         }
     }

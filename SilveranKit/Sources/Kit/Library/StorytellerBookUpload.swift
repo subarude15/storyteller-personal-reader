@@ -282,6 +282,11 @@ public struct StorytellerUploadStagingError: Error, LocalizedError {
     }
 }
 
+public enum StorytellerUploadInspection: Equatable, Sendable {
+    case file(StorytellerUploadRequestFile)
+    case rejected(String)
+}
+
 public enum StorytellerUploadFileStaging {
     /// Copies into a temp directory while security scope is held, then releases it.
     /// Does not modify `url`.
@@ -323,7 +328,7 @@ public enum StorytellerUploadFileStaging {
         role: StorytellerUploadFileRole,
         url: URL,
         access: any SecurityScopedFileAccess = SystemSecurityScopedFileAccess(),
-    ) -> Result<StorytellerUploadRequestFile, String> {
+    ) -> StorytellerUploadInspection {
         let started = access.startAccessing(url)
         defer {
             if started { access.stopAccessing(url) }
@@ -331,7 +336,7 @@ public enum StorytellerUploadFileStaging {
         let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentTypeKey, .isRegularFileKey])
         let isRegular = values?.isRegularFile ?? url.isFileURL
         guard isRegular else {
-            return .failure("\(url.lastPathComponent) isn’t a file Storyteller can import.")
+            return .rejected("\(url.lastPathComponent) isn’t a file Storyteller can import.")
         }
         let byteCount = Int64(values?.fileSize ?? 0)
         let typeIdentifier = values?.contentType?.identifier
@@ -342,7 +347,7 @@ public enum StorytellerUploadFileStaging {
             byteCount: byteCount,
             typeIdentifier: typeIdentifier,
         ) {
-            return .failure(issue)
+            return .rejected(issue)
         }
         let format: StorytellerBookFormat =
             switch role {
@@ -350,7 +355,7 @@ public enum StorytellerUploadFileStaging {
                 case .audiobook: .audiobook
                 case .readaloud: .readaloud
             }
-        return .success(
+        return .file(
             StorytellerUploadRequestFile(
                 format: format,
                 filename: filename,
