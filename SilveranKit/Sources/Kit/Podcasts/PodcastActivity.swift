@@ -92,10 +92,11 @@ public final class PodcastActivityStore {
     /// Bumped on every write so overview rows refresh after the show is opened.
     private(set) var revision: Int = 0
 
-    public init(defaults: UserDefaults, defaultsKey: String = PodcastActivityStore.defaultKey) {
+    public init(defaults: UserDefaults, defaultsKey: String? = nil) {
+        let key = defaultsKey ?? Self.defaultKey
         self.defaults = defaults
-        self.defaultsKey = defaultsKey
-        acknowledged = Self.load(defaults: defaults, key: defaultsKey)
+        self.defaultsKey = key
+        acknowledged = Self.load(defaults: defaults, key: key)
     }
 
     public func showsNewActivity(feedURL: URL?, latestPublish: Date?) -> Bool {
