@@ -2841,6 +2841,156 @@ public actor StorytellerActor {
         UserDefaults.standard.string(forKey: Self.inkampPodcastSyncCollectionUUIDKey)
     }
 
+    // MARK: - ink+amp book format links (private collection blob)
+    //
+    // Storyteller's POST /api/v2/books/merge deletes the other book record and relocates
+    // files. This blob is the reversible association. See BookFormatLink.swift.
+
+    public func fetchInkampBookFormatLinksDocument() async -> BookFormatLinkFetchResult {
+        guard await ensureAuthentication() != nil else {
+            return .unavailable(reason: Self.bookFormatLinkAuthReason(connectionStatus))
+        }
+
+        let collections = await fetchCollections()
+        if let collections {
+            if let collection = collections.first(where: {
+                $0.name == BookFormatLinkDocument.collectionName
+            }) {
+                rememberInkampBookFormatLinksCollectionUUID(collection.uuid)
+                return Self.bookFormatLinksDocument(from: collection)
+            }
+        } else {
+            if let remembered = rememberedInkampBookFormatLinksCollectionUUID(),
+                let collection = await fetchCollection(uuid: remembered)
+            {
+                return Self.bookFormatLinksDocument(from: collection)
+            }
+            return .unavailable(reason: "offline")
+        }
+
+        if let remembered = rememberedInkampBookFormatLinksCollectionUUID(),
+            let collection = await fetchCollection(uuid: remembered)
+        {
+            return Self.bookFormatLinksDocument(from: collection)
+        }
+        return .empty
+    }
+
+    public func pushInkampBookFormatLinksDocument(_ document: BookFormatLinkDocument) async
+        -> BookFormatLinkPushResult
+    {
+        guard await ensureAuthentication() != nil else {
+            return .failure(reason: Self.bookFormatLinkAuthReason(connectionStatus))
+        }
+        let encoded: String
+        do {
+            encoded = try BookFormatLinkMerge.encodeDescription(document)
+        } catch {
+            logStorytellerError("pushInkampBookFormatLinksDocument encode", error: error)
+            return .failure(reason: "encode failed")
+        }
+
+        if let existing = await inkampBookFormatLinksCollection() {
+            rememberInkampBookFormatLinksCollectionUUID(existing.uuid)
+            let updated = await updateCollection(
+                uuid: existing.uuid,
+                payload: StorytellerCollectionUpdatePayload(
+                    description: encoded,
+                    isPublic: false
+                )
+            )
+            if updated != nil {
+                return .success
+            }
+            return .failure(reason: Self.bookFormatLinkWriteFailureReason(connectionStatus))
+        }
+
+        let created = await createCollection(
+            StorytellerCollectionCreatePayload(
+                name: BookFormatLinkDocument.collectionName,
+                description: encoded,
+                isPublic: false,
+                users: nil
+            )
+        )
+        if let created {
+            if created.uuid != "pending" {
+                rememberInkampBookFormatLinksCollectionUUID(created.uuid)
+            }
+            return .success
+        }
+        return .failure(reason: Self.bookFormatLinkWriteFailureReason(connectionStatus))
+    }
+
+    private func inkampBookFormatLinksCollectionUUIDKey() -> String {
+        "punkRally.bookFormatLinks.collectionUUID.v1.\(sourceRecordValue.id)"
+    }
+
+    private static func bookFormatLinksDocument(from collection: StorytellerCollection)
+        -> BookFormatLinkFetchResult
+    {
+        guard let description = collection.description, !description.isEmpty, description.hasPrefix("{")
+        else {
+            return .empty
+        }
+        guard let document = try? BookFormatLinkMerge.decodeDescription(description) else {
+            return .unavailable(reason: "decode failed")
+        }
+        return .document(document)
+    }
+
+    private func inkampBookFormatLinksCollection() async -> StorytellerCollection? {
+        if let collections = await fetchCollections(),
+            let found = collections.first(where: { $0.name == BookFormatLinkDocument.collectionName })
+        {
+            rememberInkampBookFormatLinksCollectionUUID(found.uuid)
+            return found
+        }
+        if let uuid = rememberedInkampBookFormatLinksCollectionUUID(),
+            let collection = await fetchCollection(uuid: uuid)
+        {
+            return collection
+        }
+        return nil
+    }
+
+    private func rememberInkampBookFormatLinksCollectionUUID(_ uuid: String) {
+        guard uuid != "pending", !uuid.isEmpty else { return }
+        UserDefaults.standard.set(uuid, forKey: inkampBookFormatLinksCollectionUUIDKey())
+    }
+
+    private func rememberedInkampBookFormatLinksCollectionUUID() -> String? {
+        UserDefaults.standard.string(forKey: inkampBookFormatLinksCollectionUUIDKey())
+    }
+
+    private static func bookFormatLinkAuthReason(_ status: ConnectionStatus) -> String {
+        if case .error(let message) = status {
+            let lower = message.lowercased()
+            if lower.contains("credential") || lower.contains("unauthorized") {
+                return "auth failed"
+            }
+        }
+        return "offline"
+    }
+
+    private static func bookFormatLinkWriteFailureReason(_ status: ConnectionStatus) -> String {
+        switch status {
+            case .error(let message):
+                let lower = message.lowercased()
+                if lower.contains("credential") || lower.contains("unauthorized") {
+                    return "auth failed"
+                }
+                if lower.contains("timeout") || lower.contains("timed out") {
+                    return "timeout"
+                }
+                return "offline"
+            case .disconnected:
+                return "offline"
+            case .connected, .connecting:
+                return "server rejected"
+        }
+    }
+
     private static func peekCollectionUUID(from data: Data) -> String? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let uuid = object["uuid"] as? String,

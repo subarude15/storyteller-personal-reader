@@ -97,6 +97,8 @@ public final class MediaViewModel {
 
     public var library: BookLibrary
     public var libraryVersion: Int = 0
+    /// Active format links. Storyteller book records stay in `library`; this only groups them.
+    public private(set) var formatLinks: [BookFormatLink] = []
     public var isReady: Bool = false
     public var connectionStatus: ConnectionStatus = .disconnected
     public var sourceConnectionInfos: [SourceConnectionInfo] = []
@@ -597,6 +599,7 @@ public final class MediaViewModel {
             ),
         )
         sourceGroupsCache.removeAll()
+        formatLinks = await cachedFormatLinks()
         scheduleLibraryDerivation(reason: "refreshMetadata(\(source))")
         setIfChanged(\.connectionStatus, status)
         setIfChanged(
@@ -620,6 +623,7 @@ public final class MediaViewModel {
             "[PerfTrace][MediaViewModel] refreshMetadata complete books=\(library.bookMetaData.count)"
         )
         scheduleWidgetSnapshotPublish(reason: "refreshMetadata(\(source))")
+        await refreshBookFormatLinksFromServer()
         let elapsed = (CFAbsoluteTimeGetCurrent() - started) * 1000
         debugLog(
             "[PerfTrace][MediaViewModel] refreshMetadata end source=\(source) elapsedMs=\(String(format: "%.1f", elapsed))"
@@ -654,7 +658,7 @@ public final class MediaViewModel {
     {
         let input = MediaGridRenderInput(
             request: request,
-            metadata: library.bookMetaData,
+            metadata: libraryCatalog(),
             paths: cachedBookPaths,
             folderSourceBookIds: folderSourceBookIds,
         )
@@ -701,7 +705,7 @@ public final class MediaViewModel {
         let input = LibraryDerivationInput(
             generation: generation,
             deriveGroups: deriveGroups,
-            metadata: library.bookMetaData,
+            metadata: libraryCatalog(),
             paths: cachedBookPaths,
             folderSourceBookIds: folderSourceBookIds,
             storytellerBookIds: storytellerBookIds,
@@ -1926,6 +1930,91 @@ public final class MediaViewModel {
             )
         )
         return didDelete
+    }
+
+    public func formatGroupMembers(for book: BookMetadata) -> [BookMetadata] {
+        let members = BookFormatGrouping.members(
+            of: book.id,
+            in: library.bookMetaData,
+            links: formatLinks,
+        )
+        return members.isEmpty ? [book] : members
+    }
+
+    public func linkBookFormat(
+        _ other: BookMetadata,
+        to primary: BookMetadata,
+        startAlignment: Bool,
+    ) async -> BookFormatLinkOutcome {
+        let outcome = await BookFormatLinkCoordinator.shared.link(
+            sourceID: primary.sourceID,
+            primary: primary,
+            other: other,
+            library: library.bookMetaData,
+            startAlignment: startAlignment,
+        )
+        if case .linked(let document, _) = outcome {
+            replaceFormatLinks(sourceID: primary.sourceID, with: document.activeLinks)
+            scheduleLibraryDerivation(reason: "linkBookFormat")
+            await refreshMetadata(source: "linkBookFormat")
+        }
+        return outcome
+    }
+
+    public func unlinkBookFormats(_ book: BookMetadata) async -> BookFormatLinkOutcome {
+        let outcome = await BookFormatLinkCoordinator.shared.unlink(
+            sourceID: book.sourceID,
+            bookID: book.id,
+        )
+        if case .unlinked(let document) = outcome {
+            replaceFormatLinks(sourceID: book.sourceID, with: document.activeLinks)
+            scheduleLibraryDerivation(reason: "unlinkBookFormat")
+            await refreshMetadata(source: "unlinkBookFormat")
+        }
+        return outcome
+    }
+
+    public func retryFormatReadaloud(for book: BookMetadata) async -> BookFormatLinkOutcome {
+        await BookFormatLinkCoordinator.shared.retryAlignment(
+            members: formatGroupMembers(for: book)
+        )
+    }
+
+    private func replaceFormatLinks(sourceID: BookSourceID, with active: [BookFormatLink]) {
+        formatLinks.removeAll { $0.primary.sourceID == sourceID }
+        formatLinks.append(contentsOf: active)
+    }
+
+    private func libraryCatalog() -> [BookMetadata] {
+        BookFormatGrouping.visibleBooks(library.bookMetaData, links: formatLinks)
+    }
+
+    private func cachedFormatLinks() async -> [BookFormatLink] {
+        var merged: [BookFormatLink] = []
+        for source in bookSources where source.kind == .storyteller {
+            let links = await BookFormatLinkCoordinator.shared.cachedActiveLinks(sourceID: source.id)
+            merged.append(contentsOf: links)
+        }
+        return merged
+    }
+
+    private func refreshBookFormatLinksFromServer() async {
+        let sources = bookSources.filter { $0.kind == .storyteller }
+        guard !sources.isEmpty else {
+            if !formatLinks.isEmpty {
+                formatLinks = []
+                scheduleLibraryDerivation(reason: "formatLinksCleared")
+            }
+            return
+        }
+        var merged: [BookFormatLink] = []
+        for source in sources {
+            let links = await BookFormatLinkCoordinator.shared.refresh(sourceID: source.id)
+            merged.append(contentsOf: links)
+        }
+        guard merged != formatLinks else { return }
+        formatLinks = merged
+        scheduleLibraryDerivation(reason: "formatLinks")
     }
 
     /// Storyteller library delete. Same server call as Mac `ServerMediaManagementView`.

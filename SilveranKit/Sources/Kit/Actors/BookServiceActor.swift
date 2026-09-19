@@ -1477,6 +1477,25 @@ public actor BookServiceActor {
         return await storyteller.pushInkampPodcastSyncDocument(document)
     }
 
+    public func fetchInkampBookFormatLinksDocument(sourceID: BookSourceID) async
+        -> BookFormatLinkFetchResult
+    {
+        guard let storyteller = await storytellerActor(for: sourceID) else {
+            return .unavailable(reason: "offline")
+        }
+        return await storyteller.fetchInkampBookFormatLinksDocument()
+    }
+
+    public func pushInkampBookFormatLinksDocument(
+        _ document: BookFormatLinkDocument,
+        sourceID: BookSourceID,
+    ) async -> BookFormatLinkPushResult {
+        guard let storyteller = await storytellerActor(for: sourceID) else {
+            return .failure(reason: "offline")
+        }
+        return await storyteller.pushInkampBookFormatLinksDocument(document)
+    }
+
     private func primaryStorytellerActor() async -> StorytellerActor? {
         await ensureSourceRegistryLoaded()
         return storytellerActors().first
