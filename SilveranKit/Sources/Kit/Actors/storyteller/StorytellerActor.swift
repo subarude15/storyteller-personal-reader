@@ -2876,17 +2876,13 @@ public actor StorytellerActor {
         return .empty
     }
 
-    public func pushInkampBookFormatLinksDocument(_ document: BookFormatLinkDocument) async
+    public func pushInkampBookFormatLinksDocument(_ description: String) async
         -> BookFormatLinkPushResult
     {
         guard await ensureAuthentication() != nil else {
             return .failure(reason: Self.bookFormatLinkAuthReason(connectionStatus))
         }
-        let encoded: String
-        do {
-            encoded = try BookFormatLinkMerge.encodeDescription(document)
-        } catch {
-            logStorytellerError("pushInkampBookFormatLinksDocument encode", error: error)
+        guard description.hasPrefix("{") else {
             return .failure(reason: "encode failed")
         }
 
@@ -2895,7 +2891,7 @@ public actor StorytellerActor {
             let updated = await updateCollection(
                 uuid: existing.uuid,
                 payload: StorytellerCollectionUpdatePayload(
-                    description: encoded,
+                    description: description,
                     isPublic: false
                 )
             )
@@ -2908,7 +2904,7 @@ public actor StorytellerActor {
         let created = await createCollection(
             StorytellerCollectionCreatePayload(
                 name: BookFormatLinkDocument.collectionName,
-                description: encoded,
+                description: description,
                 isPublic: false,
                 users: nil
             )
@@ -2929,19 +2925,19 @@ public actor StorytellerActor {
     private static func bookFormatLinksDocument(from collection: StorytellerCollection)
         -> BookFormatLinkFetchResult
     {
-        guard let description = collection.description, !description.isEmpty, description.hasPrefix("{")
+        guard let description = collection.description, !description.isEmpty,
+            description.hasPrefix("{")
         else {
             return .empty
         }
-        guard let document = try? BookFormatLinkMerge.decodeDescription(description) else {
-            return .unavailable(reason: "decode failed")
-        }
-        return .document(document)
+        return .document(description)
     }
 
     private func inkampBookFormatLinksCollection() async -> StorytellerCollection? {
         if let collections = await fetchCollections(),
-            let found = collections.first(where: { $0.name == BookFormatLinkDocument.collectionName })
+            let found = collections.first(where: {
+                $0.name == BookFormatLinkDocument.collectionName
+            })
         {
             rememberInkampBookFormatLinksCollectionUUID(found.uuid)
             return found

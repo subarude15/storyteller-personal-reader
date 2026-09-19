@@ -10,6 +10,12 @@ import Foundation
 // podcasts. Storyteller stays authoritative for records, files, and progress. The blob
 // syncs across devices signed into that server. It is not a second copy of the books.
 //
+// The collection is fetched through one Storyteller source, so the blob stores only
+// that server's book UUIDs. A device's BookSourceID is random and must not be written
+// into the collection. On read, those UUIDs are resolved to BookIDs for the source
+// that fetched them. Schema 1 documents from the first version of this feature stored
+// composite BookIDs; they are read by UUID and rewritten as schema 2.
+//
 // Readaloud creation still uses `POST /api/v2/books/{id}/process`, and only when one
 // record already has both an e-book and an audiobook. Split records are not sent through
 // merge, and the UI must not call them ready until a record's readaloud status is ALIGNED.
@@ -45,7 +51,7 @@ public struct BookFormatPlayback: Equatable, Sendable, Identifiable {
     }
 }
 
-public struct BookFormatLink: Codable, Equatable, Sendable, Identifiable {
+public struct BookFormatLink: Equatable, Sendable, Identifiable {
     public var id: String
     public var members: [BookID]
     public var primary: BookID
@@ -54,26 +60,33 @@ public struct BookFormatLink: Codable, Equatable, Sendable, Identifiable {
     public var removed: Bool
 
     public init(
-        id: String,
+        id: String = "",
         members: [BookID],
         primary: BookID,
         updatedAt: Date,
         removed: Bool,
     ) {
-        self.id = id
         self.members = members
         self.primary = primary
         self.updatedAt = updatedAt
         self.removed = removed
+        // Ignore any caller-supplied id. It used to include the device-local source id.
+        self.id = Self.identifier(for: members)
+        _ = id
     }
 
     public static func identifier(for members: [BookID]) -> String {
-        members.map(\.description).sorted().joined(separator: "|")
+        identifier(forUUIDs: members.map(\.uuid))
+    }
+
+    /// Sorted Storyteller book UUIDs. The same pair produces this id on every device.
+    public static func identifier(forUUIDs uuids: [String]) -> String {
+        uuids.sorted().joined(separator: "|")
     }
 }
 
-public struct BookFormatLinkDocument: Codable, Equatable, Sendable {
-    public static let schemaVersion = 1
+public struct BookFormatLinkDocument: Equatable, Sendable {
+    public static let schemaVersion = 2
     public static let collectionName = ".inkamp.bookFormatLinks.v1"
 
     public var schemaVersion: Int
@@ -149,7 +162,8 @@ public enum BookFormatLinkFailure: Equatable, Sendable {
                 return
                     "These books can't be linked. Choose an e-book, audiobook, or Readaloud that doesn't already share a format. \(unchanged)"
             case .alreadyLinked:
-                return "That book is already linked to another edition. Unlink it there first. \(unchanged)"
+                return
+                    "That book is already linked to another edition. Unlink it there first. \(unchanged)"
             case .serverRejected:
                 return
                     "Storyteller didn't accept the change. It may have timed out or rejected it. \(unchanged)"
@@ -208,7 +222,8 @@ public struct BookFormatLinkConfirmation: Equatable, Sendable {
 public enum BookFormatLinkFetchResult: Equatable, Sendable {
     case unavailable(reason: String)
     case empty
-    case document(BookFormatLinkDocument)
+    /// Raw collection description. The caller resolves it for one local source.
+    case document(String)
 }
 
 public enum BookFormatLinkPushResult: Equatable, Sendable {
@@ -221,6 +236,17 @@ public enum BookFormatLinkOutcome: Equatable, Sendable {
     case unlinked(BookFormatLinkDocument)
     case alignment(ReadaloudAlignment)
     case failed(BookFormatLinkFailure)
+}
+
+public struct DecodedBookFormatLinks: Equatable, Sendable {
+    public var document: BookFormatLinkDocument
+    /// True when the stored JSON was schema 1 or still carried a device source id.
+    public var needsRewrite: Bool
+
+    public init(document: BookFormatLinkDocument, needsRewrite: Bool) {
+        self.document = document
+        self.needsRewrite = needsRewrite
+    }
 }
 
 public enum BookFormatLinkMerge {
@@ -248,23 +274,85 @@ public enum BookFormatLinkMerge {
         )
     }
 
+    /// Schema 2 collection body. Member and primary values are Storyteller book UUIDs.
     public static func encodeDescription(_ document: BookFormatLinkDocument) throws -> String {
+        let wire = WireDocument(
+            schemaVersion: BookFormatLinkDocument.schemaVersion,
+            updatedAt: document.updatedAt,
+            links: document.links.map { link in
+                let uuids = link.members.map(\.uuid)
+                return WireLink(
+                    id: BookFormatLink.identifier(forUUIDs: uuids),
+                    members: uuids.sorted(),
+                    primary: link.primary.uuid,
+                    updatedAt: link.updatedAt,
+                    removed: link.removed,
+                )
+            },
+        )
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(document)
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            try container.encode(BookFormatLinkDates.string(from: date))
+        }
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(wire)
         guard let string = String(data: data, encoding: .utf8) else {
             throw BookFormatLinkCodecError.utf8
         }
         return string
     }
 
-    public static func decodeDescription(_ string: String) throws -> BookFormatLinkDocument {
+    /// Reads schema 2 UUID links and schema 1 composite BookIDs. `sourceID` is the
+    /// device-local id of the Storyteller source that owns this collection.
+    public static func decodeDescription(
+        _ string: String,
+        sourceID: BookSourceID,
+    ) throws -> DecodedBookFormatLinks {
         guard let data = string.data(using: .utf8) else {
             throw BookFormatLinkCodecError.utf8
         }
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(BookFormatLinkDocument.self, from: data)
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let raw = try container.decode(String.self)
+            guard let date = BookFormatLinkDates.date(from: raw) else {
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "unreadable date",
+                )
+            }
+            return date
+        }
+        let stored = try decoder.decode(StoredDocument.self, from: data)
+        var needsRewrite = stored.schemaVersion != BookFormatLinkDocument.schemaVersion
+        var links: [BookFormatLink] = []
+        for storedLink in stored.links {
+            var uuids = storedLink.members.map(\.uuid)
+            if !uuids.contains(storedLink.primary.uuid) {
+                uuids.append(storedLink.primary.uuid)
+            }
+            if storedLink.members.contains(where: \.wasComposite) || storedLink.primary.wasComposite
+            {
+                needsRewrite = true
+            }
+            let members = uuids.map { BookID(sourceID: sourceID, uuid: $0) }
+            let link = BookFormatLink(
+                members: members,
+                primary: BookID(sourceID: sourceID, uuid: storedLink.primary.uuid),
+                updatedAt: storedLink.updatedAt,
+                removed: storedLink.removed,
+            )
+            if storedLink.id != link.id {
+                needsRewrite = true
+            }
+            links.append(link)
+        }
+        let document = BookFormatLinkDocument(
+            updatedAt: stored.updatedAt ?? links.map(\.updatedAt).max() ?? .distantPast,
+            links: links,
+        )
+        return DecodedBookFormatLinks(document: document, needsRewrite: needsRewrite)
     }
 
     public static func failure(forTransportReason reason: String) -> BookFormatLinkFailure {
@@ -290,6 +378,85 @@ public enum BookFormatLinkCodecError: Error, Sendable {
     case utf8
 }
 
+private enum BookFormatLinkDates {
+    static func string(from date: Date) -> String {
+        fractionalFormatter().string(from: date)
+    }
+
+    static func date(from string: String) -> Date? {
+        fractionalFormatter().date(from: string) ?? plainFormatter().date(from: string)
+    }
+
+    private static func fractionalFormatter() -> ISO8601DateFormatter {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }
+
+    private static func plainFormatter() -> ISO8601DateFormatter {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }
+}
+
+private struct WireDocument: Encodable {
+    var schemaVersion: Int
+    var updatedAt: Date
+    var links: [WireLink]
+}
+
+private struct WireLink: Encodable {
+    var id: String
+    var members: [String]
+    var primary: String
+    var updatedAt: Date
+    var removed: Bool
+}
+
+private struct StoredDocument: Decodable {
+    var schemaVersion: Int?
+    var updatedAt: Date?
+    var links: [StoredLink]
+}
+
+private struct StoredLink: Decodable {
+    var id: String?
+    var members: [StoredMember]
+    var primary: StoredMember
+    var updatedAt: Date
+    var removed: Bool
+}
+
+private struct StoredMember: Decodable {
+    var uuid: String
+    var wasComposite: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case sourceID
+        case uuid
+    }
+
+    init(from decoder: Decoder) throws {
+        if let keyed = try? decoder.container(keyedBy: CodingKeys.self),
+            keyed.contains(.uuid)
+        {
+            uuid = try keyed.decode(String.self, forKey: .uuid)
+            wasComposite = keyed.contains(.sourceID)
+            return
+        }
+        let single = try decoder.singleValueContainer()
+        let raw = try single.decode(String.self)
+        if let slash = raw.lastIndex(of: "/") {
+            uuid = String(raw[raw.index(after: slash)...])
+            wasComposite = true
+        } else {
+            uuid = raw
+            wasComposite = false
+        }
+    }
+}
+
 public enum BookFormatTexts {
     public static func fold(_ raw: String) -> String {
         let lowered = raw.folding(
@@ -309,10 +476,13 @@ public enum BookFormatTexts {
         var core = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if let subtitle {
             let trimmed = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty, core.lowercased().hasSuffix(trimmed.lowercased()), core.count > trimmed.count
+            if !trimmed.isEmpty, core.lowercased().hasSuffix(trimmed.lowercased()),
+                core.count > trimmed.count
             {
                 core = String(core.dropLast(trimmed.count))
-                core = core.trimmingCharacters(in: .punctuationCharacters.union(.whitespacesAndNewlines))
+                core = core.trimmingCharacters(
+                    in: .punctuationCharacters.union(.whitespacesAndNewlines)
+                )
             }
         }
         for separator in [":", " — ", " – ", " - "] {
@@ -378,7 +548,9 @@ public enum BookFormatTexts {
 
     public static func editionSummary(for book: BookMetadata) -> String {
         var parts: [String] = []
-        if let subtitle = book.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines), !subtitle.isEmpty {
+        if let subtitle = book.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !subtitle.isEmpty
+        {
             parts.append(subtitle)
         }
         if let year = BookMetadata.publicationYear(from: book.publicationDate) {
@@ -394,7 +566,9 @@ public enum BookFormatTexts {
         if let narrator = book.narrators?.compactMap(\.name).first, !narrator.isEmpty {
             parts.append("Narrated by \(narrator)")
         }
-        if let language = book.language?.trimmingCharacters(in: .whitespacesAndNewlines), !language.isEmpty {
+        if let language = book.language?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !language.isEmpty
+        {
             parts.append(language.uppercased())
         }
         return parts.isEmpty ? "No extra edition details" : parts.joined(separator: " · ")
@@ -419,7 +593,9 @@ public enum BookFormatMatcher {
         if book.source?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "podcast" {
             return true
         }
-        return book.tagNames.contains { $0.compare("podcast", options: .caseInsensitive) == .orderedSame }
+        return book.tagNames.contains {
+            $0.compare("podcast", options: .caseInsensitive) == .orderedSame
+        }
     }
 
     public static func isCompatible(_ candidate: BookMetadata, with current: BookMetadata) -> Bool {
@@ -438,7 +614,9 @@ public enum BookFormatMatcher {
 
     public static func score(_ candidate: BookMetadata, against current: BookMetadata) -> Int {
         var score = 0
-        let currentISBN = BookFormatTexts.isbnTokens(in: [current.title, current.subtitle, current.description])
+        let currentISBN = BookFormatTexts.isbnTokens(in: [
+            current.title, current.subtitle, current.description,
+        ])
         let candidateISBN = BookFormatTexts.isbnTokens(in: [
             candidate.title, candidate.subtitle, candidate.description,
         ])
@@ -455,8 +633,12 @@ public enum BookFormatMatcher {
         {
             score += 180
         }
-        let currentAuthors = Set((current.authors ?? []).compactMap(\.name).map(BookFormatTexts.fold))
-        let candidateAuthors = Set((candidate.authors ?? []).compactMap(\.name).map(BookFormatTexts.fold))
+        let currentAuthors = Set(
+            (current.authors ?? []).compactMap(\.name).map(BookFormatTexts.fold)
+        )
+        let candidateAuthors = Set(
+            (candidate.authors ?? []).compactMap(\.name).map(BookFormatTexts.fold)
+        )
         if !currentAuthors.isEmpty, !currentAuthors.isDisjoint(with: candidateAuthors) {
             score += 250
         }
@@ -464,7 +646,8 @@ public enum BookFormatMatcher {
         let candidateSeries = BookFormatTexts.fold(candidate.series?.first?.name ?? "")
         if !currentSeries.isEmpty, currentSeries == candidateSeries {
             score += 120
-            if let left = current.series?.first?.position, let right = candidate.series?.first?.position, left == right
+            if let left = current.series?.first?.position,
+                let right = candidate.series?.first?.position, left == right
             {
                 score += 40
             }
@@ -513,9 +696,10 @@ public enum BookFormatMatcher {
         if let year = BookMetadata.publicationYear(from: book.publicationDate) {
             fields.append(year)
         }
-        let isbn = BookFormatTexts.isbnTokens(in: [book.title, book.subtitle, book.description]).joined(
-            separator: " "
-        )
+        let isbn = BookFormatTexts.isbnTokens(in: [book.title, book.subtitle, book.description])
+            .joined(
+                separator: " "
+            )
         fields.append(isbn)
         return fields.contains { field in
             guard let field else { return false }
@@ -612,7 +796,8 @@ public enum BookFormatAlignment {
                         bookID: best.0.id,
                         canRetry: false,
                         canStart: false,
-                        message: "Readaloud is queued on Storyteller. It is not ready for Read & Listen yet.",
+                        message:
+                            "Readaloud is queued on Storyteller. It is not ready for Read & Listen yet.",
                     )
                 case .processing:
                     return ReadaloudAlignment(
@@ -620,7 +805,8 @@ public enum BookFormatAlignment {
                         bookID: best.0.id,
                         canRetry: false,
                         canStart: false,
-                        message: "Readaloud is processing on Storyteller. It is not ready for Read & Listen yet.",
+                        message:
+                            "Readaloud is processing on Storyteller. It is not ready for Read & Listen yet.",
                     )
                 case .failed:
                     return ReadaloudAlignment(
@@ -658,7 +844,9 @@ public enum BookFormatAlignment {
         )
     }
 
-    public static func confirmation(current: BookMetadata, other: BookMetadata) -> BookFormatLinkConfirmation {
+    public static func confirmation(current: BookMetadata, other: BookMetadata)
+        -> BookFormatLinkConfirmation
+    {
         let alignment = assess([current, other])
         let currentLine = recordLine(current)
         let otherLine = recordLine(other)
@@ -667,9 +855,12 @@ public enum BookFormatAlignment {
 
             \(otherLine)
 
-            Both records, files, downloads, bookmarks, and progress stay as they are. Nothing is deleted or rewritten.
+            Both records, files, downloads, bookmarks, and progress stay as they are. Nothing is \
+            deleted or rewritten.
 
-            The link is saved in your private Storyteller library data and syncs to other devices signed into this server. This is not Storyteller's Merge Books action, which would delete one record.
+            The link is saved in your private Storyteller library data and syncs to other devices \
+            signed into this server. This is not Storyteller's Merge Books action, which would \
+            delete one record.
 
             \(alignment.message)
             """

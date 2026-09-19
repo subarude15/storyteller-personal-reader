@@ -7,7 +7,7 @@ public protocol BookFormatLinkCache: Sendable {
 
 public protocol BookFormatLinkTransport: Sendable {
     func fetchDocument(sourceID: BookSourceID) async -> BookFormatLinkFetchResult
-    func pushDocument(sourceID: BookSourceID, document: BookFormatLinkDocument) async -> BookFormatLinkPushResult
+    func pushDocument(sourceID: BookSourceID, description: String) async -> BookFormatLinkPushResult
     func startAlignment(bookID: BookID, restart: AlignmentRestartMode) async -> Bool
 }
 
@@ -20,18 +20,19 @@ public struct UserDefaultsBookFormatLinkCache: BookFormatLinkCache, @unchecked S
     }
 
     public func load(sourceID: BookSourceID) async -> BookFormatLinkDocument {
-        guard let data = defaults.data(forKey: Self.key(sourceID)) else {
+        guard let data = defaults.data(forKey: Self.key(sourceID)),
+            let raw = String(data: data, encoding: .utf8)
+        else {
             return .empty
         }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode(BookFormatLinkDocument.self, from: data)) ?? .empty
+        return (try? BookFormatLinkMerge.decodeDescription(raw, sourceID: sourceID).document)
+            ?? .empty
     }
 
     public func save(sourceID: BookSourceID, document: BookFormatLinkDocument) async {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        guard let data = try? encoder.encode(document) else { return }
+        guard let raw = try? BookFormatLinkMerge.encodeDescription(document),
+            let data = raw.data(using: .utf8)
+        else { return }
         defaults.set(data, forKey: Self.key(sourceID))
     }
 
@@ -49,9 +50,12 @@ public struct StorytellerBookFormatLinkTransport: BookFormatLinkTransport {
 
     public func pushDocument(
         sourceID: BookSourceID,
-        document: BookFormatLinkDocument,
+        description: String,
     ) async -> BookFormatLinkPushResult {
-        await BookServiceActor.shared.pushInkampBookFormatLinksDocument(document, sourceID: sourceID)
+        await BookServiceActor.shared.pushInkampBookFormatLinksDocument(
+            description,
+            sourceID: sourceID
+        )
     }
 
     public func startAlignment(bookID: BookID, restart: AlignmentRestartMode) async -> Bool {
@@ -91,8 +95,14 @@ public actor BookFormatLinkCoordinator {
                     return []
                 }
                 return local.activeLinks
-            case .document(let remote):
-                let merged = BookFormatLinkMerge.merge(local: local, remote: remote)
+            case .document(let raw):
+                guard let decoded = Self.decoded(raw, sourceID: sourceID) else {
+                    return local.activeLinks
+                }
+                let merged = BookFormatLinkMerge.merge(local: local, remote: decoded.document)
+                if decoded.needsRewrite {
+                    await self.rewrite(merged, sourceID: sourceID)
+                }
                 await cache.save(sourceID: sourceID, document: merged)
                 return merged.activeLinks
         }
@@ -134,8 +144,11 @@ public actor BookFormatLinkCoordinator {
                 return .failed(BookFormatLinkMerge.failure(forTransportReason: reason))
             case .empty:
                 base = local
-            case .document(let remote):
-                base = BookFormatLinkMerge.merge(local: local, remote: remote)
+            case .document(let raw):
+                guard let decoded = Self.decoded(raw, sourceID: sourceID) else {
+                    return .failed(.serverRejected)
+                }
+                base = BookFormatLinkMerge.merge(local: local, remote: decoded.document)
         }
 
         if BookFormatMatcher.isLinked(primary.id, links: base.activeLinks)
@@ -158,7 +171,7 @@ public actor BookFormatLinkCoordinator {
         links.append(link)
         let proposed = BookFormatLinkDocument(updatedAt: now, links: links.sorted { $0.id < $1.id })
 
-        switch await transport.pushDocument(sourceID: sourceID, document: proposed) {
+        switch await push(proposed, sourceID: sourceID) {
             case .failure(let reason):
                 return .failed(BookFormatLinkMerge.failure(forTransportReason: reason))
             case .success:
@@ -205,11 +218,15 @@ public actor BookFormatLinkCoordinator {
                 return .failed(BookFormatLinkMerge.failure(forTransportReason: reason))
             case .empty:
                 remoteBase = local
-            case .document(let remote):
-                remoteBase = BookFormatLinkMerge.merge(local: local, remote: remote)
+            case .document(let raw):
+                guard let decoded = Self.decoded(raw, sourceID: sourceID) else {
+                    return .failed(.serverRejected)
+                }
+                remoteBase = BookFormatLinkMerge.merge(local: local, remote: decoded.document)
         }
 
-        guard let existing = remoteBase.activeLinks.first(where: { $0.members.contains(bookID) }) else {
+        guard let existing = remoteBase.activeLinks.first(where: { $0.members.contains(bookID) })
+        else {
             return .failed(.notLinked)
         }
         let now = Date()
@@ -224,7 +241,7 @@ public actor BookFormatLinkCoordinator {
         links.append(tombstone)
         let proposed = BookFormatLinkDocument(updatedAt: now, links: links.sorted { $0.id < $1.id })
 
-        switch await transport.pushDocument(sourceID: sourceID, document: proposed) {
+        switch await push(proposed, sourceID: sourceID) {
             case .failure(let reason):
                 return .failed(BookFormatLinkMerge.failure(forTransportReason: reason))
             case .success:
@@ -252,8 +269,30 @@ public actor BookFormatLinkCoordinator {
                 bookID: bookID,
                 canRetry: false,
                 canStart: false,
-                message: "Storyteller queued Readaloud alignment again. It is not ready for Read & Listen yet.",
+                message:
+                    "Storyteller queued Readaloud alignment again. It is not ready for Read & Listen yet.",
             )
         )
+    }
+
+    private static func decoded(_ raw: String, sourceID: BookSourceID) -> DecodedBookFormatLinks? {
+        try? BookFormatLinkMerge.decodeDescription(raw, sourceID: sourceID)
+    }
+
+    /// Encodes schema 2. Encode failure is reported as a rejected push so nothing is marked linked.
+    private func push(
+        _ document: BookFormatLinkDocument,
+        sourceID: BookSourceID,
+    ) async -> BookFormatLinkPushResult {
+        guard let description = try? BookFormatLinkMerge.encodeDescription(document) else {
+            return .failure(reason: "encode failed")
+        }
+        return await transport.pushDocument(sourceID: sourceID, description: description)
+    }
+
+    /// Best-effort rewrite of a schema 1 collection. Failure leaves the resolved links in place.
+    private func rewrite(_ document: BookFormatLinkDocument, sourceID: BookSourceID) async {
+        guard !document.links.isEmpty else { return }
+        _ = await push(document, sourceID: sourceID)
     }
 }

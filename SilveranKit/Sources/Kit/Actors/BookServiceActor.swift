@@ -1487,13 +1487,13 @@ public actor BookServiceActor {
     }
 
     public func pushInkampBookFormatLinksDocument(
-        _ document: BookFormatLinkDocument,
+        _ description: String,
         sourceID: BookSourceID,
     ) async -> BookFormatLinkPushResult {
         guard let storyteller = await storytellerActor(for: sourceID) else {
             return .failure(reason: "offline")
         }
-        return await storyteller.pushInkampBookFormatLinksDocument(document)
+        return await storyteller.pushInkampBookFormatLinksDocument(description)
     }
 
     private func primaryStorytellerActor() async -> StorytellerActor? {
