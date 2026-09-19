@@ -81,6 +81,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 - [x] **Episode status cluster + show filters + Josh UI stamps** — tip `b719921`; download glyph · Clean chip (incl. Clean failed) · Xm left/Played; show filters All|Downloaded|In progress|Clean pending; Shelf POD chrome; mini-player cover+title+play/pause(+close) only (scrub/−15/+15 stay on full Now Playing); Home/Library finishability text via `PlaybackFinishabilityCopy`; Sideload green [35023934089](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35023934089)
 - [x] **Podcast play queue** — tip `2f7deb4`; Play Next / Play Last in episode menus; `PodcastPlaybackQueueStore` + editable `PodcastPlaybackQueueView` (drag reorder, remove, clear finished); auto-advance on finish via shared player; persisted upcoming order; Sideload green [35025614228](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35025614228)
 - [x] **P0 Podcast resume / Home Continue stall** — tip `7eb0a9e`; Josh confirmed; Loading until playhead advances; Pause only when truly playing; Sideload green [35031138576](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35031138576)
+- [x] **Podcast release dates + new activity** — episode rows show a short publish date (`Yesterday`, `3 days ago`, `Sep 18, 2026`). Subscribed overview shows a small **New** star chip when a later episode arrives after that show was last opened. Opening the show clears it; refreshing the overview does not. Watermark is device-local (`PodcastActivityStore`), not the subscription sync blob, so acknowledging a show cannot outrank an unsubscribe.
 
 ### Shell polish
 - [x] **Mini-player above tab bar** — per-tab inset (`be395da`, Sideload [35008731469](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35008731469)); Josh confirmed
@@ -112,6 +113,7 @@ Story Timeline is shipped. Ideas/Browse search landed on `6e5ecae` and stays as-
 4. ~~**Ideas/Browse OL search**~~ → **Shipped** (`6e5ecae`; unowned cards, Save / Not interested; Saved stays local-filter only)
 5. ~~**Continue + Up next widget**~~ → **Shipped** (`482fe8b`; medium Now + 3 Up next from `HomeMixedQueue`; Sideload [35390329291](https://github.com/subarude15/storyteller-personal-reader/actions/runs/35390329291))
 6. ~~Continue widget restore~~ → **smoke** tip `cc910d9` (PR #26)
+7. ~~**Podcast release dates + new-activity chip**~~ → **Shipped** (next podcast UI cut; does not reorder items above)
 
 ### Soft UX polish (anytime)
 - Soft polish pack → **Shipped** (`b9b07ea` / PR #22)

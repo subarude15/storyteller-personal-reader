@@ -24,6 +24,7 @@ struct PodcastsHomeView: View {
     @State private var refreshTask: Task<Void, Never>?
     @State private var showPlaybackQueue = false
     @State private var playbackQueue = PodcastPlaybackQueueStore.shared
+    @State private var activityStore = PodcastActivityStore.shared
 
     private var chrome: PunkRallyTheme.Chrome {
         PunkRallyTheme.Chrome(scheme: colorScheme)
@@ -125,15 +126,34 @@ struct PodcastsHomeView: View {
                     Button {
                         selectedShow = show
                     } label: {
-                        PodcastShowRow(show: show, chrome: chrome)
+                        PodcastShowRow(
+                            show: show,
+                            chrome: chrome,
+                            hasNewActivity: activityStore.showsNewActivity(
+                                feedURL: show.feedURL,
+                                latestPublish: show.lastUpdated
+                            )
+                        )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(podcastRowLabel(show))
                 }
             }
             .padding(.horizontal, PunkRallyTheme.Metric.screenInset)
             .padding(.vertical, 12)
         }
         .background(chrome.bg)
+    }
+
+    private func podcastRowLabel(_ show: PRPodcastShow) -> String {
+        var label = "\(show.title), \(show.episodes.count) episodes"
+        if activityStore.showsNewActivity(
+            feedURL: show.feedURL,
+            latestPublish: show.lastUpdated
+        ) {
+            label += ", new episode"
+        }
+        return label
     }
 
     private var emptyState: some View {
@@ -237,6 +257,7 @@ struct PodcastsHomeView: View {
 struct PodcastShowRow: View {
     let show: PRPodcastShow
     let chrome: PunkRallyTheme.Chrome
+    var hasNewActivity: Bool = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -268,8 +289,13 @@ struct PodcastShowRow: View {
                     .font(.caption)
                     .foregroundStyle(chrome.textFaint)
             }
-            Spacer()
-            KindBadgeView(kind: .podcast, scheme: chrome.scheme)
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 6) {
+                if hasNewActivity {
+                    PodcastNewActivityChip(chrome: chrome)
+                }
+                KindBadgeView(kind: .podcast, scheme: chrome.scheme)
+            }
         }
         .padding(12)
         .background(chrome.surface)
@@ -278,7 +304,35 @@ struct PodcastShowRow: View {
             RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius)
                 .stroke(chrome.border, lineWidth: 1)
         )
-        .accessibilityLabel(Text("\(show.title), \(show.episodes.count) episodes"))
+    }
+}
+
+/// Status only — not a favorite control. The row button opens the show.
+private struct PodcastNewActivityChip: View {
+    let chrome: PunkRallyTheme.Chrome
+
+    var body: some View {
+        Label("New", systemImage: "star.fill")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(background)
+            .clipShape(Capsule())
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
+    }
+
+    private var foreground: Color {
+        chrome.scheme == .dark
+            ? PunkRallyTheme.Accent.gold
+            : Color(red: 0.541, green: 0.416, blue: 0.165)
+    }
+
+    private var background: Color {
+        chrome.scheme == .dark
+            ? Color(red: 0.165, green: 0.141, blue: 0.094)
+            : Color(red: 0.961, green: 0.929, blue: 0.847)
     }
 }
 
@@ -477,7 +531,7 @@ struct PodcastShowView: View {
                                     Text(episode.title)
                                         .font(.subheadline.weight(.medium))
                                     if let published = episode.publishedAt {
-                                        Text(published, style: .date)
+                                        Text(PodcastActivity.releaseDateLabel(for: published))
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -508,8 +562,11 @@ struct PodcastShowView: View {
                 }
             }
             .onAppear {
-                if let feedURL = show.feedURL {
-                    isSubscribed = viewModel.subscribedFeedURLs.contains(feedURL)
+                guard let feedURL = show.feedURL else { return }
+                let subscribed = viewModel.subscribedFeedURLs.contains(feedURL)
+                isSubscribed = subscribed
+                if subscribed {
+                    viewModel.acknowledgePodcastViewed(show)
                 }
             }
         }
@@ -651,6 +708,11 @@ struct EpisodeRow: View {
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(chrome.text)
                     .lineLimit(2)
+                if let published = episode.publishedAt {
+                    Text(PodcastActivity.releaseDateLabel(for: published))
+                        .font(.caption)
+                        .foregroundStyle(chrome.textFaint)
+                }
                 if let summary = episode.summary {
                     Text(summary)
                         .font(.caption)

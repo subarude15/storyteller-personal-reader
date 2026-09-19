@@ -64,6 +64,7 @@ final class PodcastsViewModel {
         for feed in subscribedFeedURLs {
             if let show = await fetchFeed(feed) {
                 loaded.append(show)
+                baselinePodcastActivity(show)
             }
         }
         shows = loaded
@@ -79,6 +80,7 @@ final class PodcastsViewModel {
         } else {
             shows.append(show)
         }
+        baselinePodcastActivity(show)
         store.markRefreshed(feedURL)
     }
 
@@ -97,6 +99,7 @@ final class PodcastsViewModel {
         } else {
             shows.append(show)
         }
+        baselinePodcastActivity(show)
         store.markRefreshed(feedURL)
         PodcastSyncCoordinator.shared.scheduleSyncAfterLocalChange()
         return true
@@ -104,6 +107,25 @@ final class PodcastsViewModel {
 
     func isSubscribed(to feedURL: URL) -> Bool {
         store.isSubscribed(to: feedURL)
+    }
+
+    /// Opening the subscribed show acknowledges its current latest episode.
+    func acknowledgePodcastViewed(_ show: PRPodcastShow) {
+        guard let feedURL = show.feedURL else { return }
+        PodcastActivityStore.shared.acknowledge(
+            feedURL: feedURL,
+            latestPublish: show.lastUpdated
+        )
+    }
+
+    /// First successful load records the current latest publish date.
+    /// Later refreshes do not move that watermark.
+    private func baselinePodcastActivity(_ show: PRPodcastShow) {
+        guard let feedURL = show.feedURL else { return }
+        PodcastActivityStore.shared.baselineIfNeeded(
+            feedURL: feedURL,
+            latestPublish: show.lastUpdated
+        )
     }
 
     func unsubscribe(feedURL: URL) async {
