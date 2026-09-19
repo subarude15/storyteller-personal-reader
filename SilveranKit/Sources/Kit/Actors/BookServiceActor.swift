@@ -1269,6 +1269,58 @@ public actor BookServiceActor {
         return result
     }
 
+    public func storytellerBookCreateAccess(sourceID: BookSourceID) async -> StorytellerBookCreateAccess
+    {
+        guard let storyteller = await storytellerActor(for: sourceID) else {
+            return .needsReconnect
+        }
+        return await storyteller.bookCreateAccess()
+    }
+
+    public func uploadStorytellerFile(
+        _ asset: StorytellerUploadAsset,
+        bookID: BookID,
+        directoryFileCount: Int,
+        audioFileCount: Int,
+        onProgress: (@Sendable (Double) -> Void)? = nil,
+    ) async -> StorytellerFileUploadResult {
+        guard let storyteller = await storytellerActor(for: bookID.sourceID) else {
+            return StorytellerFileUploadResult(identity: asset.uploadIdentity, status: .failed)
+        }
+        return await storyteller.uploadStorytellerFile(
+            asset,
+            bookUUID: bookID.uuid,
+            directoryFileCount: directoryFileCount,
+            audioFileCount: audioFileCount,
+            onProgress: onProgress,
+        )
+    }
+
+    public func attachStorytellerReadaloud(
+        _ asset: StorytellerUploadAsset,
+        bookID: BookID,
+        onProgress: (@Sendable (Double) -> Void)? = nil,
+    ) async -> StorytellerFileUploadResult {
+        guard let storyteller = await storytellerActor(for: bookID.sourceID) else {
+            return StorytellerFileUploadResult(identity: asset.uploadIdentity, status: .failed)
+        }
+        return await storyteller.attachStorytellerReadaloud(
+            asset,
+            bookUUID: bookID.uuid,
+            onProgress: onProgress,
+        )
+    }
+
+    /// Refreshes one source and returns the row only when that server lists this book id.
+    public func storytellerBookSnapshot(bookID: BookID) async -> StorytellerUploadedBookSnapshot? {
+        guard let books = await fetchLibraryInformation(sourceID: bookID.sourceID) else { return nil }
+        guard let book = books.first(where: { $0.id == bookID }) else { return nil }
+        return StorytellerUploadedBookSnapshot(
+            bookID: book.id,
+            readaloudStatus: book.readaloud?.status,
+        )
+    }
+
     private func localMediaCategory(for format: StorytellerBookFormat) -> LocalMediaCategory {
         switch format {
             case .ebook:

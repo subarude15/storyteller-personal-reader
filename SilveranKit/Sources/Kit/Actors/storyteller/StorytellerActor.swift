@@ -69,6 +69,8 @@ public actor StorytellerActor {
     }
 
     private let urlSession: URLSession
+    /// PATCH uploads of large audiobooks. The shared session's resource timeout is too short.
+    private let uploadURLSession: URLSession
     private let downloadDelegate: StorytellerDownloadDelegate
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
@@ -114,6 +116,12 @@ public actor StorytellerActor {
             delegate: delegate,
             delegateQueue: nil,
         )
+        var uploadConfiguration = URLSessionConfiguration.default
+        uploadConfiguration.timeoutIntervalForRequest = 120
+        uploadConfiguration.timeoutIntervalForResource = 6 * 60 * 60
+        uploadConfiguration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        uploadConfiguration.urlCache = URLCache(memoryCapacity: 0, diskCapacity: 0, diskPath: nil)
+        uploadURLSession = URLSession(configuration: uploadConfiguration)
         downloadDelegate = delegate
         decoder = JSONDecoder()
         encoder = JSONEncoder()
@@ -736,6 +744,20 @@ public actor StorytellerActor {
                 return false
             case .error:
                 return true
+        }
+    }
+
+    /// Fresh `bookCreate` check for the upload sheet. Unknown is not treated as allowed.
+    public func bookCreateAccess() async -> StorytellerBookCreateAccess {
+        switch await checkUserPermission(named: "bookCreate") {
+            case .allowed:
+                cachedBookCreatePermission = true
+                return .allowed
+            case .denied:
+                cachedBookCreatePermission = false
+                return .denied
+            case .error:
+                return .needsReconnect
         }
     }
 
@@ -1628,31 +1650,66 @@ public actor StorytellerActor {
         }
 
         guard let (baseURL, token) = await ensureAuthentication() else { return false }
-        let totalBytes = assets.reduce(Int64(0)) { $0 + Int64($1.data.count) }
+        let totalBytes = assets.reduce(Int64(0)) { $0 + $1.payloadByteCount }
         var completedBytes: Int64 = 0
         for (index, asset) in assets.enumerated() {
+            if Task.isCancelled { return false }
             let assetBaseBytes = completedBytes
+            let byteCount = asset.payloadByteCount
             var onSendProgress: (@Sendable (Int64, Int64) -> Void)?
             if let onProgress, totalBytes > 0 {
                 onSendProgress = { sentBytes, _ in
                     onProgress(Double(assetBaseBytes + sentBytes) / Double(totalBytes))
                 }
             }
-            let succeeded = await uploadAsset(
+            let status = await uploadAsset(
                 asset,
                 bookUUID: bookUUID,
                 collectionUUID: index == 0 ? collectionUUID : nil,
                 baseURL: baseURL,
                 token: token,
-                totalAudioFiles: asset.format == .audiobook ? audiobookAssets.count : nil,
+                directoryFileCount: assets.count,
+                audioFileCount: audiobookAssets.count,
                 onSendProgress: onSendProgress,
             )
-            if !succeeded {
-                return false
-            }
-            completedBytes += Int64(asset.data.count)
+            guard status == .uploaded else { return false }
+            completedBytes += byteCount
         }
         return true
+    }
+
+    public func uploadStorytellerFile(
+        _ asset: StorytellerUploadAsset,
+        bookUUID: String,
+        directoryFileCount: Int,
+        audioFileCount: Int,
+        collectionUUID: String? = nil,
+        onProgress: (@Sendable (Double) -> Void)? = nil,
+    ) async -> StorytellerFileUploadResult {
+        if Task.isCancelled {
+            return StorytellerFileUploadResult(identity: asset.uploadIdentity, status: .cancelled)
+        }
+        guard let (baseURL, token) = await ensureAuthentication() else {
+            return StorytellerFileUploadResult(identity: asset.uploadIdentity, status: .unauthorized)
+        }
+        var onSendProgress: (@Sendable (Int64, Int64) -> Void)?
+        if let onProgress {
+            onSendProgress = { sent, total in
+                guard total > 0 else { return }
+                onProgress(Double(sent) / Double(total))
+            }
+        }
+        let status = await uploadAsset(
+            asset,
+            bookUUID: bookUUID,
+            collectionUUID: collectionUUID,
+            baseURL: baseURL,
+            token: token,
+            directoryFileCount: directoryFileCount,
+            audioFileCount: audioFileCount,
+            onSendProgress: onSendProgress,
+        )
+        return StorytellerFileUploadResult(identity: asset.uploadIdentity, status: status)
     }
 
     private static func resolveAPIBaseURL(from serverURL: URL) -> URL {
@@ -1765,15 +1822,146 @@ public actor StorytellerActor {
         return nil
     }
 
+    private enum TusSendResult {
+        case uploaded
+        case failed
+        case unauthorized
+        case cancelled
+        case notSupported
+    }
+
+    private func sendTus(
+        asset: StorytellerUploadAsset,
+        uploadBaseURL: URL,
+        metadata: [String: String],
+        token: AccessToken,
+        treatNotFoundAsUnsupported: Bool,
+        onSendProgress: (@Sendable (Int64, Int64) -> Void)?,
+    ) async -> TusSendResult {
+        let byteCount = asset.payloadByteCount
+        guard byteCount > 0 else {
+            debugLog("[StorytellerActor] upload received an empty payload for \(asset.filename).")
+            return .failed
+        }
+        if Task.isCancelled { return .cancelled }
+
+        let metadataHeader =
+            metadata
+            .map { key, value in
+                let encodedValue = Data(value.utf8).base64EncodedString()
+                return "\(key) \(encodedValue)"
+            }
+            .joined(separator: ",")
+
+        do {
+            var createAllowedStatuses = Set(200..<300)
+            createAllowedStatuses.insert(401)
+            createAllowedStatuses.insert(403)
+            if treatNotFoundAsUnsupported {
+                createAllowedStatuses.insert(404)
+                createAllowedStatuses.insert(405)
+            }
+
+            let createResponse = try await httpPost(
+                uploadBaseURL.absoluteString,
+                headers: [
+                    "Tus-Resumable": "1.0.0",
+                    "Authorization": authorizationHeaderValue(for: token),
+                    "Upload-Length": "\(byteCount)",
+                    "Upload-Metadata": metadataHeader,
+                    "Content-Length": "0",
+                ],
+                body: Data(),
+                session: uploadURLSession,
+                allowedStatusCodes: createAllowedStatuses,
+            )
+
+            if treatNotFoundAsUnsupported,
+                createResponse.statusCode == 404 || createResponse.statusCode == 405
+            {
+                return .notSupported
+            }
+
+            switch evaluateResponse(
+                createResponse,
+                methodName: "uploadAsset",
+                context: "create for \(asset.filename)",
+            ) {
+                case .success:
+                    break
+                case .unauthorized:
+                    return .unauthorized
+                default:
+                    return .failed
+            }
+
+            guard let locationHeader = createResponse.response.value(forHTTPHeaderField: "Location")
+            else {
+                debugLog("[StorytellerActor] uploadAsset missing Location header.")
+                return .failed
+            }
+
+            let uploadURL = resolveUploadLocation(locationHeader, relativeTo: uploadBaseURL)
+
+            var patchAllowedStatuses = Set(200..<300)
+            patchAllowedStatuses.insert(401)
+            patchAllowedStatuses.insert(403)
+
+            let patchResponse = try await httpPatch(
+                uploadURL.absoluteString,
+                headers: [
+                    "Tus-Resumable": "1.0.0",
+                    "Content-Type": "application/offset+octet-stream",
+                    "Authorization": authorizationHeaderValue(for: token),
+                    "Upload-Offset": "0",
+                    "Content-Length": "\(byteCount)",
+                ],
+                body: asset.fileURL == nil ? asset.data : nil,
+                bodyFileURL: asset.fileURL,
+                session: uploadURLSession,
+                allowedStatusCodes: patchAllowedStatuses,
+                onSendProgress: onSendProgress,
+            )
+
+            switch evaluateResponse(
+                patchResponse,
+                methodName: "uploadAsset",
+                context: "patch for \(asset.filename)",
+            ) {
+                case .success:
+                    break
+                case .unauthorized:
+                    return .unauthorized
+                default:
+                    return .failed
+            }
+
+            let offset = patchResponse.response.value(forHTTPHeaderField: "Upload-Offset")
+            if Int64(offset ?? "") != byteCount {
+                debugLog("[StorytellerActor] uploadAsset patch offset mismatch.")
+                return .failed
+            }
+            return .uploaded
+        } catch is CancellationError {
+            return .cancelled
+        } catch let error as URLError where error.code == .cancelled {
+            return .cancelled
+        } catch {
+            logStorytellerError("uploadAsset", error: error)
+            return .failed
+        }
+    }
+
     private func uploadAsset(
         _ asset: StorytellerUploadAsset,
         bookUUID: String,
         collectionUUID: String?,
         baseURL: URL,
         token: AccessToken,
-        totalAudioFiles: Int? = nil,
+        directoryFileCount: Int,
+        audioFileCount: Int,
         onSendProgress: (@Sendable (Int64, Int64) -> Void)? = nil,
-    ) async -> Bool {
+    ) async -> StorytellerFileUploadResult.Status {
         let uploadBaseURL =
             baseURL
             .appendingPathComponent("books")
@@ -1798,103 +1986,30 @@ public actor StorytellerActor {
             metadata["collection"] = collectionUUID
         }
 
-        if let totalAudioFiles, totalAudioFiles > 1 {
-            metadata["totalAudioFiles"] = "\(totalAudioFiles)"
+        // Current Storyteller defers scan until this many importable files are in the
+        // book directory. Older servers still read totalAudioFiles.
+        metadata["totalFiles"] = "\(max(directoryFileCount, 1))"
+        if asset.format == .audiobook, audioFileCount > 1 {
+            metadata["totalAudioFiles"] = "\(audioFileCount)"
         }
 
-        let metadataHeader =
-            metadata
-            .map { key, value in
-                let encodedValue = Data(value.utf8).base64EncodedString()
-                return "\(key) \(encodedValue)"
-            }
-            .joined(separator: ",")
-
-        guard !asset.data.isEmpty else {
-            debugLog("[StorytellerActor] uploadAsset received empty data for \(asset.filename).")
-            return false
+        switch await sendTus(
+            asset: asset,
+            uploadBaseURL: uploadBaseURL,
+            metadata: metadata,
+            token: token,
+            treatNotFoundAsUnsupported: false,
+            onSendProgress: onSendProgress,
+        ) {
+            case .uploaded:
+                return .uploaded
+            case .unauthorized:
+                return .unauthorized
+            case .cancelled:
+                return .cancelled
+            case .failed, .notSupported:
+                return .failed
         }
-
-        do {
-            var createAllowedStatuses = Set(200..<300)
-            createAllowedStatuses.insert(401)
-            createAllowedStatuses.insert(403)
-
-            let createResponse = try await httpPost(
-                uploadBaseURL.absoluteString,
-                headers: [
-                    "Tus-Resumable": "1.0.0",
-                    "Authorization": authorizationHeaderValue(for: token),
-                    "Upload-Length": "\(asset.data.count)",
-                    "Upload-Metadata": metadataHeader,
-                    "Content-Length": "0",
-                ],
-                body: Data(),
-                session: urlSession,
-                allowedStatusCodes: createAllowedStatuses,
-            )
-
-            guard
-                case .success = evaluateResponse(
-                    createResponse,
-                    methodName: "uploadAsset",
-                    context: "create for \(asset.filename)",
-                )
-            else {
-                return false
-            }
-
-            guard
-                let locationHeader = createResponse.response.value(forHTTPHeaderField: "Location")
-            else {
-                debugLog("[StorytellerActor] uploadAsset missing Location header.")
-                return false
-            }
-
-            let uploadURL = resolveUploadLocation(locationHeader, relativeTo: uploadBaseURL)
-            debugLog(
-                "[StorytellerActor] uploadAsset: POST succeeded, Location=\(locationHeader), PATCH URL=\(uploadURL.absoluteString), dataSize=\(asset.data.count)"
-            )
-
-            var patchAllowedStatuses = Set(200..<300)
-            patchAllowedStatuses.insert(401)
-            patchAllowedStatuses.insert(403)
-
-            let patchResponse = try await httpPatch(
-                uploadURL.absoluteString,
-                headers: [
-                    "Tus-Resumable": "1.0.0",
-                    "Content-Type": "application/offset+octet-stream",
-                    "Authorization": authorizationHeaderValue(for: token),
-                    "Upload-Offset": "0",
-                    "Content-Length": "\(asset.data.count)",
-                ],
-                body: asset.data,
-                session: urlSession,
-                allowedStatusCodes: patchAllowedStatuses,
-                onSendProgress: onSendProgress,
-            )
-
-            guard
-                case .success = evaluateResponse(
-                    patchResponse,
-                    methodName: "uploadAsset",
-                    context: "patch for \(asset.filename)",
-                )
-            else {
-                return false
-            }
-
-            let offset = patchResponse.response.value(forHTTPHeaderField: "Upload-Offset")
-            if Int(offset ?? "") != asset.data.count {
-                debugLog("[StorytellerActor] uploadAsset patch offset mismatch.")
-                return false
-            }
-        } catch {
-            logStorytellerError("uploadAsset", error: error)
-            return false
-        }
-        return true
     }
 
     /// Result of a replaceBookAsset operation.
@@ -1947,113 +2062,51 @@ public actor StorytellerActor {
             metadata["metadataFieldOverrides"] = skipMetadataFieldOverridesJSONString()
         }
 
-        let metadataHeader =
-            metadata
-            .map { key, value in
-                let encodedValue = Data(value.utf8).base64EncodedString()
-                return "\(key) \(encodedValue)"
-            }
-            .joined(separator: ",")
-
-        guard !asset.data.isEmpty else {
-            debugLog(
-                "[StorytellerActor] replaceBookAsset received empty data for \(asset.filename)."
-            )
-            return .failed
-        }
-
-        debugLog(
-            "[StorytellerActor] replaceBookAsset: URL=\(uploadBaseURL.absoluteString), bookUUID=\(bookUUID), metadata=\(metadata)"
-        )
-
-        do {
-            var createAllowedStatuses = Set(200..<300)
-            createAllowedStatuses.insert(401)
-            createAllowedStatuses.insert(403)
-            createAllowedStatuses.insert(404)
-            createAllowedStatuses.insert(405)
-
-            let createResponse = try await httpPost(
-                uploadBaseURL.absoluteString,
-                headers: [
-                    "Tus-Resumable": "1.0.0",
-                    "Authorization": authorizationHeaderValue(for: token),
-                    "Upload-Length": "\(asset.data.count)",
-                    "Upload-Metadata": metadataHeader,
-                    "Content-Length": "0",
-                ],
-                body: Data(),
-                session: urlSession,
-                allowedStatusCodes: createAllowedStatuses,
-            )
-
-            let status = createResponse.statusCode
-            if status == 404 || status == 405 {
-                debugLog(
-                    "[StorytellerActor] replaceBookAsset: endpoint not supported (status \(status))"
-                )
+        switch await sendTus(
+            asset: asset,
+            uploadBaseURL: uploadBaseURL,
+            metadata: metadata,
+            token: token,
+            treatNotFoundAsUnsupported: true,
+            onSendProgress: onSendProgress,
+        ) {
+            case .uploaded:
+                return .success
+            case .notSupported:
                 return .notSupported
-            }
-
-            guard
-                case .success = evaluateResponse(
-                    createResponse,
-                    methodName: "replaceBookAsset",
-                    context: "create for \(asset.filename)",
-                )
-            else {
+            case .failed, .unauthorized, .cancelled:
                 return .failed
-            }
-
-            guard
-                let locationHeader = createResponse.response.value(forHTTPHeaderField: "Location")
-            else {
-                debugLog("[StorytellerActor] replaceBookAsset missing Location header.")
-                return .failed
-            }
-
-            let uploadURL = resolveUploadLocation(locationHeader, relativeTo: uploadBaseURL)
-
-            var patchAllowedStatuses = Set(200..<300)
-            patchAllowedStatuses.insert(401)
-            patchAllowedStatuses.insert(403)
-
-            let patchResponse = try await httpPatch(
-                uploadURL.absoluteString,
-                headers: [
-                    "Tus-Resumable": "1.0.0",
-                    "Content-Type": "application/offset+octet-stream",
-                    "Authorization": authorizationHeaderValue(for: token),
-                    "Upload-Offset": "0",
-                    "Content-Length": "\(asset.data.count)",
-                ],
-                body: asset.data,
-                session: urlSession,
-                allowedStatusCodes: patchAllowedStatuses,
-                onSendProgress: onSendProgress,
-            )
-
-            guard
-                case .success = evaluateResponse(
-                    patchResponse,
-                    methodName: "replaceBookAsset",
-                    context: "patch for \(asset.filename)",
-                )
-            else {
-                return .failed
-            }
-
-            let offset = patchResponse.response.value(forHTTPHeaderField: "Upload-Offset")
-            if Int(offset ?? "") != asset.data.count {
-                debugLog("[StorytellerActor] replaceBookAsset patch offset mismatch.")
-                return .failed
-            }
-
-            return .success
-        } catch {
-            logStorytellerError("replaceBookAsset", error: error)
-            return .failed
         }
+    }
+
+    public func attachStorytellerReadaloud(
+        _ asset: StorytellerUploadAsset,
+        bookUUID: String,
+        onProgress: (@Sendable (Double) -> Void)? = nil,
+    ) async -> StorytellerFileUploadResult {
+        var onSendProgress: (@Sendable (Int64, Int64) -> Void)?
+        if let onProgress {
+            onSendProgress = { sent, total in
+                guard total > 0 else { return }
+                onProgress(Double(sent) / Double(total))
+            }
+        }
+        let replaced = await replaceBookAsset(
+            asset,
+            bookUUID: bookUUID,
+            replaceMetadata: false,
+            onSendProgress: onSendProgress,
+        )
+        let status: StorytellerFileUploadResult.Status
+        switch replaced {
+            case .success:
+                status = .uploaded
+            case .notSupported:
+                status = .failed
+            case .failed:
+                status = accessToken == nil ? .unauthorized : .failed
+        }
+        return StorytellerFileUploadResult(identity: asset.uploadIdentity, status: status)
     }
 
     private func skipMetadataFieldOverridesJSONString() -> String {
@@ -3698,9 +3751,9 @@ extension StorytellerActor: BookSourceActor {
             }
         }
 
-        let ebookBytes = Int64(ebook?.data.count ?? 0)
-        let audioBytes = audiobooks.reduce(Int64(0)) { $0 + Int64($1.data.count) }
-        let readaloudBytes = Int64(readaloud?.data.count ?? 0)
+        let ebookBytes = ebook?.payloadByteCount ?? 0
+        let audioBytes = audiobooks.reduce(Int64(0)) { $0 + $1.payloadByteCount }
+        let readaloudBytes = readaloud?.payloadByteCount ?? 0
         let totalBytes = max(ebookBytes + audioBytes + readaloudBytes, 1)
         let baseBytes = ebookBytes + audioBytes
 

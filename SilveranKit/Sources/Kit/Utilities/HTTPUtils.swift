@@ -121,6 +121,7 @@ func httpPatch(
     headers: [String: String] = [:],
     queryParameters: [String: String] = [:],
     body: Data? = nil,
+    bodyFileURL: URL? = nil,
     session: URLSession = .shared,
     debug: Bool = false,
     allowedStatusCodes: Set<Int>? = nil,
@@ -132,6 +133,7 @@ func httpPatch(
         headers: headers,
         queryParameters: queryParameters,
         body: body,
+        bodyFileURL: bodyFileURL,
         session: session,
         debug: debug,
         allowedStatusCodes: resolvedAllowedStatusCodes(allowedStatusCodes),
@@ -199,6 +201,7 @@ private func httpRequest(
     headers: [String: String],
     queryParameters: [String: String],
     body: Data?,
+    bodyFileURL: URL? = nil,
     session: URLSession,
     debug: Bool,
     allowedStatusCodes: Set<Int>,
@@ -219,7 +222,14 @@ private func httpRequest(
 
     let data: Data
     let response: URLResponse
-    if let onSendProgress, let body {
+    if let bodyFileURL {
+        let delegate = onSendProgress.map { UploadProgressDelegate(onProgress: $0) }
+        (data, response) = try await session.upload(
+            for: request,
+            fromFile: bodyFileURL,
+            delegate: delegate,
+        )
+    } else if let onSendProgress, let body {
         (data, response) = try await session.upload(
             for: request,
             from: body,

@@ -751,13 +751,6 @@ public struct PunkRallyLibraryView: View {
             .sheet(isPresented: $showImport) {
                 NavigationStack {
                     UploadNewBookView()
-                        .navigationTitle("Import")
-                        .navigationBarTitleDisplayMode(.inline)
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Button("Done") { showImport = false }
-                            }
-                        }
                 }
                 .punkRallyMiniPlayerInset()
             }

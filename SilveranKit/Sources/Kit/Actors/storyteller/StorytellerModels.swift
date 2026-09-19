@@ -360,9 +360,24 @@ public enum StorytellerBookFormat: String, Sendable {
 public struct StorytellerUploadAsset: Sendable {
     public let format: StorytellerBookFormat
     public let filename: String
+    /// In-memory payload. Empty when `fileURL` is set.
     public let data: Data
+    /// File-backed payload. Tus PATCH streams this URL and does not read it into `data`.
+    public let fileURL: URL?
     public let contentType: String?
     public let relativePath: String?
+    /// Delete `fileURL` after the upload attempt. Staging copies only — never the user's file.
+    public let deleteFileWhenFinished: Bool
+    private let storedByteCount: Int64
+
+    public var payloadByteCount: Int64 {
+        fileURL == nil ? Int64(data.count) : storedByteCount
+    }
+
+    /// Stable id for one file inside an upload operation. Retry uses it to skip a finished PATCH.
+    public var uploadIdentity: String {
+        "\(format.rawValue)|\(filename)"
+    }
 
     public init(
         format: StorytellerBookFormat,
@@ -374,7 +389,50 @@ public struct StorytellerUploadAsset: Sendable {
         self.format = format
         self.filename = filename
         self.data = data
+        self.fileURL = nil
         self.contentType = contentType
         self.relativePath = relativePath
+        self.deleteFileWhenFinished = false
+        self.storedByteCount = Int64(data.count)
+    }
+
+    public init(
+        format: StorytellerBookFormat,
+        filename: String,
+        fileURL: URL,
+        byteCount: Int64,
+        contentType: String? = nil,
+        relativePath: String? = nil,
+        deleteFileWhenFinished: Bool = false,
+    ) {
+        self.format = format
+        self.filename = filename
+        self.data = Data()
+        self.fileURL = fileURL
+        self.contentType = contentType
+        self.relativePath = relativePath
+        self.deleteFileWhenFinished = deleteFileWhenFinished
+        self.storedByteCount = byteCount
+    }
+
+    public func withFilename(_ filename: String) -> StorytellerUploadAsset {
+        if let fileURL {
+            return StorytellerUploadAsset(
+                format: format,
+                filename: filename,
+                fileURL: fileURL,
+                byteCount: storedByteCount,
+                contentType: contentType,
+                relativePath: relativePath,
+                deleteFileWhenFinished: deleteFileWhenFinished,
+            )
+        }
+        return StorytellerUploadAsset(
+            format: format,
+            filename: filename,
+            data: data,
+            contentType: contentType,
+            relativePath: relativePath,
+        )
     }
 }

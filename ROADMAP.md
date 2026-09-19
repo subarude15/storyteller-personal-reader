@@ -23,6 +23,8 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Shipped
 
+- [x] **Mobile Storyteller upload hardening** — in review, not merged. Same Import / Add Book sheet: file-backed Tus upload (no full audiobook in memory), Storyteller destinations only when `bookCreate` is confirmed, one book UUID across retry, honest processing / partial / cancel states. Original Files documents are not modified.
+
 ### Product / sync
 - [x] **Ideas v2 (polish)** — Library | Ideas recommends titles not already in the Storyteller library (title/author/ISBN), deduped by title+author or ISBN. Every row shows a why-line (never blank); empty-reason paths are dropped. Detail shows cover, title, author, a labeled **Why** chip, and a real description — `first_sentence` from search.json, backfilled from `/works/{key}.json` description, with subjects + year when present and a graceful "No description on Open Library" fallback. Denser: author 12 / series-tag 10 hits, ~24–36 kept; last-good cache when offline. Save idea only — no download. **More like this** stays library-only.
 - [x] **Ideas v3** — **Not interested** (swipe + button) dismisses by stable id (work key / ISBN / title+author) and refills; explicit **Because you like…** anchors on every row/detail; real synopsis (work → edition → `first_sentence`); denser (author 15 / series-tag 15 hits, 8+8 queries, ~24–36 kept). No download — Save idea only. **More like this** stays library-only.

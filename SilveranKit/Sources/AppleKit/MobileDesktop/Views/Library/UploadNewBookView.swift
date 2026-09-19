@@ -1,4 +1,5 @@
 #if os(iOS) || os(macOS)
+import SilveranKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -22,14 +23,17 @@ public struct UploadNewBookView: View {
     @State private var selectedEbookURL: URL?
     @State private var selectedAudiobookURLs: [URL] = []
     @State private var selectedReadaloudURL: URL?
-    @State private var isBusy = false
-    @State private var uploadProgress: String?
-    @State private var uploadProgressFraction: Double?
-    @State private var uploadResult: UploadResult?
+    @State private var fileSummaries: [URL: String] = [:]
     @State private var bookSources: [BookSourceRecord] = []
     @State private var selectedSourceID: BookSourceID?
-    /// Book from the last successful upload — used to start / retry align.
-    @State private var pendingAlignBookID: BookID?
+    @State private var destinationHint: String?
+    @State private var uploadState: StorytellerBookUploadState = .idle
+    @State private var folderStatus: String?
+    @State private var uploadTask: Task<Void, Never>?
+    @State private var uploadGeneration = 0
+    @State private var confirmCancel = false
+    @State private var confirmDismiss = false
+    @State private var coordinator = StorytellerBookUploadCoordinator()
 
     #if os(iOS)
     @State private var activeImporter: ImporterTarget?
@@ -44,13 +48,6 @@ public struct UploadNewBookView: View {
     }
     #endif
 
-    private enum UploadResult {
-        case success
-        case aligning
-        case aligned
-        case failure(String)
-    }
-
     public init(initialSourceID: BookSourceID? = nil) {
         self.initialSourceID = initialSourceID
     }
@@ -60,7 +57,7 @@ public struct UploadNewBookView: View {
             Form {
                 Section("Destination") {
                     if bookSources.isEmpty {
-                        Text("Add a Storyteller source in Settings first.")
+                        Text(destinationHint ?? "Add a Storyteller source in Settings first.")
                             .foregroundStyle(.secondary)
                     } else {
                         Picker("Upload To", selection: selectedSourceBinding) {
@@ -69,7 +66,8 @@ public struct UploadNewBookView: View {
                                     .tag(source.id)
                             }
                         }
-                        .disabled(isBusy || uploadResult != nil)
+                        .disabled(selectionLocked)
+                        .accessibilityHint("Where the files are uploaded")
                     }
                     if selectedSource?.kind == .storyteller {
                         Text("Uses the active Storyteller URL (LAN when on home Wi‑Fi).")
@@ -79,133 +77,99 @@ public struct UploadNewBookView: View {
                 }
 
                 Section {
-                    fileRow(
+                    singleFileRow(
                         label: "Ebook",
-                        selectedURL: selectedEbookURL,
+                        url: selectedEbookURL,
+                        role: .ebook,
                         onClear: { selectedEbookURL = nil },
                         onSelect: selectEbook,
                     )
-
-                    fileRow(
-                        label: "Audiobook",
-                        selectedURLs: selectedAudiobookURLs,
-                        onClear: { selectedAudiobookURLs = [] },
-                        onSelect: selectAudiobook,
-                    )
-
-                    fileRow(
+                    audioFileRow()
+                    singleFileRow(
                         label: "Readaloud (optional)",
-                        selectedURL: selectedReadaloudURL,
+                        url: selectedReadaloudURL,
+                        role: .readaloud,
                         onClear: { selectedReadaloudURL = nil },
                         onSelect: selectReadaloud,
                     )
                 } header: {
-                    Text("Select Files")
+                    Text("Files")
                 } footer: {
-                    Text(
-                        "Pick EPUB and/or audiobook (multi-file OK). On Storyteller, ebook + audio then Aligning… until read-aloud is ready. Files you picked are never deleted."
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    Text(footerText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
-                if let result = uploadResult {
-                    Section {
-                        switch result {
-                            case .success:
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Label("Book added", systemImage: "checkmark.circle.fill")
-                                        .foregroundStyle(.green)
-                                    if pendingAlignBookID != nil {
-                                        Text(
-                                            "Aligning continues on the book card (Creating Readaloud…). Open it for SYNC when ready."
-                                        )
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    }
-                                }
-                            case .aligning:
-                                HStack(spacing: 10) {
-                                    ProgressView()
-                                    Text("Aligning…")
-                                        .foregroundStyle(.secondary)
-                                }
-                            case .aligned:
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Label(
-                                        "Read-aloud ready",
-                                        systemImage: "checkmark.circle.fill"
-                                    )
-                                    .foregroundStyle(.green)
-                                    Text("Open the book for SYNC / Continue.")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            case .failure(let message):
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Label(message, systemImage: "exclamationmark.triangle.fill")
-                                        .foregroundStyle(.red)
-                                    Button("Retry") {
-                                        Task { await retryImport() }
-                                    }
-                                    .buttonStyle(.bordered)
-                                }
-                        }
+                if folderStatus != nil || uploadState != .idle {
+                    Section("Status") {
+                        statusBlock
                     }
                 }
-
             }
             .formStyle(.grouped)
+            .scrollDismissesKeyboard(.interactively)
 
             Divider()
 
-            HStack {
-                if uploadResult != nil {
-                    Button("Import Another") {
-                        resetForNewUpload()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(isBusy)
-                }
-
-                Spacer()
-
-                if isBusy {
-                    progressCircle(progress: uploadProgressFraction ?? 0)
-                    if let progress = uploadProgress {
-                        Text(progress)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                #if os(macOS)
-                Button("Close") {
-                    dismiss()
-                }
-                .buttonStyle(.bordered)
-                .keyboardShortcut(.cancelAction)
-                #endif
-
-                Button(primaryActionTitle) {
-                    Task {
-                        await uploadBook()
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(
-                    isBusy || !hasAnyFileSelected || uploadResult != nil
-                        || selectedSourceID == nil
-                )
-                .keyboardShortcut(.defaultAction)
-            }
-            .padding()
+            bottomBar
         }
         #if os(macOS)
-        .frame(width: 500, height: 480)
+        .frame(minWidth: 480, minHeight: 520)
         #endif
+        .navigationTitle(navigationTitleText)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(operationInFlight)
+        #endif
+        .toolbar {
+            #if os(iOS)
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { requestDismiss() }
+                    .accessibilityHint(
+                        operationInFlight
+                            ? "Asks before cancelling the upload and closing"
+                            : "Closes this screen"
+                    )
+            }
+            #endif
+        }
+        .interactiveDismissDisabled(operationInFlight)
+        .confirmationDialog(
+            "Cancel this upload?",
+            isPresented: $confirmCancel,
+            titleVisibility: .visible,
+        ) {
+            Button("Cancel Upload", role: .destructive) {
+                uploadTask?.cancel()
+            }
+            Button("Keep Uploading", role: .cancel) {}
+        } message: {
+            Text(
+                "Files Storyteller already accepted stay on the server. Cancelling does not delete a partial book, and the upload does not keep going in the background."
+            )
+        }
+        .confirmationDialog(
+            "Upload still running",
+            isPresented: $confirmDismiss,
+            titleVisibility: .visible,
+        ) {
+            Button("Cancel Upload and Close", role: .destructive) {
+                uploadTask?.cancel()
+                dismiss()
+            }
+            Button("Keep Uploading", role: .cancel) {}
+        } message: {
+            Text(
+                "Closing stops this upload. Files Storyteller already accepted stay on the server. Nothing is rolled back."
+            )
+        }
         .task {
             await loadSources()
+        }
+        .onDisappear {
+            if operationInFlight {
+                uploadTask?.cancel()
+            }
         }
         #if os(iOS)
         .fileImporter(
@@ -218,80 +182,127 @@ public struct UploadNewBookView: View {
         #endif
     }
 
+    private var navigationTitleText: String {
+        selectedSource?.kind == .localFolder ? "Add Book" : "Upload to Storyteller"
+    }
+
+    private var footerText: String {
+        if selectedSource?.kind == .localFolder {
+            return "Pick an EPUB and/or audiobook. The original files are not changed or deleted."
+        }
+        return
+            "Pick an EPUB and/or audiobook (several audio files are fine). Upload sends them to Storyteller. The original files are not changed or deleted. Read & Listen is ready only after Storyteller reports ALIGNED."
+    }
+
+    @ViewBuilder
+    private var statusBlock: some View {
+        if let folderStatus {
+            Label(folderStatus, systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .accessibilityLabel(folderStatus)
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(uploadState.statusTitle, systemImage: statusSymbol)
+                    .foregroundStyle(statusColor)
+                    .accessibilityLabel(uploadState.statusTitle)
+                Text(uploadState.statusDetail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if operationInFlight, let fraction = uploadState.fraction {
+                    ProgressView(value: fraction)
+                        .accessibilityLabel("Uploading")
+                        .accessibilityValue("\(Int(fraction * 100)) percent")
+                } else if operationInFlight {
+                    ProgressView()
+                        .accessibilityLabel(uploadState.statusTitle)
+                }
+                openBookLink
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    @ViewBuilder
+    private var openBookLink: some View {
+        if let bookID = uploadState.confirmedBookID,
+            let book = mediaViewModel.library.bookMetaData.first(where: { $0.id == bookID })
+        {
+            #if os(iOS)
+            NavigationLink {
+                iOSBookDetailView(item: book, mediaKind: book.ebook == nil ? .audiobook : .ebook)
+            } label: {
+                Text("Open Book")
+            }
+            .accessibilityHint("Shows this Storyteller book")
+            #else
+            Button("Open Book") {
+                mediaViewModel.pendingInfoBookID = book.id
+            }
+            .buttonStyle(.bordered)
+            .accessibilityHint("Shows this Storyteller book")
+            #endif
+        }
+    }
+
+    private var bottomBar: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                if showsAnother {
+                    Button("Upload Another") {
+                        Task { await resetForNewBook() }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(operationInFlight)
+                }
+                Spacer(minLength: 0)
+                if operationInFlight {
+                    Button("Cancel") { confirmCancel = true }
+                        .buttonStyle(.bordered)
+                        .accessibilityHint("Stops this upload. Files already accepted stay on Storyteller.")
+                }
+            }
+            HStack {
+                #if os(macOS)
+                Button("Close") { requestDismiss() }
+                    .buttonStyle(.bordered)
+                    .keyboardShortcut(.cancelAction)
+                #endif
+                Spacer(minLength: 0)
+                Button(primaryActionTitle) {
+                    startUpload()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(primaryDisabled)
+                .keyboardShortcut(.defaultAction)
+                .accessibilityHint(primaryActionTitle)
+            }
+        }
+        .padding()
+    }
+
     private var selectedSourceBinding: Binding<BookSourceID> {
         Binding(
-            get: {
-                selectedSourceID ?? bookSources.first?.id ?? ""
-            },
+            get: { selectedSourceID ?? bookSources.first?.id ?? "" },
             set: { selectedSourceID = $0 },
         )
     }
 
-    @ViewBuilder
-    private func fileRow(
-        label: String,
-        selectedURL: URL?,
-        onClear: @escaping () -> Void,
-        onSelect: @escaping () -> Void,
-    ) -> some View {
-        HStack {
-            Text(label)
-                .fixedSize()
-            Spacer()
-            if let url = selectedURL {
-                Text(url.lastPathComponent)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Button("Clear") {
-                    onClear()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(isBusy || uploadResult != nil)
-            }
-            Button("Select...") {
-                onSelect()
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(isBusy || uploadResult != nil)
+    private var operationInFlight: Bool { uploadTask != nil }
+
+    private var selectionLocked: Bool {
+        if operationInFlight { return true }
+        switch uploadState {
+            case .idle, .blocked:
+                return folderStatus != nil
+            case .preparing, .uploading, .uploadComplete, .processing, .bookVisible, .readaloudQueued,
+                .readaloudProcessing, .readaloudReady, .stillProcessing, .partial, .failed, .cancelled:
+                return true
         }
     }
 
-    @ViewBuilder
-    private func fileRow(
-        label: String,
-        selectedURLs: [URL],
-        onClear: @escaping () -> Void,
-        onSelect: @escaping () -> Void,
-    ) -> some View {
-        HStack {
-            Text(label)
-                .fixedSize()
-            Spacer()
-            if !selectedURLs.isEmpty {
-                Text(
-                    selectedURLs.count == 1
-                        ? selectedURLs[0].lastPathComponent : "\(selectedURLs.count) files"
-                )
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                Button("Clear") {
-                    onClear()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(isBusy || uploadResult != nil)
-            }
-            Button("Select...") {
-                onSelect()
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(isBusy || uploadResult != nil)
-        }
+    private var showsAnother: Bool {
+        folderStatus != nil || uploadState != .idle
     }
 
     private var hasAnyFileSelected: Bool {
@@ -303,43 +314,133 @@ public struct UploadNewBookView: View {
     }
 
     private var primaryActionTitle: String {
-        selectedSource?.kind == .localFolder ? "Add" : "Import"
+        if selectedSource?.kind == .localFolder {
+            return uploadState == .idle && folderStatus == nil ? "Add" : "Retry"
+        }
+        switch uploadState {
+            case .idle:
+                return "Upload"
+            case .partial:
+                return "Continue upload"
+            case .stillProcessing:
+                return "Check again"
+            case .preparing, .uploading, .uploadComplete, .processing:
+                return "Upload"
+            case .bookVisible, .readaloudQueued, .readaloudProcessing, .readaloudReady:
+                return "Upload"
+            case .failed, .cancelled, .blocked:
+                return "Continue upload"
+        }
     }
 
-    private func resetForNewUpload() {
-        selectedEbookURL = nil
-        selectedAudiobookURLs = []
-        selectedReadaloudURL = nil
-        uploadResult = nil
-        uploadProgress = nil
-        uploadProgressFraction = nil
-        pendingAlignBookID = nil
-        isBusy = false
+    private var primaryDisabled: Bool {
+        if operationInFlight || selectedSourceID == nil || !hasAnyFileSelected { return true }
+        switch uploadState {
+            case .bookVisible, .readaloudQueued, .readaloudProcessing, .readaloudReady:
+                return true
+            case .idle, .preparing, .uploading, .uploadComplete, .processing, .stillProcessing, .partial,
+                .failed, .cancelled, .blocked:
+                return folderStatus != nil
+        }
     }
 
-    private func loadSources() async {
-        let sources = await BookServiceActor.shared.bookSources
-            .filter { $0.capabilities.canUploadBooks }
-            .sorted { lhs, rhs in
-                // Prefer Storyteller (active LAN/public route) for Import.
-                if lhs.kind == .storyteller && rhs.kind != .storyteller { return true }
-                if lhs.kind != .storyteller && rhs.kind == .storyteller { return false }
-                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-            }
-        await MainActor.run {
-            bookSources = sources
-            if let selectedSourceID,
-                sources.contains(where: { $0.id == selectedSourceID })
-            {
-                self.selectedSourceID = selectedSourceID
-            } else if let initialSourceID,
-                sources.contains(where: { $0.id == initialSourceID })
-            {
-                selectedSourceID = initialSourceID
+    private var statusSymbol: String {
+        switch uploadState {
+            case .bookVisible, .readaloudReady:
+                return "checkmark.circle.fill"
+            case .failed, .blocked:
+                return "exclamationmark.triangle.fill"
+            case .cancelled, .partial, .stillProcessing:
+                return "exclamationmark.circle.fill"
+            case .idle, .preparing, .uploading, .uploadComplete, .processing, .readaloudQueued,
+                .readaloudProcessing:
+                return "arrow.up.circle"
+        }
+    }
+
+    private var statusColor: Color {
+        switch uploadState {
+            case .bookVisible, .readaloudReady:
+                return .green
+            case .failed, .blocked:
+                return .red
+            case .cancelled, .partial, .stillProcessing, .readaloudQueued, .readaloudProcessing:
+                return .orange
+            case .idle, .preparing, .uploading, .uploadComplete, .processing:
+                return .primary
+        }
+    }
+
+    @ViewBuilder
+    private func singleFileRow(
+        label: String,
+        url: URL?,
+        role: StorytellerUploadFileRole,
+        onClear: @escaping () -> Void,
+        onSelect: @escaping () -> Void,
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.headline)
+            if let url {
+                Text(fileSummaries[url] ?? url.lastPathComponent)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
-                selectedSourceID = sources.first?.id
+                Text("None selected")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            HStack {
+                Button("Select…", action: onSelect)
+                    .buttonStyle(.bordered)
+                    .disabled(selectionLocked)
+                    .accessibilityLabel("Select \(label)")
+                if url != nil {
+                    Button("Clear", action: onClear)
+                        .buttonStyle(.bordered)
+                        .disabled(selectionLocked)
+                        .accessibilityLabel("Clear \(label)")
+                }
             }
         }
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private func audioFileRow() -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Audiobook")
+                .font(.headline)
+            if selectedAudiobookURLs.isEmpty {
+                Text("None selected")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(selectedAudiobookURLs, id: \.self) { url in
+                    Text(fileSummaries[url] ?? url.lastPathComponent)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            HStack {
+                Button("Select…", action: selectAudiobook)
+                    .buttonStyle(.bordered)
+                    .disabled(selectionLocked)
+                    .accessibilityLabel("Select audiobook")
+                if !selectedAudiobookURLs.isEmpty {
+                    Button("Clear") { selectedAudiobookURLs = [] }
+                        .buttonStyle(.bordered)
+                        .disabled(selectionLocked)
+                        .accessibilityLabel("Clear audiobook")
+                }
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     private func iconName(for kind: BookSourceKind) -> String {
@@ -351,41 +452,247 @@ public struct UploadNewBookView: View {
         }
     }
 
+    private func requestDismiss() {
+        if operationInFlight {
+            confirmDismiss = true
+        } else {
+            dismiss()
+        }
+    }
+
+    private func resetForNewBook() async {
+        selectedEbookURL = nil
+        selectedAudiobookURLs = []
+        selectedReadaloudURL = nil
+        fileSummaries = [:]
+        folderStatus = nil
+        uploadState = .idle
+        await coordinator.resetForNewBook()
+    }
+
+    private func loadSources() async {
+        let sources = await BookServiceActor.shared.bookSources
+        let permitted = await BookServiceActor.shared.uploadPermittedSourceIDs()
+        var listed: [BookSourceRecord] = []
+        var hidStoryteller = false
+        for source in sources where source.capabilities.canUploadBooks {
+            let access: StorytellerBookCreateAccess
+            if source.kind == .storyteller {
+                access = await BookServiceActor.shared.storytellerBookCreateAccess(sourceID: source.id)
+            } else {
+                access = .allowed
+            }
+            if StorytellerUploadDestinations.isListed(
+                source,
+                uploadPermittedSourceIDs: permitted,
+                storytellerAccess: access,
+            ) {
+                listed.append(source)
+            } else if source.kind == .storyteller {
+                hidStoryteller = true
+            }
+        }
+        listed.sort { lhs, rhs in
+            if lhs.kind == .storyteller && rhs.kind != .storyteller { return true }
+            if lhs.kind != .storyteller && rhs.kind == .storyteller { return false }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+        let hint =
+            hidStoryteller && listed.isEmpty
+            ? "Reconnect to Storyteller, or ask for permission to create books. Your selected files stay here."
+            : nil
+        bookSources = listed
+        destinationHint = hint
+        if let selectedSourceID, listed.contains(where: { $0.id == selectedSourceID }) {
+            self.selectedSourceID = selectedSourceID
+        } else if let initialSourceID, listed.contains(where: { $0.id == initialSourceID }) {
+            selectedSourceID = initialSourceID
+        } else {
+            selectedSourceID = listed.first?.id
+        }
+    }
+
+    private func startUpload() {
+        guard uploadTask == nil else { return }
+        uploadTask = Task { @MainActor in
+            await performUpload()
+            uploadTask = nil
+        }
+    }
+
+    private func performUpload() async {
+        guard hasAnyFileSelected, let sourceID = selectedSourceID, let source = selectedSource else { return }
+        folderStatus = nil
+        uploadGeneration += 1
+        let generation = uploadGeneration
+        let files = collectedFiles()
+        if let issue = StorytellerUploadFileValidation.issues(in: files) {
+            uploadState = .blocked(message: issue)
+            return
+        }
+        if source.kind != .storyteller {
+            await uploadToFolder(sourceID: sourceID, files: files)
+            return
+        }
+        let state = await coordinator.upload(
+            sourceID: sourceID,
+            isStoryteller: true,
+            files: files,
+            transport: LiveStorytellerBookUploadTransport(),
+            fileSystem: SystemStorytellerUploadFileSystem(),
+            onState: { next in
+                Task { @MainActor in
+                    guard uploadGeneration == generation else { return }
+                    uploadState = next
+                }
+            },
+        )
+        uploadGeneration += 1
+        uploadState = state
+        if state.confirmedBookID != nil {
+            await mediaViewModel.refreshMetadata(source: "storyteller-upload")
+        }
+    }
+
+    private func collectedFiles() -> [StorytellerUploadRequestFile] {
+        var files: [StorytellerUploadRequestFile] = []
+        if let url = selectedEbookURL {
+            files.append(requestFile(url, role: .ebook))
+        }
+        for url in selectedAudiobookURLs {
+            files.append(requestFile(url, role: .audiobook))
+        }
+        if let url = selectedReadaloudURL {
+            files.append(requestFile(url, role: .readaloud))
+        }
+        return files
+    }
+
+    /// Inspection already rejected bad files. This rebuilds the same request for the coordinator.
+    private func requestFile(_ url: URL, role: StorytellerUploadFileRole) -> StorytellerUploadRequestFile {
+        if case .success(let file) = StorytellerUploadFileStaging.inspect(role: role, url: url) {
+            return file
+        }
+        let format: StorytellerBookFormat =
+            switch role {
+                case .ebook: .ebook
+                case .audiobook: .audiobook
+                case .readaloud: .readaloud
+            }
+        return StorytellerUploadRequestFile(
+            format: format,
+            filename: url.lastPathComponent,
+            byteCount: 0,
+            contentType: StorytellerUploadFileValidation.contentType(for: role, filename: url.lastPathComponent),
+            typeIdentifier: nil,
+            fileURL: url,
+        )
+    }
+
+    private func uploadToFolder(sourceID: BookSourceID, files: [StorytellerUploadRequestFile]) async {
+        let fileSystem = SystemStorytellerUploadFileSystem()
+        var staged: [(StorytellerUploadRequestFile, URL)] = []
+        defer {
+            for item in staged {
+                fileSystem.removeStaged(item.1)
+            }
+        }
+        uploadState = .preparing
+        do {
+            for file in files {
+                try Task.checkCancellation()
+                staged.append((file, try fileSystem.stage(file.fileURL)))
+            }
+        } catch is CancellationError {
+            uploadState = .cancelled(partialOnServer: false)
+            return
+        } catch {
+            uploadState = .failed(message: "Couldn’t prepare the files for this folder.", bookID: nil)
+            return
+        }
+        if Task.isCancelled {
+            uploadState = .cancelled(partialOnServer: false)
+            return
+        }
+        uploadState = .uploading(fraction: 0)
+        let assets = staged.map { file, url in
+            StorytellerUploadAsset(
+                format: file.format,
+                filename: file.filename,
+                fileURL: url,
+                byteCount: file.byteCount,
+                contentType: file.contentType,
+                deleteFileWhenFinished: false,
+            )
+        }
+        let success = await BookServiceActor.shared.uploadBookAssets(
+            bookID: BookID(sourceID: sourceID, uuid: UUID().uuidString),
+            ebook: assets.first { $0.format == .ebook },
+            audiobooks: assets.filter { $0.format == .audiobook },
+            readaloud: assets.first { $0.format == .readaloud },
+        )
+        if Task.isCancelled && !success {
+            uploadState = .cancelled(partialOnServer: false)
+            return
+        }
+        guard success else {
+            uploadState = .failed(message: "Couldn’t add these files to the folder.", bookID: nil)
+            return
+        }
+        uploadState = .idle
+        folderStatus = "Added to this folder."
+        await BookServiceActor.shared.fetchLibraryInformation()
+    }
+
+    private func remember(_ url: URL, role: StorytellerUploadFileRole) {
+        switch StorytellerUploadFileStaging.inspect(role: role, url: url) {
+            case .success(let file):
+                let size = ByteCountFormatter.string(fromByteCount: file.byteCount, countStyle: .file)
+                fileSummaries[url] = "\(file.filename) · \(size)"
+            case .failure(let message):
+                fileSummaries[url] = message
+        }
+    }
+
     #if os(macOS)
     private func selectEbook() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.epub]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.message = "Select an EPUB ebook file"
-
-        if panel.runModal() == .OK {
-            selectedEbookURL = panel.url
-        }
+        guard let url = chooseFiles(types: [.epub], multiple: false, message: "Select an EPUB ebook file").first
+        else { return }
+        selectedEbookURL = url
+        remember(url, role: .ebook)
     }
 
     private func selectAudiobook() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.mpeg4Audio, .mp3, .audio]
-        panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
-        panel.message = "Select one or more audiobook files"
-
-        if panel.runModal() == .OK {
-            selectedAudiobookURLs = panel.urls
-        }
+        let urls = chooseFiles(
+            types: [.mpeg4Audio, .mp3, .audio],
+            multiple: true,
+            message: "Select one or more audiobook files",
+        )
+        guard !urls.isEmpty else { return }
+        selectedAudiobookURLs = urls
+        for url in urls { remember(url, role: .audiobook) }
     }
 
     private func selectReadaloud() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.epub]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.message = "Select a readaloud EPUB file (with media overlays)"
+        guard
+            let url = chooseFiles(
+                types: [.epub],
+                multiple: false,
+                message: "Select a readaloud EPUB file (with media overlays)",
+            ).first
+        else { return }
+        selectedReadaloudURL = url
+        remember(url, role: .readaloud)
+    }
 
-        if panel.runModal() == .OK {
-            selectedReadaloudURL = panel.url
-        }
+    private func chooseFiles(types: [UTType], multiple: Bool, message: String) -> [URL] {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = types
+        panel.allowsMultipleSelection = multiple
+        panel.canChooseDirectories = false
+        panel.message = message
+        guard panel.runModal() == .OK else { return [] }
+        return panel.urls
     }
     #else
     private func selectEbook() {
@@ -427,263 +734,23 @@ public struct UploadNewBookView: View {
         guard case .success(let urls) = result, !urls.isEmpty else { return }
         switch pendingImporterTarget {
             case .ebook:
-                selectedEbookURL = urls.first
+                if let url = urls.first {
+                    selectedEbookURL = url
+                    remember(url, role: .ebook)
+                }
             case .audiobook:
                 selectedAudiobookURLs = urls
+                for url in urls { remember(url, role: .audiobook) }
             case .readaloud:
-                selectedReadaloudURL = urls.first
+                if let url = urls.first {
+                    selectedReadaloudURL = url
+                    remember(url, role: .readaloud)
+                }
             case nil:
                 break
         }
     }
     #endif
-
-    private func readFileData(from url: URL) throws -> Data {
-        let accessing = url.startAccessingSecurityScopedResource()
-        defer {
-            if accessing {
-                url.stopAccessingSecurityScopedResource()
-            }
-        }
-        return try Data(contentsOf: url)
-    }
-
-    private func uploadBook() async {
-        guard hasAnyFileSelected, let sourceID = selectedSourceID else { return }
-
-        await MainActor.run {
-            isBusy = true
-            uploadResult = nil
-            uploadProgress = "Preparing..."
-            uploadProgressFraction = 0.0
-        }
-
-        var ebookAsset: StorytellerUploadAsset?
-        var audiobookAssets: [StorytellerUploadAsset] = []
-        var readaloudAsset: StorytellerUploadAsset?
-
-        do {
-            if let url = selectedEbookURL {
-                await MainActor.run {
-                    uploadProgress = "Reading ebook..."
-                    uploadProgressFraction = 0.03
-                }
-                let data = try readFileData(from: url)
-                ebookAsset = StorytellerUploadAsset(
-                    format: .ebook,
-                    filename: url.lastPathComponent,
-                    data: data,
-                    contentType: "application/epub+zip",
-                    relativePath: nil,
-                )
-            }
-
-            if !selectedAudiobookURLs.isEmpty {
-                await MainActor.run {
-                    uploadProgress = "Reading audiobook..."
-                    uploadProgressFraction = 0.06
-                }
-                audiobookAssets = try selectedAudiobookURLs.map { url in
-                    StorytellerUploadAsset(
-                        format: .audiobook,
-                        filename: url.lastPathComponent,
-                        data: try readFileData(from: url),
-                        contentType: audioContentType(for: url),
-                        relativePath: nil,
-                    )
-                }
-            }
-
-            if let url = selectedReadaloudURL {
-                await MainActor.run {
-                    uploadProgress = "Reading readaloud..."
-                    uploadProgressFraction = 0.09
-                }
-                let data = try readFileData(from: url)
-                readaloudAsset = StorytellerUploadAsset(
-                    format: .readaloud,
-                    filename: url.lastPathComponent,
-                    data: data,
-                    contentType: "application/epub+zip",
-                    relativePath: nil,
-                )
-            }
-
-            await MainActor.run {
-                uploadProgress = selectedSource?.kind == .localFolder ? "Adding..." : "Uploading..."
-                uploadProgressFraction = 0.1
-            }
-
-            let uploadBookUUID = UUID().uuidString
-            let bookID = BookID(sourceID: sourceID, uuid: uploadBookUUID)
-            let success = await BookServiceActor.shared.uploadBookAssets(
-                bookID: bookID,
-                ebook: ebookAsset,
-                audiobooks: audiobookAssets,
-                readaloud: readaloudAsset,
-                onProgress: { fraction in
-                    Task { @MainActor in
-                        guard isBusy else { return }
-                        let scaled = 0.1 + 0.9 * min(max(fraction, 0), 1)
-                        if scaled > (uploadProgressFraction ?? 0) {
-                            uploadProgressFraction = scaled
-                        }
-                    }
-                },
-            )
-
-            await BookServiceActor.shared.fetchLibraryInformation()
-
-            guard success else {
-                await MainActor.run {
-                    isBusy = false
-                    uploadProgress = nil
-                    uploadProgressFraction = nil
-                    uploadResult = .failure(
-                        "Couldn't upload to Storyteller. Check Wi‑Fi / LAN and Retry."
-                    )
-                }
-                return
-            }
-
-            let shouldAlign =
-                selectedSource?.kind == .storyteller
-                && ebookAsset != nil
-                && !audiobookAssets.isEmpty
-                && readaloudAsset == nil
-
-            if shouldAlign {
-                await MainActor.run {
-                    pendingAlignBookID = bookID
-                    uploadProgressFraction = 1.0
-                }
-                await startAndAwaitAlignment(for: bookID)
-            } else {
-                await MainActor.run {
-                    isBusy = false
-                    uploadProgress = nil
-                    uploadProgressFraction = 1.0
-                    pendingAlignBookID = nil
-                    uploadResult = .success
-                }
-            }
-        } catch {
-            await MainActor.run {
-                isBusy = false
-                uploadProgress = nil
-                uploadProgressFraction = nil
-                uploadResult = .failure("Failed to read files: \(error.localizedDescription)")
-            }
-            await BookServiceActor.shared.fetchLibraryInformation()
-        }
-    }
-
-    private func retryImport() async {
-        if let bookID = pendingAlignBookID {
-            await startAndAwaitAlignment(for: bookID)
-        } else {
-            await uploadBook()
-        }
-    }
-
-    /// Storyteller server process: ebook + audiobook → read-aloud (home Wi‑Fi / LAN OK).
-    private func startAndAwaitAlignment(for bookID: BookID) async {
-        await MainActor.run {
-            isBusy = true
-            uploadResult = .aligning
-            uploadProgress = "Aligning…"
-            uploadProgressFraction = nil
-        }
-
-        let started = await BookServiceActor.shared.startAlignment(for: bookID)
-        guard started else {
-            await MainActor.run {
-                isBusy = false
-                uploadProgress = nil
-                uploadResult = .failure(
-                    "Upload OK, but Aligning didn't start. Retry when on home Wi‑Fi / LAN."
-                )
-            }
-            return
-        }
-
-        // Poll library until ALIGNED (or error). Soft ceiling — server may keep going.
-        let maxAttempts = 90
-        for attempt in 0..<maxAttempts {
-            try? await Task.sleep(for: .seconds(attempt == 0 ? 2 : 4))
-            await BookServiceActor.shared.fetchLibraryInformation()
-            let book = await MainActor.run {
-                mediaViewModel.library.bookMetaData.first { $0.id == bookID }
-            }
-            if let book, book.hasAvailableReadaloud {
-                await MainActor.run {
-                    isBusy = false
-                    uploadProgress = nil
-                    uploadProgressFraction = 1.0
-                    uploadResult = .aligned
-                }
-                return
-            }
-            let status = book?.readaloud?.status?.uppercased()
-            if status == "ERROR" || status == "STOPPED" {
-                await MainActor.run {
-                    isBusy = false
-                    uploadProgress = nil
-                    uploadResult = .failure(
-                        "Aligning failed on the server. Retry, or open the book card."
-                    )
-                }
-                return
-            }
-            await MainActor.run {
-                uploadProgress = "Aligning… (\(attempt + 1))"
-            }
-        }
-
-        // Still processing after poll window — leave Creating Readaloud… on the book card.
-        await MainActor.run {
-            isBusy = false
-            uploadProgress = nil
-            uploadProgressFraction = 1.0
-            uploadResult = .success
-        }
-    }
-
-    private func audioContentType(for url: URL) -> String {
-        switch url.pathExtension.lowercased() {
-            case "aac":
-                return "audio/aac"
-            case "flac":
-                return "audio/flac"
-            case "m4a", "m4b", "mp4":
-                return "audio/mp4"
-            case "ogg", "oga":
-                return "audio/ogg"
-            case "opus":
-                return "audio/opus"
-            case "wav":
-                return "audio/wav"
-            default:
-                return "audio/mpeg"
-        }
-    }
-
-    private func progressCircle(progress: Double) -> some View {
-        ZStack {
-            Circle()
-                .stroke(Color.accentColor.opacity(0.22), lineWidth: 3)
-            Circle()
-                .trim(from: 0, to: CGFloat(min(max(progress, 0), 1)))
-                .stroke(
-                    Color.accentColor,
-                    style: StrokeStyle(lineWidth: 3, lineCap: .round),
-                )
-                .rotationEffect(.degrees(-90))
-        }
-        .frame(width: 18, height: 18)
-        .accessibilityLabel("Upload progress")
-        .accessibilityValue("\(Int(progress * 100)) percent")
-    }
 }
 
 #endif

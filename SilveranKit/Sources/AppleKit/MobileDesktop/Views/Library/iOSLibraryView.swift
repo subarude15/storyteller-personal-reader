@@ -817,8 +817,6 @@ struct MoreMenuView: View {
                         )
                 case .addBook:
                     UploadNewBookView()
-                        .navigationTitle("Add Book")
-                        .navigationBarTitleDisplayMode(.inline)
                         .iOSLibraryToolbar(
                             showSettings: $showSettings,
                             showOfflineSheet: $showOfflineSheet,
