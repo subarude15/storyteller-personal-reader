@@ -119,7 +119,7 @@ public struct LibriVoxAudiobookProvider: AudiobookCatalogProviding {
         let narrator = readers.filter { seen.insert($0).inserted }.joined(separator: ", ")
         let seconds = book.totalTimeSeconds?.value
         let duration =
-            seconds.flatMap(TimeInterval.init)
+            seconds.flatMap(timeInterval(from:))
             ?? chapters.compactMap(\.chapter.duration).reduce(0, +)
         return AudiobookProviderItem(
             provider: .librivox,
@@ -153,7 +153,7 @@ public struct LibriVoxAudiobookProvider: AudiobookCatalogProviding {
             let number = Int(section.number?.value ?? "") ?? (index + 1)
             let title = section.title?.trimmingCharacters(in: .whitespacesAndNewlines)
             let label = (title?.isEmpty == false) ? title! : "Chapter \(number)"
-            let playtime = section.playtime?.value.flatMap(TimeInterval.init)
+            let playtime = section.playtime?.value.flatMap(timeInterval(from:))
             let readers = (section.readers ?? []).compactMap { reader -> String? in
                 let name = reader.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
                 return name?.isEmpty == false ? name : nil
@@ -172,6 +172,11 @@ public struct LibriVoxAudiobookProvider: AudiobookCatalogProviding {
             )
         }
         return chapters
+    }
+
+    /// `TimeInterval.init` as a function reference is ambiguous with `init()`, so parse explicitly.
+    private static func timeInterval(from raw: String) -> TimeInterval? {
+        TimeInterval(raw)
     }
 
     private static func url(_ raw: String?) -> URL? {

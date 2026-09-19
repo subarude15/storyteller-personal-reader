@@ -6,7 +6,7 @@
       "description": "<p>A novel by Jane Austen.</p>",
       "language": "English",
       "num_sections": "2",
-      "totaltimesecs": "320",
+      "totaltimesecs": "500",
       "url_librivox": "https://librivox.org/pride-and-prejudice/",
       "coverart_thumbnail": "https://archive.org/download/cover.jpg",
       "authors": [
@@ -35,7 +35,7 @@
       "id": 99,
       "title": "Dune Messiah",
       "language": "English",
-      "totaltimesecs": 10,
+      "totaltimesecs": 25,
       "authors": [{ "first_name": "Frank", "last_name": "Herbert" }],
       "sections": [
         {

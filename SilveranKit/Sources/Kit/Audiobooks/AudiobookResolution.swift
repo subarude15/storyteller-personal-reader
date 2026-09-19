@@ -608,14 +608,40 @@ public enum AudiobookMatcher {
     }
 
     private static func firstNamesCompatible(_ lhs: String, _ rhs: String) -> Bool {
-        let left = lhs.replacingOccurrences(of: " ", with: "")
-        let right = rhs.replacingOccurrences(of: " ", with: "")
-        if left == right { return true }
-        if let leftFirst = left.first, let rightFirst = right.first, leftFirst == rightFirst,
-            left.count == 1 || right.count == 1
-        {
-            return true
+        let leftFlat = lhs.replacingOccurrences(of: " ", with: "")
+        let rightFlat = rhs.replacingOccurrences(of: " ", with: "")
+        if leftFlat == rightFlat, !leftFlat.isEmpty { return true }
+
+        let left = givenNameComponents(lhs, counterpartTokenCount: tokenCount(rhs))
+        let right = givenNameComponents(rhs, counterpartTokenCount: tokenCount(lhs))
+        guard left.count == right.count, !left.isEmpty else { return false }
+        for (leftPart, rightPart) in zip(left, right) {
+            if leftPart == rightPart { continue }
+            if initialMatches(leftPart, rightPart) { continue }
+            return false
         }
+        return true
+    }
+
+    private static func tokenCount(_ name: String) -> Int {
+        name.split(separator: " ").count
+    }
+
+    /// `jrr` lines up with three given names. Spaced initials are already separate tokens.
+    /// ponytail: a single letter-run whose length equals the other side's token count is
+    /// treated as glued initials, so `ann` would also match `a n n`. Upgrade path: compare
+    /// initials before `BookFormatTexts.fold` strips the periods that mark them.
+    private static func givenNameComponents(_ name: String, counterpartTokenCount: Int) -> [String] {
+        let tokens = name.split(separator: " ").map(String.init)
+        guard tokens.count == 1, let only = tokens.first,
+            only.count > 1, only.count == counterpartTokenCount, only.allSatisfy(\.isLetter)
+        else { return tokens }
+        return only.map { String($0) }
+    }
+
+    private static func initialMatches(_ lhs: String, _ rhs: String) -> Bool {
+        if lhs.count == 1, rhs.first.map({ String($0) }) == lhs { return true }
+        if rhs.count == 1, lhs.first.map({ String($0) }) == rhs { return true }
         return false
     }
 

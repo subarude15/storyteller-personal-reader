@@ -89,6 +89,49 @@ struct AudiobookResolutionTests {
         #expect(matched?.narrator == "Jane Smith")
     }
 
+    @Test func matchesInitialsToExpandedGivenNames() {
+        let pairs = [
+            ("J. R. R. Tolkien", "John Ronald Reuel Tolkien"),
+            ("J.R.R. Tolkien", "John Ronald Reuel Tolkien"),
+            ("Tolkien, J. R. R.", "John Ronald Reuel Tolkien"),
+            ("C. S. Lewis", "Clive Staples Lewis"),
+            ("J. Austen", "Jane Austen"),
+        ]
+        for (left, right) in pairs {
+            let forward = AudiobookMatcher.match(
+                work(title: "The Hobbit", authors: [left]),
+                item: item(title: "The Hobbit", authors: [right]),
+            )
+            let backward = AudiobookMatcher.match(
+                work(title: "The Hobbit", authors: [right]),
+                item: item(title: "The Hobbit", authors: [left]),
+            )
+            #expect(forward?.match.confidence == .exact, "\(left) should match \(right)")
+            #expect(backward?.match.confidence == .exact, "\(right) should match \(left)")
+        }
+    }
+
+    @Test func rejectsContradictoryAuthorComponents() {
+        #expect(
+            AudiobookMatcher.match(
+                work(title: "The Hobbit", authors: ["J. R. R. Tolkien"]),
+                item: item(title: "The Hobbit", authors: ["John Tolkien"]),
+            ) == nil
+        )
+        #expect(
+            AudiobookMatcher.match(
+                work(title: "Pride and Prejudice", authors: ["Jane Austen"]),
+                item: item(title: "Pride and Prejudice", authors: ["John Austen"]),
+            ) == nil
+        )
+        #expect(
+            AudiobookMatcher.match(
+                work(title: "The Hobbit", authors: ["J. R. R. Tolkien"]),
+                item: item(title: "The Hobbit", authors: ["C. S. Lewis"]),
+            ) == nil
+        )
+    }
+
     @Test func rejectsUnrelatedTitlesAndAuthors() {
         #expect(AudiobookMatcher.match(work(title: "Dune", authors: ["Frank Herbert"]), item: item(title: "Dune Messiah")) == nil)
         #expect(AudiobookMatcher.match(work(), item: item(title: "Pride and Prejudice and Zombies")) == nil)
@@ -148,10 +191,15 @@ struct AudiobookResolutionTests {
         #expect(pride.authors == ["Jane Austen"])
         #expect(pride.narrator == "Jane Smith, John Doe")
         #expect(pride.description == "A novel by Jane Austen.")
-        #expect(pride.duration == 320)
+        #expect(pride.duration == 500)
         #expect(pride.chapters.map(\.order) == [1, 2])
         #expect(pride.chapters.map(\.title) == ["Chapter 01", "Chapter 02"])
+        #expect(pride.chapters[0].duration == 180)
+        #expect(pride.chapters[1].duration == 140)
         #expect(pride.chapters[0].playbackURL.absoluteString.contains("01.mp3"))
+        let messiah = try #require(items.first { $0.providerItemID == "99" })
+        #expect(messiah.duration == 25)
+        #expect(messiah.chapters[0].duration == 10)
 
         let selected = work()
         let ranked = AudiobookMatcher.rank(work: selected, items: items)
