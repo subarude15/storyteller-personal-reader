@@ -61,7 +61,7 @@ struct iOSBookDetailView: View {
                     dismissDetail()
                 },
             )
-            .presentationDetents([.medium])
+            .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
         .onAppear {
@@ -157,6 +157,14 @@ private struct BookOptionsSheet: View {
                         }
                     } label: {
                         Label("Edit Metadata...", systemImage: "pencil")
+                    }
+                }
+
+                if mediaViewModel.isServerBook(item.id) {
+                    NavigationLink {
+                        BookFormatLinkRoot(item: item)
+                    } label: {
+                        Label("Manage book formats", systemImage: "link")
                     }
                 }
 

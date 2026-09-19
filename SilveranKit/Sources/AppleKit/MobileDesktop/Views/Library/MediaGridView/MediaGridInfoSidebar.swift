@@ -33,6 +33,9 @@ struct MediaGridInfoSidebar: View {
     @State private var isNarratorSummaryExpanded = false
     @State private var relatedItemOverride: BookMetadata?
     @State private var coverPalette = CoverDerivedPalette.fallback()
+    @State private var showingFormatLink = false
+    @State private var alignmentOverride: ReadaloudAlignment?
+    @State private var formatActionError: String?
 
     init(
         item: BookMetadata,
@@ -102,6 +105,14 @@ struct MediaGridInfoSidebar: View {
         .sheet(isPresented: $showingSyncHistory) {
             SyncHistorySheet(bookId: currentItem.id, bookTitle: currentItem.title)
         }
+        .sheet(isPresented: $showingFormatLink) {
+            BookFormatLinkSheet(item: currentItem)
+        }
+        .alert("Couldn't update formats", isPresented: formatErrorPresented) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(formatActionError ?? "")
+        }
         .onAppear {
             prepareForDisplay()
             loadDescription()
@@ -116,6 +127,8 @@ struct MediaGridInfoSidebar: View {
             coverPalette = CoverDerivedPalette.fallback()
             isAuthorSummaryExpanded = false
             isNarratorSummaryExpanded = false
+            alignmentOverride = nil
+            formatActionError = nil
             prepareForDisplay()
             loadDescription()
         }
@@ -205,9 +218,13 @@ struct MediaGridInfoSidebar: View {
                 }
 
                 let options = MediaGridViewUtilities.mediaDownloadOptions(for: currentItem)
-                if !options.isEmpty {
+                if formatMembers.count > 1 {
+                    formatMemberControls
+                } else if !options.isEmpty {
                     MacBookDetailMediaControls(item: currentItem, presentation: .hero)
                 }
+                formatLinkButton
+                formatAlignmentNote
 
                 let tags = currentItem.tagNames
                 if !tags.isEmpty {
@@ -567,9 +584,13 @@ struct MediaGridInfoSidebar: View {
                     }
                 }
 
-                if !MediaGridViewUtilities.mediaDownloadOptions(for: currentItem).isEmpty {
+                if formatMembers.count > 1 {
+                    iosFormatMemberControls
+                } else if !MediaGridViewUtilities.mediaDownloadOptions(for: currentItem).isEmpty {
                     iOSBookDetailCompactMediaControls(item: currentItem)
                 }
+                formatLinkButton
+                formatAlignmentNote
 
                 if !currentItem.tagNames.isEmpty {
                     BookDetailTagDisclosure(tags: currentItem.tagNames)
@@ -635,7 +656,9 @@ struct MediaGridInfoSidebar: View {
         let recommendations = LocalBookRecommendations.recommendations(
             for: currentItem,
             in: mediaViewModel.library.bookMetaData,
-        )
+        ).filter { book in
+            !formatMembers.contains(where: { $0.id == book.id })
+        }
         if !recommendations.isEmpty {
             BookDetailRelatedShelf(
                 title: "More like this",
@@ -769,6 +792,144 @@ struct MediaGridInfoSidebar: View {
                 self.attributedDescription = parsed
                 self.descriptionTask = nil
             }
+        }
+    }
+
+    private var formatMembers: [BookMetadata] {
+        mediaViewModel.formatGroupMembers(for: currentItem)
+    }
+
+    private var formatAlignment: ReadaloudAlignment {
+        let assessed = BookFormatAlignment.assess(formatMembers)
+        guard let alignmentOverride else { return assessed }
+        // A successful retry returns 204 before the book record leaves ERROR.
+        // Keep that queued note only until Storyteller reports a real status.
+        if assessed.phase == .failed || assessed.phase == .unavailable {
+            return alignmentOverride
+        }
+        return assessed
+    }
+
+    private var formatErrorPresented: Binding<Bool> {
+        Binding(
+            get: { formatActionError != nil },
+            set: { if !$0 { formatActionError = nil } },
+        )
+    }
+
+    @ViewBuilder
+    private var formatLinkButton: some View {
+        if mediaViewModel.isServerBook(currentItem.id) {
+            Button {
+                showingFormatLink = true
+            } label: {
+                Label("Manage book formats", systemImage: "link")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(
+                "Link an e-book and audiobook that are the same book. Neither file is deleted."
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var formatAlignmentNote: some View {
+        let showNote =
+            formatMembers.count > 1
+            || formatAlignment.phase == .queued
+            || formatAlignment.phase == .processing
+            || formatAlignment.phase == .failed
+        if showNote {
+            VStack(spacing: 8) {
+                Text(formatAlignment.message)
+                    .font(.footnote)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(formatAlignment.message)
+                if formatAlignment.canRetry {
+                    Button("Retry Readaloud") {
+                        Task { await retryReadaloud() }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .accessibilityHint("Asks Storyteller to queue alignment again. The book is not ready until Storyteller says so.")
+                }
+            }
+        }
+    }
+
+    #if os(iOS)
+    private var iosFormatMemberControls: some View {
+        HStack(spacing: 8) {
+            ForEach(formatControlPairs(), id: \.id) { pair in
+                CompactMediaButton(item: pair.book, option: pair.option)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private struct FormatControlPair: Identifiable {
+        let book: BookMetadata
+        let option: MediaDownloadOption
+        var id: String { "\(book.id.description)|\(option.id)" }
+    }
+
+    private func formatControlPairs() -> [FormatControlPair] {
+        let booksByID = Dictionary(formatMembers.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return BookFormatGrouping.playbackActions(for: formatMembers).compactMap { action in
+            guard let book = booksByID[action.bookID] else { return nil }
+            return FormatControlPair(book: book, option: option(for: action.kind))
+        }
+    }
+
+    private func option(for kind: BookFormatPlaybackKind) -> MediaDownloadOption {
+        switch kind {
+            case .read:
+                MediaDownloadOption(
+                    category: .ebook,
+                    title: kind.title,
+                    openTitle: kind.title,
+                    iconName: "book.fill",
+                )
+            case .listen:
+                MediaDownloadOption(
+                    category: .audio,
+                    title: kind.title,
+                    openTitle: kind.title,
+                    iconName: "headphones",
+                )
+            case .readAndListen:
+                MediaDownloadOption(
+                    category: .synced,
+                    title: kind.title,
+                    openTitle: kind.title,
+                    iconName: "readalong",
+                    iconType: .readaloud,
+                )
+        }
+    }
+    #endif
+
+    #if os(macOS)
+    private var formatMemberControls: some View {
+        VStack(spacing: 8) {
+            ForEach(formatMembers) { member in
+                MacBookDetailMediaControls(item: member, presentation: .hero)
+            }
+        }
+    }
+    #endif
+
+    private func retryReadaloud() async {
+        let outcome = await mediaViewModel.retryFormatReadaloud(for: currentItem)
+        switch outcome {
+            case .alignment(let alignment):
+                alignmentOverride = alignment
+                formatActionError = nil
+            case .failed(let failure):
+                formatActionError = failure.message(action: .retry)
+            case .linked, .unlinked:
+                formatActionError = nil
         }
     }
 

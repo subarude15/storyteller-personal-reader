@@ -239,7 +239,7 @@ struct iOSBookDetailCompactMediaControls: View {
     }
 }
 
-private struct CompactMediaButton: View {
+struct CompactMediaButton: View {
     let item: BookMetadata
     let option: MediaDownloadOption
     @Environment(MediaViewModel.self) private var mediaViewModel
