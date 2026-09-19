@@ -117,9 +117,8 @@ public struct LibriVoxAudiobookProvider: AudiobookCatalogProviding {
         let readers = chapters.flatMap(\.readers)
         var seen = Set<String>()
         let narrator = readers.filter { seen.insert($0).inserted }.joined(separator: ", ")
-        let seconds = book.totalTimeSeconds?.value
         let duration =
-            seconds.flatMap(timeInterval(from:))
+            timeInterval(from: book.totalTimeSeconds?.value)
             ?? chapters.compactMap(\.chapter.duration).reduce(0, +)
         return AudiobookProviderItem(
             provider: .librivox,
@@ -153,7 +152,7 @@ public struct LibriVoxAudiobookProvider: AudiobookCatalogProviding {
             let number = Int(section.number?.value ?? "") ?? (index + 1)
             let title = section.title?.trimmingCharacters(in: .whitespacesAndNewlines)
             let label = (title?.isEmpty == false) ? title! : "Chapter \(number)"
-            let playtime = section.playtime?.value.flatMap(timeInterval(from:))
+            let playtime = timeInterval(from: section.playtime?.value)
             let readers = (section.readers ?? []).compactMap { reader -> String? in
                 let name = reader.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
                 return name?.isEmpty == false ? name : nil
@@ -174,9 +173,11 @@ public struct LibriVoxAudiobookProvider: AudiobookCatalogProviding {
         return chapters
     }
 
-    /// `TimeInterval.init` as a function reference is ambiguous with `init()`, so parse explicitly.
-    private static func timeInterval(from raw: String) -> TimeInterval? {
-        TimeInterval(raw)
+    /// Call `TimeInterval(_:)` directly. Passing `TimeInterval.init` or any
+    /// `(String) -> TimeInterval?` into `flatMap` selects `String.flatMap` instead.
+    private static func timeInterval(from raw: String?) -> TimeInterval? {
+        guard let raw else { return nil }
+        return TimeInterval(raw)
     }
 
     private static func url(_ raw: String?) -> URL? {
