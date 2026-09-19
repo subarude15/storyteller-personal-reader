@@ -112,7 +112,7 @@ targets:
         KEYCHAIN_SERVICE: "$(KEYCHAIN_SERVICE)"
         SILVERAN_WIDGET_APP_GROUP: "$(APP_GROUP_ID)"
         LSApplicationCategoryType: "public.app-category.books"
-        NSLocalNetworkUsageDescription: "ink+amp needs local network access to connect to your Storyteller server and ad-strip worker."
+        NSLocalNetworkUsageDescription: "ink+amp needs local network access to connect to your Storyteller server, Shelfarr, and ad-strip worker."
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         CFBundleURLTypes:
@@ -188,7 +188,7 @@ targets:
         # unexpanded build-setting placeholders into Info / AltStore resign.
         SILVERAN_WIDGET_APP_GROUP: group.com.punkrally.reader
         LSApplicationCategoryType: "public.app-category.books"
-        NSLocalNetworkUsageDescription: "ink+amp needs local network access to connect to your Storyteller server and ad-strip worker."
+        NSLocalNetworkUsageDescription: "ink+amp needs local network access to connect to your Storyteller server, Shelfarr, and ad-strip worker."
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         CFBundleURLTypes:

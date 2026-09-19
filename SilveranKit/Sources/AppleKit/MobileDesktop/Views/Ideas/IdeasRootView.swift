@@ -1,5 +1,6 @@
 #if os(iOS)
 import SwiftUI
+import SilveranKit
 
 /// Habit-based ideas. Metadata and a local save list only — no download or import.
 struct IdeasRootView: View {
@@ -432,6 +433,8 @@ struct IdeaDetailView: View {
     @State private var isSaved = false
     @State private var fetched: OpenLibraryWorkDetail?
     @State private var loadingSummary = false
+    @State private var shelfarrBusy = false
+    @State private var shelfarrMessage: String?
 
     private var description: String? {
         if let fetched, let desc = fetched.description, !desc.isEmpty { return desc }
@@ -521,6 +524,44 @@ struct IdeaDetailView: View {
                 .buttonStyle(.borderedProminent)
                 .accessibilityIdentifier("save-idea")
 
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Shelfarr")
+                        .font(.headline)
+                    Button {
+                        askShelfarr([.ebook])
+                    } label: {
+                        Label("Request ebook", systemImage: "book")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(shelfarrBusy)
+                    .accessibilityIdentifier("shelfarr-request-ebook")
+                    Button {
+                        askShelfarr([.audiobook])
+                    } label: {
+                        Label("Request audiobook", systemImage: "headphones")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(shelfarrBusy)
+                    .accessibilityIdentifier("shelfarr-request-audiobook")
+                    Button {
+                        askShelfarr([.ebook, .audiobook])
+                    } label: {
+                        Label("Request both", systemImage: "books.vertical")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(shelfarrBusy)
+                    .accessibilityIdentifier("shelfarr-request-both")
+                    if let shelfarrMessage {
+                        Text(shelfarrMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
                 if let onNotInterested {
                     Button(role: .destructive) {
                         onNotInterested()
@@ -545,6 +586,21 @@ struct IdeaDetailView: View {
                 loadingSummary = true
                 fetched = await OpenLibraryIdeaLookup.fetchDetail(forKey: workKey)
                 loadingSummary = false
+            }
+        }
+    }
+
+    private func askShelfarr(_ mediums: [ShelfarrMedium]) {
+        shelfarrBusy = true
+        shelfarrMessage = nil
+        Task { @MainActor in
+            let result = await ShelfarrRequestManager.request(idea, mediums: mediums)
+            shelfarrBusy = false
+            switch result {
+                case .success:
+                    shelfarrMessage = "Requested on Shelfarr"
+                case .failure(let error):
+                    shelfarrMessage = error.userMessage
             }
         }
     }

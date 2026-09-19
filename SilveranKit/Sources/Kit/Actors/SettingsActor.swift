@@ -39,10 +39,12 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
         sync = (try? container.decode(Sync.self, forKey: .sync)) ?? Sync()
         library = (try? container.decode(Library.self, forKey: .library)) ?? Library()
         themes = (try? container.decode(Themes.self, forKey: .themes)) ?? Themes()
+        shelfarrBaseURL = (try? container.decode(String.self, forKey: .shelfarrBaseURL)) ?? ""
+        shelfarrAPIToken = (try? container.decode(String.self, forKey: .shelfarrAPIToken)) ?? ""
     }
 
     private enum TopLevelCodingKeys: String, CodingKey {
-        case reading, playback, readingBar, sync, library, themes
+        case reading, playback, readingBar, sync, library, themes, shelfarrBaseURL, shelfarrAPIToken
     }
 
     public struct Reading: Codable, Equatable, Sendable {
@@ -738,6 +740,8 @@ public actor SettingsActor {
         selectedDarkThemeId: String? = nil,
         customThemes: [ReaderTheme]? = nil,
         builtInThemeOverrides: [ReaderTheme]? = nil,
+        shelfarrBaseURL: String? = nil,
+        shelfarrAPIToken: String? = nil,
     ) throws {
         var updated = config
 
@@ -891,6 +895,12 @@ public actor SettingsActor {
         }
         if let builtInThemeOverrides {
             updated.themes.builtInThemeOverrides = builtInThemeOverrides
+        }
+        if let shelfarrBaseURL {
+            updated.shelfarrBaseURL = shelfarrBaseURL
+        }
+        if let shelfarrAPIToken {
+            updated.shelfarrAPIToken = shelfarrAPIToken
         }
 
         #if os(iOS)

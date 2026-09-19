@@ -57,21 +57,19 @@ public struct SettingsView: View {
     @State private var isReloadingFromActor = false
     @State private var lastPersistTime: Date = .distantPast
     @StateObject private var reloader = SettingsReloader()
-        private enum ShelfarrConnectionStatus {
-            case success
-            case failed(errorMessage: String?)
-        
-            var errorMessage: String? {
-                switch self {
+    private enum ShelfarrConnectionStatus: Equatable {
+        case success
+        case failed(errorMessage: String?)
+
+        var errorMessage: String? {
+            switch self {
                 case .success: return nil
                 case .failed(let msg): return msg
-                }
             }
         }
-        @State private var shelfarrBaseURL = ""
-        @State private var shelfarrAPIToken = ""
-        @State private var shelfarrConnectionStatus: ShelfarrConnectionStatus? = nil
-        #if os(macOS)
+    }
+    @State private var shelfarrConnectionStatus: ShelfarrConnectionStatus?
+    #if os(macOS)
         @State private var selectedTab: SettingsTab = .readerSettings
         #endif
 
@@ -249,50 +247,20 @@ public struct SettingsView: View {
             config = SilveranGlobalConfig()
         }
 
-        private func testShelfarrConnection() {
-            guard !shelfarrBaseURL.isEmpty, !shelfarrAPIToken.isEmpty else {
-                shelfarrConnectionStatus = .failed(errorMessage: "Base URL and token are required")
-                return
-            }
-            // Build URL: ensure no double slash
-            let base = shelfarrBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-            let urlString = base.hasSuffix("/") ? base + "api/v1/status" : base + "/api/v1/status"
-            guard let url = URL(string: urlString) else {
-                shelfarrConnectionStatus = .failed(errorMessage: "Invalid URL")
-                return
-            }
-            var request = URLRequest(url: url)
-            request.httpMethod = "GET"
-            request.setValue("Bearer \(shelfarrAPIToken)", forHTTPHeaderField: "Authorization")
-            request.timeoutInterval = 5.0
-        
-            shelfarrConnectionStatus = nil // reset while testing
-        
-            Task {
-                do {
-                    let (_, response) = try await URLSession.shared.data(for: request)
-                    if let httpResponse = response as? HTTPURLResponse {
-                        if (200...299).contains(httpResponse.statusCode) {
-                            await MainActor.run {
-                                shelfarrConnectionStatus = .success
-                            }
-                        } else {
-                            await MainActor.run {
-                                shelfarrConnectionStatus = .failed(errorMessage: "HTTP \(httpResponse.statusCode)")
-                            }
-                        }
-                    } else {
-                        await MainActor.run {
-                            shelfarrConnectionStatus = .failed(errorMessage: "Invalid response")
-                        }
-                    }
-                } catch {
-                    await MainActor.run {
-                        shelfarrConnectionStatus = .failed(errorMessage: error.localizedDescription)
-                    }
-                }
+    private func testShelfarrConnection() {
+        let base = config.shelfarrBaseURL
+        let token = config.shelfarrAPIToken
+        shelfarrConnectionStatus = nil
+        Task { @MainActor in
+            let client = ShelfarrClient(baseURL: base, token: token)
+            switch await client.testConnection() {
+                case .success:
+                    shelfarrConnectionStatus = .success
+                case .failure(let error):
+                    shelfarrConnectionStatus = .failed(errorMessage: error.userMessage)
             }
         }
+    }
 }
 
 #if os(macOS)
@@ -495,34 +463,44 @@ extension SettingsView {
                 }
 
                 Section("Shelfarr") {
-                                    VStack(alignment: .leading, spacing: 12) {
-                                        TextField("Base URL", text: $shelfarrBaseURL)
-                                            .placeholder(when: shelfarrBaseURL.isEmpty) {
-                                                Text("http://192.168.1.2:5057").foregroundColor(.secondary)
-                                            }
-                                            .textContentType(.URL)
-                                            .keyboardType(.URL)
-                                        SecureField("API Token", text: $shelfarrAPIToken)
-                                            .placeholder(when: shelfarrAPIToken.isEmpty) {
-                                                Text("••••••••").foregroundColor(.secondary)
-                                            }
-                                            .textContentType(.password)
-                                        Button(action: testShelfarrConnection) {
-                                            Label("Test Connection", systemImage: "network")
-                                                .frame(maxWidth: .infinity)
-                                        }
-                                        .buttonStyle(.borderedProminent)
-                                        if let connectionStatus = shelfarrConnectionStatus {
-                                            HStack {
-                                                Image(systemName: connectionStatus == .success ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                                    .foregroundColor(connectionStatus == .success ? .green : .red)
-                                                Text(connectionStatus == .success ? "Connected" : "Failed: \(connectionStatus.errorMessage ?? "Unknown error")")
-                                                    .font(.caption)
-                                                    .foregroundColor(.secondary)
-                                            }
-                                        }
-                                    }
-                                }
+                    VStack(alignment: .leading, spacing: 12) {
+                        TextField(
+                            "Base URL",
+                            text: $config.shelfarrBaseURL,
+                            prompt: Text("http://192.168.1.2:5057"),
+                        )
+                        .textContentType(.URL)
+                        .keyboardType(.URL)
+                        SecureField(
+                            "API Token",
+                            text: $config.shelfarrAPIToken,
+                            prompt: Text("Token"),
+                        )
+                        .textContentType(.password)
+                        Button(action: testShelfarrConnection) {
+                            Label("Test Connection", systemImage: "network")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        if let connectionStatus = shelfarrConnectionStatus {
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(
+                                    systemName: connectionStatus == .success
+                                        ? "checkmark.circle.fill" : "xmark.circle.fill"
+                                )
+                                .foregroundStyle(connectionStatus == .success ? .green : .red)
+                                Text(
+                                    connectionStatus == .success
+                                        ? "Connected"
+                                        : (connectionStatus.errorMessage ?? "Unknown error")
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
 
                                 Section {
                                     NavigationLink {
