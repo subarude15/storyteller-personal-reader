@@ -121,12 +121,20 @@ public struct ResolvedAudiobook: Equatable, Sendable, Codable, Identifiable {
     }
 
     /// One existing-player track per provider section. Never one fake track for the whole book.
-    public func playbackMetadata() -> AudiobookMetadata? {
-        let ordered = chapters.sorted { $0.order < $1.order }.filter {
-            let scheme = $0.playbackURL.scheme?.lowercased()
+    /// `localFiles` replaces remote chapter URLs when every playable chapter has a file.
+    public func playbackMetadata(localFiles: [String: URL]? = nil) -> AudiobookMetadata? {
+        let ordered = chapters.sorted { $0.order < $1.order }.filter { chapter in
+            if chapter.playbackURL.isFileURL { return true }
+            let scheme = chapter.playbackURL.scheme?.lowercased()
             return scheme == "https" || scheme == "http"
         }
         guard !ordered.isEmpty else { return nil }
+        if let localFiles {
+            let missing = ordered.contains { chapter in
+                !chapter.playbackURL.isFileURL && localFiles[chapter.id] == nil
+            }
+            if missing { return nil }
+        }
 
         var tracks: [AudiobookTrack] = []
         var playbackChapters: [AudiobookChapter] = []
@@ -136,10 +144,11 @@ public struct ResolvedAudiobook: Equatable, Sendable, Codable, Identifiable {
             // Upgrade path: probe each remote asset before building the timeline.
             let duration = max(chapter.duration ?? 1, 0.1)
             let href = "chapter-\(index)"
+            let url = localFiles?[chapter.id] ?? chapter.playbackURL
             tracks.append(
                 AudiobookTrack(
                     href: href,
-                    url: chapter.playbackURL,
+                    url: url,
                     type: "audio/mpeg",
                     duration: duration,
                     startTime: cursor,

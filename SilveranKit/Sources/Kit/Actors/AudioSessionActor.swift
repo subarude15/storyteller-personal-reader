@@ -785,10 +785,13 @@ public actor AudioSessionActor {
         playback: ResolvedAudiobookPlayback,
         startAt: TimeInterval?,
     ) async throws {
+        let preparedIsLocal = prepared.tracks.contains { $0.url.isFileURL }
+        let currentIsLocal = metadata?.tracks.contains { $0.url.isFileURL } ?? false
         if self.book?.id == book.id,
             resolvedPlayback?.provider == playback.provider,
             resolvedPlayback?.providerItemID == playback.providerItemID,
-            metadata != nil
+            metadata != nil,
+            preparedIsLocal == currentIsLocal
         {
             await publishState()
             return
@@ -1602,6 +1605,14 @@ public actor AudioSessionActor {
 
     private func startRemoteCoverTask(url: URL, sessionID: UUID) {
         coverTask?.cancel()
+        if url.isFileURL {
+            coverTask = Task { [weak self] in
+                let data = try? Data(contentsOf: url)
+                guard let data, !data.isEmpty, !Task.isCancelled else { return }
+                await self?.applyCover(data, sessionID: sessionID)
+            }
+            return
+        }
         coverTask = Task { [weak self] in
             var request = URLRequest(url: url, timeoutInterval: 15)
             guard
