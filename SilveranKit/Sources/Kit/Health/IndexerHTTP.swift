@@ -35,7 +35,7 @@ public struct LiveDiagnosticHTTPTransport: DiagnosticHTTPTransport {
     }
 }
 
-public enum IndexerProbeFailure: Equatable, Sendable {
+public enum IndexerProbeFailure: Equatable, Error, Sendable {
     case invalidURL
     case unauthorized
     case unreachable
