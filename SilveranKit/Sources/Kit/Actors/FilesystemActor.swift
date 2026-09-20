@@ -10,6 +10,17 @@ func encodedIdentityPathComponent(_ input: String) -> String {
     return "b64_\(encoded)"
 }
 
+func decodedIdentityPathComponent(_ component: String) -> String? {
+    guard component.hasPrefix("b64_") else { return nil }
+    var encoded = String(component.dropFirst(4))
+        .replacingOccurrences(of: "-", with: "+")
+        .replacingOccurrences(of: "_", with: "/")
+    let padding = (4 - encoded.count % 4) % 4
+    encoded += String(repeating: "=", count: padding)
+    guard let data = Data(base64Encoded: encoded) else { return nil }
+    return String(data: data, encoding: .utf8)
+}
+
 struct PersistedSyncHistory: Codable, Sendable {
     struct Book: Codable, Sendable {
         let bookID: BookID
