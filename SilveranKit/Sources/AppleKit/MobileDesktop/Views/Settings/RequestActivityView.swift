@@ -253,13 +253,26 @@ enum RequestActivityBrowseTarget {
 }
 
 public struct RequestActivityView: View {
+    var initialRequestID: String?
     @StateObject private var model = RequestActivityViewModel()
     @Environment(MediaViewModel.self) private var mediaViewModel: MediaViewModel
+    @State private var deepLinkID: String?
+    @State private var missingRequestMessage: String?
 
-    public init() {}
+    public init(initialRequestID: String? = nil) {
+        self.initialRequestID = initialRequestID
+    }
 
     public var body: some View {
         List {
+            if let missingRequestMessage {
+                Section {
+                    Text(missingRequestMessage)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             if let message = model.lazyLibrarianUnavailableMessage {
                 Section {
                     Label(message, systemImage: "exclamationmark.triangle")
@@ -318,6 +331,10 @@ public struct RequestActivityView: View {
         }
         .onAppear {
             model.onAppear(libraryBooks: mediaViewModel.library.bookMetaData)
+            applyInitialDestination()
+        }
+        .onChange(of: initialRequestID) { _, _ in
+            applyInitialDestination()
         }
         .onChange(of: mediaViewModel.libraryVersion) { _, _ in
             model.applyLibraryPresence(libraryBooks: mediaViewModel.library.bookMetaData)
@@ -326,6 +343,42 @@ public struct RequestActivityView: View {
             NotificationCenter.default.publisher(for: .requestActivityStoreDidChange)
         ) { _ in
             model.reloadFromStore()
+        }
+        .background {
+            NavigationLink(
+                isActive: Binding(
+                    get: { deepLinkID != nil },
+                    set: { isActive in
+                        if !isActive { deepLinkID = nil }
+                    },
+                )
+            ) {
+                if let deepLinkID {
+                    RequestActivityDetailView(itemID: deepLinkID, model: model)
+                } else {
+                    EmptyView()
+                }
+            } label: {
+                EmptyView()
+            }
+            .hidden()
+        }
+    }
+
+    /// Push the shared detail when the id is still in history. Otherwise stay on the list.
+    private func applyInitialDestination() {
+        guard let initialRequestID else { return }
+        let resolved = RequestActivityNavigation.resolved(
+            .detail(requestID: initialRequestID),
+            itemExists: { model.item(id: $0) != nil },
+        )
+        switch resolved {
+            case .list:
+                deepLinkID = nil
+                missingRequestMessage = RequestActivityNavigation.missingHistoryMessage
+            case .detail(let requestID):
+                missingRequestMessage = nil
+                deepLinkID = requestID
         }
     }
 }
