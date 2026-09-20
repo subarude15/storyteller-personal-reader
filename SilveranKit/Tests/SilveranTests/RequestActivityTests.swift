@@ -425,7 +425,243 @@ struct RequestActivityTests {
         #expect(groups.contains(where: { $0.0 == .inProgress && $0.1.count == 1 }))
     }
 
+    // MARK: - Library summary
+
+    @Test func librarySummaryHidesWhenNoRequests() {
+        let summary = RequestActivityGrouping.librarySummary([], now: Date())
+        #expect(summary.hasTrackedRequests == false)
+        #expect(summary.subtitle == nil)
+        #expect(summary.accessibilityLabel == "Requests")
+    }
+
+    @Test func librarySummaryOneInProgress() {
+        let now = Date()
+        let summary = RequestActivityGrouping.librarySummary(
+            [item(id: "1", status: .searching, updatedAt: now)],
+            now: now,
+        )
+        #expect(summary.inProgressCount == 1)
+        #expect(summary.needsAttentionCount == 0)
+        #expect(summary.subtitle == "1 in progress")
+        #expect(summary.accessibilityLabel == "Requests. 1 in progress.")
+        #expect(summary.showsAttentionStyling == false)
+    }
+
+    @Test func librarySummaryMultipleInProgress() {
+        let now = Date()
+        let summary = RequestActivityGrouping.librarySummary(
+            [
+                item(id: "1", status: .searching, updatedAt: now),
+                item(id: "2", status: .wanted, updatedAt: now),
+                item(id: "3", status: .snatched, updatedAt: now),
+            ],
+            now: now,
+        )
+        #expect(summary.inProgressCount == 3)
+        #expect(summary.subtitle == "3 in progress")
+    }
+
+    @Test func librarySummaryNeedsAttentionPlusInProgress() {
+        let now = Date()
+        let summary = RequestActivityGrouping.librarySummary(
+            [
+                item(id: "a", status: .needsAttention, updatedAt: now, attention: "stale"),
+                item(id: "b", status: .searching, updatedAt: now),
+                item(id: "c", status: .wanted, updatedAt: now),
+                item(id: "d", status: .requested, updatedAt: now),
+            ],
+            now: now,
+        )
+        #expect(summary.needsAttentionCount == 1)
+        #expect(summary.inProgressCount == 3)
+        #expect(summary.subtitle == "3 in progress · 1 needs attention")
+        #expect(summary.showsAttentionStyling)
+        #expect(summary.accessibilityLabel == "Requests. 3 in progress · 1 needs attention.")
+    }
+
+    @Test func librarySummaryNeedsAttentionTakesPriorityOverAvailable() {
+        let now = Date()
+        let summary = RequestActivityGrouping.librarySummary(
+            [
+                item(id: "a", status: .needsAttention, updatedAt: now, attention: "failed"),
+                item(id: "b", status: .available, updatedAt: now),
+            ],
+            now: now,
+        )
+        #expect(summary.subtitle == "1 needs attention")
+        #expect(summary.recentlyAvailableCount == 1)
+    }
+
+    @Test func librarySummaryCompletedOnlyRecent() {
+        let now = Date()
+        let summary = RequestActivityGrouping.librarySummary(
+            [
+                item(id: "1", status: .available, updatedAt: now.addingTimeInterval(-2 * 3600)),
+                item(id: "2", status: .available, updatedAt: now.addingTimeInterval(-10 * 3600)),
+            ],
+            now: now,
+        )
+        #expect(summary.inProgressCount == 0)
+        #expect(summary.recentlyAvailableCount == 2)
+        #expect(summary.subtitle == "2 recently available")
+    }
+
+    @Test func librarySummaryOldCompletedBecomesAllCaughtUp() {
+        let now = Date()
+        let old = now.addingTimeInterval(
+            -(RequestActivityGrouping.recentCompletionWindow + 3600)
+        )
+        let summary = RequestActivityGrouping.librarySummary(
+            [item(id: "1", status: .available, updatedAt: old)],
+            now: now,
+        )
+        #expect(summary.recentlyAvailableCount == 0)
+        #expect(summary.subtitle == "All caught up")
+    }
+
+    @Test func librarySummaryRecentVsOldCompleted() {
+        let now = Date()
+        let recent = now.addingTimeInterval(-12 * 3600)
+        let old = now.addingTimeInterval(
+            -(RequestActivityGrouping.recentCompletionWindow + 24 * 3600)
+        )
+        let summary = RequestActivityGrouping.librarySummary(
+            [
+                item(id: "recent", status: .available, updatedAt: recent),
+                item(id: "old", status: .alreadyAvailable, updatedAt: old),
+            ],
+            now: now,
+        )
+        #expect(summary.recentlyAvailableCount == 1)
+        #expect(summary.subtitle == "1 recently available")
+    }
+
+    @Test func librarySummaryShelfarrRequestedCountsAsInProgress() {
+        let now = Date()
+        let summary = RequestActivityGrouping.librarySummary(
+            [shelfarrItem(status: .requested, updatedAt: now)],
+            now: now,
+        )
+        #expect(summary.inProgressCount == 1)
+        #expect(summary.subtitle == "1 in progress")
+    }
+
+    @Test func librarySummaryLazyLibrarianWantedCountsAsInProgress() {
+        let now = Date()
+        let summary = RequestActivityGrouping.librarySummary(
+            [item(id: "w", status: .wanted, updatedAt: now)],
+            now: now,
+        )
+        #expect(summary.inProgressCount == 1)
+        #expect(RequestActivityStatus.wanted.isInProgress)
+    }
+
+    @Test func librarySummaryAvailableCountsAsCompletedNotInProgress() {
+        let now = Date()
+        #expect(RequestActivityStatus.available.isCompleted)
+        #expect(RequestActivityStatus.available.isInProgress == false)
+        let summary = RequestActivityGrouping.librarySummary(
+            [item(id: "a", status: .available, updatedAt: now)],
+            now: now,
+        )
+        #expect(summary.inProgressCount == 0)
+        #expect(summary.recentlyAvailableCount == 1)
+    }
+
+    @Test func libraryDetailStatusLineSearching() {
+        let line = item(id: "1", status: .searching, updatedAt: Date())
+            .libraryDetailStatusLine
+        #expect(line == "Ebook · Searching")
+    }
+
+    @Test func libraryDetailStatusLineAvailableFromLazyLibrarian() {
+        let line = item(id: "1", status: .available, updatedAt: Date())
+            .libraryDetailStatusLine
+        #expect(line == "Ebook · Available from LazyLibrarian")
+    }
+
+    // MARK: - Store observability
+
+    @Test func storePostsChangeNotificationOnRecordAndRemove() {
+        let defaults = UserDefaults(suiteName: "request-activity-\(UUID().uuidString)")!
+        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let store = RequestActivityStore(defaults: defaults)
+        let counter = NotificationCounter(name: .requestActivityStoreDidChange)
+        defer { counter.stop() }
+
+        store.recordSubmission(
+            work: work(title: "Notify"),
+            provider: .lazyLibrarian,
+            outcomes: [
+                BookRequestOutcome(
+                    format: .ebook,
+                    phase: .searching,
+                    detail: "Searching",
+                    providerBookID: "OL9W",
+                )
+            ],
+        )
+        #expect(counter.count == 1)
+
+        let id = store.allItems()[0].id
+        store.remove(id: id)
+        #expect(counter.count == 2)
+        #expect(store.allItems().isEmpty)
+    }
+
+    @Test func storePostsChangeNotificationOnUpsert() {
+        let defaults = UserDefaults(suiteName: "request-activity-\(UUID().uuidString)")!
+        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let store = RequestActivityStore(defaults: defaults)
+        let counter = NotificationCounter(name: .requestActivityStoreDidChange)
+        defer { counter.stop() }
+
+        store.upsert(item(id: "up", status: .wanted, updatedAt: Date()))
+        #expect(counter.count == 1)
+        #expect(store.librarySummary().inProgressCount == 1)
+    }
+
+    @Test func storePostsChangeNotificationOnPruneWhenItemsRemoved() {
+        let defaults = UserDefaults(suiteName: "request-activity-\(UUID().uuidString)")!
+        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let store = RequestActivityStore(defaults: defaults)
+        let now = Date()
+        let staleCompleted = now.addingTimeInterval(
+            -(RequestActivityGrouping.completedRetentionInterval + 3600)
+        )
+        store.upsert(item(id: "old", status: .available, updatedAt: staleCompleted))
+
+        let counter = NotificationCounter(name: .requestActivityStoreDidChange)
+        defer { counter.stop() }
+        store.prune(now: now)
+        #expect(counter.count == 1)
+        #expect(store.allItems().isEmpty)
+    }
+
     // MARK: - Helpers
+
+    private func item(
+        id: String,
+        status: RequestActivityStatus,
+        updatedAt: Date,
+        attention: String? = nil,
+        format: BookRequestFormat = .ebook,
+        provider: BookRequestProviderKind = .lazyLibrarian,
+    ) -> RequestActivityItem {
+        RequestActivityItem(
+            id: id,
+            canonicalWorkID: id,
+            title: id,
+            author: "",
+            provider: provider,
+            requestedFormats: [format],
+            updatedAt: updatedAt,
+            formatStatuses: [
+                RequestFormatStatus(format: format, status: status, updatedAt: updatedAt)
+            ],
+            attentionReason: attention,
+        )
+    }
 
     private func work(
         title: String = "Pride and Prejudice",
@@ -466,6 +702,37 @@ struct RequestActivityTests {
                 )
             ],
         )
+    }
+}
+
+private final class NotificationCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _count = 0
+    private var token: NSObjectProtocol?
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _count
+    }
+
+    init(name: Notification.Name) {
+        token = NotificationCenter.default.addObserver(
+            forName: name,
+            object: nil,
+            queue: nil,
+        ) { [weak self] _ in
+            self?.lock.lock()
+            self?._count += 1
+            self?.lock.unlock()
+        }
+    }
+
+    func stop() {
+        if let token {
+            NotificationCenter.default.removeObserver(token)
+            self.token = nil
+        }
     }
 }
 

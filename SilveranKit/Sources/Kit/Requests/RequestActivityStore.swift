@@ -1,5 +1,13 @@
 import Foundation
 
+extension Notification.Name {
+    /// Posted after Request Activity history mutates (upsert / submit / remove / prune).
+    /// No secrets in `userInfo` — observers should re-read the store.
+    public static let requestActivityStoreDidChange = Notification.Name(
+        "punkRally.requestActivityStoreDidChange"
+    )
+}
+
 /// Device-local request history. No secrets — BookIDs and statuses only.
 public final class RequestActivityStore: @unchecked Sendable {
     public static let shared = RequestActivityStore()
@@ -159,6 +167,11 @@ public final class RequestActivityStore: @unchecked Sendable {
         encoder.outputFormatting = [.sortedKeys]
         guard let data = try? encoder.encode(items) else { return }
         defaults.set(data, forKey: key)
+        NotificationCenter.default.post(name: .requestActivityStoreDidChange, object: nil)
+    }
+
+    public func librarySummary(now: Date = Date()) -> RequestActivityLibrarySummary {
+        RequestActivityGrouping.librarySummary(allItems(), now: now)
     }
 }
 
