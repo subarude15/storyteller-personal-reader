@@ -590,6 +590,11 @@ struct MediaGridView: View {
         .onAppear {
             refreshRequestLibraryIndex()
         }
+        .onChange(of: mediaViewModel.libraryVersion) { _, _ in
+            // Library sync can match a previously pending request. Rebuild once here
+            // (grid/table already call recomputeAllCaches for the book snapshot).
+            refreshRequestLibraryIndex()
+        }
         .onReceive(
             NotificationCenter.default.publisher(for: .requestActivityStoreDidChange)
         ) { _ in

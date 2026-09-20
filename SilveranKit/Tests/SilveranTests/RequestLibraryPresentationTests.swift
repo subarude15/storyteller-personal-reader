@@ -254,6 +254,27 @@ struct RequestLibraryPresentationTests {
         #expect(refresher.currentIndex().badge(for: book)?.label == "Searching")
     }
 
+    @Test func libraryArrivalClearsPendingAndShowsBadge() {
+        let book = libraryBook(uuid: "arrive", title: "Dune", authors: ["Frank Herbert"], ebook: true)
+        let item = requestItem(
+            canonicalWorkID: book.id.description,
+            title: "Dune",
+            author: "Frank Herbert",
+            formats: [.ebook],
+            status: .searching,
+            updatedAt: now,
+        )
+
+        let unmatched = RequestLibraryPresentationIndex(items: [item], books: [], now: now)
+        #expect(unmatched.pendingRows(filter: .requests).map(\.id) == [item.id])
+
+        let matched = RequestLibraryPresentationIndex(items: [item], books: [book], now: now)
+        #expect(matched.pendingRows(filter: .requests).isEmpty)
+        #expect(matched.match(book: book)?.id == item.id)
+        #expect(matched.badge(for: book)?.label == "Searching")
+        #expect(matched.filteredBooks([book], filter: .requests).map(\.id) == [book.id])
+    }
+
     // MARK: - Helpers
 
     private func requestItem(
