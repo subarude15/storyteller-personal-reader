@@ -62,28 +62,28 @@ public enum RequestActivityTransitionDetector {
     }
 
     /// Formats that newly entered Needs Attention / Failed (attention bucket).
+    /// Per-format: a recovered format may notify again even if siblings stay in attention.
     public static func newlyAttentionFormats(
         previous: RequestActivityItem?,
         current: RequestActivityItem,
     ) -> [BookRequestFormat] {
-        let fingerprint = attentionFingerprint(for: current)
-        let lastNotified =
-            previous?.notificationState?.lastNotifiedAttentionFingerprint
-            ?? current.notificationState?.lastNotifiedAttentionFingerprint
+        let alreadyNotified = Set(
+            (previous?.notificationState ?? current.notificationState)?
+                .lastNotifiedAttentionFormats ?? []
+        )
+        let nowAttention = Set(attentionFormats(in: current))
+        let wasAttention = Set(previous.map { attentionFormats(in: $0) } ?? [])
 
-        let nowAttention = attentionFormats(in: current)
-        guard !nowAttention.isEmpty else { return [] }
-
-        let wasAttention = previous.map { attentionFormats(in: $0) } ?? []
-        let newly = nowAttention.filter { !wasAttention.contains($0) }
-        guard !newly.isEmpty else { return [] }
-
-        // When still in attention, skip if this generation was already notified.
-        // When re-entering from a non-attention state, always allow (fingerprint cleared on exit).
-        if !wasAttention.isEmpty, let lastNotified, lastNotified == fingerprint {
-            return []
+        return BookRequestFormat.allCases.filter { format in
+            guard current.requestedFormats.contains(format) else { return false }
+            guard nowAttention.contains(format) else { return false }
+            // Still in attention from previous update — not a new transition.
+            if wasAttention.contains(format) { return false }
+            // Restart / reload with persisted notify state while still in attention.
+            if previous == nil, alreadyNotified.contains(format) { return false }
+            // Transition into attention (including re-entry after recovery).
+            return true
         }
-        return newly
     }
 
     public static func attentionFormats(in item: RequestActivityItem) -> [BookRequestFormat] {
@@ -91,10 +91,6 @@ public enum RequestActivityTransitionDetector {
             guard item.requestedFormats.contains(format) else { return false }
             return item.status(for: format)?.status.needsAttentionBucket == true
         }
-    }
-
-    public static func attentionFingerprint(for item: RequestActivityItem) -> String {
-        attentionFormats(in: item).map(\.rawValue).joined(separator: ",")
     }
 
     /// Apply notified-state onto the item after events are accepted.
@@ -116,18 +112,22 @@ public enum RequestActivityTransitionDetector {
                     {
                         state.lastNotifiedAvailableFormats.append(format)
                     }
-                    // Stable order for encoding / equality.
                     state.lastNotifiedAvailableFormats = BookRequestFormat.allCases.filter {
                         state.lastNotifiedAvailableFormats.contains($0)
                     }
-                case .needsAttention:
-                    state.lastNotifiedAttentionFingerprint = attentionFingerprint(for: item)
+                case .needsAttention(_, _, let formats):
+                    for format in formats where !state.lastNotifiedAttentionFormats.contains(format)
+                    {
+                        state.lastNotifiedAttentionFormats.append(format)
+                    }
             }
         }
 
-        // Leaving attention clears the fingerprint so a later re-entry may notify again.
-        if attentionFormats(in: item).isEmpty {
-            state.lastNotifiedAttentionFingerprint = nil
+        // Drop formats that left attention so a later re-entry may notify again,
+        // even when sibling formats remain in attention.
+        let stillAttention = Set(attentionFormats(in: item))
+        state.lastNotifiedAttentionFormats = BookRequestFormat.allCases.filter {
+            state.lastNotifiedAttentionFormats.contains($0) && stillAttention.contains($0)
         }
 
         updated.notificationState = state

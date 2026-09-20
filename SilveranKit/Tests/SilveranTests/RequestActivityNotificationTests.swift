@@ -180,7 +180,7 @@ struct RequestActivityNotificationTests {
             formats: [.ebook],
             attention: "Still waiting",
             notificationState: RequestActivityNotificationState(
-                lastNotifiedAttentionFingerprint: "ebook"
+                lastNotifiedAttentionFormats: [.ebook]
             ),
         )
         let current = item(
@@ -231,14 +231,14 @@ struct RequestActivityNotificationTests {
             events: first,
             previous: searching,
         )
-        #expect(stamped.notificationState?.lastNotifiedAttentionFingerprint == "audiobook")
+        #expect(stamped.notificationState?.lastNotifiedAttentionFormats == [.audiobook])
 
         let recovered = RequestActivityTransitionDetector.applyingNotificationState(
             searching,
             events: [],
             previous: stamped,
         )
-        #expect(recovered.notificationState?.lastNotifiedAttentionFingerprint == nil)
+        #expect(recovered.notificationState?.lastNotifiedAttentionFormats.isEmpty == true)
 
         let again = RequestActivityTransitionDetector.events(
             previous: recovered,
@@ -247,6 +247,184 @@ struct RequestActivityNotificationTests {
         )
         #expect(again.count == 1)
         #expect(again[0].notificationBody == "Dune audiobook needs attention.")
+    }
+
+    @Test func mixedFormatAttentionPartialRecoveryAllowsEbookReNotifyOnly() {
+        let id = "mixed-attn"
+        let bothSearching = item(
+            id: id,
+            statuses: [.ebook: .searching, .audiobook: .searching],
+        )
+        let bothAttention = item(
+            id: id,
+            statuses: [.ebook: .needsAttention, .audiobook: .needsAttention],
+            attention: "stale",
+        )
+
+        // 1. Both enter attention together → one combined notification
+        let enter = RequestActivityTransitionDetector.events(
+            previous: bothSearching,
+            current: bothAttention,
+            settings: enabledSettings(),
+        )
+        #expect(enter.count == 1)
+        guard case .needsAttention(_, _, let enterFormats) = enter[0] else {
+            Issue.record("expected needsAttention")
+            return
+        }
+        #expect(Set(enterFormats) == [.ebook, .audiobook])
+        let stampedBoth = RequestActivityTransitionDetector.applyingNotificationState(
+            bothAttention,
+            events: enter,
+            previous: bothSearching,
+        )
+        #expect(
+            stampedBoth.notificationState?.lastNotifiedAttentionFormats == [.ebook, .audiobook]
+        )
+
+        // 2. Both remain attention → no repeat
+        let stay = RequestActivityTransitionDetector.events(
+            previous: stampedBoth,
+            current: stampedBoth,
+            settings: enabledSettings(),
+        )
+        #expect(stay.isEmpty)
+
+        // 3. ebook recovers while audiobook remains attention → no notification
+        let ebookRecovered = item(
+            id: id,
+            statuses: [.ebook: .searching, .audiobook: .needsAttention],
+            attention: "stale",
+            notificationState: stampedBoth.notificationState,
+        )
+        let afterPartial = RequestActivityTransitionDetector.applyingNotificationState(
+            ebookRecovered,
+            events: RequestActivityTransitionDetector.events(
+                previous: stampedBoth,
+                current: ebookRecovered,
+                settings: enabledSettings(),
+            ),
+            previous: stampedBoth,
+        )
+        #expect(
+            RequestActivityTransitionDetector.events(
+                previous: stampedBoth,
+                current: ebookRecovered,
+                settings: enabledSettings(),
+            ).isEmpty
+        )
+        #expect(afterPartial.notificationState?.lastNotifiedAttentionFormats == [.audiobook])
+
+        // 4+5. ebook re-enters attention; audiobook never recovered → ebook only
+        let ebookFailsAgain = item(
+            id: id,
+            statuses: [.ebook: .needsAttention, .audiobook: .needsAttention],
+            attention: "stale again",
+            notificationState: afterPartial.notificationState,
+        )
+        let reEnter = RequestActivityTransitionDetector.events(
+            previous: afterPartial,
+            current: ebookFailsAgain,
+            settings: enabledSettings(),
+        )
+        #expect(reEnter.count == 1)
+        guard case .needsAttention(_, _, let reFormats) = reEnter[0] else {
+            Issue.record("expected needsAttention for ebook only")
+            return
+        }
+        #expect(reFormats == [.ebook])
+        #expect(!reFormats.contains(.audiobook))
+        #expect(reEnter[0].notificationBody == "Dune ebook needs attention.")
+    }
+
+    @Test func bothFormatsFullyRecoverThenFailAgainCombinedNotification() {
+        let id = "both-recover"
+        let bothAttention = item(
+            id: id,
+            statuses: [.ebook: .needsAttention, .audiobook: .needsAttention],
+            attention: "stale",
+            notificationState: RequestActivityNotificationState(
+                lastNotifiedAttentionFormats: [.ebook, .audiobook]
+            ),
+        )
+        let bothSearching = item(
+            id: id,
+            statuses: [.ebook: .searching, .audiobook: .searching],
+            notificationState: bothAttention.notificationState,
+        )
+        let cleared = RequestActivityTransitionDetector.applyingNotificationState(
+            bothSearching,
+            events: [],
+            previous: bothAttention,
+        )
+        #expect(cleared.notificationState?.lastNotifiedAttentionFormats.isEmpty == true)
+
+        let bothFailAgain = item(
+            id: id,
+            statuses: [.ebook: .needsAttention, .audiobook: .needsAttention],
+            attention: "failed again",
+            notificationState: cleared.notificationState,
+        )
+        let events = RequestActivityTransitionDetector.events(
+            previous: cleared,
+            current: bothFailAgain,
+            settings: enabledSettings(),
+        )
+        #expect(events.count == 1)
+        guard case .needsAttention(_, _, let formats) = events[0] else {
+            Issue.record("expected combined needsAttention")
+            return
+        }
+        #expect(Set(formats) == [.ebook, .audiobook])
+        #expect(events[0].notificationBody == "Dune needs attention.")
+    }
+
+    @Test func restartWhileStillInAttentionDoesNotDuplicate() {
+        let defaults = UserDefaults(suiteName: "request-notify-\(UUID().uuidString)")!
+        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let store = RequestActivityStore(defaults: defaults)
+        let recorder = RecordingRequestNotificationScheduler()
+        let previousScheduler = RequestActivityNotifier.shared.scheduler
+        let previousSettings = RequestActivityNotifier.shared.settingsProvider
+        RequestActivityNotifier.shared.scheduler = recorder
+        RequestActivityNotifier.shared.settingsProvider = { enabledSettings() }
+        defer {
+            RequestActivityNotifier.shared.scheduler = previousScheduler
+            RequestActivityNotifier.shared.settingsProvider = previousSettings
+        }
+
+        let searching = item(status: .searching, formats: [.ebook, .audiobook])
+        store.upsert(searching)
+        recorder.reset()
+
+        let attention = item(
+            id: searching.id,
+            statuses: [.ebook: .needsAttention, .audiobook: .needsAttention],
+            attention: "stale",
+        )
+        store.upsert(attention)
+        #expect(recorder.events.count == 1)
+        recorder.reset()
+
+        // Simulate restart: reload persisted row and upsert same attention state.
+        let reloaded = store.item(id: searching.id)!
+        #expect(reloaded.notificationState?.lastNotifiedAttentionFormats == [.ebook, .audiobook])
+        store.upsert(reloaded)
+        #expect(recorder.events.isEmpty)
+    }
+
+    @Test func legacyAttentionFingerprintMigratesToPerFormatState() throws {
+        let json = """
+            {
+              "lastNotifiedAvailableFormats": [],
+              "lastNotifiedAttentionFingerprint": "ebook,audiobook"
+            }
+            """
+        let state = try JSONDecoder().decode(
+            RequestActivityNotificationState.self,
+            from: Data(json.utf8),
+        )
+        #expect(state.lastNotifiedAttentionFormats == [.ebook, .audiobook])
     }
 
     @Test func shelfarrRequestedForFiveDaysDoesNotNotifyAttention() {
@@ -510,6 +688,7 @@ struct RequestActivityNotificationTests {
     private func item(
         id: String = UUID().uuidString,
         statuses: [BookRequestFormat: RequestActivityStatus],
+        attention: String? = nil,
         notificationState: RequestActivityNotificationState? = nil,
     ) -> RequestActivityItem {
         let now = Date()
@@ -525,6 +704,7 @@ struct RequestActivityNotificationTests {
             formatStatuses: formats.map {
                 RequestFormatStatus(format: $0, status: statuses[$0]!, updatedAt: now)
             },
+            attentionReason: attention,
             notificationState: notificationState,
         )
     }

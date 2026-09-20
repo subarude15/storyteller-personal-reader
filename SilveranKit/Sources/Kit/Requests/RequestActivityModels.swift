@@ -70,16 +70,54 @@ public enum RequestActivityStatus: String, Codable, Equatable, Sendable, CaseIte
 public struct RequestActivityNotificationState: Codable, Equatable, Sendable {
     /// Formats already notified as Available in Library.
     public var lastNotifiedAvailableFormats: [BookRequestFormat]
-    /// Fingerprint of the last Needs Attention notification (`ebook`, `audiobook`, or `audiobook,ebook`).
-    /// Cleared when the request leaves attention so a later re-entry may notify again.
-    public var lastNotifiedAttentionFingerprint: String?
+    /// Formats already notified for Needs Attention.
+    /// A format is removed when it leaves attention so a later re-entry may notify again,
+    /// even if sibling formats remain in attention.
+    public var lastNotifiedAttentionFormats: [BookRequestFormat]
 
     public init(
         lastNotifiedAvailableFormats: [BookRequestFormat] = [],
-        lastNotifiedAttentionFingerprint: String? = nil,
+        lastNotifiedAttentionFormats: [BookRequestFormat] = [],
     ) {
         self.lastNotifiedAvailableFormats = lastNotifiedAvailableFormats
-        self.lastNotifiedAttentionFingerprint = lastNotifiedAttentionFingerprint
+        self.lastNotifiedAttentionFormats = lastNotifiedAttentionFormats
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        lastNotifiedAvailableFormats =
+            try container.decodeIfPresent([BookRequestFormat].self, forKey: .lastNotifiedAvailableFormats)
+            ?? []
+        var attentionFormats =
+            try container.decodeIfPresent([BookRequestFormat].self, forKey: .lastNotifiedAttentionFormats)
+            ?? []
+        // Legacy fingerprint (`"ebook"`, `"audiobook"`, `"audiobook,ebook"`) → per-format set.
+        if attentionFormats.isEmpty,
+            let fingerprint = try container.decodeIfPresent(
+                String.self,
+                forKey: .lastNotifiedAttentionFingerprint
+            ),
+            !fingerprint.isEmpty
+        {
+            let parts = Set(fingerprint.split(separator: ",").map(String.init))
+            attentionFormats = BookRequestFormat.allCases.filter { parts.contains($0.rawValue) }
+        }
+        lastNotifiedAttentionFormats = BookRequestFormat.allCases.filter {
+            attentionFormats.contains($0)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(lastNotifiedAvailableFormats, forKey: .lastNotifiedAvailableFormats)
+        try container.encode(lastNotifiedAttentionFormats, forKey: .lastNotifiedAttentionFormats)
+        // Intentionally omit legacy fingerprint — new writes use per-format state only.
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case lastNotifiedAvailableFormats
+        case lastNotifiedAttentionFormats
+        case lastNotifiedAttentionFingerprint
     }
 }
 
