@@ -17,14 +17,15 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-1. **Book-first audiobook resolution** — select or request a book, then **Find audiobook options**. The app queries a provider only after that tap, matches results to the selected work, and plays the chosen version in the existing audiobook player. LibriVox is the first provider. This is not a global catalog browse and does not mark torrent, debrid, or Explore streaming phases complete.
+1. **Harden Storyteller book upload/import** — follow-up in review. Library → Import and More → Add Book already use the file-backed Tus path from #44. This round widens Files picker types, makes Check again poll-only, lengthens processing waits for large imports, and reuses a folder-destination UUID on retry. Mid-byte Tus resume is intentionally not invented: Storyteller finish semantics use a full PATCH from offset 0; resume stays file-level via a stable book UUID. Does **not** start LazyLibrarian, debrid, or a second library.
 
 **Explicit reject:** Playtorio, TorBox, magnets, LibGen, Audible scrape, DRM strip, and free-catalog Explore browse (Standard Ebooks / public OPDS shelves / Download / Import). Do not start second player, CarPlay, or DSM/SMB unless Josh reorders.
 
 ## Shipped
 
 - [x] **Book-first audiobook resolution** — workflow is select/request book → Find audiobook options → match provider results to that work → choose an audiobook. LibriVox/public-domain only, queried after the tap, not when opening a book, scrolling search, or refreshing the library. Matched versions stay formats of the selected work (no extra library rows, no second player). Resume is device-local. Does **not** complete streaming, torrent, or debrid phases.
-- [x] **Mobile Storyteller upload hardening** — in review, not merged. Same Import / Add Book sheet: file-backed Tus upload (no full audiobook in memory), Storyteller destinations only when `bookCreate` is confirmed, one book UUID across retry, honest processing / partial / cancel states. Original Files documents are not modified.
+- [x] **Mobile Storyteller upload hardening** — merged in #44 (`bac55cd`). Same Import / Add Book sheet: file-backed Tus upload (no full audiobook in memory), Storyteller destinations only when `bookCreate` is confirmed, one book UUID across retry, honest processing / partial / cancel states. Original Files documents are not modified.
+- [ ] **Storyteller upload follow-up (picker / Check again / polls)** — in review, not merged. Wider audiobook picker types, poll-only Check again, longer library-visibility waits, folder-destination UUID reuse on retry.
 
 ### Product / sync
 - [x] **Ideas v2 (polish)** — Library | Ideas recommends titles not already in the Storyteller library (title/author/ISBN), deduped by title+author or ISBN. Every row shows a why-line (never blank); empty-reason paths are dropped. Detail shows cover, title, author, a labeled **Why** chip, and a real description — `first_sentence` from search.json, backfilled from `/works/{key}.json` description, with subjects + year when present and a graceful "No description on Open Library" fallback. Denser: author 12 / series-tag 10 hits, ~24–36 kept; last-good cache when offline. Save idea only — no download. **More like this** stays library-only.

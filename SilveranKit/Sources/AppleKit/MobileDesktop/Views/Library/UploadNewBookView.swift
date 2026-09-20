@@ -29,6 +29,7 @@ public struct UploadNewBookView: View {
     @State private var destinationHint: String?
     @State private var uploadState: StorytellerBookUploadState = .idle
     @State private var folderStatus: String?
+    @State private var folderBookUUID: String?
     @State private var uploadTask: Task<Void, Never>?
     @State private var uploadGeneration = 0
     @State private var confirmCancel = false
@@ -466,6 +467,7 @@ public struct UploadNewBookView: View {
         selectedReadaloudURL = nil
         fileSummaries = [:]
         folderStatus = nil
+        folderBookUUID = nil
         uploadState = .idle
         await coordinator.resetForNewBook()
     }
@@ -534,19 +536,32 @@ public struct UploadNewBookView: View {
             await uploadToFolder(sourceID: sourceID, files: files)
             return
         }
-        let state = await coordinator.upload(
-            sourceID: sourceID,
-            isStoryteller: true,
-            files: files,
-            transport: LiveStorytellerBookUploadTransport(),
-            fileSystem: SystemStorytellerUploadFileSystem(),
-            onState: { next in
-                Task { @MainActor in
-                    guard uploadGeneration == generation else { return }
-                    uploadState = next
-                }
-            },
-        )
+
+        let onState: @Sendable (StorytellerBookUploadState) -> Void = { next in
+            Task { @MainActor in
+                guard uploadGeneration == generation else { return }
+                uploadState = next
+            }
+        }
+        let state: StorytellerBookUploadState
+        if case .stillProcessing = uploadState {
+            state = await coordinator.checkLibrary(
+                sourceID: sourceID,
+                isStoryteller: true,
+                files: files,
+                transport: LiveStorytellerBookUploadTransport(),
+                onState: onState,
+            )
+        } else {
+            state = await coordinator.upload(
+                sourceID: sourceID,
+                isStoryteller: true,
+                files: files,
+                transport: LiveStorytellerBookUploadTransport(),
+                fileSystem: SystemStorytellerUploadFileSystem(),
+                onState: onState,
+            )
+        }
         uploadGeneration += 1
         uploadState = state
         if state.confirmedBookID != nil {
@@ -615,6 +630,9 @@ public struct UploadNewBookView: View {
             return
         }
         uploadState = .uploading(fraction: 0)
+        if folderBookUUID == nil {
+            folderBookUUID = UUID().uuidString
+        }
         let assets = staged.map { file, url in
             StorytellerUploadAsset(
                 format: file.format,
@@ -626,7 +644,7 @@ public struct UploadNewBookView: View {
             )
         }
         let success = await BookServiceActor.shared.uploadBookAssets(
-            bookID: BookID(sourceID: sourceID, uuid: UUID().uuidString),
+            bookID: BookID(sourceID: sourceID, uuid: folderBookUUID ?? UUID().uuidString),
             ebook: assets.first { $0.format == .ebook },
             audiobooks: assets.filter { $0.format == .audiobook },
             readaloud: assets.first { $0.format == .readaloud },
@@ -656,7 +674,12 @@ public struct UploadNewBookView: View {
 
     #if os(macOS)
     private func selectEbook() {
-        guard let url = chooseFiles(types: [.epub], multiple: false, message: "Select an EPUB ebook file").first
+        guard
+            let url = chooseFiles(
+                types: StorytellerUploadFileValidation.pickerContentTypes(for: .ebook),
+                multiple: false,
+                message: "Select an EPUB ebook file",
+            ).first
         else { return }
         selectedEbookURL = url
         remember(url, role: .ebook)
@@ -664,7 +687,7 @@ public struct UploadNewBookView: View {
 
     private func selectAudiobook() {
         let urls = chooseFiles(
-            types: [.mpeg4Audio, .mp3, .audio],
+            types: StorytellerUploadFileValidation.pickerContentTypes(for: .audiobook),
             multiple: true,
             message: "Select one or more audiobook files",
         )
@@ -676,7 +699,7 @@ public struct UploadNewBookView: View {
     private func selectReadaloud() {
         guard
             let url = chooseFiles(
-                types: [.epub],
+                types: StorytellerUploadFileValidation.pickerContentTypes(for: .readaloud),
                 multiple: false,
                 message: "Select a readaloud EPUB file (with media overlays)",
             ).first
@@ -720,9 +743,9 @@ public struct UploadNewBookView: View {
     private var importerContentTypes: [UTType] {
         switch activeImporter {
             case .audiobook:
-                return [.mpeg4Audio, .mp3, .audio]
+                return StorytellerUploadFileValidation.pickerContentTypes(for: .audiobook)
             case .ebook, .readaloud, nil:
-                return [.epub]
+                return StorytellerUploadFileValidation.pickerContentTypes(for: .ebook)
         }
     }
 

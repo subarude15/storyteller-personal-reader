@@ -8,6 +8,9 @@ import UniformTypeIdentifiers
 // directory; older servers read `totalAudioFiles` on audio files. A matching Upload-Offset
 // means the finish handler ran. It does not mean the library list already shows the row.
 // Re-PATCH of the same filename overwrites that slot, so a retry skips finished files.
+// Mid-byte Tus resume is not used: Storyteller's create/finish path was verified to take a
+// full PATCH from `Upload-Offset: 0`, and inventing HEAD/partial offsets would invent
+// server behavior. Resume is file-level via `completedAssetIDs` + a stable book UUID.
 // Nothing here deletes a partial server book. `/upload/finalize` can relocate whatever is
 // left in that directory onto an existing audiobook, including an empty directory, so it
 // is not called.
@@ -176,6 +179,10 @@ public enum StorytellerUploadFileValidation {
         switch role {
             case .ebook, .readaloud:
                 guard acceptsEpub(filename: filename, type: type) else {
+                    if isPDF(filename: filename, type: type) {
+                        return
+                            "\(displayName) is a PDF. Storyteller ebooks have to be EPUB files."
+                    }
                     return "\(displayName) isn’t an EPUB. Storyteller ebooks have to be EPUB files."
                 }
             case .audiobook:
@@ -208,11 +215,35 @@ public enum StorytellerUploadFileValidation {
         return nil
     }
 
+    /// Content types for the Files / Open panel. Broader than a single extension filter so
+    /// zip / `.audiobook` packages Storyteller accepts still appear; validation still rejects
+    /// unsupported picks before any network call.
+    public static func pickerContentTypes(for role: StorytellerUploadFileRole) -> [UTType] {
+        switch role {
+            case .ebook, .readaloud:
+                return [.epub]
+            case .audiobook:
+                var types: [UTType] = [.mpeg4Audio, .mp3, .audio, .zip]
+                if let m4b = UTType(filenameExtension: "m4b") {
+                    types.append(m4b)
+                }
+                if let audiobook = UTType(filenameExtension: "audiobook") {
+                    types.append(audiobook)
+                }
+                return types
+        }
+    }
+
     private static func acceptsEpub(filename: String, type: UTType?) -> Bool {
         let ext = (filename as NSString).pathExtension.lowercased()
         if let type, contradictsBook(type) { return false }
         if type?.conforms(to: .epub) == true { return true }
         return ext == "epub"
+    }
+
+    private static func isPDF(filename: String, type: UTType?) -> Bool {
+        if type?.conforms(to: .pdf) == true { return true }
+        return (filename as NSString).pathExtension.lowercased() == "pdf"
     }
 
     private static func acceptsAudiobook(filename: String, type: UTType?) -> Bool {
@@ -579,8 +610,8 @@ public actor StorytellerBookUploadCoordinator {
         files: [StorytellerUploadRequestFile],
         transport: any StorytellerBookUploadTransport,
         fileSystem: any StorytellerUploadFileSystem,
-        maxBookPolls: Int = 6,
-        maxAlignmentPolls: Int = 8,
+        maxBookPolls: Int = 12,
+        maxAlignmentPolls: Int = 10,
         sleep: @escaping @Sendable (Int) async -> Void = StorytellerBookUploadCoordinator.defaultSleep,
         isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled },
         onState: @escaping @Sendable (StorytellerBookUploadState) -> Void = { _ in },
@@ -734,7 +765,73 @@ public actor StorytellerBookUploadCoordinator {
 
         if isCancelled() { return note(cancelledState(), onState: onState) }
 
-        _ = note(.uploadComplete, onState: onState)
+        if !pending.isEmpty {
+            _ = note(.uploadComplete, onState: onState)
+        }
+        return await waitForLibrary(
+            bookID: bookID,
+            files: files,
+            isStoryteller: isStoryteller,
+            transport: transport,
+            maxBookPolls: maxBookPolls,
+            maxAlignmentPolls: maxAlignmentPolls,
+            sleep: sleep,
+            isCancelled: isCancelled,
+            onState: onState,
+        )
+    }
+
+    /// Poll Storyteller for a book that already finished transferring. Used by Check again.
+    /// Does not re-upload bytes or mint a new UUID.
+    public func checkLibrary(
+        sourceID: BookSourceID,
+        isStoryteller: Bool,
+        files: [StorytellerUploadRequestFile],
+        transport: any StorytellerBookUploadTransport,
+        maxBookPolls: Int = 12,
+        maxAlignmentPolls: Int = 10,
+        sleep: @escaping @Sendable (Int) async -> Void = StorytellerBookUploadCoordinator.defaultSleep,
+        isCancelled: @escaping @Sendable () -> Bool = { Task.isCancelled },
+        onState: @escaping @Sendable (StorytellerBookUploadState) -> Void = { _ in },
+    ) async -> StorytellerBookUploadState {
+        if submitting { return state }
+        submitting = true
+        defer { submitting = false }
+
+        guard let bookUUID else {
+            return note(
+                .failed(message: "Nothing to check yet. Upload the book first.", bookID: nil),
+                onState: onState,
+            )
+        }
+        let bookID = BookID(sourceID: sourceID, uuid: bookUUID)
+        if isCancelled() {
+            return note(cancelledState(), onState: onState)
+        }
+        return await waitForLibrary(
+            bookID: bookID,
+            files: files,
+            isStoryteller: isStoryteller,
+            transport: transport,
+            maxBookPolls: maxBookPolls,
+            maxAlignmentPolls: maxAlignmentPolls,
+            sleep: sleep,
+            isCancelled: isCancelled,
+            onState: onState,
+        )
+    }
+
+    private func waitForLibrary(
+        bookID: BookID,
+        files: [StorytellerUploadRequestFile],
+        isStoryteller: Bool,
+        transport: any StorytellerBookUploadTransport,
+        maxBookPolls: Int,
+        maxAlignmentPolls: Int,
+        sleep: @Sendable (Int) async -> Void,
+        isCancelled: @Sendable () -> Bool,
+        onState: @Sendable (StorytellerBookUploadState) -> Void,
+    ) async -> StorytellerBookUploadState {
         _ = note(.processing, onState: onState)
 
         let shouldAlign = StorytellerUploadAlignment.shouldQueueReadaloud(
