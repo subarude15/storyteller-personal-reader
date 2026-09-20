@@ -65,6 +65,62 @@ public enum RequestActivityStatus: String, Codable, Equatable, Sendable, CaseIte
     }
 }
 
+/// Persisted notification dedupe for one Request Activity row.
+/// Optional on `RequestActivityItem` so legacy JSON keeps decoding.
+public struct RequestActivityNotificationState: Codable, Equatable, Sendable {
+    /// Formats already notified as Available in Library.
+    public var lastNotifiedAvailableFormats: [BookRequestFormat]
+    /// Formats already notified for Needs Attention.
+    /// A format is removed when it leaves attention so a later re-entry may notify again,
+    /// even if sibling formats remain in attention.
+    public var lastNotifiedAttentionFormats: [BookRequestFormat]
+
+    public init(
+        lastNotifiedAvailableFormats: [BookRequestFormat] = [],
+        lastNotifiedAttentionFormats: [BookRequestFormat] = [],
+    ) {
+        self.lastNotifiedAvailableFormats = lastNotifiedAvailableFormats
+        self.lastNotifiedAttentionFormats = lastNotifiedAttentionFormats
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        lastNotifiedAvailableFormats =
+            try container.decodeIfPresent([BookRequestFormat].self, forKey: .lastNotifiedAvailableFormats)
+            ?? []
+        var attentionFormats =
+            try container.decodeIfPresent([BookRequestFormat].self, forKey: .lastNotifiedAttentionFormats)
+            ?? []
+        // Legacy fingerprint (`"ebook"`, `"audiobook"`, `"audiobook,ebook"`) → per-format set.
+        if attentionFormats.isEmpty,
+            let fingerprint = try container.decodeIfPresent(
+                String.self,
+                forKey: .lastNotifiedAttentionFingerprint
+            ),
+            !fingerprint.isEmpty
+        {
+            let parts = Set(fingerprint.split(separator: ",").map(String.init))
+            attentionFormats = BookRequestFormat.allCases.filter { parts.contains($0.rawValue) }
+        }
+        lastNotifiedAttentionFormats = BookRequestFormat.allCases.filter {
+            attentionFormats.contains($0)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(lastNotifiedAvailableFormats, forKey: .lastNotifiedAvailableFormats)
+        try container.encode(lastNotifiedAttentionFormats, forKey: .lastNotifiedAttentionFormats)
+        // Intentionally omit legacy fingerprint — new writes use per-format state only.
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case lastNotifiedAvailableFormats
+        case lastNotifiedAttentionFormats
+        case lastNotifiedAttentionFingerprint
+    }
+}
+
 public struct RequestFormatStatus: Codable, Equatable, Sendable {
     public var format: BookRequestFormat
     public var status: RequestActivityStatus
@@ -108,6 +164,8 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
     public var openLibraryWorkID: String?
     public var openLibraryEditionID: String?
     public var isbn: String?
+    /// Local notification dedupe metadata — absent on legacy rows (safe default).
+    public var notificationState: RequestActivityNotificationState?
 
     public init(
         id: String = UUID().uuidString,
@@ -126,6 +184,7 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
         openLibraryWorkID: String? = nil,
         openLibraryEditionID: String? = nil,
         isbn: String? = nil,
+        notificationState: RequestActivityNotificationState? = nil,
     ) {
         self.id = id
         self.canonicalWorkID = canonicalWorkID
@@ -143,6 +202,7 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
         self.openLibraryWorkID = openLibraryWorkID
         self.openLibraryEditionID = openLibraryEditionID
         self.isbn = isbn
+        self.notificationState = notificationState
     }
 
     public var overallStatus: RequestActivityStatus {

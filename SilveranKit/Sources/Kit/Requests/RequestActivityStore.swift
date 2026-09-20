@@ -41,17 +41,31 @@ public final class RequestActivityStore: @unchecked Sendable {
     public func upsert(_ item: RequestActivityItem) {
         lock.lock()
         var items = loadUnlocked()
+        let previous: RequestActivityItem?
+        let existingIndex: Int?
         if let index = items.firstIndex(where: { $0.id == item.id }) {
-            items[index] = item
+            previous = items[index]
+            existingIndex = index
         } else if let index = items.firstIndex(where: {
             $0.canonicalWorkID == item.canonicalWorkID && $0.provider == item.provider
         }) {
-            items[index] = item
+            previous = items[index]
+            existingIndex = index
         } else {
-            items.append(item)
+            previous = nil
+            existingIndex = nil
+        }
+        let prepared = RequestActivityNotifier.shared.prepare(previous: previous, incoming: item)
+        if let existingIndex {
+            items[existingIndex] = prepared.item
+        } else {
+            items.append(prepared.item)
         }
         let didSave = saveUnlocked(items)
+        let events = prepared.events
         lock.unlock()
+        // Schedule outside the lock — never re-enter the store from notification delivery.
+        RequestActivityNotifier.shared.deliver(events)
         if didSave {
             notifyDidChange()
         }
@@ -138,6 +152,11 @@ public final class RequestActivityStore: @unchecked Sendable {
         if !submissionFailed, !stillNeedsAttention {
             item.lastError = nil
         }
+        let prepared = RequestActivityNotifier.shared.prepare(
+            previous: existingIndex.map { items[$0] },
+            incoming: item,
+        )
+        item = prepared.item
         if let existingIndex {
             items[existingIndex] = item
         } else {
@@ -145,7 +164,9 @@ public final class RequestActivityStore: @unchecked Sendable {
         }
         let didSave = saveUnlocked(items)
         let formatLabels = item.requestedFormats.map(\.rawValue).joined(separator: ",")
+        let events = prepared.events
         lock.unlock()
+        RequestActivityNotifier.shared.deliver(events)
         if didSave {
             notifyDidChange()
         }

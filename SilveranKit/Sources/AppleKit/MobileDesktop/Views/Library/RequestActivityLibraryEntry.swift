@@ -11,6 +11,7 @@ struct RequestActivityLibraryEntry: View {
     @State private var summary = RequestActivityLibrarySummary()
     @State private var tick = 0
     @State private var lastAppliedLibraryVersion: Int?
+    @State private var openFromNotification = false
 
     var body: some View {
         Group {
@@ -52,8 +53,22 @@ struct RequestActivityLibraryEntry: View {
                 .accessibilityAddTraits(.isButton)
             }
         }
+        .background {
+            NavigationLink(isActive: $openFromNotification) {
+                RequestActivityView()
+            } label: {
+                EmptyView()
+            }
+            .hidden()
+        }
         .id(tick)
-        .onAppear(perform: applyLibraryAndReload)
+        .onAppear {
+            applyLibraryAndReload()
+            if RequestActivityNavigationPending.shouldOpen {
+                RequestActivityNavigationPending.shouldOpen = false
+                openFromNotification = true
+            }
+        }
         .onChange(of: mediaViewModel.libraryVersion) { _, _ in
             applyLibraryAndReload()
         }
@@ -61,6 +76,12 @@ struct RequestActivityLibraryEntry: View {
             NotificationCenter.default.publisher(for: .requestActivityStoreDidChange)
         ) { _ in
             reloadSummary()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .punkRallyShowRequestActivity)
+        ) { _ in
+            RequestActivityNavigationPending.shouldOpen = false
+            openFromNotification = true
         }
     }
 
