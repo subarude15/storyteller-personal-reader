@@ -250,6 +250,11 @@ public final class RequestActivityStore: @unchecked Sendable {
 public enum RequestActivityAttention {
     /// Stale Wanted/Searching/Requested is a LazyLibrarian signal. Shelfarr only
     /// reports acceptance, so age alone is not an error.
+    ///
+    /// When a format first enters `.needsAttention`, `updatedAt` is set to `now`
+    /// so automatic-fallback delay measures attention age — not the older Wanted
+    /// / Searching timestamp. Later applies while still Needs Attention leave
+    /// that clock alone.
     public static func apply(_ item: RequestActivityItem, now: Date = Date()) -> RequestActivityItem {
         var updated = item
         var reason: String? = item.attentionReason
@@ -258,6 +263,7 @@ public enum RequestActivityAttention {
             if format.status == .failed {
                 reason = format.detail ?? "Request failed"
                 format.status = .needsAttention
+                format.updatedAt = now
                 updated.formatStatuses[index] = format
                 continue
             }
@@ -268,9 +274,12 @@ public enum RequestActivityAttention {
                 >= RequestActivityGrouping.lookupFailureAttentionThreshold
             {
                 reason = "Status lookup failed repeatedly"
-                format.status = .needsAttention
-                format.detail = reason
-                updated.formatStatuses[index] = format
+                if format.status != .needsAttention {
+                    format.status = .needsAttention
+                    format.detail = reason
+                    format.updatedAt = now
+                    updated.formatStatuses[index] = format
+                }
                 continue
             }
             let age = now.timeIntervalSince(format.updatedAt)
@@ -283,6 +292,7 @@ public enum RequestActivityAttention {
                 reason = "Still waiting after \(ServiceHealthURLSanitizer.relativeAge(from: format.updatedAt, now: now))"
                 format.status = .needsAttention
                 format.detail = reason
+                format.updatedAt = now
                 updated.formatStatuses[index] = format
             }
         }

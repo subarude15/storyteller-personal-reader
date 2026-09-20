@@ -50,7 +50,7 @@ public actor RequestAutomaticFallbackCoordinator {
     private let history: RequestActivityStore
     private let submitter: any AutomaticFallbackSubmitting
     private let settingsProvider: @Sendable () -> AutomaticFallbackSettingsSnapshot
-    private let healthProvider: @Sendable () -> (lazyLibrarianUnavailable: Bool, shelfarrUnavailable: Bool)
+    private let healthProvider: @Sendable () -> (Bool, Bool)
     private var inFlight: Set<String> = []
 
     public init(

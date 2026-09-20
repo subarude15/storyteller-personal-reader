@@ -47,8 +47,9 @@ final class RequestActivityViewModel: ObservableObject {
         _ = refreshService.applyLibraryPresence(libraryBooks: libraryBooks)
         items = history.allItems()
         Task { await self.reloadActionContext() }
+        // Refresh first; evaluateAutomaticFallback runs after refreshAll so we
+        // never race a stale Needs Attention row against a recovering provider.
         refresh(force: false)
-        Task { await self.evaluateAutomaticFallback() }
     }
 
     func applyLibraryPresence(libraryBooks: [BookMetadata]) {

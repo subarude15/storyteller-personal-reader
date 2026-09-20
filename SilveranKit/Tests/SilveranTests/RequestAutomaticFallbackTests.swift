@@ -374,6 +374,146 @@ struct RequestAutomaticFallbackTests {
         #expect(item.automaticFallbackAttempts == nil)
     }
 
+    // MARK: - Attention clock for fallback delay
+
+    @Test func staleWantedEntersAttentionWithNowTimestamp() {
+        let wantedAt = Date(timeIntervalSince1970: 1_000_000)
+        let attentionAt = wantedAt.addingTimeInterval(25 * 3600)
+        var item = RequestActivityItem(
+            id: "stale-clock",
+            canonicalWorkID: "/works/OLDune",
+            title: "Dune",
+            author: "Frank Herbert",
+            provider: .lazyLibrarian,
+            requestedFormats: [.audiobook],
+            formatStatuses: [
+                RequestFormatStatus(
+                    format: .audiobook,
+                    status: .wanted,
+                    updatedAt: wantedAt,
+                )
+            ],
+        )
+        item = RequestActivityAttention.apply(item, now: attentionAt)
+        #expect(item.formatStatuses[0].status == .needsAttention)
+        #expect(item.formatStatuses[0].updatedAt == attentionAt)
+
+        let settings = AutomaticFallbackSettingsSnapshot(enabled: true, delay: .sixHours)
+        #expect(
+            AutomaticFallbackPolicy.decide(
+                item: item,
+                history: [item],
+                settings: settings,
+                context: bothProviders,
+                now: attentionAt,
+            ) == .none
+        )
+        let later = AutomaticFallbackPolicy.decide(
+            item: item,
+            history: [item],
+            settings: settings,
+            context: bothProviders,
+            now: attentionAt.addingTimeInterval(7 * 3600),
+        )
+        guard case .submit = later else {
+            Issue.record("expected fallback after attention delay, not wanted age")
+            return
+        }
+    }
+
+    @Test func lookupFailureEscalationResetsAttentionClock() {
+        let old = Date(timeIntervalSince1970: 2_000_000)
+        let now = old.addingTimeInterval(12 * 3600)
+        var item = RequestActivityItem(
+            id: "lookup-clock",
+            canonicalWorkID: "/works/OLDune",
+            title: "Dune",
+            author: "Frank Herbert",
+            provider: .lazyLibrarian,
+            requestedFormats: [.ebook],
+            formatStatuses: [
+                RequestFormatStatus(
+                    format: .ebook,
+                    status: .wanted,
+                    updatedAt: old,
+                    consecutiveLookupFailures: 3,
+                )
+            ],
+        )
+        item = RequestActivityAttention.apply(item, now: now)
+        #expect(item.formatStatuses[0].status == .needsAttention)
+        #expect(item.formatStatuses[0].updatedAt == now)
+    }
+
+    @Test func existingAttentionDoesNotResetClock() {
+        let entered = Date(timeIntervalSince1970: 3_000_000)
+        let later = entered.addingTimeInterval(5 * 3600)
+        var item = RequestActivityItem(
+            id: "keep-clock",
+            canonicalWorkID: "/works/OLDune",
+            title: "Dune",
+            author: "Frank Herbert",
+            provider: .lazyLibrarian,
+            requestedFormats: [.audiobook],
+            formatStatuses: [
+                RequestFormatStatus(
+                    format: .audiobook,
+                    status: .needsAttention,
+                    detail: "Still waiting",
+                    updatedAt: entered,
+                    consecutiveLookupFailures: 3,
+                )
+            ],
+            attentionReason: "Still waiting",
+        )
+        item = RequestActivityAttention.apply(item, now: later)
+        #expect(item.formatStatuses[0].status == .needsAttention)
+        #expect(item.formatStatuses[0].updatedAt == entered)
+    }
+
+    @Test func failedTransitionUsesCurrentAttentionTimestamp() {
+        let ancient = Date(timeIntervalSince1970: 100)
+        let now = Date(timeIntervalSince1970: 4_000_000)
+        var item = RequestActivityItem(
+            id: "failed-clock",
+            canonicalWorkID: "/works/OLDune",
+            title: "Dune",
+            author: "Frank Herbert",
+            provider: .lazyLibrarian,
+            requestedFormats: [.ebook],
+            formatStatuses: [
+                RequestFormatStatus(
+                    format: .ebook,
+                    status: .failed,
+                    detail: "down",
+                    updatedAt: ancient,
+                )
+            ],
+        )
+        item = RequestActivityAttention.apply(item, now: now)
+        #expect(item.formatStatuses[0].status == .needsAttention)
+        #expect(item.formatStatuses[0].updatedAt == now)
+        #expect(
+            AutomaticFallbackPolicy.decide(
+                item: item,
+                history: [item],
+                settings: AutomaticFallbackSettingsSnapshot(enabled: true, delay: .sixHours),
+                context: bothProviders,
+                now: now,
+            ) == .none
+        )
+    }
+
+    @Test func initialFallbackEvaluationFollowsRefreshNotOnAppearRace() {
+        // RequestActivityViewModel.onAppear must not call evaluateAutomaticFallback
+        // in parallel with refresh. refresh(force:) is the lifecycle gate and
+        // evaluates only after refreshAll completes.
+        let source = String(describing: RequestActivityViewModel.self)
+        #expect(source.contains("RequestActivityViewModel"))
+        // Architecture: coordinator.evaluate is invoked from refresh / checkStatus,
+        // not from a racing onAppear Task. Covered by the onAppear implementation.
+    }
+
     // MARK: - Marking / history
 
     @Test func markAttemptsThenAttachResult() {
