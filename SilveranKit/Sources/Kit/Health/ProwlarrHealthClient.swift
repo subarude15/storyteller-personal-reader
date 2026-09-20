@@ -49,13 +49,12 @@ public struct ProwlarrHealthClient: Sendable {
                 failures = [:]
                 statusReadable = false
             case .success(let body):
-                guard let parsed = Self.failures(from: body, secret: key) else {
-                    failures = [:]
-                    statusReadable = false
-                }
-                else {
+                if let parsed = Self.failures(from: body, secret: key) {
                     failures = parsed
                     statusReadable = true
+                } else {
+                    failures = [:]
+                    statusReadable = false
                 }
         }
 
