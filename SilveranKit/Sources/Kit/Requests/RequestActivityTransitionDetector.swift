@@ -78,8 +78,11 @@ public enum RequestActivityTransitionDetector {
         let newly = nowAttention.filter { !wasAttention.contains($0) }
         guard !newly.isEmpty else { return [] }
 
-        // Already notified for this attention generation — avoid spam on refresh.
-        if let lastNotified, lastNotified == fingerprint { return [] }
+        // When still in attention, skip if this generation was already notified.
+        // When re-entering from a non-attention state, always allow (fingerprint cleared on exit).
+        if !wasAttention.isEmpty, let lastNotified, lastNotified == fingerprint {
+            return []
+        }
         return newly
     }
 
