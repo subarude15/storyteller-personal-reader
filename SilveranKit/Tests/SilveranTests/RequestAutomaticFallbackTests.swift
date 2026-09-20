@@ -504,16 +504,6 @@ struct RequestAutomaticFallbackTests {
         )
     }
 
-    @Test func initialFallbackEvaluationFollowsRefreshNotOnAppearRace() {
-        // RequestActivityViewModel.onAppear must not call evaluateAutomaticFallback
-        // in parallel with refresh. refresh(force:) is the lifecycle gate and
-        // evaluates only after refreshAll completes.
-        let source = String(describing: RequestActivityViewModel.self)
-        #expect(source.contains("RequestActivityViewModel"))
-        // Architecture: coordinator.evaluate is invoked from refresh / checkStatus,
-        // not from a racing onAppear Task. Covered by the onAppear implementation.
-    }
-
     // MARK: - Marking / history
 
     @Test func markAttemptsThenAttachResult() {
