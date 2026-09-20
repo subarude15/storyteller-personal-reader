@@ -197,13 +197,17 @@ struct HomeView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: sectionSpacing) {
-                            HStack {
-                                Text("Home")
-                                    .font(.storytellerTitle(size: 32))
-                                Spacer()
-                                #if os(macOS)
-                                viewOptionsButton
-                                #endif
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack {
+                                    Text("Home")
+                                        .font(.storytellerTitle(size: 32))
+                                    Spacer()
+                                    #if os(macOS)
+                                    viewOptionsButton
+                                    #endif
+                                }
+
+                                RequestActivityLibraryEntry()
                             }
                             .padding(.leading, horizontalPadding)
                             .padding(

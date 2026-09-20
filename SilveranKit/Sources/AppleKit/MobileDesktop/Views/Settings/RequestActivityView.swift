@@ -31,6 +31,10 @@ final class RequestActivityViewModel: ObservableObject {
         refresh(force: false)
     }
 
+    func reloadFromStore() {
+        items = history.allItems()
+    }
+
     func refresh(force: Bool) {
         task?.cancel()
         isRefreshing = true
@@ -90,11 +94,13 @@ public struct RequestActivityView: View {
 
             if model.groups.isEmpty {
                 Section {
-                    Text("No book requests yet.")
+                    Text("No tracked requests yet")
                         .foregroundStyle(.secondary)
-                    Text("When you request an ebook or audiobook, it shows up here.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text(
+                        "Books you request will appear here while they are being searched for and prepared."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
             } else {
                 ForEach(model.groups, id: \.0) { group in
@@ -138,6 +144,11 @@ public struct RequestActivityView: View {
             }
         }
         .onAppear { model.onAppear() }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .requestActivityStoreDidChange)
+        ) { _ in
+            model.reloadFromStore()
+        }
     }
 }
 
