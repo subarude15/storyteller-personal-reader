@@ -137,6 +137,7 @@ public enum BookRequests {
         client: LazyLibrarianClient = LazyLibrarianClient(),
         history: RequestActivityStore = .shared,
         now: Date = Date(),
+        providerOverride: BookRequestProviderKind? = nil,
     ) async -> BookRequestSubmission {
         let settings = await SettingsActor.shared.config
         let key = (try? await AuthenticationActor.shared.loadLazyLibrarianAPIKey()) ?? ""
@@ -147,7 +148,12 @@ public enum BookRequests {
         let shelfReady =
             !settings.shelfarrBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !settings.shelfarrAPIToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let preference = BookRequestProviderKind.preference(from: settings.bookRequestProvider)
+        let preference: BookRequestProviderKind
+        if let providerOverride, providerOverride != .automatic {
+            preference = providerOverride
+        } else {
+            preference = BookRequestProviderKind.preference(from: settings.bookRequestProvider)
+        }
         guard let provider = BookRequestRouting.choose(
             preference: preference,
             lazyLibrarianReady: lazyReady,
@@ -258,6 +264,36 @@ public enum BookRequests {
             "[RequestActivity] request end work=\(work.workID) provider=\(provider.rawValue) outcomes=\(outcomes.count)"
         )
         return BookRequestSubmission(provider: provider, outcomes: outcomes)
+    }
+
+    /// Retry only formats that RequestActivityRetryPolicy marks retryable.
+    public static func retry(
+        item: RequestActivityItem,
+        formats: [BookRequestFormat]? = nil,
+        client: LazyLibrarianClient = LazyLibrarianClient(),
+        history: RequestActivityStore = .shared,
+        now: Date = Date(),
+    ) async -> BookRequestSubmission {
+        let targets = formats ?? RequestActivityRetryPolicy.retryableFormats(for: item)
+        guard !targets.isEmpty else {
+            return BookRequestSubmission(
+                provider: item.provider == .automatic ? nil : item.provider,
+                outcomes: [],
+                message: "Nothing to retry.",
+            )
+        }
+        let override: BookRequestProviderKind? =
+            (item.provider == .lazyLibrarian || item.provider == .shelfarr)
+            ? item.provider
+            : nil
+        return await submit(
+            work: item.canonicalWorkForRetry(),
+            formats: targets,
+            client: client,
+            history: history,
+            now: now,
+            providerOverride: override,
+        )
     }
 
     private static func readingIdea(_ work: CanonicalBookWork) -> ReadingIdea {
