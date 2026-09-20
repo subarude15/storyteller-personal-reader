@@ -242,7 +242,9 @@ public struct SettingsView: View {
                         prowlarrEnabled: newValue.prowlarrEnabled,
                         prowlarrBaseURL: newValue.prowlarrBaseURL,
                         jackettEnabled: newValue.jackettEnabled,
-                        jackettBaseURL: newValue.jackettBaseURL
+                        jackettBaseURL: newValue.jackettBaseURL,
+                        delugeEnabled: newValue.delugeEnabled,
+                        delugeBaseURL: newValue.delugeBaseURL
                     )
                 } catch {
                     await MainActor.run {
@@ -387,6 +389,121 @@ private struct LazyLibrarianSettingsSection: View {
     }
 }
 
+private struct DelugeSettingsSection: View {
+    @Binding var enabled: Bool
+    @Binding var baseURL: String
+    @State private var passwordDraft = ""
+    @State private var passwordSaved = false
+    @State private var status: DelugeConnection?
+    @State private var passwordError: String?
+    @State private var checking = false
+
+    var body: some View {
+        Section {
+            Toggle("Enabled", isOn: $enabled)
+            TextField(
+                "Server URL",
+                text: $baseURL,
+                prompt: Text("http://host:8112"),
+            )
+            .textContentType(.URL)
+            .autocorrectionDisabled()
+            #if os(iOS)
+            .keyboardType(.URL)
+            .textInputAutocapitalization(.never)
+            #endif
+            SecureField(
+                "Password",
+                text: $passwordDraft,
+                prompt: Text(passwordSaved ? "Saved — enter a new password to replace" : "WebUI password"),
+            )
+            .textContentType(.password)
+            .onSubmit { Task { await saveDraft() } }
+            if passwordSaved, passwordDraft.isEmpty {
+                Text("Password saved")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Remove Password", role: .destructive) {
+                    Task { await removePassword() }
+                }
+            }
+            Button {
+                Task { await test() }
+            } label: {
+                Label(checking ? "Testing…" : "Test Connection", systemImage: "network")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(checking)
+            if let passwordError {
+                Text(passwordError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            } else if let status {
+                HStack {
+                    Image(systemName: status == .ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(status == .ok ? .green : .red)
+                    Text(status.message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text("Deluge")
+        } footer: {
+            Text(
+                "Read-only download observability for LazyLibrarian. The WebUI password is stored in the keychain. Test Connection never adds, pauses, or removes torrents."
+            )
+        }
+        .task {
+            passwordSaved = await AuthenticationActor.shared.hasDelugePassword()
+        }
+        .onDisappear {
+            let draft = passwordDraft
+            guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            Task {
+                try? await AuthenticationActor.shared.saveDelugePassword(draft)
+            }
+        }
+    }
+
+    private func saveDraft() async {
+        let draft = passwordDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !draft.isEmpty else { return }
+        do {
+            try await AuthenticationActor.shared.saveDelugePassword(draft)
+            passwordDraft = ""
+            passwordSaved = true
+            passwordError = nil
+        } catch {
+            passwordError = "Could not save the password."
+        }
+    }
+
+    private func removePassword() async {
+        do {
+            try await AuthenticationActor.shared.deleteDelugePassword()
+            passwordDraft = ""
+            passwordSaved = false
+            passwordError = nil
+            status = nil
+        } catch {
+            passwordError = "Could not remove the password."
+        }
+    }
+
+    private func test() async {
+        checking = true
+        passwordError = nil
+        status = nil
+        defer { checking = false }
+        await saveDraft()
+        if passwordError != nil { return }
+        let password = (try? await AuthenticationActor.shared.loadDelugePassword()) ?? ""
+        status = await DelugeWebClient().testConnection(baseURL: baseURL, password: password)
+    }
+}
+
 /// Optional indexer service. URL stays in config; the API key stays in the keychain.
 private struct IndexerServiceSettingsSection: View {
     var title: String
@@ -509,6 +626,8 @@ extension SettingsView {
                     prowlarrBaseURL: $config.prowlarrBaseURL,
                     jackettEnabled: $config.jackettEnabled,
                     jackettBaseURL: $config.jackettBaseURL,
+                    delugeEnabled: $config.delugeEnabled,
+                    delugeBaseURL: $config.delugeBaseURL,
                     shelfarrConnectionStatus: shelfarrConnectionStatus,
                     onTestShelfarr: testShelfarrConnection,
                 )
@@ -696,6 +815,11 @@ extension SettingsView {
                 LazyLibrarianSettingsSection(
                     enabled: $config.lazyLibrarianEnabled,
                     baseURL: $config.lazyLibrarianBaseURL,
+                )
+
+                DelugeSettingsSection(
+                    enabled: $config.delugeEnabled,
+                    baseURL: $config.delugeBaseURL,
                 )
 
                 Section("Shelfarr") {
@@ -1336,6 +1460,8 @@ private struct MacBookSourcesSettingsView: View {
     @Binding var prowlarrBaseURL: String
     @Binding var jackettEnabled: Bool
     @Binding var jackettBaseURL: String
+    @Binding var delugeEnabled: Bool
+    @Binding var delugeBaseURL: String
     var shelfarrConnectionStatus: SettingsView.ShelfarrConnectionStatus?
     var onTestShelfarr: () -> Void
 
@@ -1361,6 +1487,10 @@ private struct MacBookSourcesSettingsView: View {
                     LazyLibrarianSettingsSection(
                         enabled: $lazyLibrarianEnabled,
                         baseURL: $lazyLibrarianBaseURL,
+                    )
+                    DelugeSettingsSection(
+                        enabled: $delugeEnabled,
+                        baseURL: $delugeBaseURL,
                     )
                 Section("Shelfarr") {
                     TextField(

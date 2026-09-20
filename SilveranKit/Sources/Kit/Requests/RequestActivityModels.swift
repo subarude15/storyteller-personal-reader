@@ -200,6 +200,8 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
     public var automaticFallbackAttempts: [AutomaticFallbackAttempt]?
     /// Chronological timeline. Absent on legacy rows (display synthesizes a minimal history).
     public var events: [RequestActivityEvent]?
+    /// Per-format Deluge observability. Absent on legacy rows.
+    public var downloadStates: [RequestFormatDownloadState]?
 
     public init(
         id: String = UUID().uuidString,
@@ -223,6 +225,7 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
         fallbackKind: RequestFallbackKind? = nil,
         automaticFallbackAttempts: [AutomaticFallbackAttempt]? = nil,
         events: [RequestActivityEvent]? = nil,
+        downloadStates: [RequestFormatDownloadState]? = nil,
     ) {
         self.id = id
         self.canonicalWorkID = canonicalWorkID
@@ -245,6 +248,7 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
         self.fallbackKind = fallbackKind
         self.automaticFallbackAttempts = automaticFallbackAttempts
         self.events = events
+        self.downloadStates = downloadStates
     }
 
     public var overallStatus: RequestActivityStatus {
@@ -262,6 +266,10 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
 
     public func status(for format: BookRequestFormat) -> RequestFormatStatus? {
         formatStatuses.first { $0.format == format }
+    }
+
+    public func downloadState(for format: BookRequestFormat) -> RequestFormatDownloadState? {
+        downloadStates?.first { $0.format == format }
     }
 
     public var formatsLabel: String {

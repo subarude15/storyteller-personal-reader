@@ -4,15 +4,18 @@ import Foundation
 /// Read-only; never queues or syncs.
 public struct RequestActivityRefreshService: Sendable {
     public var client: LazyLibrarianClient
+    public var delugeClient: DelugeWebClient
     public var history: RequestActivityStore
     public var now: @Sendable () -> Date
 
     public init(
         client: LazyLibrarianClient = LazyLibrarianClient(),
+        delugeClient: DelugeWebClient = DelugeWebClient(),
         history: RequestActivityStore = .shared,
         now: @escaping @Sendable () -> Date = { Date() },
     ) {
         self.client = client
+        self.delugeClient = delugeClient
         self.history = history
         self.now = now
     }
@@ -51,6 +54,9 @@ public struct RequestActivityRefreshService: Sendable {
             && !settings.lazyLibrarianBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !key.isEmpty
 
+        // One Deluge fetch per refresh cycle — match all rows in memory afterward.
+        let delugeIndex = await fetchDelugeIndex(settings: settings)
+
         var results: [RequestActivityItem] = []
         await withTaskGroup(of: RequestActivityItem.self) { group in
             for item in items {
@@ -62,6 +68,7 @@ public struct RequestActivityRefreshService: Sendable {
                         baseURL: settings.lazyLibrarianBaseURL,
                         apiKey: key,
                         matcher: matcher,
+                        delugeIndex: delugeIndex,
                     )
                 }
             }
@@ -80,6 +87,7 @@ public struct RequestActivityRefreshService: Sendable {
         baseURL: String,
         apiKey: String,
         matcher: RequestLibraryMatcher = RequestLibraryMatcher(books: []),
+        delugeIndex: DelugeTorrentIndex? = nil,
     ) async -> RequestActivityItem {
         let checkedAt = now()
 
@@ -90,6 +98,13 @@ public struct RequestActivityRefreshService: Sendable {
         }
 
         if updated.allRequestedFormatsInLibrary {
+            if let delugeIndex {
+                updated = RequestDownloadObservability.applying(
+                    updated,
+                    index: delugeIndex,
+                    now: checkedAt,
+                )
+            }
             updated.lastCheckedAt = checkedAt
             history.upsert(updated)
             return updated
@@ -112,16 +127,27 @@ public struct RequestActivityRefreshService: Sendable {
             case .automatic:
                 break
             case .shelfarr:
-                // Shelfarr has no richer lifecycle in this app — keep Requested.
-                // Do not overwrite formats already Available in Library.
                 updated = RequestActivityAttention.apply(updated, now: checkedAt)
                 updated = RequestLibraryPresence.apply(updated, matcher: matcher, now: checkedAt)
+                if let delugeIndex {
+                    updated = RequestDownloadObservability.applying(
+                        updated,
+                        index: delugeIndex,
+                        now: checkedAt,
+                    )
+                }
                 history.upsert(updated)
                 return updated
             case .lazyLibrarian:
                 guard lazyReady else {
                     updated.lastError = "LazyLibrarian is currently unavailable"
-                    // Do not escalate to Needs Attention on a single offline look.
+                    if let delugeIndex {
+                        updated = RequestDownloadObservability.applying(
+                            updated,
+                            index: delugeIndex,
+                            now: checkedAt,
+                        )
+                    }
                     history.upsert(updated)
                     debugLog("[RequestActivity] status refresh skipped id=\(updated.id) reason=llUnavailable")
                     return updated
@@ -132,8 +158,6 @@ public struct RequestActivityRefreshService: Sendable {
                 {
                     bookID = existing
                 } else {
-                    // Legacy / incomplete rows: recover BookID via the same matcher as submission.
-                    // Read-only — never re-queue.
                     switch await client.resolveBookID(
                         work: updated.canonicalWorkForRetry(),
                         baseURL: baseURL,
@@ -141,7 +165,6 @@ public struct RequestActivityRefreshService: Sendable {
                     ) {
                         case .success(let resolved):
                             updated.providerBookID = resolved
-                            // Persist recovered ID before continuing so a later failure keeps it.
                             history.upsert(updated)
                             debugLog(
                                 "[RequestActivity] recovered LazyLibrarian BookID id=\(updated.id) bookID=\(resolved)"
@@ -156,7 +179,6 @@ public struct RequestActivityRefreshService: Sendable {
                                         now: checkedAt,
                                     )
                                 case .message(let text):
-                                    // Transient / auth errors: same posture as lookup failure.
                                     for index in updated.formatStatuses.indices {
                                         if updated.formatStatuses[index].status == .availableInLibrary {
                                             continue
@@ -174,6 +196,13 @@ public struct RequestActivityRefreshService: Sendable {
                                 matcher: matcher,
                                 now: checkedAt,
                             )
+                            if let delugeIndex {
+                                updated = RequestDownloadObservability.applying(
+                                    updated,
+                                    index: delugeIndex,
+                                    now: checkedAt,
+                                )
+                            }
                             history.upsert(updated)
                             debugLog(
                                 "[RequestActivity] BookID recovery failed id=\(updated.id) reason=\(failure.detail)"
@@ -198,6 +227,13 @@ public struct RequestActivityRefreshService: Sendable {
                         }
                         updated = RequestActivityAttention.apply(updated, now: checkedAt)
                         updated = RequestLibraryPresence.apply(updated, matcher: matcher, now: checkedAt)
+                        if let delugeIndex {
+                            updated = RequestDownloadObservability.applying(
+                                updated,
+                                index: delugeIndex,
+                                now: checkedAt,
+                            )
+                        }
                         history.upsert(updated)
                         debugLog(
                             "[RequestActivity] status refresh failed id=\(updated.id) error=\(failure.detail)"
@@ -214,6 +250,13 @@ public struct RequestActivityRefreshService: Sendable {
                             updated.formatStatuses[index].consecutiveLookupFailures = 0
                         }
                         updated = RequestLibraryPresence.apply(updated, matcher: matcher, now: checkedAt)
+                        if let delugeIndex {
+                            updated = RequestDownloadObservability.applying(
+                                updated,
+                                index: delugeIndex,
+                                now: checkedAt,
+                            )
+                        }
                         history.upsert(updated)
                         return updated
                     case .success(let snapshot?):
@@ -248,7 +291,6 @@ public struct RequestActivityRefreshService: Sendable {
                                     ?? checkedAt,
                                 consecutiveLookupFailures: 0,
                             )
-                            // Only bump updatedAt when the status actually changes.
                             if previous.first(where: { $0.format == format })?.status != mapped {
                                 status.updatedAt = checkedAt
                                 updated.updatedAt = checkedAt
@@ -269,15 +311,52 @@ public struct RequestActivityRefreshService: Sendable {
                             updated.attentionReason = nil
                         }
                         updated = RequestActivityAttention.apply(updated, now: checkedAt)
-                        // Re-apply so Storyteller presence still wins after provider write.
                         updated = RequestLibraryPresence.apply(updated, matcher: matcher, now: checkedAt)
+                        if let delugeIndex {
+                            updated = RequestDownloadObservability.applying(
+                                updated,
+                                index: delugeIndex,
+                                now: checkedAt,
+                            )
+                        }
                         history.upsert(updated)
                         debugLog("[RequestActivity] status refresh end id=\(updated.id) ok=true")
                         return updated
                 }
         }
         updated = RequestLibraryPresence.apply(updated, matcher: matcher, now: checkedAt)
+        if let delugeIndex {
+            updated = RequestDownloadObservability.applying(
+                updated,
+                index: delugeIndex,
+                now: checkedAt,
+            )
+        }
         history.upsert(updated)
         return updated
+    }
+
+    /// Fetch torrent list once for Check Status / single-item refresh.
+    public func loadDelugeIndex() async -> DelugeTorrentIndex? {
+        let settings = await SettingsActor.shared.config
+        return await fetchDelugeIndex(settings: settings)
+    }
+
+    private func fetchDelugeIndex(settings: SilveranGlobalConfig) async -> DelugeTorrentIndex? {
+        let enabled = settings.delugeEnabled
+        let base = settings.delugeBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let password = (try? await AuthenticationActor.shared.loadDelugePassword()) ?? ""
+        guard enabled, !base.isEmpty, !password.isEmpty else { return nil }
+        let checkedAt = now()
+        switch await delugeClient.fetchTorrentIndex(
+            baseURL: base,
+            password: password,
+            now: checkedAt,
+        ) {
+            case .success(let index):
+                return index
+            case .failure:
+                return .unavailable(at: checkedAt)
+        }
     }
 }

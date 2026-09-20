@@ -12,6 +12,7 @@ public actor AuthenticationActor {
     private let lazyLibrarianAPIKey = "lazyLibrarianAPIKey"
     private let prowlarrAPIKey = "prowlarrAPIKey"
     private let jackettAPIKey = "jackettAPIKey"
+    private let delugePassword = "delugePassword"
 
     private init() {}
 
@@ -174,6 +175,28 @@ public actor AuthenticationActor {
     public func hasJackettAPIKey() async -> Bool {
         guard let key = try? await loadJackettAPIKey() else { return false }
         return !key.isEmpty
+    }
+
+    public func saveDelugePassword(_ password: String) async throws {
+        let trimmed = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            try await deleteDelugePassword()
+            return
+        }
+        try await saveString(trimmed, for: delugePassword)
+    }
+
+    public func loadDelugePassword() async throws -> String? {
+        try await loadString(for: delugePassword)
+    }
+
+    public func deleteDelugePassword() async throws {
+        try await keychain.removeItem(account: delugePassword)
+    }
+
+    public func hasDelugePassword() async -> Bool {
+        guard let password = try? await loadDelugePassword() else { return false }
+        return !password.isEmpty
     }
 
     private func saveString(_ value: String, for account: String) async throws {

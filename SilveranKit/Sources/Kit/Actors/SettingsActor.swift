@@ -26,6 +26,9 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
     /// Optional read-only Jackett diagnostics. API key stays in the keychain.
     public var jackettEnabled: Bool = false
     public var jackettBaseURL: String = ""
+    /// Optional read-only Deluge WebUI observability. Password stays in the keychain.
+    public var delugeEnabled: Bool = false
+    public var delugeBaseURL: String = ""
 
     public init(
         reading: Reading = Reading(),
@@ -64,13 +67,16 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
         prowlarrBaseURL = (try? container.decode(String.self, forKey: .prowlarrBaseURL)) ?? ""
         jackettEnabled = (try? container.decode(Bool.self, forKey: .jackettEnabled)) ?? false
         jackettBaseURL = (try? container.decode(String.self, forKey: .jackettBaseURL)) ?? ""
+        delugeEnabled = (try? container.decode(Bool.self, forKey: .delugeEnabled)) ?? false
+        delugeBaseURL = (try? container.decode(String.self, forKey: .delugeBaseURL)) ?? ""
     }
 
     private enum TopLevelCodingKeys: String, CodingKey {
         case reading, playback, readingBar, sync, library, themes, shelfarrBaseURL, shelfarrAPIToken,
             lazyLibrarianEnabled, lazyLibrarianBaseURL, bookRequestProvider,
             bookSearchLANEnabled, bookSearchLANBaseURL,
-            prowlarrEnabled, prowlarrBaseURL, jackettEnabled, jackettBaseURL
+            prowlarrEnabled, prowlarrBaseURL, jackettEnabled, jackettBaseURL,
+            delugeEnabled, delugeBaseURL
     }
 
     public struct Reading: Codable, Equatable, Sendable {
@@ -777,6 +783,8 @@ public actor SettingsActor {
         prowlarrBaseURL: String? = nil,
         jackettEnabled: Bool? = nil,
         jackettBaseURL: String? = nil,
+        delugeEnabled: Bool? = nil,
+        delugeBaseURL: String? = nil,
     ) throws {
         var updated = config
 
@@ -963,6 +971,12 @@ public actor SettingsActor {
         }
         if let jackettBaseURL {
             updated.jackettBaseURL = jackettBaseURL
+        }
+        if let delugeEnabled {
+            updated.delugeEnabled = delugeEnabled
+        }
+        if let delugeBaseURL {
+            updated.delugeBaseURL = delugeBaseURL
         }
 
         #if os(iOS)

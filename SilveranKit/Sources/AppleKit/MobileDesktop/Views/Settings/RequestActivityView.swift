@@ -151,6 +151,7 @@ final class RequestActivityViewModel: ObservableObject {
                 && !settings.lazyLibrarianBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
                     .isEmpty
                 && !key.isEmpty
+            let delugeIndex = await self.refreshService.loadDelugeIndex()
 
             let updated = await self.refreshService.refreshOne(
                 current,
@@ -159,6 +160,7 @@ final class RequestActivityViewModel: ObservableObject {
                 baseURL: settings.lazyLibrarianBaseURL,
                 apiKey: key,
                 matcher: matcher,
+                delugeIndex: delugeIndex,
             )
             await MainActor.run {
                 self.upsert(updated)
@@ -573,7 +575,7 @@ private struct RequestActivityChainRow: View {
             Text(chain.listFormatProviderLine)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Text(chain.currentStatus.label)
+            Text(chain.currentStatusLabel)
                 .font(.subheadline.weight(.semibold))
             if chain.attemptCount > 1 {
                 Text("\(chain.attemptCount) attempts")
@@ -714,7 +716,7 @@ struct RequestActivityChainDetailView: View {
                 }
                 LabeledContent("Requested", value: dateLabel(chain.createdAt))
                 LabeledContent("Formats", value: chain.formatsLabel)
-                LabeledContent("Status", value: chain.currentStatus.label)
+                LabeledContent("Status", value: chain.currentStatusLabel)
             }
 
             Section("Current Status") {
@@ -722,17 +724,67 @@ struct RequestActivityChainDetailView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(state.format.label)
                             .font(.subheadline.weight(.semibold))
-                        Text(state.status.label)
-                        Text(state.providerLabel)
+                        Text(state.displayStatusLabel)
+                        Text(state.displayProviderLabel)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        if let detail = state.detail, !detail.isEmpty {
+                        if let detail = state.detail, !detail.isEmpty,
+                            detail != state.displayStatusLabel
+                        {
                             Text(detail)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
                     .padding(.vertical, 2)
+                }
+            }
+
+            let downloads = chain.formatStates.compactMap { state -> (BookRequestFormat, RequestFormatDownloadState)? in
+                guard let download = state.download,
+                    download.status != .notFound,
+                    download.status != .unknown
+                else { return nil }
+                return (state.format, download)
+            }
+            if !downloads.isEmpty {
+                Section("Download") {
+                    ForEach(downloads, id: \.0) { format, download in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(format.label)
+                                .font(.subheadline.weight(.semibold))
+                            Text("Deluge")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(download.status.label)
+                            if let progress = download.progress, download.status.showsProgress {
+                                ProgressView(value: min(max(progress, 0), 1))
+                                if let percent = download.percentLabel {
+                                    Text(percent)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            if let eta = download.etaLabel {
+                                Text(eta)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if let detail = download.detail, !detail.isEmpty,
+                                detail != download.status.label
+                            {
+                                Text(detail)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if download.delugeUnavailable {
+                                Text("Deluge unavailable — showing last known state")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
                 }
             }
 
