@@ -59,6 +59,19 @@ public enum RequestActivityNavigation {
                 itemExists(requestID) ? .detail(requestID: requestID) : .list
         }
     }
+
+    /// Map a provider-row id to its logical chain id when known.
+    /// Notification payloads stay unchanged; only presentation navigation remaps.
+    public static func resolvedChainDetail(
+        requestID: String,
+        chainIDForRequest: (String) -> String?,
+        itemExists: (String) -> Bool,
+    ) -> RequestActivityNavigationDestination {
+        if let chainID = chainIDForRequest(requestID) {
+            return .detail(requestID: chainID)
+        }
+        return resolved(.detail(requestID: requestID), itemExists: itemExists)
+    }
 }
 
 /// One-shot pending destination. Survives until a mounted view consumes it.
@@ -99,6 +112,9 @@ public enum RequestActivityLibraryNavigation {
         book: BookMetadata,
         index: RequestLibraryPresentationIndex,
     ) -> RequestActivityNavigationDestination {
+        if let chain = index.matchChain(book: book) {
+            return .detail(requestID: chain.id)
+        }
         if let requestID = index.match(book: book)?.id {
             return .detail(requestID: requestID)
         }

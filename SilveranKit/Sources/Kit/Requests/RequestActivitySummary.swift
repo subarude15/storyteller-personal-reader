@@ -1,7 +1,7 @@
 import Foundation
 
 /// Compact library-facing snapshot of request activity.
-/// Counts are derived from existing section grouping — no fake statuses.
+/// Counts are derived from logical request chains — no fake statuses.
 public struct RequestActivityLibrarySummary: Equatable, Sendable {
     public var needsAttentionCount: Int
     public var inProgressCount: Int
@@ -80,36 +80,8 @@ extension RequestActivityGrouping {
         now: Date = Date(),
         recentWindow: TimeInterval = recentCompletionWindow,
     ) -> RequestActivityLibrarySummary {
-        guard !items.isEmpty else {
-            return RequestActivityLibrarySummary(hasTrackedRequests: false)
-        }
-
-        var needsAttention = 0
-        var inProgress = 0
-        var recentlyAvailable = 0
-
-        for item in items {
-            switch section(for: item, now: now) {
-                case .needsAttention:
-                    needsAttention += 1
-                case .inProgress:
-                    inProgress += 1
-                case .completed:
-                    if now.timeIntervalSince(item.updatedAt) <= recentWindow {
-                        recentlyAvailable += 1
-                    }
-                case .recent:
-                    // Uncategorized recent rows are not active requests.
-                    break
-            }
-        }
-
-        return RequestActivityLibrarySummary(
-            needsAttentionCount: needsAttention,
-            inProgressCount: inProgress,
-            recentlyAvailableCount: recentlyAvailable,
-            hasTrackedRequests: true,
-        )
+        // Count logical request chains so a fallback parent+child is one request.
+        RequestActivityChains.librarySummary(items, now: now, recentWindow: recentWindow)
     }
 }
 

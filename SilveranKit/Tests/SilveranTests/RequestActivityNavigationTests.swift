@@ -145,4 +145,41 @@ struct RequestActivityNavigationTests {
         #expect(RequestActivityLibraryNavigation.summary == .list)
         #expect(RequestActivityLibraryNavigation.summary.requestID == nil)
     }
+
+    @Test func childRequestIDResolvesToChainRootForDetail() {
+        let now = Date()
+        let root = RequestActivityItem(
+            id: "ll-root",
+            canonicalWorkID: "work/1",
+            title: "Dune",
+            author: "Frank Herbert",
+            provider: .lazyLibrarian,
+            requestedFormats: [.ebook],
+            updatedAt: now,
+            formatStatuses: [
+                RequestFormatStatus(format: .ebook, status: .needsAttention, updatedAt: now)
+            ],
+        )
+        let child = RequestActivityItem(
+            id: "shelf-child",
+            canonicalWorkID: "work/1",
+            title: "Dune",
+            author: "Frank Herbert",
+            provider: .shelfarr,
+            requestedFormats: [.ebook],
+            updatedAt: now,
+            formatStatuses: [
+                RequestFormatStatus(format: .ebook, status: .requested, updatedAt: now)
+            ],
+            fallbackFromRequestID: "ll-root",
+            fallbackKind: .automatic,
+        )
+        let index = RequestActivityChains.build(from: [root, child], now: now)
+        let resolved = RequestActivityNavigation.resolvedChainDetail(
+            requestID: "shelf-child",
+            chainIDForRequest: { index.requestIDToChainID[$0] },
+            itemExists: { id in index.requestIDToChainID[id] != nil },
+        )
+        #expect(resolved == .detail(requestID: "ll-root"))
+    }
 }
