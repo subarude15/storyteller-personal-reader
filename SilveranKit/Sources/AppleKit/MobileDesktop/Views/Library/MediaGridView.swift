@@ -125,6 +125,9 @@ struct MediaGridView: View {
     @State private var selectedProgress: ProgressCondition? = nil
     @State private var selectedLocation: LocationFilterOption = .all
     @State private var selectedSourceID: BookSourceID? = nil
+    @State private var requestLibraryFilter: RequestLibraryFilter = .all
+    @State private var requestLibraryIndex = RequestLibraryPresentationIndex()
+    @State private var sourceDisplayItems: [BookMetadata] = []
     @State private var shouldEnsureActiveItemVisible: Bool = false
     @State private var hasHandledInitialSelection: Bool = false
     @AppStorage private var showSourceBadge: Bool
@@ -583,6 +586,18 @@ struct MediaGridView: View {
             #endif
         }
         .frame(minWidth: platformMinimumWidth)
+        .environment(\.requestLibraryPresentationIndex, requestLibraryIndex)
+        .onAppear {
+            refreshRequestLibraryIndex()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .requestActivityStoreDidChange)
+        ) { _ in
+            refreshRequestLibraryIndex()
+        }
+        .onChange(of: requestLibraryFilter) { _, _ in
+            applyRequestLibraryFilter()
+        }
         #if os(macOS)
         .ignoresSafeArea(.container, edges: .top)
         .focusable(true)
@@ -1030,50 +1045,56 @@ struct MediaGridView: View {
     #endif
 
     private var contentFilterBar: some View {
-        MediaGridSortAndFilterBar(
-            selectedSortOption: selectedSortOptionBinding,
-            selectedFormatFilter: $selectedFormatFilter,
-            selectedTag: $selectedTag,
-            selectedSeries: $selectedSeries,
-            selectedAuthor: $selectedAuthor,
-            selectedNarrator: $selectedNarrator,
-            selectedTranslator: $selectedTranslator,
-            selectedPublicationYear: $selectedPublicationYear,
-            selectedRating: $selectedRating,
-            selectedStatus: $selectedStatus,
-            selectedProgress: $selectedProgress,
-            selectedLocation: $selectedLocation,
-            selectedSourceID: $selectedSourceID,
-            contextFilters: contextFilters,
-            layoutStyle: Binding(
-                get: { layoutStyle },
-                set: { layoutStyleRaw = $0.rawValue },
-            ),
-            coverPreference: Binding(
-                get: { coverPreference },
-                set: { coverPrefRaw = $0.rawValue },
-            ),
-            coverSize: $coverSizeValue,
-            showAudioIndicator: $showAudioIndicator,
-            showSourceBadge: $showSourceBadge,
-            showSeriesPositionBadge: $showSeriesPositionBadge,
-            progressStyle: Binding(
-                get: { progressStyle },
-                set: { progressStyleRaw = $0.rawValue },
-            ),
-            availableTags: cachedAvailableTags,
-            availableSeries: cachedAvailableSeries,
-            availableAuthors: cachedAvailableAuthors,
-            availableNarrators: cachedAvailableNarrators,
-            availableTranslators: cachedAvailableTranslators,
-            availablePublicationYears: cachedAvailablePublicationYears,
-            availableRatings: cachedAvailableRatings,
-            availableStatuses: cachedAvailableStatuses,
-            availableSources: mediaViewModel.bookSources,
-            filtersSummaryText: cachedFiltersSummary,
-            showLayoutOption: true,
-            onAddBook: addBookAction,
-        )
+        VStack(alignment: .leading, spacing: 8) {
+            MediaGridSortAndFilterBar(
+                selectedSortOption: selectedSortOptionBinding,
+                selectedFormatFilter: $selectedFormatFilter,
+                selectedTag: $selectedTag,
+                selectedSeries: $selectedSeries,
+                selectedAuthor: $selectedAuthor,
+                selectedNarrator: $selectedNarrator,
+                selectedTranslator: $selectedTranslator,
+                selectedPublicationYear: $selectedPublicationYear,
+                selectedRating: $selectedRating,
+                selectedStatus: $selectedStatus,
+                selectedProgress: $selectedProgress,
+                selectedLocation: $selectedLocation,
+                selectedSourceID: $selectedSourceID,
+                contextFilters: contextFilters,
+                layoutStyle: Binding(
+                    get: { layoutStyle },
+                    set: { layoutStyleRaw = $0.rawValue },
+                ),
+                coverPreference: Binding(
+                    get: { coverPreference },
+                    set: { coverPrefRaw = $0.rawValue },
+                ),
+                coverSize: $coverSizeValue,
+                showAudioIndicator: $showAudioIndicator,
+                showSourceBadge: $showSourceBadge,
+                showSeriesPositionBadge: $showSeriesPositionBadge,
+                progressStyle: Binding(
+                    get: { progressStyle },
+                    set: { progressStyleRaw = $0.rawValue },
+                ),
+                availableTags: cachedAvailableTags,
+                availableSeries: cachedAvailableSeries,
+                availableAuthors: cachedAvailableAuthors,
+                availableNarrators: cachedAvailableNarrators,
+                availableTranslators: cachedAvailableTranslators,
+                availablePublicationYears: cachedAvailablePublicationYears,
+                availableRatings: cachedAvailableRatings,
+                availableStatuses: cachedAvailableStatuses,
+                availableSources: mediaViewModel.bookSources,
+                filtersSummaryText: cachedFiltersSummary,
+                showLayoutOption: true,
+                onAddBook: addBookAction,
+            )
+            RequestLibraryFilterChip(
+                filter: $requestLibraryFilter,
+                summary: requestLibraryIndex.chip,
+            )
+        }
     }
 
     private var addBookAction: (() -> Void)? {
@@ -1262,30 +1283,32 @@ struct MediaGridView: View {
             .padding(.horizontal, gridHorizontalPadding)
             .padding(.leading, 8)
 
-            if cachedDisplayItems.isEmpty {
+            if cachedDisplayItems.isEmpty && requestLibraryPendingRows.isEmpty {
                 VStack(spacing: 12) {
-                    Text("No media is available here yet!")
+                    Text(requestLibraryEmptyTitle)
                         .font(.title)
                         .foregroundStyle(.secondary)
-                    #if os(iOS)
-                    Text("To add some media, go to Settings to connect a Storyteller server.")
-                        .font(.body)
-                        .foregroundStyle(.tertiary)
-                        .multilineTextAlignment(.center)
-                    #else
-                    Text(emptyStateMessage)
-                        .font(.body)
-                        .foregroundStyle(.tertiary)
-                        .multilineTextAlignment(.center)
-                    #endif
-                    if sourceFilterKind == .localFolder {
-                        Button {
-                            showLocalFolderHelp = true
-                        } label: {
-                            Label("Folder Layouts", systemImage: "questionmark.circle")
+                    if requestLibraryFilter == .all {
+                        #if os(iOS)
+                        Text("To add some media, go to Settings to connect a Storyteller server.")
+                            .font(.body)
+                            .foregroundStyle(.tertiary)
+                            .multilineTextAlignment(.center)
+                        #else
+                        Text(emptyStateMessage)
+                            .font(.body)
+                            .foregroundStyle(.tertiary)
+                            .multilineTextAlignment(.center)
+                        #endif
+                        if sourceFilterKind == .localFolder {
+                            Button {
+                                showLocalFolderHelp = true
+                            } label: {
+                                Label("Folder Layouts", systemImage: "questionmark.circle")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.blue)
                         }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.blue)
                     }
                 }
                 .frame(maxWidth: 500)
@@ -1293,6 +1316,11 @@ struct MediaGridView: View {
                 .padding(.top, 60)
                 .padding(.horizontal, gridHorizontalPadding)
             } else {
+                if !requestLibraryPendingRows.isEmpty {
+                    RequestLibraryPendingSection(rows: requestLibraryPendingRows)
+                        .padding(.horizontal, gridHorizontalPadding)
+                }
+                if !cachedDisplayItems.isEmpty {
                 switch layoutStyle {
                     case .grid, .fan:
                         #if os(iOS)
@@ -1416,6 +1444,7 @@ struct MediaGridView: View {
                         }
                         .scrollTargetLayout()
                         .padding(.horizontal, gridHorizontalPadding)
+                }
                 }
             }
         }
@@ -1680,6 +1709,29 @@ struct MediaGridView: View {
         isSidebarVisible = false
     }
 
+    private var requestLibraryPendingRows: [RequestLibraryPendingRow] {
+        requestLibraryIndex.pendingRows(filter: requestLibraryFilter)
+    }
+
+    private var requestLibraryEmptyTitle: String {
+        requestLibraryFilter.emptyMessage ?? "No media is available here yet!"
+    }
+
+    private func refreshRequestLibraryIndex() {
+        requestLibraryIndex = RequestLibraryPresentationIndex(
+            items: RequestActivityStore.shared.allItems(),
+            books: mediaViewModel.library.bookMetaData,
+        )
+        applyRequestLibraryFilter()
+    }
+
+    private func applyRequestLibraryFilter() {
+        cachedDisplayItems = requestLibraryIndex.filteredBooks(
+            sourceDisplayItems,
+            filter: requestLibraryFilter,
+        )
+    }
+
     private func recomputeDisplayItems() {
         let started = CFAbsoluteTimeGetCurrent()
         debugLog(
@@ -1726,7 +1778,11 @@ struct MediaGridView: View {
         renderSnapshotTask = Task { @MainActor in
             let snapshot = await mediaViewModel.mediaGridSnapshot(for: request)
             guard !Task.isCancelled, generation == renderRequestGeneration else { return }
-            cachedDisplayItems = snapshot.displayItems
+            sourceDisplayItems = snapshot.displayItems
+            cachedDisplayItems = requestLibraryIndex.filteredBooks(
+                snapshot.displayItems,
+                filter: requestLibraryFilter,
+            )
             cachedFiltersSummary = snapshot.filtersSummary
             if includeFilterOptions {
                 cachedAvailableTags = snapshot.availableTags

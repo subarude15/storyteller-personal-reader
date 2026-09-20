@@ -114,8 +114,9 @@ struct RequestActivityLibraryEntry: View {
 }
 
 /// Subtle request-status line for book detail when a tracked request exists.
+/// Read-only: viewing detail does not refresh providers or rewrite request history.
 struct BookRequestStatusIndicator: View {
-    let workID: String
+    let book: BookMetadata
     var history: RequestActivityStore = .shared
 
     @Environment(MediaViewModel.self) private var mediaViewModel: MediaViewModel
@@ -145,7 +146,7 @@ struct BookRequestStatusIndicator: View {
         }
         .id(tick)
         .onAppear(perform: reload)
-        .onChange(of: workID) { _, _ in reload() }
+        .onChange(of: book.id) { _, _ in reload() }
         .onChange(of: mediaViewModel.libraryVersion) { _, _ in reload() }
         .onReceive(
             NotificationCenter.default.publisher(for: .requestActivityStoreDidChange)
@@ -155,10 +156,11 @@ struct BookRequestStatusIndicator: View {
     }
 
     private func reload() {
-        _ = RequestActivityRefreshService(history: history).applyLibraryPresence(
-            libraryBooks: mediaViewModel.library.bookMetaData
+        let index = RequestLibraryPresentationIndex(
+            items: history.allItems(),
+            books: mediaViewModel.library.bookMetaData,
         )
-        item = history.item(forWorkID: workID)
+        item = index.match(book: book)
         tick &+= 1
     }
 }

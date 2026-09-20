@@ -251,9 +251,7 @@ struct MediaGridInfoSidebar: View {
                 formatLinkButton
                 findAudiobookButton
                 requestBookButton
-                BookRequestStatusIndicator(
-                    workID: CanonicalBookWork.library(currentItem).workID
-                )
+                BookRequestStatusIndicator(book: currentItem)
                 formatAlignmentNote
 
                 let tags = currentItem.tagNames
@@ -622,9 +620,7 @@ struct MediaGridInfoSidebar: View {
                 formatLinkButton
                 findAudiobookButton
                 requestBookButton
-                BookRequestStatusIndicator(
-                    workID: CanonicalBookWork.library(currentItem).workID
-                )
+                BookRequestStatusIndicator(book: currentItem)
                 formatAlignmentNote
 
                 if !currentItem.tagNames.isEmpty {

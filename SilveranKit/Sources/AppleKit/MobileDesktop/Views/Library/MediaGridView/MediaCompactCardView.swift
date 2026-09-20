@@ -42,6 +42,9 @@ struct MediaCompactCardView: View {
         var body: some View {
             #if os(iOS)
             iOSInteractiveCard
+                .overlay(alignment: .bottom) {
+                    RequestLibraryStatusBadgeLink(book: item)
+                }
                 .confirmationDialog(
                     "Delete \(item.title)?",
                     isPresented: $confirmServerDelete,
@@ -61,6 +64,9 @@ struct MediaCompactCardView: View {
                 }
             #else
             cardContent
+                .overlay(alignment: .bottom) {
+                    RequestLibraryStatusBadgeLink(book: item)
+                }
             #endif
         }
 
