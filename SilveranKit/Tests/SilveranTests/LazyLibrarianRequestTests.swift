@@ -167,6 +167,99 @@ struct LazyLibrarianRequestTests {
         #expect(script.calls.contains { $0.cmd == "findBook" && $0.query["name"] == "9780141439518" })
     }
 
+    @Test func isbnNormalizationKeepsISBN10CheckX() {
+        #expect(LazyLibrarianMatcher.isbnDigits("080442957X") == "080442957X")
+        #expect(LazyLibrarianMatcher.isbnDigits("080442957x") == "080442957X")
+        #expect(LazyLibrarianMatcher.isbnDigits("0-8044-2957-X") == "080442957X")
+        #expect(LazyLibrarianMatcher.isbnDigits("0 8044 2957 x") == "080442957X")
+        #expect(LazyLibrarianMatcher.isbnDigits("0306406152") == "0306406152")
+        #expect(LazyLibrarianMatcher.isbnDigits("978-0-306-40615-7") == "9780306406157")
+        #expect(LazyLibrarianMatcher.isbnDigits("9780306406157") == "9780306406157")
+        #expect(LazyLibrarianMatcher.isbnDigits("08044A2957") == nil)
+        #expect(LazyLibrarianMatcher.isbnDigits("X804429570") == nil)
+        #expect(LazyLibrarianMatcher.isbnDigits("978030640615X") == nil)
+        #expect(LazyLibrarianMatcher.isbnDigits("080442957") == nil)
+        #expect(LazyLibrarianMatcher.isbnDigits("isbn") == nil)
+    }
+
+    @Test func isbn10EndingInXMatchesCandidatesAndISBN13Payload() {
+        #expect(LazyLibrarianMatcher.isbnMatch("080442957X", "080442957x"))
+        #expect(LazyLibrarianMatcher.isbnMatch("0-8044-2957-X", "080442957X"))
+        #expect(LazyLibrarianMatcher.isbnMatch("080442957X", "9780804429573"))
+        #expect(!LazyLibrarianMatcher.isbnMatch("080442957X", "9780804429580"))
+        #expect(!LazyLibrarianMatcher.isbnMatch("080442957X", "1111111111"))
+
+        let chosen = LazyLibrarianMatcher.choose(
+            work: work(
+                title: "The Great Gatsby",
+                author: "F. Scott Fitzgerald",
+                isbn: "0-8044-2957-X",
+                year: "1925",
+            ),
+            candidates: [
+                LazyLibrarianCandidate(
+                    bookID: "OLX",
+                    title: "Different Title",
+                    author: "F. Scott Fitzgerald",
+                    isbn: "080442957X",
+                    year: "1925",
+                ),
+                LazyLibrarianCandidate(
+                    bookID: "OTHER",
+                    title: "The Great Gatsby",
+                    author: "F. Scott Fitzgerald",
+                    isbn: "1111111111",
+                    year: "1925",
+                ),
+            ],
+        )
+        guard case .success(let hit) = chosen else {
+            Issue.record("expected ISBN-10 X match")
+            return
+        }
+        #expect(hit.bookID == "OLX")
+    }
+
+    @Test func isbn10EndingInXIsUsedForFindBookLookup() async {
+        let script = Script()
+        script.handler = { cmd, query in
+            if cmd == "findBook", query["name"] == "080442957X" {
+                return Script.http(
+                    self.hit(
+                        id: "OLX",
+                        title: "The Great Gatsby",
+                        author: "F. Scott Fitzgerald",
+                        isbn: "080442957X",
+                        year: "1925",
+                    )
+                )
+            }
+            if cmd == "findBook" {
+                return Script.http("[]")
+            }
+            if cmd == "getBook" {
+                return Script.http(
+                    #"{"book":[{"BookID":"OLX","Status":"Open","AudioStatus":"Open"}]}"#
+                )
+            }
+            return Script.http("OK")
+        }
+        let outcomes = await LazyLibrarianClient(transport: script).request(
+            work: work(
+                title: "The Great Gatsby",
+                author: "F. Scott Fitzgerald",
+                isbn: "080442957x",
+                year: "1925",
+            ),
+            formats: [.ebook],
+            baseURL: base,
+            apiKey: key,
+        )
+        #expect(outcomes.map(\.phase) == [.searching])
+        #expect(script.calls.contains { $0.cmd == "findBook" && $0.query["name"] == "080442957X" })
+        #expect(script.calls.filter { $0.cmd == "queueBook" }.map { $0.query["id"] } == ["OLX"])
+    }
+
     @Test func ambiguousMatchDoesNotQueue() async {
         let script = Script()
         script.handler = { cmd, _ in

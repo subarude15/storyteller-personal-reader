@@ -224,11 +224,36 @@ public enum LazyLibrarianMatcher {
         return long.dropFirst(3).prefix(9) == short.prefix(9)
     }
 
+    /// Normalize a single ISBN string to ISBN-10 or ISBN-13 shape.
+    /// Spaces, hyphens, and other punctuation are ignored. Digits are kept.
+    /// `X`/`x` is kept only as the final ISBN-10 check digit (normalized to `X`).
     static func isbnDigits(_ raw: String?) -> String? {
         guard let raw else { return nil }
-        let digits = raw.filter(\.isNumber)
-        guard digits.count == 10 || digits.count == 13 else { return nil }
-        return digits
+        var out = ""
+        var sawCheckX = false
+        for character in raw {
+            if character.isWhitespace || character == "-" {
+                continue
+            }
+            if !character.isLetter, !character.isNumber {
+                continue
+            }
+            if sawCheckX { return nil }
+            if character.isNumber {
+                out.append(character)
+                continue
+            }
+            if character == "X" || character == "x" {
+                guard out.count == 9 else { return nil }
+                out.append("X")
+                sawCheckX = true
+                continue
+            }
+            return nil
+        }
+        guard out.count == 10 || out.count == 13 else { return nil }
+        if out.count == 13, sawCheckX { return nil }
+        return out
     }
 }
 

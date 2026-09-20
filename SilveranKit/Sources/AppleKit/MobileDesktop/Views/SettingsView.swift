@@ -57,7 +57,7 @@ public struct SettingsView: View {
     @State private var isReloadingFromActor = false
     @State private var lastPersistTime: Date = .distantPast
     @StateObject private var reloader = SettingsReloader()
-    private enum ShelfarrConnectionStatus: Equatable {
+    fileprivate enum ShelfarrConnectionStatus: Equatable {
         case success
         case failed(errorMessage: String?)
 
@@ -308,9 +308,11 @@ private struct LazyLibrarianSettingsSection: View {
                 prompt: Text("https://host:5299"),
             )
             .textContentType(.URL)
+            .autocorrectionDisabled()
+            #if os(iOS)
             .keyboardType(.URL)
             .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
+            #endif
             SecureField(
                 "API Key",
                 text: $keyDraft,
@@ -430,11 +432,19 @@ extension SettingsView {
                     }
                     .tag(SettingsTab.readingBar)
 
-                MacBookSourcesSettingsView()
-                    .tabItem {
-                        Label("Book Sources", systemImage: "externaldrive")
-                    }
-                    .tag(SettingsTab.bookSources)
+                MacBookSourcesSettingsView(
+                    lazyLibrarianEnabled: $config.lazyLibrarianEnabled,
+                    lazyLibrarianBaseURL: $config.lazyLibrarianBaseURL,
+                    shelfarrBaseURL: $config.shelfarrBaseURL,
+                    shelfarrAPIToken: $config.shelfarrAPIToken,
+                    bookRequestProvider: $config.bookRequestProvider,
+                    shelfarrConnectionStatus: shelfarrConnectionStatus,
+                    onTestShelfarr: testShelfarrConnection,
+                )
+                .tabItem {
+                    Label("Book Sources", systemImage: "externaldrive")
+                }
+                .tag(SettingsTab.bookSources)
             }
 
             Divider()
@@ -1184,9 +1194,75 @@ private struct MacGeneralSettingsView: View {
 }
 
 private struct MacBookSourcesSettingsView: View {
+    @Binding var lazyLibrarianEnabled: Bool
+    @Binding var lazyLibrarianBaseURL: String
+    @Binding var shelfarrBaseURL: String
+    @Binding var shelfarrAPIToken: String
+    @Binding var bookRequestProvider: String
+    var shelfarrConnectionStatus: SettingsView.ShelfarrConnectionStatus?
+    var onTestShelfarr: () -> Void
+
     var body: some View {
-        StorytellerServerSettingsView()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        VStack(spacing: 0) {
+            StorytellerServerSettingsView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Divider()
+            Form {
+                LazyLibrarianSettingsSection(
+                    enabled: $lazyLibrarianEnabled,
+                    baseURL: $lazyLibrarianBaseURL,
+                )
+                Section("Shelfarr") {
+                    TextField(
+                        "Base URL",
+                        text: $shelfarrBaseURL,
+                        prompt: Text("https://host:5057"),
+                    )
+                    .textContentType(.URL)
+                    .autocorrectionDisabled()
+                    SecureField(
+                        "API Token",
+                        text: $shelfarrAPIToken,
+                        prompt: Text("Token"),
+                    )
+                    .textContentType(.password)
+                    Button(action: onTestShelfarr) {
+                        Label("Test Connection", systemImage: "network")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    if let connectionStatus = shelfarrConnectionStatus {
+                        HStack {
+                            Image(
+                                systemName: connectionStatus == .success
+                                    ? "checkmark.circle.fill" : "xmark.circle.fill"
+                            )
+                            .foregroundStyle(connectionStatus == .success ? .green : .red)
+                            Text(
+                                connectionStatus == .success
+                                    ? "Connected"
+                                    : "Failed: \(connectionStatus.errorMessage ?? "Unknown error")"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Section {
+                    Picker("Provider", selection: $bookRequestProvider) {
+                        Text("LazyLibrarian").tag(BookRequestProviderKind.lazyLibrarian.rawValue)
+                        Text("Shelfarr").tag(BookRequestProviderKind.shelfarr.rawValue)
+                    }
+                } header: {
+                    Text("Book requests")
+                } footer: {
+                    Text(
+                        "Used when both LazyLibrarian and Shelfarr are set up. Otherwise the configured one is used. A request asks that server to search. It does not mean the file is downloaded."
+                    )
+                }
+            }
+            .frame(maxHeight: 360)
+        }
     }
 }
 
