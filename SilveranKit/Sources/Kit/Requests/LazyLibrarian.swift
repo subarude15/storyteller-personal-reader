@@ -265,20 +265,31 @@ public struct LazyLibrarianClient: Sendable {
     }
 
     public func testConnection(baseURL: String, apiKey: String) async -> LazyLibrarianConnection {
+        await probeHealth(baseURL: baseURL, apiKey: apiKey).connection
+    }
+
+    /// Read-only health probe. Uses getVersion only — no library mutations or searches.
+    public func probeHealth(baseURL: String, apiKey: String) async -> LazyLibrarianHealthProbe {
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else { return .unauthorized }
+        guard !key.isEmpty else {
+            return LazyLibrarianHealthProbe(connection: .unauthorized, version: nil)
+        }
         guard let url = LazyLibrarianEndpoint.url(base: baseURL, apiKey: key, command: "getVersion")
-        else { return .cannotReachServer }
+        else {
+            return LazyLibrarianHealthProbe(connection: .cannotReachServer, version: nil)
+        }
         switch await call(url, timeout: 8, apiKey: key) {
             case .failure(let failure):
-                return connection(failure)
+                return LazyLibrarianHealthProbe(connection: connection(failure), version: nil)
             case .success(let body):
                 guard let object = jsonObject(body) as? [String: Any],
                     bool(object["Success"]) == true,
                     let version = string(object, ["current_version"]),
                     !version.isEmpty
-                else { return .invalidResponse }
-                return .ok
+                else {
+                    return LazyLibrarianHealthProbe(connection: .invalidResponse, version: nil)
+                }
+                return LazyLibrarianHealthProbe(connection: .ok, version: version)
         }
     }
 

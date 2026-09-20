@@ -17,6 +17,9 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
     public var lazyLibrarianEnabled: Bool = false
     public var lazyLibrarianBaseURL: String = ""
     public var bookRequestProvider: String = BookRequestProviderKind.lazyLibrarian.rawValue
+    /// Optional LAN-only book search helper. Never a core dependency.
+    public var bookSearchLANEnabled: Bool = false
+    public var bookSearchLANBaseURL: String = ""
 
     public init(
         reading: Reading = Reading(),
@@ -49,11 +52,14 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
         bookRequestProvider =
             (try? container.decode(String.self, forKey: .bookRequestProvider))
             ?? BookRequestProviderKind.lazyLibrarian.rawValue
+        bookSearchLANEnabled = (try? container.decode(Bool.self, forKey: .bookSearchLANEnabled)) ?? false
+        bookSearchLANBaseURL = (try? container.decode(String.self, forKey: .bookSearchLANBaseURL)) ?? ""
     }
 
     private enum TopLevelCodingKeys: String, CodingKey {
         case reading, playback, readingBar, sync, library, themes, shelfarrBaseURL, shelfarrAPIToken,
-            lazyLibrarianEnabled, lazyLibrarianBaseURL, bookRequestProvider
+            lazyLibrarianEnabled, lazyLibrarianBaseURL, bookRequestProvider,
+            bookSearchLANEnabled, bookSearchLANBaseURL
     }
 
     public struct Reading: Codable, Equatable, Sendable {
@@ -754,6 +760,8 @@ public actor SettingsActor {
         lazyLibrarianEnabled: Bool? = nil,
         lazyLibrarianBaseURL: String? = nil,
         bookRequestProvider: String? = nil,
+        bookSearchLANEnabled: Bool? = nil,
+        bookSearchLANBaseURL: String? = nil,
     ) throws {
         var updated = config
 
@@ -922,6 +930,12 @@ public actor SettingsActor {
         }
         if let bookRequestProvider {
             updated.bookRequestProvider = bookRequestProvider
+        }
+        if let bookSearchLANEnabled {
+            updated.bookSearchLANEnabled = bookSearchLANEnabled
+        }
+        if let bookSearchLANBaseURL {
+            updated.bookSearchLANBaseURL = bookSearchLANBaseURL
         }
 
         #if os(iOS)
