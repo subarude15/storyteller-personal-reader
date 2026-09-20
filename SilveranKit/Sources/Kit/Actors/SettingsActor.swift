@@ -16,7 +16,7 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
     public var shelfarrAPIToken: String = ""
     public var lazyLibrarianEnabled: Bool = false
     public var lazyLibrarianBaseURL: String = ""
-    public var bookRequestProvider: String = BookRequestProviderKind.lazyLibrarian.rawValue
+    public var bookRequestProvider: String = BookRequestProviderKind.automatic.rawValue
     /// Optional LAN-only book search helper. Never a core dependency.
     public var bookSearchLANEnabled: Bool = false
     public var bookSearchLANBaseURL: String = ""
@@ -51,7 +51,7 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
         lazyLibrarianBaseURL = (try? container.decode(String.self, forKey: .lazyLibrarianBaseURL)) ?? ""
         bookRequestProvider =
             (try? container.decode(String.self, forKey: .bookRequestProvider))
-            ?? BookRequestProviderKind.lazyLibrarian.rawValue
+            ?? BookRequestProviderKind.automatic.rawValue
         bookSearchLANEnabled = (try? container.decode(Bool.self, forKey: .bookSearchLANEnabled)) ?? false
         bookSearchLANBaseURL = (try? container.decode(String.self, forKey: .bookSearchLANBaseURL)) ?? ""
     }

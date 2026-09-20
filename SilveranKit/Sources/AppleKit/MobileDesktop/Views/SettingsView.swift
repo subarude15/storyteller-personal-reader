@@ -557,6 +557,11 @@ extension SettingsView {
                     } label: {
                         Label("Services & Health", systemImage: "heart.text.square")
                     }
+                    NavigationLink {
+                        RequestActivityView()
+                    } label: {
+                        Label("Request Activity", systemImage: "tray.full")
+                    }
                 }
 
                 Section("Podcasts") {
@@ -643,14 +648,18 @@ extension SettingsView {
 
                 Section {
                     Picker("Provider", selection: $config.bookRequestProvider) {
-                        Text("LazyLibrarian").tag(BookRequestProviderKind.lazyLibrarian.rawValue)
-                        Text("Shelfarr").tag(BookRequestProviderKind.shelfarr.rawValue)
+                        Text(BookRequestProviderKind.automatic.displayName)
+                            .tag(BookRequestProviderKind.automatic.rawValue)
+                        Text(BookRequestProviderKind.lazyLibrarian.displayName)
+                            .tag(BookRequestProviderKind.lazyLibrarian.rawValue)
+                        Text(BookRequestProviderKind.shelfarr.displayName)
+                            .tag(BookRequestProviderKind.shelfarr.rawValue)
                     }
                 } header: {
                     Text("Book requests")
                 } footer: {
                     Text(
-                        "Used when both LazyLibrarian and Shelfarr are set up. Otherwise the configured one is used. A request asks that server to search. It does not mean the file is downloaded."
+                        "Automatic prefers LazyLibrarian when it is set up, otherwise Shelfarr. Explicit choices never silently switch providers."
                     )
                 }
 
@@ -1221,6 +1230,11 @@ private struct MacBookSourcesSettingsView: View {
                         } label: {
                             Label("Services & Health", systemImage: "heart.text.square")
                         }
+                        NavigationLink {
+                            RequestActivityView()
+                        } label: {
+                            Label("Request Activity", systemImage: "tray.full")
+                        }
                     }
                     LazyLibrarianSettingsSection(
                         enabled: $lazyLibrarianEnabled,
@@ -1264,14 +1278,18 @@ private struct MacBookSourcesSettingsView: View {
                 }
                 Section {
                     Picker("Provider", selection: $bookRequestProvider) {
-                        Text("LazyLibrarian").tag(BookRequestProviderKind.lazyLibrarian.rawValue)
-                        Text("Shelfarr").tag(BookRequestProviderKind.shelfarr.rawValue)
+                        Text(BookRequestProviderKind.automatic.displayName)
+                            .tag(BookRequestProviderKind.automatic.rawValue)
+                        Text(BookRequestProviderKind.lazyLibrarian.displayName)
+                            .tag(BookRequestProviderKind.lazyLibrarian.rawValue)
+                        Text(BookRequestProviderKind.shelfarr.displayName)
+                            .tag(BookRequestProviderKind.shelfarr.rawValue)
                     }
                 } header: {
                     Text("Book requests")
                 } footer: {
                     Text(
-                        "Used when both LazyLibrarian and Shelfarr are set up. Otherwise the configured one is used. A request asks that server to search. It does not mean the file is downloaded."
+                        "Automatic prefers LazyLibrarian when it is set up, otherwise Shelfarr. Explicit choices never silently switch providers."
                     )
                 }
                 Section {

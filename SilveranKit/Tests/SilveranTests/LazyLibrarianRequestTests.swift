@@ -413,6 +413,20 @@ struct LazyLibrarianRequestTests {
     @Test func providerPreferenceUsesTheConfiguredOne() {
         #expect(
             BookRequestRouting.choose(
+                preference: .automatic,
+                lazyLibrarianReady: true,
+                shelfarrReady: true,
+            ) == .lazyLibrarian
+        )
+        #expect(
+            BookRequestRouting.choose(
+                preference: .automatic,
+                lazyLibrarianReady: false,
+                shelfarrReady: true,
+            ) == .shelfarr
+        )
+        #expect(
+            BookRequestRouting.choose(
                 preference: .lazyLibrarian,
                 lazyLibrarianReady: true,
                 shelfarrReady: true,
@@ -423,7 +437,7 @@ struct LazyLibrarianRequestTests {
                 preference: .shelfarr,
                 lazyLibrarianReady: true,
                 shelfarrReady: false,
-            ) == .lazyLibrarian
+            ) == nil
         )
         #expect(
             BookRequestRouting.choose(
