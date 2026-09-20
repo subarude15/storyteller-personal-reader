@@ -755,7 +755,8 @@ struct RequestActivityChainDetailView: View {
                     }
                     .listRowBackground(
                         highlightAttemptID == item.id
-                            ? Color.accentColor.opacity(0.08) : nil
+                            ? Color.accentColor.opacity(0.08)
+                            : Color.clear
                     )
                 }
             }
