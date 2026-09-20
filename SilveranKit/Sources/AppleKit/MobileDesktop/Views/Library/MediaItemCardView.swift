@@ -97,6 +97,7 @@ struct MediaItemCardView: View {
 
         var body: some View {
             #if os(iOS)
+            Group {
             if mediaGridTapOpensPlayer {
                 // ink+amp: tapping a downloaded ebook/audiobook/readaloud opens
                 // it in the player/reader. An undownloaded tap opens the book
@@ -160,8 +161,15 @@ struct MediaItemCardView: View {
                     Text(folderDeleteMessage(request))
                 }
             }
+            }
+            .overlay(alignment: .bottom) {
+                RequestLibraryStatusBadgeLink(book: item)
+            }
             #else
             cardContent
+                .overlay(alignment: .bottom) {
+                    RequestLibraryStatusBadgeLink(book: item)
+                }
             #endif
         }
 
