@@ -10,6 +10,8 @@ public actor AuthenticationActor {
     private let passwordKey = "password"
     private let hardcoverTokenKey = "hardcoverToken"
     private let lazyLibrarianAPIKey = "lazyLibrarianAPIKey"
+    private let prowlarrAPIKey = "prowlarrAPIKey"
+    private let jackettAPIKey = "jackettAPIKey"
 
     private init() {}
 
@@ -127,6 +129,50 @@ public actor AuthenticationActor {
 
     public func hasLazyLibrarianAPIKey() async -> Bool {
         guard let key = try? await loadLazyLibrarianAPIKey() else { return false }
+        return !key.isEmpty
+    }
+
+    public func saveProwlarrAPIKey(_ key: String) async throws {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            try await deleteProwlarrAPIKey()
+            return
+        }
+        try await saveString(trimmed, for: prowlarrAPIKey)
+    }
+
+    public func loadProwlarrAPIKey() async throws -> String? {
+        try await loadString(for: prowlarrAPIKey)
+    }
+
+    public func deleteProwlarrAPIKey() async throws {
+        try await keychain.removeItem(account: prowlarrAPIKey)
+    }
+
+    public func hasProwlarrAPIKey() async -> Bool {
+        guard let key = try? await loadProwlarrAPIKey() else { return false }
+        return !key.isEmpty
+    }
+
+    public func saveJackettAPIKey(_ key: String) async throws {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            try await deleteJackettAPIKey()
+            return
+        }
+        try await saveString(trimmed, for: jackettAPIKey)
+    }
+
+    public func loadJackettAPIKey() async throws -> String? {
+        try await loadString(for: jackettAPIKey)
+    }
+
+    public func deleteJackettAPIKey() async throws {
+        try await keychain.removeItem(account: jackettAPIKey)
+    }
+
+    public func hasJackettAPIKey() async -> Bool {
+        guard let key = try? await loadJackettAPIKey() else { return false }
         return !key.isEmpty
     }
 

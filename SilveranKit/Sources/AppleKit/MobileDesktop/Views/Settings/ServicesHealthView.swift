@@ -170,6 +170,12 @@ public struct ServicesHealthView: View {
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
+                if showsIndexerDetail(result), let detail = result.detail, detail != result.summary {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
             }
             Spacer(minLength: 0)
         }
@@ -183,6 +189,15 @@ public struct ServicesHealthView: View {
             case .unavailable: .red
             case .disabled, .localOnly: .secondary
             case .checking: .blue
+        }
+    }
+
+    private func showsIndexerDetail(_ result: ServiceHealthResult) -> Bool {
+        switch result.serviceID {
+            case .prowlarr, .jackett:
+                result.status == .warning || result.status == .unavailable
+            case .lazyLibrarian, .shelfarr, .librivox, .storyteller, .bookSearchLAN:
+                false
         }
     }
 }
@@ -241,6 +256,24 @@ public struct ServiceHealthDetailView: View {
                 }
             }
 
+            if result.serviceID == .prowlarr || result.serviceID == .jackett {
+                Section {
+                    Text("LazyLibrarian may use these indexers to search for books.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Section("Indexers") {
+                    if result.indexers.isEmpty {
+                        Text("No indexers configured")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(result.indexers) { row in
+                            ServiceIndexerListRow(row: row)
+                        }
+                    }
+                }
+            }
+
             if let action = result.suggestedAction {
                 Section("Suggested action") {
                     Text(action)
@@ -260,6 +293,44 @@ public struct ServiceHealthDetailView: View {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return "\(formatter.string(from: date)) · \(ServiceHealthURLSanitizer.relativeAge(from: date))"
+    }
+}
+
+private struct ServiceIndexerListRow: View {
+    var row: ServiceIndexerRow
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(row.name)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(row.health.label)
+                    .font(.subheadline)
+                    .foregroundStyle(tint)
+            }
+            if let detail = row.detail, !detail.isEmpty {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(expanded ? nil : 2)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard (row.detail?.count ?? 0) > 80 else { return }
+            expanded.toggle()
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var tint: Color {
+        switch row.health {
+            case .healthy: .green
+            case .failing: .orange
+            case .disabled, .unknown: .secondary
+        }
     }
 }
 #endif
