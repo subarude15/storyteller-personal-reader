@@ -198,6 +198,8 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
     public var fallbackKind: RequestFallbackKind?
     /// One-hop automatic attempts already made from this row. Absent on legacy rows.
     public var automaticFallbackAttempts: [AutomaticFallbackAttempt]?
+    /// Chronological timeline. Absent on legacy rows (display synthesizes a minimal history).
+    public var events: [RequestActivityEvent]?
 
     public init(
         id: String = UUID().uuidString,
@@ -220,6 +222,7 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
         fallbackFromRequestID: String? = nil,
         fallbackKind: RequestFallbackKind? = nil,
         automaticFallbackAttempts: [AutomaticFallbackAttempt]? = nil,
+        events: [RequestActivityEvent]? = nil,
     ) {
         self.id = id
         self.canonicalWorkID = canonicalWorkID
@@ -241,6 +244,7 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
         self.fallbackFromRequestID = fallbackFromRequestID
         self.fallbackKind = fallbackKind
         self.automaticFallbackAttempts = automaticFallbackAttempts
+        self.events = events
     }
 
     public var overallStatus: RequestActivityStatus {

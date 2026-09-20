@@ -373,8 +373,14 @@ public enum BookRequests {
             (item.provider == .lazyLibrarian || item.provider == .shelfarr)
             ? item.provider
             : nil
+        let stamped = RequestActivityTimeline.appendRetryStarted(
+            to: item,
+            formats: targets,
+            now: now,
+        )
+        history.upsert(stamped)
         return await submit(
-            work: item.canonicalWorkForRetry(),
+            work: stamped.canonicalWorkForRetry(),
             formats: targets,
             client: client,
             history: history,

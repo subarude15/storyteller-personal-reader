@@ -62,7 +62,15 @@ public final class RequestActivityStore: @unchecked Sendable {
             previous = nil
             existingIndex = nil
         }
-        let prepared = RequestActivityNotifier.shared.prepare(previous: previous, incoming: item)
+        let preparedIncoming = RequestActivityTimeline.recordingTransitions(
+            previous: previous,
+            incoming: item,
+            now: item.updatedAt,
+        )
+        let prepared = RequestActivityNotifier.shared.prepare(
+            previous: previous,
+            incoming: preparedIncoming,
+        )
         if let existingIndex {
             items[existingIndex] = prepared.item
         } else {
@@ -170,8 +178,14 @@ public final class RequestActivityStore: @unchecked Sendable {
         if !submissionFailed, !stillNeedsAttention {
             item.lastError = nil
         }
+        let previous = existingIndex.map { items[$0] }
+        item = RequestActivityTimeline.recordingTransitions(
+            previous: previous,
+            incoming: item,
+            now: now,
+        )
         let prepared = RequestActivityNotifier.shared.prepare(
-            previous: existingIndex.map { items[$0] },
+            previous: previous,
             incoming: item,
         )
         item = prepared.item
@@ -180,11 +194,34 @@ public final class RequestActivityStore: @unchecked Sendable {
         } else {
             items.append(item)
         }
+
+        var notificationEvents = prepared.events
+        // Record fallback on the source row when this submission is an alternate hop.
+        if let fallbackFromRequestID,
+            let fallbackKind,
+            let parentIndex = items.firstIndex(where: { $0.id == fallbackFromRequestID })
+        {
+            let parentPrevious = items[parentIndex]
+            var parent = RequestActivityTimeline.appendFallbackEvent(
+                to: parentPrevious,
+                fallbackKind: fallbackKind,
+                targetProvider: provider,
+                formats: outcomes.map(\.format),
+                relatedRequestID: item.id,
+                now: now,
+            )
+            let parentPrepared = RequestActivityNotifier.shared.prepare(
+                previous: parentPrevious,
+                incoming: parent,
+            )
+            items[parentIndex] = parentPrepared.item
+            notificationEvents.append(contentsOf: parentPrepared.events)
+        }
+
         let didSave = saveUnlocked(items)
         let formatLabels = item.requestedFormats.map(\.rawValue).joined(separator: ",")
-        let events = prepared.events
         lock.unlock()
-        RequestActivityNotifier.shared.deliver(events)
+        RequestActivityNotifier.shared.deliver(notificationEvents)
         if didSave {
             notifyDidChange()
         }
