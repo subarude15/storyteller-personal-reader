@@ -40,6 +40,10 @@ public struct RequestActivityActionContext: Equatable, Sendable {
     public var shelfarrBaseURL: String
     public var bookSearchLANEnabled: Bool
     public var bookSearchLANBaseURL: String
+    /// True when a key is stored. The key itself is never copied here.
+    public var lazyLibrarianHasAPIKey: Bool
+    /// True when a token is stored. The token itself is never copied here.
+    public var shelfarrHasToken: Bool
 
     public init(
         lazyLibrarianEnabled: Bool = false,
@@ -47,21 +51,28 @@ public struct RequestActivityActionContext: Equatable, Sendable {
         shelfarrBaseURL: String = "",
         bookSearchLANEnabled: Bool = false,
         bookSearchLANBaseURL: String = "",
+        lazyLibrarianHasAPIKey: Bool = false,
+        shelfarrHasToken: Bool = false,
     ) {
         self.lazyLibrarianEnabled = lazyLibrarianEnabled
         self.lazyLibrarianBaseURL = lazyLibrarianBaseURL
         self.shelfarrBaseURL = shelfarrBaseURL
         self.bookSearchLANEnabled = bookSearchLANEnabled
         self.bookSearchLANBaseURL = bookSearchLANBaseURL
+        self.lazyLibrarianHasAPIKey = lazyLibrarianHasAPIKey
+        self.shelfarrHasToken = shelfarrHasToken
     }
 
-    public init(config: SilveranGlobalConfig) {
+    public init(config: SilveranGlobalConfig, lazyLibrarianHasAPIKey: Bool = false) {
+        let token = config.shelfarrAPIToken.trimmingCharacters(in: .whitespacesAndNewlines)
         self.init(
             lazyLibrarianEnabled: config.lazyLibrarianEnabled,
             lazyLibrarianBaseURL: config.lazyLibrarianBaseURL,
             shelfarrBaseURL: config.shelfarrBaseURL,
             bookSearchLANEnabled: config.bookSearchLANEnabled,
             bookSearchLANBaseURL: config.bookSearchLANBaseURL,
+            lazyLibrarianHasAPIKey: lazyLibrarianHasAPIKey,
+            shelfarrHasToken: !token.isEmpty,
         )
     }
 }
@@ -72,6 +83,7 @@ public struct RequestActivityActionAvailability: Equatable, Sendable {
     public var canOpenLazyLibrarian: Bool
     public var canOpenShelfarr: Bool
     public var canOpenAlternateSearch: Bool
+    public var canTryAnotherSource: Bool
     public var retryFormats: [BookRequestFormat]
 
     public init(
@@ -80,6 +92,7 @@ public struct RequestActivityActionAvailability: Equatable, Sendable {
         canOpenLazyLibrarian: Bool = false,
         canOpenShelfarr: Bool = false,
         canOpenAlternateSearch: Bool = false,
+        canTryAnotherSource: Bool = false,
         retryFormats: [BookRequestFormat] = [],
     ) {
         self.canCheckStatus = canCheckStatus
@@ -87,12 +100,13 @@ public struct RequestActivityActionAvailability: Equatable, Sendable {
         self.canOpenLazyLibrarian = canOpenLazyLibrarian
         self.canOpenShelfarr = canOpenShelfarr
         self.canOpenAlternateSearch = canOpenAlternateSearch
+        self.canTryAnotherSource = canTryAnotherSource
         self.retryFormats = retryFormats
     }
 
     public var hasAnyAction: Bool {
         canCheckStatus || canRetry || canOpenLazyLibrarian || canOpenShelfarr
-            || canOpenAlternateSearch
+            || canOpenAlternateSearch || canTryAnotherSource
     }
 }
 
@@ -120,6 +134,7 @@ public enum RequestActivityActions {
         let openLAN =
             context.bookSearchLANEnabled
             && lanURL != nil
+        let fallback = RequestActivityFallbackPolicy.offer(for: item, context: context)
 
         return RequestActivityActionAvailability(
             canCheckStatus: true,
@@ -127,6 +142,7 @@ public enum RequestActivityActions {
             canOpenLazyLibrarian: openLL,
             canOpenShelfarr: openShelf,
             canOpenAlternateSearch: openLAN,
+            canTryAnotherSource: fallback.canOffer,
             retryFormats: retryFormats,
         )
     }

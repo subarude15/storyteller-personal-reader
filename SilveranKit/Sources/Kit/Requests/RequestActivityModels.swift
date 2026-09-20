@@ -166,6 +166,8 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
     public var isbn: String?
     /// Local notification dedupe metadata — absent on legacy rows (safe default).
     public var notificationState: RequestActivityNotificationState?
+    /// Request Activity row this attempt was started from. Absent on older rows.
+    public var fallbackFromRequestID: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -185,6 +187,7 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
         openLibraryEditionID: String? = nil,
         isbn: String? = nil,
         notificationState: RequestActivityNotificationState? = nil,
+        fallbackFromRequestID: String? = nil,
     ) {
         self.id = id
         self.canonicalWorkID = canonicalWorkID
@@ -203,6 +206,7 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
         self.openLibraryEditionID = openLibraryEditionID
         self.isbn = isbn
         self.notificationState = notificationState
+        self.fallbackFromRequestID = fallbackFromRequestID
     }
 
     public var overallStatus: RequestActivityStatus {

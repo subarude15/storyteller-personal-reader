@@ -138,6 +138,7 @@ public enum BookRequests {
         history: RequestActivityStore = .shared,
         now: Date = Date(),
         providerOverride: BookRequestProviderKind? = nil,
+        fallbackFromRequestID: String? = nil,
     ) async -> BookRequestSubmission {
         let settings = await SettingsActor.shared.config
         let key = (try? await AuthenticationActor.shared.loadLazyLibrarianAPIKey()) ?? ""
@@ -175,8 +176,10 @@ public enum BookRequests {
             "[RequestActivity] request start work=\(work.workID) provider=\(provider.rawValue) formats=\(formats.map(\.rawValue).joined(separator: ","))"
         )
 
-        // Local duplicate short-circuit before hitting providers.
-        let existing = history.item(forWorkID: work.openLibraryWorkID ?? work.workID)
+        // Duplicate check is per provider so a fallback does not treat the
+        // original row as the alternate provider's request.
+        let workID = work.openLibraryWorkID ?? work.workID
+        let existing = history.item(forWorkID: workID, provider: provider)
         var toSend: [BookRequestFormat] = []
         var localOutcomes: [BookRequestOutcome] = []
         for format in formats {
@@ -259,6 +262,7 @@ public enum BookRequests {
             provider: provider,
             outcomes: outcomes,
             now: now,
+            fallbackFromRequestID: fallbackFromRequestID,
         )
         debugLog(
             "[RequestActivity] request end work=\(work.workID) provider=\(provider.rawValue) outcomes=\(outcomes.count)"
