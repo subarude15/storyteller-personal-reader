@@ -144,7 +144,7 @@ public struct RequestLibraryPresentationIndex: Equatable, Sendable {
         }
         self.pending = items.compactMap { item in
             guard !matchedIDs.contains(item.id) else { return nil }
-            guard let badge = Self.badge(for: item, now: now, includeStaleReady: true) else {
+            guard let badge = Self.badge(for: item, now: now, includeStaleReady: false) else {
                 return nil
             }
             return RequestLibraryPendingRow(
