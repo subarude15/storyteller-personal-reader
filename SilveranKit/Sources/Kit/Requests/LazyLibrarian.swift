@@ -26,6 +26,65 @@ public enum LazyLibrarianConnection: Equatable, Sendable {
     }
 }
 
+public enum LazyLibrarianFormatState: String, Equatable, Sendable {
+    case open
+    case wanted
+    case snatched
+    case available
+    case ignored
+
+    public var activityStatus: RequestActivityStatus {
+        switch self {
+            case .open: .requested
+            case .wanted: .wanted
+            case .snatched: .snatched
+            case .available: .available
+            case .ignored: .needsAttention
+        }
+    }
+
+    public var rawLabel: String {
+        rawValue
+    }
+}
+
+public struct LazyLibrarianBookSnapshot: Equatable, Sendable {
+    public var bookID: String
+    public var ebook: LazyLibrarianFormatState
+    public var audiobook: LazyLibrarianFormatState
+
+    public init(bookID: String, ebook: LazyLibrarianFormatState, audiobook: LazyLibrarianFormatState) {
+        self.bookID = bookID
+        self.ebook = ebook
+        self.audiobook = audiobook
+    }
+
+    public func state(for format: BookRequestFormat) -> LazyLibrarianFormatState {
+        switch format {
+            case .ebook: ebook
+            case .audiobook: audiobook
+        }
+    }
+}
+
+public enum LazyLibrarianLookupFailure: Error, Equatable, Sendable {
+    case unauthorized
+    case unreachable
+    case timeout
+    case missingBook
+    case message(String)
+
+    public var detail: String {
+        switch self {
+            case .unauthorized: "Unauthorized. Check the API key."
+            case .unreachable: "Cannot reach the LazyLibrarian server."
+            case .timeout: "The LazyLibrarian server timed out."
+            case .missingBook: "Book no longer exists in LazyLibrarian."
+            case .message(let text): text
+        }
+    }
+}
+
 public struct LazyLibrarianHTTP: Sendable {
     public var status: Int
     public var body: Data
@@ -357,6 +416,42 @@ public struct LazyLibrarianClient: Sendable {
         return outcomes
     }
 
+    /// Read-only status for a previously resolved LazyLibrarian BookID.
+    public func lookupBook(
+        id: String,
+        baseURL: String,
+        apiKey: String,
+    ) async -> Result<LazyLibrarianBookSnapshot?, LazyLibrarianLookupFailure> {
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return .failure(.unauthorized) }
+        guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .failure(.missingBook)
+        }
+        switch await getBook(id: id, baseURL: baseURL, apiKey: key) {
+            case .failure(let message):
+                if message.text.localizedCaseInsensitiveContains("timed out") {
+                    return .failure(.timeout)
+                }
+                if message.text.localizedCaseInsensitiveContains("unauthorized") {
+                    return .failure(.unauthorized)
+                }
+                if message.text.localizedCaseInsensitiveContains("cannot reach") {
+                    return .failure(.unreachable)
+                }
+                return .failure(.message(message.text))
+            case .success(nil):
+                return .success(nil)
+            case .success(let owned?):
+                return .success(
+                    LazyLibrarianBookSnapshot(
+                        bookID: id,
+                        ebook: owned.ebook.publicState,
+                        audiobook: owned.audiobook.publicState,
+                    )
+                )
+        }
+    }
+
     private func candidates(
         work: CanonicalBookWork,
         baseURL: String,
@@ -435,18 +530,21 @@ public struct LazyLibrarianClient: Sendable {
                     format: format,
                     phase: .alreadyAvailable,
                     detail: "Already available in LazyLibrarian. Not downloaded into this library yet.",
+                    providerBookID: bookID,
                 )
-            case .wanted:
+            case .wanted, .snatched:
                 return BookRequestOutcome(
                     format: format,
                     phase: .alreadyRequested,
                     detail: "Already requested. LazyLibrarian has not finished downloading it.",
+                    providerBookID: bookID,
                 )
             case .ignored:
                 return BookRequestOutcome(
                     format: format,
                     phase: .failed,
                     detail: "LazyLibrarian has this \(format.label) marked ignored. Nothing was queued.",
+                    providerBookID: bookID,
                 )
             case .open:
                 break
@@ -460,13 +558,19 @@ public struct LazyLibrarianClient: Sendable {
             timeout: 20,
         ) {
             case .failure(let message):
-                return BookRequestOutcome(format: format, phase: .failed, detail: message.text)
+                return BookRequestOutcome(
+                    format: format,
+                    phase: .failed,
+                    detail: message.text,
+                    providerBookID: bookID,
+                )
             case .success(let body):
                 if !accepted(body) {
                     return BookRequestOutcome(
                         format: format,
                         phase: .failed,
                         detail: textDetail(body, apiKey: apiKey, fallback: "LazyLibrarian did not queue this book."),
+                        providerBookID: bookID,
                     )
                 }
         }
@@ -482,6 +586,7 @@ public struct LazyLibrarianClient: Sendable {
                     format: format,
                     phase: .requested,
                     detail: "Request accepted. Search did not start. The file is not downloaded.",
+                    providerBookID: bookID,
                 )
             case .success(let body):
                 if searchStarted(body) {
@@ -489,12 +594,14 @@ public struct LazyLibrarianClient: Sendable {
                         format: format,
                         phase: .searching,
                         detail: "Request accepted. LazyLibrarian is searching. The file is not downloaded.",
+                        providerBookID: bookID,
                     )
                 }
                 return BookRequestOutcome(
                     format: format,
                     phase: .requested,
                     detail: "Request accepted. Search did not start. The file is not downloaded.",
+                    providerBookID: bookID,
                 )
         }
     }
@@ -689,8 +796,19 @@ public struct LazyLibrarianClient: Sendable {
     private enum Holding {
         case open
         case wanted
+        case snatched
         case available
         case ignored
+
+        var publicState: LazyLibrarianFormatState {
+            switch self {
+                case .open: .open
+                case .wanted: .wanted
+                case .snatched: .snatched
+                case .available: .available
+                case .ignored: .ignored
+            }
+        }
     }
 
     private func owned(from value: Any) -> OwnedBook? {
@@ -708,7 +826,8 @@ public struct LazyLibrarianClient: Sendable {
         if let library, !library.isEmpty { return .available }
         switch status?.lowercased() {
             case "have": return .available
-            case "wanted", "snatched": return .wanted
+            case "wanted": return .wanted
+            case "snatched": return .snatched
             case "ignored": return .ignored
             default: return .open
         }

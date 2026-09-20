@@ -133,6 +133,13 @@ struct ShelfarrClientTests {
                 preference: .lazyLibrarian,
                 lazyLibrarianReady: false,
                 shelfarrReady: true,
+            ) == nil
+        )
+        #expect(
+            BookRequestRouting.choose(
+                preference: .automatic,
+                lazyLibrarianReady: false,
+                shelfarrReady: true,
             ) == .shelfarr
         )
     }

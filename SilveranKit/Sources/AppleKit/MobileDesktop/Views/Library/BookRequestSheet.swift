@@ -10,6 +10,7 @@ struct BookRequestSheet: View {
     @State private var sending = false
     @State private var submission: BookRequestSubmission?
     @State private var providerName: String?
+    @State private var tracked: RequestActivityItem?
 
     var body: some View {
         NavigationStack {
@@ -27,6 +28,25 @@ struct BookRequestSheet: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                if let tracked, !tracked.formatStatuses.isEmpty {
+                    Section("Current request") {
+                        ForEach(tracked.formatStatuses, id: \.format) { format in
+                            HStack {
+                                Text(format.format.label)
+                                Spacer()
+                                Text(format.status.label)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if let detail = format.detail {
+                                Text(detail)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+
                 Section {
                     formatRow(.ebook)
                     formatRow(.audiobook)
@@ -77,21 +97,10 @@ struct BookRequestSheet: View {
             }
         }
         .task {
-            let settings = await SettingsActor.shared.config
-            let keySaved = await AuthenticationActor.shared.hasLazyLibrarianAPIKey()
-            let lazyReady =
-                settings.lazyLibrarianEnabled
-                && !settings.lazyLibrarianBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                && keySaved
-            let shelfReady =
-                !settings.shelfarrBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                && !settings.shelfarrAPIToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            let chosen = BookRequestRouting.choose(
-                preference: .preference(from: settings.bookRequestProvider),
-                lazyLibrarianReady: lazyReady,
-                shelfarrReady: shelfReady,
+            await loadProvider()
+            tracked = RequestActivityStore.shared.item(
+                forWorkID: work.openLibraryWorkID ?? work.workID
             )
-            providerName = chosen?.displayName
         }
     }
 
@@ -103,6 +112,20 @@ struct BookRequestSheet: View {
                 Text("Already in library")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+            } else if let status = tracked?.status(for: format) {
+                switch status.status {
+                    case .available, .alreadyAvailable, .downloaded:
+                        Text(status.status.label)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    case .wanted, .searching, .snatched, .requested, .alreadyRequested:
+                        Text(status.status.label)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    case .failed, .needsAttention, .unknown:
+                        Button("Request") { send([format]) }
+                            .disabled(sending)
+                }
             } else {
                 Button("Request") { send([format]) }
                     .disabled(sending)
@@ -111,7 +134,17 @@ struct BookRequestSheet: View {
     }
 
     private func missing(from formats: [BookRequestFormat]) -> [BookRequestFormat] {
-        formats.filter { !owned.contains($0) }
+        formats.filter { format in
+            if owned.contains(format) { return false }
+            guard let status = tracked?.status(for: format) else { return true }
+            switch status.status {
+                case .available, .alreadyAvailable, .downloaded,
+                    .wanted, .searching, .snatched, .requested, .alreadyRequested:
+                    return false
+                case .failed, .needsAttention, .unknown:
+                    return true
+            }
+        }
     }
 
     private func send(_ formats: [BookRequestFormat]) {
@@ -121,9 +154,30 @@ struct BookRequestSheet: View {
         Task {
             let result = await BookRequests.submit(work: work, formats: formats)
             submission = result
-            providerName = result.provider?.displayName ?? providerName
+            providerName = result.provider?.shortName ?? providerName
+            tracked = RequestActivityStore.shared.item(
+                forWorkID: work.openLibraryWorkID ?? work.workID
+            )
             sending = false
         }
+    }
+
+    private func loadProvider() async {
+        let settings = await SettingsActor.shared.config
+        let keySaved = await AuthenticationActor.shared.hasLazyLibrarianAPIKey()
+        let lazyReady =
+            settings.lazyLibrarianEnabled
+            && !settings.lazyLibrarianBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && keySaved
+        let shelfReady =
+            !settings.shelfarrBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !settings.shelfarrAPIToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let chosen = BookRequestRouting.choose(
+            preference: .preference(from: settings.bookRequestProvider),
+            lazyLibrarianReady: lazyReady,
+            shelfarrReady: shelfReady,
+        )
+        providerName = chosen?.shortName
     }
 
     private func label(_ phase: BookRequestPhase) -> String {
@@ -133,7 +187,6 @@ struct BookRequestSheet: View {
             case .alreadyRequested: "Already requested"
             case .alreadyAvailable: "Already available"
             case .failed: "Failed"
-            @unknown default: "Failed"
         }
     }
 }
