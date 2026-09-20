@@ -1,7 +1,8 @@
 import Foundation
 
 /// Persists non-sensitive last-result metadata for the Services & Health screen.
-public struct ServiceHealthCache: Sendable {
+public struct ServiceHealthCache: @unchecked Sendable {
+    // UserDefaults is thread-safe. Linux's SDK does not mark it Sendable.
     public static let shared = ServiceHealthCache()
     public static let cacheAgeLimit: TimeInterval = 5 * 60
 
