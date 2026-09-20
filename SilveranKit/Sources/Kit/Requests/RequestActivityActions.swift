@@ -146,6 +146,30 @@ public enum RequestActivityActions {
             retryFormats: retryFormats,
         )
     }
+
+    /// Chain actions target the effective attempt; browse links union all attempts.
+    public static func availability(
+        for chain: RequestActivityChain,
+        context: RequestActivityActionContext,
+    ) -> RequestActivityActionAvailability {
+        guard let actionItem = RequestActivityChains.actionItem(for: chain) else {
+            return RequestActivityActionAvailability()
+        }
+        var result = availability(for: actionItem, context: context)
+        for item in chain.items {
+            let itemAvailability = availability(for: item, context: context)
+            if itemAvailability.canOpenLazyLibrarian {
+                result.canOpenLazyLibrarian = true
+            }
+            if itemAvailability.canOpenShelfarr {
+                result.canOpenShelfarr = true
+            }
+            if itemAvailability.canOpenAlternateSearch {
+                result.canOpenAlternateSearch = true
+            }
+        }
+        return result
+    }
 }
 
 /// Safe http/https browse URLs — never append secrets.

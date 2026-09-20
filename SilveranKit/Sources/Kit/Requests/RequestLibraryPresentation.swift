@@ -92,9 +92,10 @@ public struct RequestLibraryChipSummary: Equatable, Sendable {
 /// In-memory book → request lookup. Built once per reload; card queries are O(1).
 public struct RequestLibraryPresentationIndex: Equatable, Sendable {
     public var chip: RequestLibraryChipSummary
-    private var byCanonicalID: [String: RequestActivityItem]
-    private var byISBN: [String: RequestActivityItem]
-    private var byTitleAuthor: [String: RequestActivityItem]
+    public var chainIndex: RequestActivityChainIndex
+    private var byCanonicalID: [String: RequestActivityChain]
+    private var byISBN: [String: RequestActivityChain]
+    private var byTitleAuthor: [String: RequestActivityChain]
     private var pending: [RequestLibraryPendingRow]
     private var now: Date
 
@@ -104,25 +105,34 @@ public struct RequestLibraryPresentationIndex: Equatable, Sendable {
         now: Date = Date(),
     ) {
         self.now = now
-        var canonical: [String: RequestActivityItem] = [:]
-        var isbn: [String: RequestActivityItem] = [:]
-        var titleAuthor: [String: RequestActivityItem] = [:]
+        let chainIndex = RequestActivityChains.build(from: items, now: now)
+        self.chainIndex = chainIndex
 
-        for item in items {
-            Self.insert(item, into: &canonical, key: item.canonicalWorkID)
-            if let ol = RequestLibraryMatcher.normalizeOpenLibraryID(item.openLibraryWorkID) {
-                Self.insert(item, into: &canonical, key: ol)
-            }
-            if let edition = RequestLibraryMatcher.normalizeOpenLibraryID(item.openLibraryEditionID) {
-                Self.insert(item, into: &canonical, key: edition)
-            }
-            if let normalized = RequestLibraryMatcher.normalizeISBN(item.isbn) {
-                Self.insert(item, into: &isbn, key: normalized)
-            }
-            for author in RequestLibraryMatcher.authorCandidates(from: item.author) {
-                if let key = RequestLibraryMatcher.titleAuthorKey(title: item.title, authorNames: [author])
+        var canonical: [String: RequestActivityChain] = [:]
+        var isbn: [String: RequestActivityChain] = [:]
+        var titleAuthor: [String: RequestActivityChain] = [:]
+
+        for chain in chainIndex.chains {
+            let seed = chain.rootItem ?? chain.latestItem
+            Self.insert(chain, into: &canonical, key: chain.canonicalWorkID)
+            if let seed {
+                if let ol = RequestLibraryMatcher.normalizeOpenLibraryID(seed.openLibraryWorkID) {
+                    Self.insert(chain, into: &canonical, key: ol)
+                }
+                if let edition = RequestLibraryMatcher.normalizeOpenLibraryID(seed.openLibraryEditionID)
                 {
-                    Self.insert(item, into: &titleAuthor, key: key)
+                    Self.insert(chain, into: &canonical, key: edition)
+                }
+                if let normalized = RequestLibraryMatcher.normalizeISBN(seed.isbn) {
+                    Self.insert(chain, into: &isbn, key: normalized)
+                }
+            }
+            for author in RequestLibraryMatcher.authorCandidates(from: chain.author) {
+                if let key = RequestLibraryMatcher.titleAuthorKey(
+                    title: chain.title,
+                    authorNames: [author],
+                ) {
+                    Self.insert(chain, into: &titleAuthor, key: key)
                 }
             }
         }
@@ -131,32 +141,35 @@ public struct RequestLibraryPresentationIndex: Equatable, Sendable {
         self.byISBN = isbn
         self.byTitleAuthor = titleAuthor
 
-        var matchedIDs = Set<String>()
+        var matchedChainIDs = Set<String>()
         for book in books {
-            if let item = Self.lookup(
+            if let chain = Self.lookup(
                 book,
                 canonical: canonical,
                 isbn: isbn,
                 titleAuthor: titleAuthor,
             ) {
-                matchedIDs.insert(item.id)
+                matchedChainIDs.insert(chain.id)
             }
         }
-        self.pending = items.compactMap { item in
-            guard !matchedIDs.contains(item.id) else { return nil }
-            guard let badge = Self.badge(for: item, now: now, includeStaleReady: false) else {
+        self.pending = chainIndex.chains.compactMap { chain in
+            guard !matchedChainIDs.contains(chain.id) else { return nil }
+            guard let badge = Self.badge(for: chain, now: now, includeStaleReady: false) else {
                 return nil
             }
             return RequestLibraryPendingRow(
-                id: item.id,
-                title: item.title,
-                author: item.author,
-                formatsLabel: item.formatsLabel,
+                id: chain.id,
+                title: chain.title,
+                author: chain.author,
+                formatsLabel: chain.formatsLabel,
                 badge: badge,
             )
         }
 
-        let summary = RequestActivityGrouping.librarySummary(items, now: now)
+        let summary = RequestActivityChains.librarySummary(
+            chains: chainIndex.chains,
+            now: now,
+        )
         self.chip = RequestLibraryChipSummary(
             activeCount: summary.inProgressCount + summary.needsAttentionCount,
             attentionCount: summary.needsAttentionCount,
@@ -164,6 +177,11 @@ public struct RequestLibraryPresentationIndex: Equatable, Sendable {
     }
 
     public func match(book: BookMetadata) -> RequestActivityItem? {
+        guard let chain = matchChain(book: book) else { return nil }
+        return chain.latestItem ?? chain.rootItem
+    }
+
+    public func matchChain(book: BookMetadata) -> RequestActivityChain? {
         Self.lookup(
             book,
             canonical: byCanonicalID,
@@ -174,12 +192,15 @@ public struct RequestLibraryPresentationIndex: Equatable, Sendable {
 
     /// Badge for an active match. Stale completed rows return nil so cards stay quiet.
     public func badge(for book: BookMetadata) -> RequestLibraryBadgeState? {
-        guard let item = match(book: book) else { return nil }
-        return Self.badge(for: item, now: now, includeStaleReady: false)
+        guard let chain = matchChain(book: book) else { return nil }
+        return Self.badge(for: chain, now: now, includeStaleReady: false)
     }
 
     public func badge(for item: RequestActivityItem) -> RequestLibraryBadgeState? {
-        Self.badge(for: item, now: now, includeStaleReady: false)
+        if let chain = chainIndex.chain(containingRequestID: item.id) {
+            return Self.badge(for: chain, now: now, includeStaleReady: false)
+        }
+        return Self.badge(for: item, now: now, includeStaleReady: false)
     }
 
     public func includes(book: BookMetadata, filter: RequestLibraryFilter) -> Bool {
@@ -187,8 +208,8 @@ public struct RequestLibraryPresentationIndex: Equatable, Sendable {
             case .all:
                 return true
             case .requests, .needsAttention, .availableInLibrary:
-                guard let item = match(book: book) else { return false }
-                return Self.itemIncluded(item, filter: filter, now: now)
+                guard let chain = matchChain(book: book) else { return false }
+                return Self.chainIncluded(chain, filter: filter, now: now)
         }
     }
 
@@ -219,10 +240,10 @@ public struct RequestLibraryPresentationIndex: Equatable, Sendable {
 
     private static func lookup(
         _ book: BookMetadata,
-        canonical: [String: RequestActivityItem],
-        isbn: [String: RequestActivityItem],
-        titleAuthor: [String: RequestActivityItem],
-    ) -> RequestActivityItem? {
+        canonical: [String: RequestActivityChain],
+        isbn: [String: RequestActivityChain],
+        titleAuthor: [String: RequestActivityChain],
+    ) -> RequestActivityChain? {
         let canonicalKeys = [book.id.description, book.id.uuid]
         for key in canonicalKeys {
             if let hit = canonical[key] { return hit }
@@ -252,37 +273,68 @@ public struct RequestLibraryPresentationIndex: Equatable, Sendable {
     }
 
     private static func insert(
-        _ item: RequestActivityItem,
-        into table: inout [String: RequestActivityItem],
+        _ chain: RequestActivityChain,
+        into table: inout [String: RequestActivityChain],
         key: String,
     ) {
         guard !key.isEmpty else { return }
         if let existing = table[key] {
-            table[key] = preferred(existing, item)
+            table[key] = preferred(existing, chain)
         } else {
-            table[key] = item
+            table[key] = chain
         }
     }
 
-    /// Needs Attention beats in-progress beats Ready; ties keep the newer row.
+    /// Needs Attention beats in-progress beats Ready; ties keep the newer chain.
     private static func preferred(
-        _ lhs: RequestActivityItem,
-        _ rhs: RequestActivityItem,
-    ) -> RequestActivityItem {
+        _ lhs: RequestActivityChain,
+        _ rhs: RequestActivityChain,
+    ) -> RequestActivityChain {
         let left = priorityRank(lhs)
         let right = priorityRank(rhs)
         if left != right { return left < right ? lhs : rhs }
         return lhs.updatedAt >= rhs.updatedAt ? lhs : rhs
     }
 
-    private static func priorityRank(_ item: RequestActivityItem) -> Int {
-        if item.formatStatuses.contains(where: { $0.status.needsAttentionBucket })
-            || item.attentionReason != nil
-        {
-            return 0
+    private static func priorityRank(_ chain: RequestActivityChain) -> Int {
+        switch RequestActivityChains.section(for: chain) {
+            case .needsAttention: 0
+            case .inProgress: 1
+            case .completed, .recent: 2
         }
-        if item.formatStatuses.contains(where: \.status.isInProgress) { return 1 }
-        return 2
+    }
+
+    public static func badge(
+        for chain: RequestActivityChain,
+        now: Date = Date(),
+        includeStaleReady: Bool,
+    ) -> RequestLibraryBadgeState? {
+        let section = RequestActivityChains.section(for: chain, now: now)
+        switch section {
+            case .recent:
+                return nil
+            case .completed:
+                let recent =
+                    now.timeIntervalSince(chain.updatedAt)
+                    <= RequestActivityGrouping.recentCompletionWindow
+                if !includeStaleReady && !recent { return nil }
+                return readyBadge
+            case .needsAttention:
+                return RequestLibraryBadgeState(
+                    label: "Needs Attention",
+                    systemImage: "exclamationmark.triangle",
+                    kind: .needsAttention,
+                    accessibilityLabel: "Request status: Needs Attention",
+                )
+            case .inProgress:
+                break
+        }
+
+        let statuses = chain.formatStates.map(\.status)
+        guard let winner = statuses.min(by: { statusRank($0) < statusRank($1) }) else {
+            return nil
+        }
+        return badge(for: winner)
     }
 
     public static func badge(
@@ -316,6 +368,32 @@ public struct RequestLibraryPresentationIndex: Equatable, Sendable {
             return nil
         }
         return badge(for: winner)
+    }
+
+    public static func chainIncluded(
+        _ chain: RequestActivityChain,
+        filter: RequestLibraryFilter,
+        now: Date = Date(),
+    ) -> Bool {
+        let section = RequestActivityChains.section(for: chain, now: now)
+        switch filter {
+            case .all:
+                return true
+            case .requests:
+                switch section {
+                    case .needsAttention, .inProgress:
+                        return true
+                    case .completed:
+                        return now.timeIntervalSince(chain.updatedAt)
+                            <= RequestActivityGrouping.recentCompletionWindow
+                    case .recent:
+                        return false
+                }
+            case .needsAttention:
+                return section == .needsAttention
+            case .availableInLibrary:
+                return section == .completed
+        }
     }
 
     public static func itemIncluded(

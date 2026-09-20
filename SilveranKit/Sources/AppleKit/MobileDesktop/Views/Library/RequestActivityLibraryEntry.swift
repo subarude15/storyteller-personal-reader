@@ -139,27 +139,28 @@ struct BookRequestStatusIndicator: View {
 
     @Environment(MediaViewModel.self) private var mediaViewModel: MediaViewModel
     @Environment(\.bookDetailHeroColors) private var heroColors
-    @State private var item: RequestActivityItem?
+    @State private var displayStatusLine: String?
+    @State private var displayNeedsAttention = false
     @State private var tick = 0
 
     var body: some View {
         Group {
-            if let item {
+            if let displayStatusLine {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Request status")
                         .font(.caption)
                         .foregroundStyle(heroColors.secondary)
-                    Text(item.libraryDetailStatusLine)
+                    Text(displayStatusLine)
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(
-                            item.overallStatus.needsAttentionBucket
+                            displayNeedsAttention
                                 ? Color.orange
                                 : heroColors.primary
                         )
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("Request status. \(item.libraryDetailStatusLine)")
+                .accessibilityLabel("Request status. \(displayStatusLine)")
             }
         }
         .id(tick)
@@ -178,7 +179,13 @@ struct BookRequestStatusIndicator: View {
             items: history.allItems(),
             books: mediaViewModel.library.bookMetaData,
         )
-        item = index.match(book: book)
+        if let chain = index.matchChain(book: book) {
+            displayStatusLine = chain.libraryDetailStatusLine
+            displayNeedsAttention = chain.needsAttention
+        } else {
+            displayStatusLine = nil
+            displayNeedsAttention = false
+        }
         tick &+= 1
     }
 }
