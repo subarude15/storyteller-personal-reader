@@ -163,6 +163,8 @@ public final class RequestActivityStore: @unchecked Sendable {
 }
 
 public enum RequestActivityAttention {
+    /// Stale Wanted/Searching/Requested is a LazyLibrarian signal. Shelfarr only
+    /// reports acceptance, so age alone is not an error.
     public static func apply(_ item: RequestActivityItem, now: Date = Date()) -> RequestActivityItem {
         var updated = item
         var reason: String? = item.attentionReason
@@ -172,6 +174,9 @@ public enum RequestActivityAttention {
                 reason = format.detail ?? "Request failed"
                 format.status = .needsAttention
                 updated.formatStatuses[index] = format
+                continue
+            }
+            if item.provider == .shelfarr {
                 continue
             }
             if format.consecutiveLookupFailures
@@ -196,7 +201,8 @@ public enum RequestActivityAttention {
                 updated.formatStatuses[index] = format
             }
         }
-        updated.attentionReason = reason
+        let stillFlagged = updated.formatStatuses.contains { $0.status.needsAttentionBucket }
+        updated.attentionReason = stillFlagged ? reason : nil
         return updated
     }
 }

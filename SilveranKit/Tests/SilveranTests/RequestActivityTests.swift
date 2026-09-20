@@ -335,6 +335,42 @@ struct RequestActivityTests {
 
     // MARK: - Shelfarr
 
+    @Test func shelfarrRequestedStaysRequestedAfterADay() {
+        let now = Date()
+        let item = RequestActivityAttention.apply(
+            shelfarrItem(status: .requested, updatedAt: now.addingTimeInterval(-25 * 3600)),
+            now: now,
+        )
+        #expect(item.formatStatuses[0].status == .requested)
+        #expect(item.attentionReason == nil)
+        #expect(RequestActivityGrouping.section(for: item, now: now) == .inProgress)
+    }
+
+    @Test func shelfarrRequestedStaysRequestedAfterSeveralDays() {
+        let now = Date()
+        let item = RequestActivityAttention.apply(
+            shelfarrItem(status: .requested, updatedAt: now.addingTimeInterval(-5 * 24 * 3600)),
+            now: now,
+        )
+        #expect(item.formatStatuses[0].status == .requested)
+        #expect(item.attentionReason == nil)
+    }
+
+    @Test func failedShelfarrSubmissionNeedsAttention() {
+        let now = Date()
+        let item = RequestActivityAttention.apply(
+            shelfarrItem(
+                status: .failed,
+                detail: "Authentication failed. Check your Shelfarr API token.",
+                updatedAt: now,
+            ),
+            now: now,
+        )
+        #expect(item.formatStatuses[0].status == .needsAttention)
+        #expect(item.attentionReason?.contains("token") == true)
+        #expect(RequestActivityGrouping.section(for: item, now: now) == .needsAttention)
+    }
+
     @Test func shelfarrAcceptedDoesNotInventLifecycle() {
         let defaults = UserDefaults(suiteName: "request-activity-\(UUID().uuidString)")!
         defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
@@ -406,6 +442,29 @@ struct RequestActivityTests {
             openLibraryWorkID: "/works/OL1W",
             openLibraryEditionID: nil,
             publicationYear: "1813",
+        )
+    }
+
+    private func shelfarrItem(
+        status: RequestActivityStatus,
+        detail: String? = "Shelfarr accepted this request.",
+        updatedAt: Date,
+    ) -> RequestActivityItem {
+        RequestActivityItem(
+            canonicalWorkID: "shelfarr-work",
+            title: "Dune",
+            author: "Frank Herbert",
+            provider: .shelfarr,
+            requestedFormats: [.ebook],
+            updatedAt: updatedAt,
+            formatStatuses: [
+                RequestFormatStatus(
+                    format: .ebook,
+                    status: status,
+                    detail: detail,
+                    updatedAt: updatedAt,
+                )
+            ],
         )
     }
 }
