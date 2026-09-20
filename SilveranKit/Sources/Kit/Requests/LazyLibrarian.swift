@@ -671,10 +671,10 @@ public struct LazyLibrarianClient: Sendable {
     private func holding(_ status: String?, library: String?) -> Holding {
         if let library, !library.isEmpty { return .available }
         switch status?.lowercased() {
-            case "have": .available
-            case "wanted", "snatched": .wanted
-            case "ignored": .ignored
-            default: .open
+            case "have": return .available
+            case "wanted", "snatched": return .wanted
+            case "ignored": return .ignored
+            default: return .open
         }
     }
 
