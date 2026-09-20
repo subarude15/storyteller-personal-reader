@@ -211,20 +211,28 @@ struct StorytellerBookUploadTests {
                 typeIdentifier: UTType.epub.identifier,
             ) != nil
         )
-        #expect(
-            StorytellerUploadFileValidation.issue(
-                role: .ebook,
-                filename: "Notes.pdf",
-                byteCount: 20,
-                typeIdentifier: UTType.pdf.identifier,
-            ) != nil
+        let pdfIssue = StorytellerUploadFileValidation.issue(
+            role: .ebook,
+            filename: "Notes.pdf",
+            byteCount: 20,
+            typeIdentifier: UTType.pdf.identifier,
         )
+        #expect(pdfIssue != nil)
+        #expect(pdfIssue?.contains("PDF") == true)
         #expect(
             StorytellerUploadFileValidation.issue(
                 role: .audiobook,
                 filename: "Talk.m4b",
                 byteCount: 20,
                 typeIdentifier: nil,
+            ) == nil
+        )
+        #expect(
+            StorytellerUploadFileValidation.issue(
+                role: .audiobook,
+                filename: "Book.zip",
+                byteCount: 40,
+                typeIdentifier: UTType.zip.identifier,
             ) == nil
         )
         let transport = FakeTransport()
@@ -239,6 +247,71 @@ struct StorytellerBookUploadTests {
         #expect(await transport.accessCount == 0)
         #expect(await transport.uploadedIDs.isEmpty)
         #expect(await coordinator.bookUUID == nil)
+    }
+
+    @Test func pickerTypesIncludeZipAndAudiobookPackages() {
+        let ebook = StorytellerUploadFileValidation.pickerContentTypes(for: .ebook)
+        #expect(ebook.contains(.epub))
+        let audio = StorytellerUploadFileValidation.pickerContentTypes(for: .audiobook)
+        #expect(audio.contains(.mpeg4Audio))
+        #expect(audio.contains(.mp3))
+        #expect(audio.contains(.audio))
+        #expect(audio.contains(.zip))
+    }
+
+    @Test func checkLibraryPollsWithoutReuploading() async {
+        let transport = FakeTransport()
+        let log = StateLog()
+        let ids = UUIDSource(value: "check-book")
+        let coordinator = StorytellerBookUploadCoordinator(makeUUID: ids.next)
+        let book = file("Book.epub", format: .ebook)
+        let expected = BookID(sourceID: "story", uuid: "check-book")
+        let first = await upload(
+            coordinator,
+            files: [book],
+            transport: transport,
+            fileSystem: FakeFileSystem(),
+            maxBookPolls: 1,
+            onState: { log.add($0) },
+        )
+        #expect(first == .stillProcessing(expectedBookID: expected))
+        #expect(await transport.uploadedIDs == [book.id])
+
+        await transport.enqueue(StorytellerUploadedBookSnapshot(bookID: expected, readaloudStatus: nil))
+        let checked = await coordinator.checkLibrary(
+            sourceID: "story",
+            isStoryteller: true,
+            files: [book],
+            transport: transport,
+            maxBookPolls: 2,
+            sleep: { _ in },
+            onState: { log.add($0) },
+        )
+        #expect(checked == .bookVisible(expected))
+        #expect(await transport.uploadedIDs == [book.id])
+        #expect(!log.states.suffix(4).contains(where: {
+            if case .uploading = $0 { return true }
+            return false
+        }))
+        #expect(log.states.contains(.processing))
+        #expect(ids.count == 1)
+    }
+
+    @Test func checkLibraryWithoutPriorUploadFailsClosed() async {
+        let coordinator = StorytellerBookUploadCoordinator(makeUUID: { "unused" })
+        let transport = FakeTransport()
+        let state = await coordinator.checkLibrary(
+            sourceID: "story",
+            isStoryteller: true,
+            files: [file("Book.epub", format: .ebook)],
+            transport: transport,
+            sleep: { _ in },
+        )
+        #expect(
+            state == .failed(message: "Nothing to check yet. Upload the book first.", bookID: nil)
+        )
+        #expect(await transport.uploadedIDs.isEmpty)
+        #expect(await transport.accessCount == 0)
     }
 
     @Test func uploadCompletionIsNotVisibilityAndTimeoutStaysPending() async {
