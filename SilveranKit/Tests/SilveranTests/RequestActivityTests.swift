@@ -286,6 +286,7 @@ struct RequestActivityTests {
         )
         stale = RequestActivityAttention.apply(stale, now: now)
         #expect(stale.formatStatuses[0].status == .needsAttention)
+        #expect(stale.formatStatuses[0].updatedAt == now)
         #expect(stale.attentionReason != nil)
 
         var fresh = RequestActivityItem(
@@ -331,6 +332,7 @@ struct RequestActivityTests {
         item.formatStatuses[0].consecutiveLookupFailures = 3
         item = RequestActivityAttention.apply(item, now: now)
         #expect(item.formatStatuses[0].status == .needsAttention)
+        #expect(item.formatStatuses[0].updatedAt == now)
     }
 
     // MARK: - Shelfarr

@@ -47,6 +47,8 @@ final class RequestActivityViewModel: ObservableObject {
         _ = refreshService.applyLibraryPresence(libraryBooks: libraryBooks)
         items = history.allItems()
         Task { await self.reloadActionContext() }
+        // Refresh first; evaluateAutomaticFallback runs after refreshAll so we
+        // never race a stale Needs Attention row against a recovering provider.
         refresh(force: false)
     }
 
@@ -81,6 +83,7 @@ final class RequestActivityViewModel: ObservableObject {
                 self.items = updated.isEmpty ? self.history.allItems() : updated
                 self.isRefreshing = false
             }
+            await self.evaluateAutomaticFallback()
         }
     }
 
@@ -139,6 +142,7 @@ final class RequestActivityViewModel: ObservableObject {
                     self.actionError = error
                 }
             }
+            await self.evaluateAutomaticFallback()
         }
     }
 
@@ -232,6 +236,7 @@ final class RequestActivityViewModel: ObservableObject {
                 history: self.history,
                 providerOverride: override,
                 fallbackFromRequestID: fromID,
+                fallbackKind: .manual,
             )
             let created = self.history.item(
                 forWorkID: current.canonicalWorkID,
@@ -352,6 +357,22 @@ final class RequestActivityViewModel: ObservableObject {
                 config: config,
                 lazyLibrarianHasAPIKey: hasKey,
             )
+        }
+    }
+
+    /// Opt-in automatic one-hop fallback. Never holds the store lock across network work.
+    func evaluateAutomaticFallback() async {
+        await reloadActionContext()
+        let context = await MainActor.run { self.actionContext }
+        let books = await MainActor.run { self.libraryBooks }
+        let submitted = await RequestAutomaticFallbackCoordinator.shared.evaluate(
+            libraryBooks: books,
+            actionContext: context,
+        )
+        if submitted > 0 {
+            await MainActor.run {
+                self.items = self.history.allItems()
+            }
         }
     }
 }
@@ -521,6 +542,11 @@ private struct RequestActivityRow: View {
             .foregroundStyle(.secondary)
             Text(item.overallStatus.label)
                 .font(.subheadline.weight(.semibold))
+            if item.fallbackKind == .automatic {
+                Text("Automatic fallback")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
             if let detail = primaryDetail {
                 Text(detail)
                     .font(.caption)
@@ -655,6 +681,41 @@ struct RequestActivityDetailView: View {
                 LabeledContent("Provider", value: item.provider.shortName)
                 LabeledContent("Requested", value: dateLabel(item.createdAt))
                 LabeledContent("Formats", value: item.formatsLabel)
+                if item.fallbackKind == .automatic {
+                    Text(fallbackOriginLabel(for: item))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let pending = AutomaticFallbackPolicy.pendingMessage(
+                item: item,
+                settings: RequestAutomaticFallbackSettings.current,
+                context: model.actionContext,
+            ) {
+                Section {
+                    Text(pending)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let attempt = item.automaticFallbackAttempts?.last(where: {
+                $0.resultingRequestID != nil
+            }), let createdID = attempt.resultingRequestID {
+                Section {
+                    Text("Automatically tried \(attempt.targetProvider.shortName)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    NavigationLink {
+                        RequestActivityDetailView(itemID: createdID, model: model)
+                    } label: {
+                        Label(
+                            "View \(attempt.targetProvider.shortName) request",
+                            systemImage: "arrow.right",
+                        )
+                    }
+                }
             }
 
             Section("Status") {
@@ -820,6 +881,15 @@ struct RequestActivityDetailView: View {
             return
         }
         openURL(url)
+    }
+
+    private func fallbackOriginLabel(for item: RequestActivityItem) -> String {
+        guard let parentID = item.fallbackFromRequestID,
+            let parent = model.item(id: parentID)
+        else {
+            return "Automatic fallback"
+        }
+        return "Fallback from \(parent.provider.shortName)"
     }
 
     private func dateLabel(_ date: Date?) -> String {

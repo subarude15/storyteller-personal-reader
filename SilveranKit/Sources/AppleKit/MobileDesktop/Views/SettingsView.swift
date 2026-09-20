@@ -779,6 +779,8 @@ extension SettingsView {
 
                 RequestNotificationsSettingsSection()
 
+                RequestAutomaticFallbackSettingsSection()
+
                 Section {
                     Toggle("Enabled", isOn: $config.bookSearchLANEnabled)
                     TextField(
@@ -1435,6 +1437,7 @@ private struct MacBookSourcesSettingsView: View {
                     )
                 }
                 RequestNotificationsSettingsSection()
+                RequestAutomaticFallbackSettingsSection()
                 Section {
                     Toggle("Enabled", isOn: $bookSearchLANEnabled)
                     TextField(
