@@ -215,11 +215,11 @@ public enum RequestActivityFallbackPolicy {
         let ordered = BookRequestFormat.allCases.filter { formats.contains($0) }
         switch ordered.count {
             case 0:
-                "request"
+                return "request"
             case 1:
-                ordered[0].label.lowercased()
+                return ordered[0].label.lowercased()
             default:
-                "ebook and audiobook"
+                return "ebook and audiobook"
         }
     }
 
