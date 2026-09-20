@@ -74,7 +74,7 @@ struct IndexerHealthTests {
         let transport = prowlarrTransport(
             statusBody: #"{"version":"1"}"#,
             indexers: #"[{"id":1,"name":"Off","enable":false}]"#,
-            statuses: #"[{"indexerId":1,"mostRecentFailure":"Last test failed"}]"#,
+            statuses: #"[{"indexerId":1,"mostRecentFailure":"2026-03-18T12:00:00Z"}]"#,
         )
         let result = await ProwlarrHealthChecker(transport: transport).check(
             settings: prowlarrSettings()
@@ -95,7 +95,14 @@ struct IndexerHealthTests {
                   {"id":3,"name":"Off","enable":false}
                 ]
                 """,
-            statuses: #"[{"indexerId":2,"mostRecentFailure":"Last test failed"}]"#,
+            statuses: """
+                [{
+                  "indexerId":2,
+                  "initialFailure":"2026-03-18T10:00:00Z",
+                  "mostRecentFailure":"2026-03-19T14:30:00Z",
+                  "disabledTill":"2026-03-20T08:00:00Z"
+                }]
+                """,
         )
         let result = await ProwlarrHealthChecker(transport: transport).check(
             settings: prowlarrSettings()
@@ -106,7 +113,10 @@ struct IndexerHealthTests {
         #expect(result.suggestedAction == "Open details to review affected indexers")
         let failing = result.indexers.first { $0.name == "AudiobookBay" }
         #expect(failing?.health == .failing)
-        #expect(failing?.detail == "Last test failed")
+        #expect(failing?.detail?.hasPrefix("Recent failures") == true)
+        #expect(failing?.detail?.contains("disabled until") == true)
+        #expect(failing?.detail?.contains("2026-03-19T14:30:00Z") != true)
+        #expect(failing?.detail?.contains("2026-03-20T08:00:00Z") != true)
         #expect(result.indexers.first { $0.name == "NZBGeek" }?.health == .healthy)
         #expect(result.isActionableIssue)
     }
@@ -117,8 +127,8 @@ struct IndexerHealthTests {
             indexers: #"[{"id":1,"name":"A","enable":true},{"id":2,"name":"B","enable":true}]"#,
             statuses: """
                 [
-                  {"indexerId":1,"mostRecentFailure":"down"},
-                  {"indexerId":2,"initialFailure":"down"}
+                  {"indexerId":1,"mostRecentFailure":"2026-03-18T12:00:00Z"},
+                  {"indexerId":2,"initialFailure":"2026-03-17T09:15:00Z"}
                 ]
                 """,
         )
@@ -127,6 +137,33 @@ struct IndexerHealthTests {
         )
         #expect(result.detail == "All enabled indexers are unavailable")
         #expect(result.status == .warning)
+        #expect(result.indexers.allSatisfy { $0.detail?.hasPrefix("Recent failures") == true })
+        #expect(result.indexers.contains { $0.detail?.contains("2026-03-18T12:00:00Z") == true } == false)
+    }
+
+    @Test func prowlarrFailureDetailUsesFriendlyCopyNotRawTimestamps() async {
+        let transport = prowlarrTransport(
+            statusBody: #"{"version":"1"}"#,
+            indexers: #"[{"id":9,"name":"Only Dates","enable":true}]"#,
+            statuses: """
+                [{
+                  "indexerId":9,
+                  "initialFailure":"2026-03-10T01:02:03Z",
+                  "mostRecentFailure":"2026-03-11T04:05:06.789Z",
+                  "disabledTill":"2026-03-12T07:08:09Z"
+                }]
+                """,
+        )
+        let result = await ProwlarrHealthChecker(transport: transport).check(
+            settings: prowlarrSettings()
+        )
+        let detail = result.indexers.first?.detail ?? ""
+        #expect(result.indexers.first?.health == .failing)
+        #expect(detail == "Recent failures · disabled until \(prowlarrDisplayDate("2026-03-12T07:08:09Z")!)")
+        #expect(!detail.contains("2026-03-10T01:02:03Z"))
+        #expect(!detail.contains("2026-03-11T04:05:06.789Z"))
+        #expect(!detail.contains("2026-03-12T07:08:09Z"))
+        #expect(!detail.localizedCaseInsensitiveContains("last test failed"))
     }
 
     @Test func prowlarrUnreadableStatusDoesNotInventHealthyOrWarn() async {
@@ -186,7 +223,7 @@ struct IndexerHealthTests {
         let transport = prowlarrTransport(
             statusBody: #"{"version":"1"}"#,
             indexers: #"[{"id":1,"name":"Name \#(secret)","enable":true}]"#,
-            statuses: #"[{"indexerId":1,"mostRecentFailure":"boom \#(secret) apikey=\#(secret)"}]"#,
+            statuses: #"[{"indexerId":1,"mostRecentFailure":"2026-03-19T14:30:00Z","disabledTill":"2026-03-20T08:00:00Z"}]"#,
         )
         let result = await ProwlarrHealthChecker(transport: transport).check(
             settings: .init(
@@ -197,7 +234,9 @@ struct IndexerHealthTests {
         )
         #expect(result.indexers.first?.name.contains(secret) != true)
         #expect(result.indexers.first?.detail?.contains(secret) != true)
-        #expect(result.indexers.first?.detail?.contains("apikey=") == true)
+        #expect(result.indexers.first?.detail?.contains("apikey=") != true)
+        #expect(result.indexers.first?.detail?.hasPrefix("Recent failures") == true)
+        #expect(result.indexers.first?.detail?.contains("2026-03-19T14:30:00Z") != true)
         #expect(result.sanitizedHost?.contains(secret) != true)
         #expect(result.sanitizedHost?.contains("apikey") != true)
         try assertCacheOmits(result, secret: secret)
@@ -387,7 +426,7 @@ struct IndexerHealthTests {
         let prowlarr = prowlarrTransport(
             statusBody: #"{"version":"1"}"#,
             indexers: #"[{"id":1,"name":"A","enable":true},{"id":2,"name":"B","enable":true}]"#,
-            statuses: #"[{"indexerId":2,"mostRecentFailure":"Last test failed"}]"#,
+            statuses: #"[{"indexerId":2,"mostRecentFailure":"2026-03-19T14:30:00Z","disabledTill":"2026-03-20T08:00:00Z"}]"#,
         )
         let jackett = ScriptHTTP()
         let diagnostics = ServiceHealthDiagnostics(
@@ -446,6 +485,19 @@ struct IndexerHealthTests {
             jackettBaseURL: "http://192.168.1.2:9117",
             jackettAPIKey: jackettSecret,
         )
+    }
+
+    private func prowlarrDisplayDate(_ iso: String) -> String? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        guard let date = fractional.date(from: iso) ?? plain.date(from: iso) else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 
     private func prowlarrTransport(statusBody: String, indexers: String, statuses: String) -> ScriptHTTP {

@@ -114,15 +114,55 @@ public struct ProwlarrHealthClient: Sendable {
             guard let row = value as? [String: Any] else { continue }
             let id = (row["indexerId"] as? Int) ?? (row["indexerId"] as? NSNumber)?.intValue
             guard let id else { continue }
-            let raw =
-                (row["mostRecentFailure"] as? String)
-                ?? (row["initialFailure"] as? String)
-                ?? "Last test failed"
-            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            let reason = trimmed.isEmpty ? "Last test failed" : trimmed
-            map[id] = IndexerSecretRedactor.redact(reason, secrets: [secret])
+            // mostRecentFailure / initialFailure / disabledTill are timestamps, not messages.
+            let detail = IndexerSecretRedactor.redact(
+                failureDetail(from: row),
+                secrets: [secret],
+            )
+            map[id] = detail
         }
         return map
+    }
+
+    /// Builds human copy from indexerstatus timestamps. Does not invent a failure reason.
+    private static func failureDetail(from row: [String: Any]) -> String {
+        let disabledTill = dateString(row["disabledTill"])
+        if let until = formatDisplayDate(disabledTill) {
+            return "Recent failures · disabled until \(until)"
+        }
+        let recent =
+            dateString(row["mostRecentFailure"])
+            ?? dateString(row["initialFailure"])
+        if let last = formatDisplayDate(recent) {
+            return "Recent failures · last \(last)"
+        }
+        return "Recent failures"
+    }
+
+    private static func dateString(_ value: Any?) -> String? {
+        if let text = value as? String {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        return nil
+    }
+
+    private static func formatDisplayDate(_ raw: String?) -> String? {
+        guard let raw, let date = parseAPIDate(raw) else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    private static func parseAPIDate(_ raw: String) -> Date? {
+        let isoFractional = ISO8601DateFormatter()
+        isoFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = isoFractional.date(from: raw) { return date }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        return iso.date(from: raw)
     }
 
     private static func row(
