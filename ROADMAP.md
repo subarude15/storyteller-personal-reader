@@ -18,12 +18,14 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 ## Now (do first)
 
 1. **Book-first audiobook resolution** — select or request a book, then **Find audiobook options**. The app queries a provider only after that tap, matches results to the selected work, and plays the chosen version in the existing audiobook player. LibriVox is the first provider. This is not a global catalog browse and does not mark torrent, debrid, or Explore streaming phases complete.
+2. **Resolved audiobook offline downloads** — in review. Download a matched LibriVox audiobook onto the device and play that copy in the existing player. The book stays the selected work. Does not complete torrent or debrid phases.
 
 **Explicit reject:** Playtorio, TorBox, magnets, LibGen, Audible scrape, DRM strip, and free-catalog Explore browse (Standard Ebooks / public OPDS shelves / Download / Import). Do not start second player, CarPlay, or DSM/SMB unless Josh reorders.
 
 ## Shipped
 
 - [x] **Book-first audiobook resolution** — workflow is select/request book → Find audiobook options → match provider results to that work → choose an audiobook. LibriVox/public-domain only, queried after the tap, not when opening a book, scrolling search, or refreshing the library. Matched versions stay formats of the selected work (no extra library rows, no second player). Resume is device-local. Does **not** complete streaming, torrent, or debrid phases.
+- [x] **Resolved audiobook offline downloads** — in review, not merged. From the same audiobook options sheet: Download, progress, Cancel, Retry, Play Offline, Remove Download. Files live under app storage keyed by work + provider + provider item, with a local manifest. Complete copies play through the existing audiobook player and keep the same resume identity. Does **not** complete torrent or debrid phases.
 - [x] **Mobile Storyteller upload hardening** — in review, not merged. Same Import / Add Book sheet: file-backed Tus upload (no full audiobook in memory), Storyteller destinations only when `bookCreate` is confirmed, one book UUID across retry, honest processing / partial / cancel states. Original Files documents are not modified.
 
 ### Product / sync
