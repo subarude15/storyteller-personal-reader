@@ -20,6 +20,12 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
     /// Optional LAN-only book search helper. Never a core dependency.
     public var bookSearchLANEnabled: Bool = false
     public var bookSearchLANBaseURL: String = ""
+    /// Optional read-only Prowlarr diagnostics. API key stays in the keychain.
+    public var prowlarrEnabled: Bool = false
+    public var prowlarrBaseURL: String = ""
+    /// Optional read-only Jackett diagnostics. API key stays in the keychain.
+    public var jackettEnabled: Bool = false
+    public var jackettBaseURL: String = ""
 
     public init(
         reading: Reading = Reading(),
@@ -54,12 +60,17 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
             ?? BookRequestProviderKind.automatic.rawValue
         bookSearchLANEnabled = (try? container.decode(Bool.self, forKey: .bookSearchLANEnabled)) ?? false
         bookSearchLANBaseURL = (try? container.decode(String.self, forKey: .bookSearchLANBaseURL)) ?? ""
+        prowlarrEnabled = (try? container.decode(Bool.self, forKey: .prowlarrEnabled)) ?? false
+        prowlarrBaseURL = (try? container.decode(String.self, forKey: .prowlarrBaseURL)) ?? ""
+        jackettEnabled = (try? container.decode(Bool.self, forKey: .jackettEnabled)) ?? false
+        jackettBaseURL = (try? container.decode(String.self, forKey: .jackettBaseURL)) ?? ""
     }
 
     private enum TopLevelCodingKeys: String, CodingKey {
         case reading, playback, readingBar, sync, library, themes, shelfarrBaseURL, shelfarrAPIToken,
             lazyLibrarianEnabled, lazyLibrarianBaseURL, bookRequestProvider,
-            bookSearchLANEnabled, bookSearchLANBaseURL
+            bookSearchLANEnabled, bookSearchLANBaseURL,
+            prowlarrEnabled, prowlarrBaseURL, jackettEnabled, jackettBaseURL
     }
 
     public struct Reading: Codable, Equatable, Sendable {
@@ -762,6 +773,10 @@ public actor SettingsActor {
         bookRequestProvider: String? = nil,
         bookSearchLANEnabled: Bool? = nil,
         bookSearchLANBaseURL: String? = nil,
+        prowlarrEnabled: Bool? = nil,
+        prowlarrBaseURL: String? = nil,
+        jackettEnabled: Bool? = nil,
+        jackettBaseURL: String? = nil,
     ) throws {
         var updated = config
 
@@ -936,6 +951,18 @@ public actor SettingsActor {
         }
         if let bookSearchLANBaseURL {
             updated.bookSearchLANBaseURL = bookSearchLANBaseURL
+        }
+        if let prowlarrEnabled {
+            updated.prowlarrEnabled = prowlarrEnabled
+        }
+        if let prowlarrBaseURL {
+            updated.prowlarrBaseURL = prowlarrBaseURL
+        }
+        if let jackettEnabled {
+            updated.jackettEnabled = jackettEnabled
+        }
+        if let jackettBaseURL {
+            updated.jackettBaseURL = jackettBaseURL
         }
 
         #if os(iOS)

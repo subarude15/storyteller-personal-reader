@@ -14,6 +14,12 @@ public struct ServiceHealthSettingsSnapshot: Sendable {
     public var shelfarrAPIToken: String
     public var bookSearchLANEnabled: Bool
     public var bookSearchLANBaseURL: String
+    public var prowlarrEnabled: Bool
+    public var prowlarrBaseURL: String
+    public var prowlarrAPIKey: String
+    public var jackettEnabled: Bool
+    public var jackettBaseURL: String
+    public var jackettAPIKey: String
 
     public init(
         lazyLibrarianEnabled: Bool = false,
@@ -23,6 +29,12 @@ public struct ServiceHealthSettingsSnapshot: Sendable {
         shelfarrAPIToken: String = "",
         bookSearchLANEnabled: Bool = false,
         bookSearchLANBaseURL: String = "",
+        prowlarrEnabled: Bool = false,
+        prowlarrBaseURL: String = "",
+        prowlarrAPIKey: String = "",
+        jackettEnabled: Bool = false,
+        jackettBaseURL: String = "",
+        jackettAPIKey: String = "",
     ) {
         self.lazyLibrarianEnabled = lazyLibrarianEnabled
         self.lazyLibrarianBaseURL = lazyLibrarianBaseURL
@@ -31,6 +43,12 @@ public struct ServiceHealthSettingsSnapshot: Sendable {
         self.shelfarrAPIToken = shelfarrAPIToken
         self.bookSearchLANEnabled = bookSearchLANEnabled
         self.bookSearchLANBaseURL = bookSearchLANBaseURL
+        self.prowlarrEnabled = prowlarrEnabled
+        self.prowlarrBaseURL = prowlarrBaseURL
+        self.prowlarrAPIKey = prowlarrAPIKey
+        self.jackettEnabled = jackettEnabled
+        self.jackettBaseURL = jackettBaseURL
+        self.jackettAPIKey = jackettAPIKey
     }
 }
 
@@ -64,12 +82,16 @@ public struct ServiceHealthDiagnostics: Sendable {
             .liveFetch,
         bookSearchTransport: any BookSearchLANTransport = LiveBookSearchLANTransport(),
         storytellerProbe: any StorytellerHealthProbing = LiveStorytellerHealthProbe(),
+        prowlarrTransport: any DiagnosticHTTPTransport = LiveDiagnosticHTTPTransport(),
+        jackettTransport: any DiagnosticHTTPTransport = LiveDiagnosticHTTPTransport(),
     ) -> [any ServiceHealthChecking] {
         [
             LazyLibrarianHealthChecker(transport: lazyLibrarianTransport),
             ShelfarrHealthChecker(session: shelfarrSession),
             LibriVoxHealthChecker(fetch: libriVoxFetch),
             StorytellerHealthChecker(probe: storytellerProbe),
+            ProwlarrHealthChecker(transport: prowlarrTransport),
+            JackettHealthChecker(transport: jackettTransport),
             BookSearchLANHealthChecker(transport: bookSearchTransport),
         ]
     }
@@ -77,6 +99,8 @@ public struct ServiceHealthDiagnostics: Sendable {
     public static func liveSettingsLoader() async -> ServiceHealthSettingsSnapshot {
         let config = await SettingsActor.shared.config
         let apiKey = (try? await AuthenticationActor.shared.loadLazyLibrarianAPIKey()) ?? ""
+        let prowlarrKey = (try? await AuthenticationActor.shared.loadProwlarrAPIKey()) ?? ""
+        let jackettKey = (try? await AuthenticationActor.shared.loadJackettAPIKey()) ?? ""
         return ServiceHealthSettingsSnapshot(
             lazyLibrarianEnabled: config.lazyLibrarianEnabled,
             lazyLibrarianBaseURL: config.lazyLibrarianBaseURL,
@@ -85,6 +109,12 @@ public struct ServiceHealthDiagnostics: Sendable {
             shelfarrAPIToken: config.shelfarrAPIToken,
             bookSearchLANEnabled: config.bookSearchLANEnabled,
             bookSearchLANBaseURL: config.bookSearchLANBaseURL,
+            prowlarrEnabled: config.prowlarrEnabled,
+            prowlarrBaseURL: config.prowlarrBaseURL,
+            prowlarrAPIKey: prowlarrKey,
+            jackettEnabled: config.jackettEnabled,
+            jackettBaseURL: config.jackettBaseURL,
+            jackettAPIKey: jackettKey,
         )
     }
 

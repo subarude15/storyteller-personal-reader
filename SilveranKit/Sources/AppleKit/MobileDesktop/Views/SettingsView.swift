@@ -238,7 +238,11 @@ public struct SettingsView: View {
                         lazyLibrarianBaseURL: newValue.lazyLibrarianBaseURL,
                         bookRequestProvider: newValue.bookRequestProvider,
                         bookSearchLANEnabled: newValue.bookSearchLANEnabled,
-                        bookSearchLANBaseURL: newValue.bookSearchLANBaseURL
+                        bookSearchLANBaseURL: newValue.bookSearchLANBaseURL,
+                        prowlarrEnabled: newValue.prowlarrEnabled,
+                        prowlarrBaseURL: newValue.prowlarrBaseURL,
+                        jackettEnabled: newValue.jackettEnabled,
+                        jackettBaseURL: newValue.jackettBaseURL
                     )
                 } catch {
                     await MainActor.run {
@@ -383,6 +387,89 @@ private struct LazyLibrarianSettingsSection: View {
     }
 }
 
+/// Optional indexer service. URL stays in config; the API key stays in the keychain.
+private struct IndexerServiceSettingsSection: View {
+    var title: String
+    var urlPrompt: String
+    var footer: String
+    @Binding var enabled: Bool
+    @Binding var baseURL: String
+    var hasKey: () async -> Bool
+    var saveKey: (String) async throws -> Void
+    var deleteKey: () async throws -> Void
+
+    @State private var keyDraft = ""
+    @State private var keySaved = false
+    @State private var keyError: String?
+
+    var body: some View {
+        Section {
+            Toggle("Enabled", isOn: $enabled)
+            TextField("Server URL", text: $baseURL, prompt: Text(urlPrompt))
+                .textContentType(.URL)
+                .autocorrectionDisabled()
+            #if os(iOS)
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+            #endif
+            SecureField(
+                "API Key",
+                text: $keyDraft,
+                prompt: Text(keySaved ? "Saved — enter a new key to replace" : "API key"),
+            )
+            .textContentType(.password)
+            .onSubmit { Task { await saveDraft() } }
+            if keySaved, keyDraft.isEmpty {
+                Text("API key saved")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Remove API Key", role: .destructive) {
+                    Task { await removeKey() }
+                }
+            }
+            if let keyError {
+                Text(keyError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        } header: {
+            Text(title)
+        } footer: {
+            Text(footer)
+        }
+        .task { keySaved = await hasKey() }
+        .onDisappear {
+            let draft = keyDraft
+            guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            Task { try? await saveKey(draft) }
+        }
+    }
+
+    private func saveDraft() async {
+        let draft = keyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !draft.isEmpty else { return }
+        do {
+            try await saveKey(draft)
+            keyDraft = ""
+            keySaved = true
+            keyError = nil
+        } catch {
+            keyError = "Could not save the API key."
+        }
+    }
+
+    private func removeKey() async {
+        do {
+            try await deleteKey()
+            keyDraft = ""
+            keySaved = false
+            keyError = nil
+        } catch {
+            keyError = "Could not remove the API key."
+        }
+    }
+}
+
 #if os(macOS)
 extension SettingsView {
     fileprivate var macOSContent: some View {
@@ -418,6 +505,10 @@ extension SettingsView {
                     bookRequestProvider: $config.bookRequestProvider,
                     bookSearchLANEnabled: $config.bookSearchLANEnabled,
                     bookSearchLANBaseURL: $config.bookSearchLANBaseURL,
+                    prowlarrEnabled: $config.prowlarrEnabled,
+                    prowlarrBaseURL: $config.prowlarrBaseURL,
+                    jackettEnabled: $config.jackettEnabled,
+                    jackettBaseURL: $config.jackettBaseURL,
                     shelfarrConnectionStatus: shelfarrConnectionStatus,
                     onTestShelfarr: testShelfarrConnection,
                 )
@@ -645,6 +736,29 @@ extension SettingsView {
                         }
                     }
                 }
+
+                IndexerServiceSettingsSection(
+                    title: "Prowlarr",
+                    urlPrompt: "http://192.168.1.2:9696",
+                    footer:
+                        "Optional. The API key is stored in the keychain. Diagnostics only — nothing here searches or changes Prowlarr.",
+                    enabled: $config.prowlarrEnabled,
+                    baseURL: $config.prowlarrBaseURL,
+                    hasKey: { await AuthenticationActor.shared.hasProwlarrAPIKey() },
+                    saveKey: { try await AuthenticationActor.shared.saveProwlarrAPIKey($0) },
+                    deleteKey: { try await AuthenticationActor.shared.deleteProwlarrAPIKey() },
+                )
+                IndexerServiceSettingsSection(
+                    title: "Jackett",
+                    urlPrompt: "http://192.168.1.2:9117",
+                    footer:
+                        "Optional. The API key is stored in the keychain. Diagnostics only — nothing here searches or changes Jackett.",
+                    enabled: $config.jackettEnabled,
+                    baseURL: $config.jackettBaseURL,
+                    hasKey: { await AuthenticationActor.shared.hasJackettAPIKey() },
+                    saveKey: { try await AuthenticationActor.shared.saveJackettAPIKey($0) },
+                    deleteKey: { try await AuthenticationActor.shared.deleteJackettAPIKey() },
+                )
 
                 Section {
                     Picker("Provider", selection: $config.bookRequestProvider) {
@@ -1214,6 +1328,10 @@ private struct MacBookSourcesSettingsView: View {
     @Binding var bookRequestProvider: String
     @Binding var bookSearchLANEnabled: Bool
     @Binding var bookSearchLANBaseURL: String
+    @Binding var prowlarrEnabled: Bool
+    @Binding var prowlarrBaseURL: String
+    @Binding var jackettEnabled: Bool
+    @Binding var jackettBaseURL: String
     var shelfarrConnectionStatus: SettingsView.ShelfarrConnectionStatus?
     var onTestShelfarr: () -> Void
 
@@ -1276,6 +1394,28 @@ private struct MacBookSourcesSettingsView: View {
                         }
                     }
                 }
+                IndexerServiceSettingsSection(
+                    title: "Prowlarr",
+                    urlPrompt: "http://192.168.1.2:9696",
+                    footer:
+                        "Optional. The API key is stored in the keychain. Diagnostics only — nothing here searches or changes Prowlarr.",
+                    enabled: $prowlarrEnabled,
+                    baseURL: $prowlarrBaseURL,
+                    hasKey: { await AuthenticationActor.shared.hasProwlarrAPIKey() },
+                    saveKey: { try await AuthenticationActor.shared.saveProwlarrAPIKey($0) },
+                    deleteKey: { try await AuthenticationActor.shared.deleteProwlarrAPIKey() },
+                )
+                IndexerServiceSettingsSection(
+                    title: "Jackett",
+                    urlPrompt: "http://192.168.1.2:9117",
+                    footer:
+                        "Optional. The API key is stored in the keychain. Diagnostics only — nothing here searches or changes Jackett.",
+                    enabled: $jackettEnabled,
+                    baseURL: $jackettBaseURL,
+                    hasKey: { await AuthenticationActor.shared.hasJackettAPIKey() },
+                    saveKey: { try await AuthenticationActor.shared.saveJackettAPIKey($0) },
+                    deleteKey: { try await AuthenticationActor.shared.deleteJackettAPIKey() },
+                )
                 Section {
                     Picker("Provider", selection: $bookRequestProvider) {
                         Text(BookRequestProviderKind.automatic.displayName)

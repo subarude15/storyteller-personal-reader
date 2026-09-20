@@ -57,6 +57,8 @@ public enum ServiceHealthID: String, Codable, Equatable, Sendable, CaseIterable 
     case shelfarr
     case librivox
     case storyteller
+    case prowlarr
+    case jackett
     case bookSearchLAN
 
     public var displayName: String {
@@ -65,6 +67,8 @@ public enum ServiceHealthID: String, Codable, Equatable, Sendable, CaseIterable 
             case .shelfarr: "Shelfarr"
             case .librivox: "LibriVox"
             case .storyteller: "Storyteller"
+            case .prowlarr: "Prowlarr"
+            case .jackett: "Jackett"
             case .bookSearchLAN: "Book Search (LAN-only)"
         }
     }
@@ -89,6 +93,8 @@ public struct ServiceHealthResult: Codable, Equatable, Sendable, Identifiable {
     public var technicalDetail: String?
     /// Non-sensitive key/value pairs (version, counts, sync age, …).
     public var metadata: [String: String]
+    /// Per-indexer rows for Prowlarr/Jackett. Never includes secrets.
+    public var indexers: [ServiceIndexerRow]
     public var suggestedAction: String?
     public var isActionableIssue: Bool
 
@@ -104,6 +110,7 @@ public struct ServiceHealthResult: Codable, Equatable, Sendable, Identifiable {
         lastError: String? = nil,
         technicalDetail: String? = nil,
         metadata: [String: String] = [:],
+        indexers: [ServiceIndexerRow] = [],
         suggestedAction: String? = nil,
         isActionableIssue: Bool? = nil,
     ) {
@@ -118,6 +125,7 @@ public struct ServiceHealthResult: Codable, Equatable, Sendable, Identifiable {
         self.lastError = lastError
         self.technicalDetail = technicalDetail
         self.metadata = metadata
+        self.indexers = indexers
         self.suggestedAction = suggestedAction
         self.isActionableIssue = isActionableIssue ?? status.isActionableIssue
     }
@@ -137,6 +145,7 @@ public struct ServiceHealthResult: Codable, Equatable, Sendable, Identifiable {
             lastError: previous?.lastError,
             technicalDetail: previous?.technicalDetail,
             metadata: previous?.metadata ?? [:],
+            indexers: previous?.indexers ?? [],
             suggestedAction: nil,
             isActionableIssue: false,
         )
@@ -192,6 +201,45 @@ public struct ServiceHealthSummary: Equatable, Sendable {
         self.healthy = healthy
         self.warnings = warnings
         self.unavailable = unavailable
+    }
+}
+
+public enum ServiceIndexerHealth: String, Codable, Equatable, Sendable {
+    case healthy
+    case failing
+    case disabled
+    case unknown
+
+    public var label: String {
+        switch self {
+            case .healthy: "Healthy"
+            case .failing: "Failing"
+            case .disabled: "Disabled"
+            case .unknown: "Unknown"
+        }
+    }
+}
+
+/// One indexer on the service detail screen. No secrets.
+public struct ServiceIndexerRow: Codable, Equatable, Sendable, Identifiable {
+    public var id: String
+    public var name: String
+    public var enabled: Bool
+    public var health: ServiceIndexerHealth
+    public var detail: String?
+
+    public init(
+        id: String,
+        name: String,
+        enabled: Bool,
+        health: ServiceIndexerHealth,
+        detail: String? = nil,
+    ) {
+        self.id = id
+        self.name = name
+        self.enabled = enabled
+        self.health = health
+        self.detail = detail
     }
 }
 
