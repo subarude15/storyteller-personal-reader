@@ -11,6 +11,7 @@ final class RequestActivityViewModel: ObservableObject {
     private let history: RequestActivityStore
     private let refreshService: RequestActivityRefreshService
     private var task: Task<Void, Never>?
+    private var libraryBooks: [BookMetadata] = []
 
     init(
         history: RequestActivityStore = .shared,
@@ -25,10 +26,18 @@ final class RequestActivityViewModel: ObservableObject {
         RequestActivityGrouping.groups(items)
     }
 
-    func onAppear() {
+    func onAppear(libraryBooks: [BookMetadata] = []) {
+        self.libraryBooks = libraryBooks
         history.prune()
+        _ = refreshService.applyLibraryPresence(libraryBooks: libraryBooks)
         items = history.allItems()
         refresh(force: false)
+    }
+
+    func applyLibraryPresence(libraryBooks: [BookMetadata]) {
+        self.libraryBooks = libraryBooks
+        _ = refreshService.applyLibraryPresence(libraryBooks: libraryBooks)
+        items = history.allItems()
     }
 
     func reloadFromStore() {
@@ -38,10 +47,14 @@ final class RequestActivityViewModel: ObservableObject {
     func refresh(force: Bool) {
         task?.cancel()
         isRefreshing = true
+        let books = libraryBooks
         task = Task { [weak self] in
             guard let self else { return }
             await self.loadHealthHint()
-            let updated = await self.refreshService.refreshAll(force: force) { [weak self] item in
+            let updated = await self.refreshService.refreshAll(
+                force: force,
+                libraryBooks: books,
+            ) { [weak self] item in
                 await MainActor.run {
                     self?.upsert(item)
                 }
@@ -79,6 +92,7 @@ final class RequestActivityViewModel: ObservableObject {
 
 public struct RequestActivityView: View {
     @StateObject private var model = RequestActivityViewModel()
+    @Environment(MediaViewModel.self) private var mediaViewModel: MediaViewModel
 
     public init() {}
 
@@ -143,7 +157,12 @@ public struct RequestActivityView: View {
                 .disabled(model.isRefreshing)
             }
         }
-        .onAppear { model.onAppear() }
+        .onAppear {
+            model.onAppear(libraryBooks: mediaViewModel.library.bookMetaData)
+        }
+        .onChange(of: mediaViewModel.libraryVersion) { _, _ in
+            model.applyLibraryPresence(libraryBooks: mediaViewModel.library.bookMetaData)
+        }
         .onReceive(
             NotificationCenter.default.publisher(for: .requestActivityStoreDidChange)
         ) { _ in

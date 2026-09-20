@@ -92,11 +92,17 @@ public final class RequestActivityStore: @unchecked Sendable {
                 requestedFormats: outcomes.map(\.format),
                 createdAt: now,
                 updatedAt: now,
+                openLibraryWorkID: work.openLibraryWorkID,
+                openLibraryEditionID: work.openLibraryEditionID,
+                isbn: work.isbn,
             )
         item.title = work.title
         item.author = work.authors.joined(separator: ", ")
         item.provider = provider
         item.updatedAt = now
+        if item.openLibraryWorkID == nil { item.openLibraryWorkID = work.openLibraryWorkID }
+        if item.openLibraryEditionID == nil { item.openLibraryEditionID = work.openLibraryEditionID }
+        if item.isbn == nil || item.isbn?.isEmpty == true { item.isbn = work.isbn }
         if let bookID = outcomes.compactMap(\.providerBookID).first {
             item.providerBookID = bookID
             debugLog(

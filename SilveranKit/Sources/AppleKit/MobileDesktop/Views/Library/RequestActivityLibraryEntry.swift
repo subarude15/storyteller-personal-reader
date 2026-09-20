@@ -7,8 +7,10 @@ struct RequestActivityLibraryEntry: View {
     var history: RequestActivityStore = .shared
     var now: () -> Date = { Date() }
 
+    @Environment(MediaViewModel.self) private var mediaViewModel: MediaViewModel
     @State private var summary = RequestActivityLibrarySummary()
     @State private var tick = 0
+    @State private var lastAppliedLibraryVersion: Int?
 
     var body: some View {
         Group {
@@ -51,11 +53,14 @@ struct RequestActivityLibraryEntry: View {
             }
         }
         .id(tick)
-        .onAppear(perform: reload)
+        .onAppear(perform: applyLibraryAndReload)
+        .onChange(of: mediaViewModel.libraryVersion) { _, _ in
+            applyLibraryAndReload()
+        }
         .onReceive(
             NotificationCenter.default.publisher(for: .requestActivityStoreDidChange)
         ) { _ in
-            reload()
+            reloadSummary()
         }
     }
 
@@ -69,7 +74,19 @@ struct RequestActivityLibraryEntry: View {
             : Color.accentColor.opacity(0.12)
     }
 
-    private func reload() {
+    private func applyLibraryAndReload() {
+        let version = mediaViewModel.libraryVersion
+        if lastAppliedLibraryVersion != version {
+            lastAppliedLibraryVersion = version
+            _ = RequestActivityRefreshService(history: history).applyLibraryPresence(
+                libraryBooks: mediaViewModel.library.bookMetaData,
+                now: now(),
+            )
+        }
+        reloadSummary()
+    }
+
+    private func reloadSummary() {
         summary = history.librarySummary(now: now())
         tick &+= 1
     }
@@ -80,6 +97,7 @@ struct BookRequestStatusIndicator: View {
     let workID: String
     var history: RequestActivityStore = .shared
 
+    @Environment(MediaViewModel.self) private var mediaViewModel: MediaViewModel
     @Environment(\.bookDetailHeroColors) private var heroColors
     @State private var item: RequestActivityItem?
     @State private var tick = 0
@@ -107,6 +125,7 @@ struct BookRequestStatusIndicator: View {
         .id(tick)
         .onAppear(perform: reload)
         .onChange(of: workID) { _, _ in reload() }
+        .onChange(of: mediaViewModel.libraryVersion) { _, _ in reload() }
         .onReceive(
             NotificationCenter.default.publisher(for: .requestActivityStoreDidChange)
         ) { _ in
@@ -115,6 +134,9 @@ struct BookRequestStatusIndicator: View {
     }
 
     private func reload() {
+        _ = RequestActivityRefreshService(history: history).applyLibraryPresence(
+            libraryBooks: mediaViewModel.library.bookMetaData
+        )
         item = history.item(forWorkID: workID)
         tick &+= 1
     }

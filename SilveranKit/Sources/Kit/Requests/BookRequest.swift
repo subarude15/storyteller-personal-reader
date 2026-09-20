@@ -176,7 +176,7 @@ public enum BookRequests {
         for format in formats {
             if let prior = existing?.status(for: format) {
                 switch prior.status {
-                    case .available, .alreadyAvailable, .downloaded:
+                    case .availableInLibrary, .available, .alreadyAvailable, .downloaded:
                         debugLog(
                             "[RequestActivity] duplicate avoided work=\(work.workID) format=\(format.rawValue) reason=alreadyAvailable"
                         )
