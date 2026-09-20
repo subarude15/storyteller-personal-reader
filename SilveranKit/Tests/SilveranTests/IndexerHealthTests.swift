@@ -235,29 +235,39 @@ struct IndexerHealthTests {
     }
 
     @Test func jackettSuccessCountsConfiguredIndexers() async {
-        let transport = jackettTransport(
-            body: """
-                [
-                  {"id":"nzbgeek","name":"NZBGeek","configured":true},
-                  {"id":"off","name":"Off","configured":false}
-                ]
-                """
-        )
+        let transport = jackettTransport(body: jackettIndexersXML())
         let result = await JackettHealthChecker(transport: transport).check(settings: jackettSettings())
         #expect(result.status == .healthy)
-        #expect(result.summary == "Connected · 1 indexer")
-        #expect(result.metadata["Configured"] == "1")
-        #expect(result.indexers.first { $0.name == "NZBGeek" }?.health == .unknown)
-        #expect(result.indexers.first { $0.name == "Off" }?.health == .disabled)
+        #expect(result.summary == "Connected · 2 indexers")
+        #expect(result.metadata["Configured"] == "2")
+        #expect(result.indexers.map(\.name) == ["NZBGeek", "AudiobookBay"])
+        #expect(result.indexers.allSatisfy { $0.health == .unknown })
+        #expect(
+            result.indexers.allSatisfy {
+                $0.detail == "Configured · live health not available"
+            }
+        )
         #expect(result.isActionableIssue == false)
-        let query = transport.seen.first?.url?.query ?? ""
-        #expect(query.contains("apikey=\(jackettSecret)"))
-        #expect(query.contains("configured=true"))
+
+        let request = try #require(transport.seen.first)
+        #expect(request.url?.path.hasSuffix("/api/v2.0/indexers/all/results/torznab/api") == true)
+        let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let query = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
+        #expect(query["t"] == "indexers")
+        #expect(query["configured"] == "true")
+        #expect(query["apikey"] == jackettSecret)
+        #expect(result.sanitizedHost?.contains(jackettSecret) != true)
+        #expect(result.sanitizedHost?.contains("apikey") != true)
     }
 
     @Test func jackettUnknownHealthDoesNotWarn() async {
         let transport = jackettTransport(
-            body: #"[{"id":"a","name":"A","configured":true},{"id":"b","name":"B","configured":true}]"#
+            body: jackettIndexersXML(
+                rows: [
+                    ("a", true, "A"),
+                    ("b", true, "B"),
+                ]
+            )
         )
         let result = await JackettHealthChecker(transport: transport).check(settings: jackettSettings())
         #expect(result.status == .healthy)
@@ -266,28 +276,38 @@ struct IndexerHealthTests {
         #expect(ServiceHealthAttention.items(from: [result]).isEmpty)
     }
 
-    @Test func jackettKnownFailureWarns() async {
+    @Test func jackettTorznabListDoesNotInventFailures() async {
+        // Torznab t=indexers exposes identity and caps only — no live health / last_error.
+        let transport = jackettTransport(body: jackettIndexersXML())
+        let result = await JackettHealthChecker(transport: transport).check(settings: jackettSettings())
+        #expect(result.status == .healthy)
+        #expect(result.indexers.contains { $0.health == .failing } == false)
+        #expect(result.isActionableIssue == false)
+        #expect(ServiceHealthAttention.items(from: [result]).isEmpty)
+    }
+
+    @Test func jackettConfiguredFalseIsDisabledNotWarning() async {
         let transport = jackettTransport(
-            body: """
-                [
-                  {"id":"a","name":"A","configured":true},
-                  {"id":"b","name":"B","configured":true,"error":"Last test failed"},
-                  {"id":"c","name":"C","configured":false,"error":"ignored because disabled"}
+            body: jackettIndexersXML(
+                rows: [
+                    ("nzbgeek", true, "NZBGeek"),
+                    ("off", false, "Off"),
                 ]
-                """
+            )
         )
         let result = await JackettHealthChecker(transport: transport).check(settings: jackettSettings())
-        #expect(result.status == .warning)
-        #expect(result.summary == "Connected · 1 indexer failing")
-        #expect(result.detail == "1 enabled indexer is failing")
-        #expect(result.indexers.first { $0.name == "B" }?.health == .failing)
-        #expect(result.indexers.first { $0.name == "C" }?.health == .disabled)
-        #expect(result.isActionableIssue)
+        #expect(result.status == .healthy)
+        #expect(result.summary == "Connected · 1 indexer")
+        #expect(result.indexers.first { $0.name == "Off" }?.health == .disabled)
+        #expect(ServiceHealthAttention.items(from: [result]).isEmpty)
     }
 
     @Test func jackettInvalidAuth() async {
         let transport = ScriptHTTP()
-        transport.stubs["/api/v2.0/indexers"] = .init(status: 403, body: Data(jackettSecret.utf8))
+        transport.stubs[JackettHealthClient.indexerListPath] = .init(
+            status: 403,
+            body: Data(jackettSecret.utf8),
+        )
         let result = await JackettHealthChecker(transport: transport).check(settings: jackettSettings())
         #expect(result.status == .unavailable)
         #expect(result.summary == "Authentication failed")
@@ -296,29 +316,39 @@ struct IndexerHealthTests {
 
     @Test func jackettTimeoutAndUnreachable() async {
         let timeout = ScriptHTTP()
-        timeout.stubs["/api/v2.0/indexers"] = .init(error: URLError(.timedOut))
+        timeout.stubs[JackettHealthClient.indexerListPath] = .init(error: URLError(.timedOut))
         let timed = await JackettHealthChecker(transport: timeout).check(settings: jackettSettings())
         #expect(timed.summary == "Could not reach Jackett")
         #expect(timed.technicalDetail == "URLError timedOut")
 
         let down = ScriptHTTP()
-        down.stubs["/api/v2.0/indexers"] = .init(error: URLError(.cannotConnectToHost))
+        down.stubs[JackettHealthClient.indexerListPath] = .init(
+            error: URLError(.cannotConnectToHost)
+        )
         let unreachable = await JackettHealthChecker(transport: down).check(settings: jackettSettings())
         #expect(unreachable.technicalDetail == "unreachable")
     }
 
     @Test func jackettMalformedResponse() async {
-        let transport = jackettTransport(body: #"{"not":"a list"}"#)
+        let transport = jackettTransport(body: #"{"not":"torznab xml"}"#)
         let result = await JackettHealthChecker(transport: transport).check(settings: jackettSettings())
         #expect(result.status == .warning)
         #expect(result.technicalDetail == "malformed")
         #expect(result.isActionableIssue)
+
+        let wrongRoot = jackettTransport(body: #"<caps><server title="Jackett"/></caps>"#)
+        let wrong = await JackettHealthChecker(transport: wrongRoot).check(settings: jackettSettings())
+        #expect(wrong.technicalDetail == "malformed")
     }
 
     @Test func jackettSecretsAreNotPersisted() async throws {
         let secret = jackettSecret
         let transport = jackettTransport(
-            body: #"[{"id":"id-\#(secret)","name":"Name \#(secret)","configured":true,"error":"fail \#(secret) apikey=\#(secret)"}]"#
+            body: jackettIndexersXML(
+                rows: [
+                    ("id-\(secret)", true, "Name \(secret)"),
+                ]
+            )
         )
         let result = await JackettHealthChecker(transport: transport).check(
             settings: .init(
@@ -327,17 +357,17 @@ struct IndexerHealthTests {
                 jackettAPIKey: secret,
             )
         )
-        #expect(result.status == .warning)
+        #expect(result.status == .healthy)
         #expect(result.sanitizedHost == "http://192.168.1.2:9117")
         #expect(result.indexers.first?.name.contains(secret) != true)
         #expect(result.indexers.first?.id.contains(secret) != true)
-        #expect(result.indexers.first?.detail?.contains(secret) != true)
         try assertCacheOmits(result, secret: secret)
         let redacted = IndexerSecretRedactor.redact(
-            "X-Api-Key: \(secret) Authorization: Bearer \(secret)",
+            "X-Api-Key: \(secret) Authorization: Bearer \(secret) apikey=\(secret)",
             secrets: [secret],
         )
         #expect(!redacted.contains(secret))
+        #expect(redacted.contains("apikey=••••"))
     }
 
     // MARK: - Dashboard
@@ -428,8 +458,43 @@ struct IndexerHealthTests {
 
     private func jackettTransport(body: String) -> ScriptHTTP {
         let transport = ScriptHTTP()
-        transport.stubs["/api/v2.0/indexers"] = .init(body: Data(body.utf8))
+        transport.stubs["/" + JackettHealthClient.indexerListPath] = .init(body: Data(body.utf8))
+        transport.stubs[JackettHealthClient.indexerListPath] = .init(body: Data(body.utf8))
         return transport
+    }
+
+    private func jackettIndexersXML(
+        rows: [(id: String, configured: Bool, title: String)] = [
+            ("nzbgeek", true, "NZBGeek"),
+            ("audiobookbay", true, "AudiobookBay"),
+        ]
+    ) -> String {
+        let body = rows.map { row in
+            """
+              <indexer id="\(row.id)" configured="\(row.configured ? "true" : "false")">
+                <title>\(row.title)</title>
+                <description>\(row.title) indexer</description>
+                <link>https://example.test/</link>
+                <language>en-US</language>
+                <type>public</type>
+                <caps>
+                  <server title="Jackett"/>
+                  <searching>
+                    <search available="yes" supportedParams="q"/>
+                  </searching>
+                  <categories>
+                    <category id="7000" name="Books"/>
+                  </categories>
+                </caps>
+              </indexer>
+            """
+        }.joined(separator: "\n")
+        return """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <indexers>
+            \(body)
+            </indexers>
+            """
     }
 
     private func dashboardCheckers(

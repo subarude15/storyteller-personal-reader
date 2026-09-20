@@ -185,31 +185,8 @@ public struct JackettHealthChecker: ServiceHealthChecking {
         host: String?,
         now: Date,
     ) -> ServiceHealthResult {
-        let failing = snapshot.indexers.filter { $0.enabled && $0.health == .failing }.count
+        // Torznab t=indexers has no reliable live health. Unknown is not a warning.
         let indexers = rankedIndexerRows(snapshot.indexers)
-        let metadata: [String: String] = [
-            "Indexers": String(snapshot.indexers.count),
-            "Configured": String(snapshot.configuredCount),
-            "Known failing": String(failing),
-        ]
-        if failing > 0 {
-            return ServiceHealthResult(
-                serviceID: .jackett,
-                status: .warning,
-                summary: IndexerHealthCopy.failingSummary(failing),
-                detail: IndexerHealthCopy.failingDetail(
-                    failing: failing,
-                    enabled: snapshot.configuredCount,
-                ),
-                lastChecked: now,
-                lastSuccess: now,
-                sanitizedHost: host,
-                technicalDetail: "indexerFailures",
-                metadata: metadata,
-                indexers: indexers,
-                suggestedAction: IndexerHealthCopy.review,
-            )
-        }
         return ServiceHealthResult(
             serviceID: .jackett,
             status: .healthy,
@@ -217,7 +194,10 @@ public struct JackettHealthChecker: ServiceHealthChecking {
             lastChecked: now,
             lastSuccess: now,
             sanitizedHost: host,
-            metadata: metadata,
+            metadata: [
+                "Indexers": String(snapshot.indexers.count),
+                "Configured": String(snapshot.configuredCount),
+            ],
             indexers: indexers,
             isActionableIssue: false,
         )
