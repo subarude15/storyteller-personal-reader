@@ -180,6 +180,21 @@ public enum LazyLibrarianMatchFailure: Error, Equatable, Sendable {
     case ambiguous
 }
 
+/// Failure from read-only BookID resolution (findBook + matcher only).
+public enum LazyLibrarianResolveFailure: Error, Equatable, Sendable {
+    case noMatch
+    case ambiguous
+    case message(String)
+
+    public var detail: String {
+        switch self {
+            case .noMatch: "Could not match this request to a LazyLibrarian book."
+            case .ambiguous: "Multiple LazyLibrarian matches found."
+            case .message(let text): text
+        }
+    }
+}
+
 public enum LazyLibrarianMatcher {
     public static func choose(
         work: CanonicalBookWork,
@@ -368,15 +383,8 @@ public struct LazyLibrarianClient: Sendable {
             return failed(formats, "The server URL is not valid.", apiKey: key)
         }
 
-        let found: [LazyLibrarianCandidate]
-        switch await candidates(work: work, baseURL: baseURL, apiKey: key) {
-            case .failure(let message):
-                return failed(formats, message.text, apiKey: key)
-            case .success(let rows):
-                found = rows
-        }
-        let chosen: LazyLibrarianCandidate
-        switch LazyLibrarianMatcher.choose(work: work, candidates: found) {
+        let bookID: String
+        switch await resolveBookID(work: work, baseURL: baseURL, apiKey: key) {
             case .failure(.noMatch):
                 return failed(
                     formats,
@@ -389,12 +397,14 @@ public struct LazyLibrarianClient: Sendable {
                     "Several books matched. Nothing was queued.",
                     apiKey: key,
                 )
-            case .success(let candidate):
-                chosen = candidate
+            case .failure(.message(let text)):
+                return failed(formats, text, apiKey: key)
+            case .success(let resolved):
+                bookID = resolved
         }
 
         let record: OwnedBook
-        switch await ensureBook(id: chosen.bookID, baseURL: baseURL, apiKey: key) {
+        switch await ensureBook(id: bookID, baseURL: baseURL, apiKey: key) {
             case .failure(let message):
                 return failed(formats, message.text, apiKey: key)
             case .success(let owned):
@@ -406,7 +416,7 @@ public struct LazyLibrarianClient: Sendable {
             outcomes.append(
                 await queue(
                     format: format,
-                    bookID: chosen.bookID,
+                    bookID: bookID,
                     record: record,
                     baseURL: baseURL,
                     apiKey: key,
@@ -414,6 +424,38 @@ public struct LazyLibrarianClient: Sendable {
             )
         }
         return outcomes
+    }
+
+    /// Resolve a LazyLibrarian BookID with the same high-confidence matcher as submission.
+    /// Read-only: findBook only — never addBook, queueBook, or searchBook.
+    public func resolveBookID(
+        work: CanonicalBookWork,
+        baseURL: String,
+        apiKey: String,
+    ) async -> Result<String, LazyLibrarianResolveFailure> {
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            return .failure(.message("Unauthorized. Check the API key."))
+        }
+        guard LazyLibrarianEndpoint.url(base: baseURL, apiKey: key, command: "getVersion") != nil
+        else {
+            return .failure(.message("The server URL is not valid."))
+        }
+        let found: [LazyLibrarianCandidate]
+        switch await candidates(work: work, baseURL: baseURL, apiKey: key) {
+            case .failure(let message):
+                return .failure(.message(message.text))
+            case .success(let rows):
+                found = rows
+        }
+        switch LazyLibrarianMatcher.choose(work: work, candidates: found) {
+            case .failure(.noMatch):
+                return .failure(.noMatch)
+            case .failure(.ambiguous):
+                return .failure(.ambiguous)
+            case .success(let candidate):
+                return .success(candidate.bookID)
+        }
     }
 
     /// Read-only status for a previously resolved LazyLibrarian BookID.

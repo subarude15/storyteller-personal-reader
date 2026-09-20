@@ -542,11 +542,6 @@ private struct RequestActivityRow: View {
             .foregroundStyle(.secondary)
             Text(item.overallStatus.label)
                 .font(.subheadline.weight(.semibold))
-            if item.fallbackKind == .automatic {
-                Text("Automatic fallback")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
             if let detail = primaryDetail {
                 Text(detail)
                     .font(.caption)
@@ -743,6 +738,19 @@ struct RequestActivityDetailView: View {
                 }
             }
 
+            let timeline = RequestActivityTimeline.displayEvents(for: item)
+            if !timeline.isEmpty {
+                Section("History") {
+                    ForEach(Array(timeline.enumerated()), id: \.element.id) { index, event in
+                        RequestActivityTimelineRow(
+                            event: event,
+                            isLast: index == timeline.count - 1,
+                            model: model,
+                        )
+                    }
+                }
+            }
+
             if availability.hasAnyAction {
                 Section("Actions") {
                     if availability.canCheckStatus {
@@ -835,13 +843,14 @@ struct RequestActivityDetailView: View {
                 }
             }
 
-            if let error = item.lastError {
+            let extras = RequestActivityTimeline.extraDiagnostics(for: item)
+            if let error = extras.lastError {
                 Section("Last error") {
                     Text(error)
                 }
             }
 
-            if let reason = item.attentionReason {
+            if let reason = extras.attentionReason {
                 Section("Needs attention") {
                     Text(reason)
                 }
@@ -894,6 +903,79 @@ struct RequestActivityDetailView: View {
 
     private func dateLabel(_ date: Date?) -> String {
         guard let date else { return "—" }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+}
+
+private struct RequestActivityTimelineRow: View {
+    let event: RequestActivityEvent
+    let isLast: Bool
+    @ObservedObject var model: RequestActivityViewModel
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(spacing: 0) {
+                Image(systemName: RequestActivityTimeline.systemImage(for: event.kind))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20, height: 20)
+                if !isLast {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.25))
+                        .frame(width: 2, height: 14)
+                }
+            }
+            .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.title ?? RequestActivityTimeline.title(for: event.kind))
+                    .font(.subheadline.weight(.semibold))
+                if let subtitle = RequestActivityTimeline.subtitle(for: event) {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let detail = event.detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text(dateLabel(event.date))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                if let relatedID = event.relatedRequestID,
+                    model.item(id: relatedID) != nil
+                {
+                    NavigationLink {
+                        RequestActivityDetailView(itemID: relatedID, model: model)
+                    } label: {
+                        Text("View request")
+                            .font(.caption)
+                    }
+                }
+            }
+            .padding(.bottom, isLast ? 0 : 10)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var accessibilityLabel: String {
+        var parts = [event.title ?? RequestActivityTimeline.title(for: event.kind)]
+        if let subtitle = RequestActivityTimeline.subtitle(for: event) {
+            parts.append(subtitle)
+        }
+        if let detail = event.detail, !detail.isEmpty {
+            parts.append(detail)
+        }
+        parts.append(dateLabel(event.date))
+        return parts.joined(separator: ", ")
+    }
+
+    private func dateLabel(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short

@@ -126,17 +126,60 @@ public struct RequestActivityRefreshService: Sendable {
                     debugLog("[RequestActivity] status refresh skipped id=\(updated.id) reason=llUnavailable")
                     return updated
                 }
-                guard let bookID = updated.providerBookID, !bookID.isEmpty else {
-                    updated.lastError = "Missing LazyLibrarian BookID"
-                    updated.attentionReason = "Missing LazyLibrarian BookID"
-                    for index in updated.formatStatuses.indices {
-                        if updated.formatStatuses[index].status == .availableInLibrary { continue }
-                        updated.formatStatuses[index].status = .needsAttention
-                        updated.formatStatuses[index].detail = updated.attentionReason
+                let bookID: String
+                if let existing = updated.providerBookID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                    !existing.isEmpty
+                {
+                    bookID = existing
+                } else {
+                    // Legacy / incomplete rows: recover BookID via the same matcher as submission.
+                    // Read-only — never re-queue.
+                    switch await client.resolveBookID(
+                        work: updated.canonicalWorkForRetry(),
+                        baseURL: baseURL,
+                        apiKey: apiKey,
+                    ) {
+                        case .success(let resolved):
+                            updated.providerBookID = resolved
+                            // Persist recovered ID before continuing so a later failure keeps it.
+                            history.upsert(updated)
+                            debugLog(
+                                "[RequestActivity] recovered LazyLibrarian BookID id=\(updated.id) bookID=\(resolved)"
+                            )
+                            bookID = resolved
+                        case .failure(let failure):
+                            switch failure {
+                                case .noMatch, .ambiguous:
+                                    updated = RequestActivityAttention.markFormatsNeedsAttention(
+                                        updated,
+                                        reason: failure.detail,
+                                        now: checkedAt,
+                                    )
+                                case .message(let text):
+                                    // Transient / auth errors: same posture as lookup failure.
+                                    for index in updated.formatStatuses.indices {
+                                        if updated.formatStatuses[index].status == .availableInLibrary {
+                                            continue
+                                        }
+                                        updated.formatStatuses[index].consecutiveLookupFailures += 1
+                                    }
+                                    updated.lastError = text
+                                    updated = RequestActivityAttention.apply(
+                                        updated,
+                                        now: checkedAt,
+                                    )
+                            }
+                            updated = RequestLibraryPresence.apply(
+                                updated,
+                                matcher: matcher,
+                                now: checkedAt,
+                            )
+                            history.upsert(updated)
+                            debugLog(
+                                "[RequestActivity] BookID recovery failed id=\(updated.id) reason=\(failure.detail)"
+                            )
+                            return updated
                     }
-                    updated = RequestLibraryPresence.apply(updated, matcher: matcher, now: checkedAt)
-                    history.upsert(updated)
-                    return updated
                 }
 
                 switch await client.lookupBook(id: bookID, baseURL: baseURL, apiKey: apiKey) {
@@ -147,14 +190,11 @@ public struct RequestActivityRefreshService: Sendable {
                         }
                         updated.lastError = failure.detail
                         if case .missingBook = failure {
-                            updated.attentionReason = failure.detail
-                            for index in updated.formatStatuses.indices {
-                                if updated.formatStatuses[index].status == .availableInLibrary {
-                                    continue
-                                }
-                                updated.formatStatuses[index].status = .needsAttention
-                                updated.formatStatuses[index].detail = failure.detail
-                            }
+                            updated = RequestActivityAttention.markFormatsNeedsAttention(
+                                updated,
+                                reason: failure.detail,
+                                now: checkedAt,
+                            )
                         }
                         updated = RequestActivityAttention.apply(updated, now: checkedAt)
                         updated = RequestLibraryPresence.apply(updated, matcher: matcher, now: checkedAt)
@@ -164,12 +204,13 @@ public struct RequestActivityRefreshService: Sendable {
                         )
                         return updated
                     case .success(nil):
-                        updated.attentionReason = LazyLibrarianLookupFailure.missingBook.detail
-                        updated.lastError = updated.attentionReason
+                        updated = RequestActivityAttention.markFormatsNeedsAttention(
+                            updated,
+                            reason: LazyLibrarianLookupFailure.missingBook.detail,
+                            now: checkedAt,
+                        )
                         for index in updated.formatStatuses.indices {
                             if updated.formatStatuses[index].status == .availableInLibrary { continue }
-                            updated.formatStatuses[index].status = .needsAttention
-                            updated.formatStatuses[index].detail = updated.attentionReason
                             updated.formatStatuses[index].consecutiveLookupFailures = 0
                         }
                         updated = RequestLibraryPresence.apply(updated, matcher: matcher, now: checkedAt)
