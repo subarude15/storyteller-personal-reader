@@ -36,6 +36,7 @@ struct MediaGridInfoSidebar: View {
     @State private var coverPalette = CoverDerivedPalette.fallback()
     @State private var showingFormatLink = false
     @State private var showingAudiobookOptions = false
+    @State private var showingBookRequest = false
     @State private var alignmentOverride: ReadaloudAlignment?
     @State private var formatActionError: String?
 
@@ -120,6 +121,16 @@ struct MediaGridInfoSidebar: View {
             .presentationDragIndicator(.visible)
             #endif
         }
+        .sheet(isPresented: $showingBookRequest) {
+            BookRequestSheet(
+                work: CanonicalBookWork.library(currentItem),
+                owned: BookRequestLibrary.ownedFormats(formatMembers),
+            )
+            #if os(iOS)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            #endif
+        }
         .alert("Couldn't update formats", isPresented: formatErrorPresented) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -142,6 +153,7 @@ struct MediaGridInfoSidebar: View {
             alignmentOverride = nil
             formatActionError = nil
             showingAudiobookOptions = false
+            showingBookRequest = false
             prepareForDisplay()
             loadDescription()
         }
@@ -238,6 +250,7 @@ struct MediaGridInfoSidebar: View {
                 }
                 formatLinkButton
                 findAudiobookButton
+                requestBookButton
                 formatAlignmentNote
 
                 let tags = currentItem.tagNames
@@ -605,6 +618,7 @@ struct MediaGridInfoSidebar: View {
                 }
                 formatLinkButton
                 findAudiobookButton
+                requestBookButton
                 formatAlignmentNote
 
                 if !currentItem.tagNames.isEmpty {
@@ -852,6 +866,18 @@ struct MediaGridInfoSidebar: View {
             .accessibilityIdentifier("find-audiobook-options")
             .accessibilityHint("Searches audiobook providers for this book only after you tap.")
         }
+    }
+
+    @ViewBuilder
+    private var requestBookButton: some View {
+        Button {
+            showingBookRequest = true
+        } label: {
+            Label("Request", systemImage: "paperplane")
+                .font(.subheadline.weight(.semibold))
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Asks LazyLibrarian or Shelfarr to search for this book.")
     }
 
     @ViewBuilder

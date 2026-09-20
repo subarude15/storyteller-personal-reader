@@ -434,6 +434,7 @@ struct IdeaDetailView: View {
     @State private var fetched: OpenLibraryWorkDetail?
     @State private var loadingSummary = false
     @State private var showingAudiobookOptions = false
+    @State private var showingBookRequest = false
 
     private var description: String? {
         if let fetched, let desc = fetched.description, !desc.isEmpty { return desc }
@@ -518,6 +519,14 @@ struct IdeaDetailView: View {
                 .accessibilityIdentifier("find-audiobook-options")
                 .accessibilityHint("Searches audiobook providers for this book only after you tap.")
                 Button {
+                    showingBookRequest = true
+                } label: {
+                    Label("Request", systemImage: "paperplane")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityHint("Asks LazyLibrarian or Shelfarr to search for this book.")
+                Button {
                     if isSaved {
                         SavedReadingIdeas.remove(idea.id)
                     } else {
@@ -556,6 +565,11 @@ struct IdeaDetailView: View {
             )
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showingBookRequest) {
+            BookRequestSheet(work: CanonicalBookWork.idea(idea), owned: [])
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
         .task {
             isSaved = SavedReadingIdeas.contains(idea.id)
