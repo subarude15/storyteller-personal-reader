@@ -3,6 +3,7 @@ import Foundation
 extension Notification.Name {
     /// Posted after Request Activity history mutates (upsert / submit / remove / prune).
     /// No secrets in `userInfo` — observers should re-read the store.
+    /// Always posted outside the store lock so observers may safely re-enter.
     public static let requestActivityStoreDidChange = Notification.Name(
         "punkRally.requestActivityStoreDidChange"
     )
@@ -39,7 +40,6 @@ public final class RequestActivityStore: @unchecked Sendable {
 
     public func upsert(_ item: RequestActivityItem) {
         lock.lock()
-        defer { lock.unlock() }
         var items = loadUnlocked()
         if let index = items.firstIndex(where: { $0.id == item.id }) {
             items[index] = item
@@ -50,15 +50,22 @@ public final class RequestActivityStore: @unchecked Sendable {
         } else {
             items.append(item)
         }
-        saveUnlocked(items)
+        let didSave = saveUnlocked(items)
+        lock.unlock()
+        if didSave {
+            notifyDidChange()
+        }
     }
 
     public func remove(id: String) {
         lock.lock()
-        defer { lock.unlock() }
         var items = loadUnlocked()
         items.removeAll { $0.id == id }
-        saveUnlocked(items)
+        let didSave = saveUnlocked(items)
+        lock.unlock()
+        if didSave {
+            notifyDidChange()
+        }
         debugLog("[RequestActivity] removed local tracking id=\(id)")
     }
 
@@ -71,7 +78,6 @@ public final class RequestActivityStore: @unchecked Sendable {
         guard !outcomes.isEmpty else { return }
         let workID = work.openLibraryWorkID ?? work.workID
         lock.lock()
-        defer { lock.unlock() }
         var items = loadUnlocked()
         let existingIndex = items.firstIndex {
             $0.canonicalWorkID == workID && $0.provider == provider
@@ -123,15 +129,19 @@ public final class RequestActivityStore: @unchecked Sendable {
         } else {
             items.append(item)
         }
-        saveUnlocked(items)
+        let didSave = saveUnlocked(items)
+        let formatLabels = item.requestedFormats.map(\.rawValue).joined(separator: ",")
+        lock.unlock()
+        if didSave {
+            notifyDidChange()
+        }
         debugLog(
-            "[RequestActivity] saved request work=\(workID) provider=\(provider.rawValue) formats=\(item.requestedFormats.map(\.rawValue).joined(separator: ","))"
+            "[RequestActivity] saved request work=\(workID) provider=\(provider.rawValue) formats=\(formatLabels)"
         )
     }
 
     public func prune(now: Date = Date()) {
         lock.lock()
-        defer { lock.unlock() }
         let retention = RequestActivityGrouping.completedRetentionInterval
         var items = loadUnlocked()
         let before = items.count
@@ -148,9 +158,12 @@ public final class RequestActivityStore: @unchecked Sendable {
                     return now.timeIntervalSince(item.updatedAt) > retention
             }
         }
-        if items.count != before {
-            saveUnlocked(items)
-            debugLog("[RequestActivity] pruned history removed=\(before - items.count)")
+        let removed = before - items.count
+        let didSave = removed > 0 ? saveUnlocked(items) : false
+        lock.unlock()
+        if didSave {
+            notifyDidChange()
+            debugLog("[RequestActivity] pruned history removed=\(removed)")
         }
     }
 
@@ -161,12 +174,18 @@ public final class RequestActivityStore: @unchecked Sendable {
         return (try? decoder.decode([RequestActivityItem].self, from: data)) ?? []
     }
 
-    private func saveUnlocked(_ items: [RequestActivityItem]) {
+    /// Persist only. Callers must hold `lock` and post notifications after unlocking.
+    @discardableResult
+    private func saveUnlocked(_ items: [RequestActivityItem]) -> Bool {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(items) else { return }
+        guard let data = try? encoder.encode(items) else { return false }
         defaults.set(data, forKey: key)
+        return true
+    }
+
+    private func notifyDidChange() {
         NotificationCenter.default.post(name: .requestActivityStoreDidChange, object: nil)
     }
 

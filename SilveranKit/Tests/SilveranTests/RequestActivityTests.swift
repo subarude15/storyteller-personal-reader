@@ -638,6 +638,33 @@ struct RequestActivityTests {
         #expect(store.allItems().isEmpty)
     }
 
+    @Test func storeChangeNotificationAllowsReentrantReadsWithoutDeadlock() {
+        let defaults = UserDefaults(suiteName: "request-activity-\(UUID().uuidString)")!
+        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let store = RequestActivityStore(defaults: defaults)
+
+        var observedCount = 0
+        var observedInProgress = 0
+        let token = NotificationCenter.default.addObserver(
+            forName: .requestActivityStoreDidChange,
+            object: nil,
+            queue: nil,
+        ) { _ in
+            // Re-enter the same store while handling the synchronous notification.
+            // Must not deadlock on the non-recursive NSLock.
+            let items = store.allItems()
+            observedCount = items.count
+            observedInProgress = store.librarySummary().inProgressCount
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        store.upsert(item(id: "reenter", status: .searching, updatedAt: Date()))
+
+        #expect(observedCount == 1)
+        #expect(observedInProgress == 1)
+        #expect(store.allItems().count == 1)
+    }
+
     // MARK: - Helpers
 
     private func item(
