@@ -299,8 +299,7 @@ public enum RequestActivityAttention {
             var format = updated.formatStatuses[index]
             if format.status == .failed {
                 reason = format.detail ?? "Request failed"
-                format.status = .needsAttention
-                format.updatedAt = now
+                enterNeedsAttention(&format, detail: reason, now: now)
                 updated.formatStatuses[index] = format
                 continue
             }
@@ -311,12 +310,8 @@ public enum RequestActivityAttention {
                 >= RequestActivityGrouping.lookupFailureAttentionThreshold
             {
                 reason = "Status lookup failed repeatedly"
-                if format.status != .needsAttention {
-                    format.status = .needsAttention
-                    format.detail = reason
-                    format.updatedAt = now
-                    updated.formatStatuses[index] = format
-                }
+                enterNeedsAttention(&format, detail: reason, now: now)
+                updated.formatStatuses[index] = format
                 continue
             }
             let age = now.timeIntervalSince(format.updatedAt)
@@ -327,14 +322,48 @@ public enum RequestActivityAttention {
                 || format.status == .alreadyRequested
             if staleCandidate, age >= RequestActivityGrouping.staleWantedInterval {
                 reason = "Still waiting after \(ServiceHealthURLSanitizer.relativeAge(from: format.updatedAt, now: now))"
-                format.status = .needsAttention
-                format.detail = reason
-                format.updatedAt = now
+                enterNeedsAttention(&format, detail: reason, now: now)
                 updated.formatStatuses[index] = format
             }
         }
         let stillFlagged = updated.formatStatuses.contains { $0.status.needsAttentionBucket }
         updated.attentionReason = stillFlagged ? reason : nil
+        return updated
+    }
+
+    /// Transition a format into Needs Attention.
+    /// Starts the automatic-fallback attention clock only on entry; preserves
+    /// `updatedAt` when the format is already `.needsAttention`.
+    public static func enterNeedsAttention(
+        _ format: inout RequestFormatStatus,
+        detail: String?,
+        now: Date,
+    ) {
+        let entering = format.status != .needsAttention
+        format.status = .needsAttention
+        format.detail = detail
+        if entering {
+            format.updatedAt = now
+        }
+    }
+
+    /// Mark every non-library format Needs Attention with a shared reason.
+    public static func markFormatsNeedsAttention(
+        _ item: RequestActivityItem,
+        reason: String,
+        now: Date,
+    ) -> RequestActivityItem {
+        var updated = item
+        updated.lastError = reason
+        updated.attentionReason = reason
+        for index in updated.formatStatuses.indices {
+            if updated.formatStatuses[index].status == .availableInLibrary { continue }
+            enterNeedsAttention(
+                &updated.formatStatuses[index],
+                detail: reason,
+                now: now,
+            )
+        }
         return updated
     }
 }

@@ -150,15 +150,11 @@ public struct RequestActivityRefreshService: Sendable {
                         case .failure(let failure):
                             switch failure {
                                 case .noMatch, .ambiguous:
-                                    updated.lastError = failure.detail
-                                    updated.attentionReason = failure.detail
-                                    for index in updated.formatStatuses.indices {
-                                        if updated.formatStatuses[index].status == .availableInLibrary {
-                                            continue
-                                        }
-                                        updated.formatStatuses[index].status = .needsAttention
-                                        updated.formatStatuses[index].detail = failure.detail
-                                    }
+                                    updated = RequestActivityAttention.markFormatsNeedsAttention(
+                                        updated,
+                                        reason: failure.detail,
+                                        now: checkedAt,
+                                    )
                                 case .message(let text):
                                     // Transient / auth errors: same posture as lookup failure.
                                     for index in updated.formatStatuses.indices {
@@ -194,14 +190,11 @@ public struct RequestActivityRefreshService: Sendable {
                         }
                         updated.lastError = failure.detail
                         if case .missingBook = failure {
-                            updated.attentionReason = failure.detail
-                            for index in updated.formatStatuses.indices {
-                                if updated.formatStatuses[index].status == .availableInLibrary {
-                                    continue
-                                }
-                                updated.formatStatuses[index].status = .needsAttention
-                                updated.formatStatuses[index].detail = failure.detail
-                            }
+                            updated = RequestActivityAttention.markFormatsNeedsAttention(
+                                updated,
+                                reason: failure.detail,
+                                now: checkedAt,
+                            )
                         }
                         updated = RequestActivityAttention.apply(updated, now: checkedAt)
                         updated = RequestLibraryPresence.apply(updated, matcher: matcher, now: checkedAt)
@@ -211,12 +204,13 @@ public struct RequestActivityRefreshService: Sendable {
                         )
                         return updated
                     case .success(nil):
-                        updated.attentionReason = LazyLibrarianLookupFailure.missingBook.detail
-                        updated.lastError = updated.attentionReason
+                        updated = RequestActivityAttention.markFormatsNeedsAttention(
+                            updated,
+                            reason: LazyLibrarianLookupFailure.missingBook.detail,
+                            now: checkedAt,
+                        )
                         for index in updated.formatStatuses.indices {
                             if updated.formatStatuses[index].status == .availableInLibrary { continue }
-                            updated.formatStatuses[index].status = .needsAttention
-                            updated.formatStatuses[index].detail = updated.attentionReason
                             updated.formatStatuses[index].consecutiveLookupFailures = 0
                         }
                         updated = RequestLibraryPresence.apply(updated, matcher: matcher, now: checkedAt)

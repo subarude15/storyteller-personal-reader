@@ -209,6 +209,184 @@ struct RequestActivityBookIDRecoveryTests {
         #expect(!script.commands.contains("searchBook"))
     }
 
+    // MARK: - Attention clock on recovery failure
+
+    @Test func noMatchStartsAttentionClockNowAndBlocksImmediateFallback() async {
+        let wantedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let checkedAt = wantedAt.addingTimeInterval(24 * 3600)
+        let script = noMatchScript()
+
+        let defaults = UserDefaults(suiteName: "ll-recovery-\(UUID().uuidString)")!
+        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let store = RequestActivityStore(defaults: defaults)
+        let seed = legacyItem(
+            title: "Pride and Prejudice",
+            author: "Jane Austen",
+            providerBookID: nil,
+            status: .wanted,
+            formatUpdatedAt: wantedAt,
+        )
+        store.upsert(seed)
+
+        let service = RequestActivityRefreshService(
+            client: LazyLibrarianClient(transport: script),
+            history: store,
+            now: { checkedAt },
+        )
+        let updated = await service.refreshOne(
+            seed,
+            force: true,
+            lazyReady: true,
+            baseURL: base,
+            apiKey: key,
+        )
+
+        #expect(updated.status(for: .ebook)?.status == .needsAttention)
+        #expect(updated.status(for: .ebook)?.updatedAt == checkedAt)
+        #expect(updated.attentionReason == "Could not match this request to a LazyLibrarian book.")
+
+        let decision = AutomaticFallbackPolicy.decide(
+            item: updated,
+            history: [updated],
+            settings: AutomaticFallbackSettingsSnapshot(enabled: true, delay: .sixHours),
+            context: bothProviders,
+            now: checkedAt,
+        )
+        #expect(decision == .none)
+    }
+
+    @Test func ambiguousMatchStartsAttentionClockNow() async {
+        let wantedAt = Date(timeIntervalSince1970: 1_700_100_000)
+        let checkedAt = wantedAt.addingTimeInterval(24 * 3600)
+        let script = RecoveryScript()
+        script.handler = { cmd, _ in
+            if cmd == "findBook" {
+                return RecoveryScript.http(
+                    """
+                    [\
+                    {"bookid":"A","bookname":"Emma","authorname":"Jane Austen","bookpub":"1815"},\
+                    {"bookid":"B","bookname":"Emma","authorname":"Jane Austen","bookpub":"1815"}\
+                    ]
+                    """
+                )
+            }
+            return RecoveryScript.http("OK")
+        }
+
+        let defaults = UserDefaults(suiteName: "ll-recovery-\(UUID().uuidString)")!
+        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let store = RequestActivityStore(defaults: defaults)
+        let seed = legacyItem(
+            title: "Emma",
+            author: "Jane Austen",
+            providerBookID: nil,
+            status: .wanted,
+            formatUpdatedAt: wantedAt,
+        )
+        store.upsert(seed)
+
+        let service = RequestActivityRefreshService(
+            client: LazyLibrarianClient(transport: script),
+            history: store,
+            now: { checkedAt },
+        )
+        let updated = await service.refreshOne(
+            seed,
+            force: true,
+            lazyReady: true,
+            baseURL: base,
+            apiKey: key,
+        )
+
+        #expect(updated.status(for: .ebook)?.status == .needsAttention)
+        #expect(updated.status(for: .ebook)?.updatedAt == checkedAt)
+        #expect(updated.attentionReason == "Multiple LazyLibrarian matches found.")
+    }
+
+    @Test func existingNeedsAttentionDoesNotResetClockOnRecoveryFailure() async {
+        let enteredAt = Date(timeIntervalSince1970: 1_700_200_000)
+        let checkedAt = enteredAt.addingTimeInterval(5 * 3600)
+        let script = noMatchScript()
+
+        let defaults = UserDefaults(suiteName: "ll-recovery-\(UUID().uuidString)")!
+        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let store = RequestActivityStore(defaults: defaults)
+        let seed = legacyItem(
+            title: "Pride and Prejudice",
+            author: "Jane Austen",
+            providerBookID: nil,
+            lastError: "Could not match this request to a LazyLibrarian book.",
+            attentionReason: "Could not match this request to a LazyLibrarian book.",
+            status: .needsAttention,
+            formatUpdatedAt: enteredAt,
+        )
+        store.upsert(seed)
+
+        let service = RequestActivityRefreshService(
+            client: LazyLibrarianClient(transport: script),
+            history: store,
+            now: { checkedAt },
+        )
+        let updated = await service.refreshOne(
+            seed,
+            force: true,
+            lazyReady: true,
+            baseURL: base,
+            apiKey: key,
+        )
+
+        #expect(updated.status(for: .ebook)?.status == .needsAttention)
+        #expect(updated.status(for: .ebook)?.updatedAt == enteredAt)
+    }
+
+    @Test func needsAttentionTimelineUsesTransitionTimestamp() async {
+        let wantedAt = Date(timeIntervalSince1970: 1_700_300_000)
+        let checkedAt = wantedAt.addingTimeInterval(24 * 3600)
+        let script = noMatchScript()
+
+        let defaults = UserDefaults(suiteName: "ll-recovery-\(UUID().uuidString)")!
+        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let store = RequestActivityStore(defaults: defaults)
+        var seed = legacyItem(
+            title: "Pride and Prejudice",
+            author: "Jane Austen",
+            providerBookID: nil,
+            status: .wanted,
+            formatUpdatedAt: wantedAt,
+        )
+        seed.events = [
+            RequestActivityEvent(
+                date: wantedAt,
+                kind: .requested,
+                format: .ebook,
+                provider: .lazyLibrarian,
+                title: "Requested",
+            )
+        ]
+        store.upsert(seed)
+
+        let service = RequestActivityRefreshService(
+            client: LazyLibrarianClient(transport: script),
+            history: store,
+            now: { checkedAt },
+        )
+        _ = await service.refreshOne(
+            seed,
+            force: true,
+            lazyReady: true,
+            baseURL: base,
+            apiKey: key,
+        )
+
+        let loaded = try #require(store.item(id: seed.id))
+        let attentionEvents = RequestActivityTimeline.displayEvents(for: loaded).filter {
+            $0.kind == .needsAttention && $0.format == .ebook
+        }
+        #expect(attentionEvents.count == 1)
+        #expect(attentionEvents[0].date == checkedAt)
+        #expect(attentionEvents[0].date != wantedAt)
+    }
+
     @Test func alreadyInStorytellerSkipsLazyLibrarianRecovery() async {
         let script = RecoveryScript()
         script.handler = { cmd, _ in
@@ -359,6 +537,30 @@ struct RequestActivityBookIDRecoveryTests {
 
     // MARK: - Helpers
 
+    private var bothProviders: RequestActivityActionContext {
+        RequestActivityActionContext(
+            lazyLibrarianEnabled: true,
+            lazyLibrarianBaseURL: "https://lazy.example",
+            shelfarrBaseURL: "https://shelf.example",
+            lazyLibrarianHasAPIKey: true,
+            shelfarrHasToken: true,
+        )
+    }
+
+    private func noMatchScript() -> RecoveryScript {
+        let script = RecoveryScript()
+        script.handler = { cmd, _ in
+            if cmd == "findBook" {
+                return RecoveryScript.http(
+                    self.hit(id: "LL-WRONG", title: "Pride and Prejudice", author: "Charles Dickens")
+                )
+            }
+            Issue.record("unexpected command \(cmd)")
+            return RecoveryScript.http("OK")
+        }
+        return script
+    }
+
     private func legacyItem(
         id: String = UUID().uuidString,
         canonicalWorkID: String? = nil,
@@ -370,8 +572,10 @@ struct RequestActivityBookIDRecoveryTests {
         lastError: String? = nil,
         attentionReason: String? = nil,
         status: RequestActivityStatus = .wanted,
+        formatUpdatedAt: Date? = nil,
     ) -> RequestActivityItem {
         let now = Date()
+        let formatAt = formatUpdatedAt ?? now
         return RequestActivityItem(
             id: id,
             canonicalWorkID: canonicalWorkID ?? id,
@@ -380,14 +584,14 @@ struct RequestActivityBookIDRecoveryTests {
             provider: .lazyLibrarian,
             providerBookID: providerBookID,
             requestedFormats: formats,
-            createdAt: now,
-            updatedAt: now,
+            createdAt: formatUpdatedAt ?? now,
+            updatedAt: formatAt,
             formatStatuses: formats.map {
                 RequestFormatStatus(
                     format: $0,
                     status: status,
                     detail: attentionReason,
-                    updatedAt: now,
+                    updatedAt: formatAt,
                 )
             },
             lastError: lastError,
