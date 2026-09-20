@@ -31,6 +31,10 @@ final class RequestActivityViewModel: ObservableObject {
         refresh(force: false)
     }
 
+    func reloadFromStore() {
+        items = history.allItems()
+    }
+
     func refresh(force: Bool) {
         task?.cancel()
         isRefreshing = true
