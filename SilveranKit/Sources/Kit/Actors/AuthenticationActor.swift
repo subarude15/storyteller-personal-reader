@@ -9,6 +9,7 @@ public actor AuthenticationActor {
     private let usernameKey = "username"
     private let passwordKey = "password"
     private let hardcoverTokenKey = "hardcoverToken"
+    private let lazyLibrarianAPIKey = "lazyLibrarianAPIKey"
 
     private init() {}
 
@@ -105,6 +106,28 @@ public actor AuthenticationActor {
 
     public func deleteHardcoverToken() async throws {
         try await keychain.removeItem(account: hardcoverTokenKey)
+    }
+
+    public func saveLazyLibrarianAPIKey(_ key: String) async throws {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            try await deleteLazyLibrarianAPIKey()
+            return
+        }
+        try await saveString(trimmed, for: lazyLibrarianAPIKey)
+    }
+
+    public func loadLazyLibrarianAPIKey() async throws -> String? {
+        try await loadString(for: lazyLibrarianAPIKey)
+    }
+
+    public func deleteLazyLibrarianAPIKey() async throws {
+        try await keychain.removeItem(account: lazyLibrarianAPIKey)
+    }
+
+    public func hasLazyLibrarianAPIKey() async -> Bool {
+        guard let key = try? await loadLazyLibrarianAPIKey() else { return false }
+        return !key.isEmpty
     }
 
     private func saveString(_ value: String, for account: String) async throws {
