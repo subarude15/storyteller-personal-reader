@@ -1,8 +1,28 @@
 import Foundation
 
-public enum AudiobookProviderError: Error, Equatable {
-    case unavailable
+public enum AudiobookProviderError: Error, Equatable, Sendable {
+    case unreachable
+    case timeout
+    case httpStatus(Int)
+    case rateLimited
     case undecodable
+
+    public var issue: AudiobookProviderIssue {
+        switch self {
+            case .unreachable: .unreachable
+            case .timeout: .timeout
+            case .httpStatus: .unexpectedResponse
+            case .rateLimited: .rateLimited
+            case .undecodable: .unexpectedResponse
+        }
+    }
+}
+
+public enum AudiobookProviderIssue: Equatable, Sendable {
+    case unreachable
+    case timeout
+    case rateLimited
+    case unexpectedResponse
 }
 
 /// LibriVox public-domain catalog. One title query for the selected work. No catalog crawl.
@@ -20,11 +40,40 @@ public struct LibriVoxAudiobookProvider: AudiobookCatalogProviding {
     public static func liveFetch(_ url: URL) async throws -> Data {
         var request = URLRequest(url: url, timeoutInterval: 20)
         request.setValue("inkamp/audiobook-resolver", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw AudiobookProviderError.unavailable
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch let error as URLError {
+            debugLog(
+                "[LibriVox] provider=librivox url=\(sanitizedURL(url)) network=\(error.code.rawValue)"
+            )
+            switch error.code {
+                case .timedOut:
+                    throw AudiobookProviderError.timeout
+                default:
+                    throw AudiobookProviderError.unreachable
+            }
+        } catch {
+            debugLog("[LibriVox] provider=librivox url=\(sanitizedURL(url)) network=unknown")
+            throw AudiobookProviderError.unreachable
         }
-        return data
+        guard let http = response as? HTTPURLResponse else {
+            debugLog("[LibriVox] provider=librivox url=\(sanitizedURL(url)) status=missing")
+            throw AudiobookProviderError.unreachable
+        }
+        let contentType = http.value(forHTTPHeaderField: "Content-Type") ?? "unknown"
+        debugLog(
+            "[LibriVox] provider=librivox url=\(sanitizedURL(url)) status=\(http.statusCode) type=\(contentType)"
+        )
+        switch http.statusCode {
+            case 200..<300:
+                return data
+            case 429:
+                throw AudiobookProviderError.rateLimited
+            default:
+                throw AudiobookProviderError.httpStatus(http.statusCode)
+        }
     }
 
     /// Anchored title+author, then anchored title, then one unanchored title query.
@@ -52,7 +101,7 @@ public struct LibriVoxAudiobookProvider: AudiobookCatalogProviding {
     public func search(_ work: CanonicalBookWork) async throws -> [AudiobookProviderItem] {
         let urls = Self.queryURLs(for: work)
         guard !urls.isEmpty else { return [] }
-        var lastError: Error?
+        var lastError: AudiobookProviderError?
         for url in urls {
             do {
                 let data = try await fetch(url)
@@ -63,11 +112,19 @@ public struct LibriVoxAudiobookProvider: AudiobookCatalogProviding {
             } catch let error as AudiobookProviderError {
                 if error == .undecodable {
                     lastError = error
+                    debugLog(
+                        "[LibriVox] provider=librivox url=\(Self.sanitizedURL(url)) decode=failed"
+                    )
                     continue
                 }
                 throw error
+            } catch let error as URLError {
+                switch error.code {
+                    case .timedOut: throw AudiobookProviderError.timeout
+                    default: throw AudiobookProviderError.unreachable
+                }
             } catch {
-                throw AudiobookProviderError.unavailable
+                throw AudiobookProviderError.unreachable
             }
         }
         if let lastError {
@@ -81,9 +138,18 @@ public struct LibriVoxAudiobookProvider: AudiobookCatalogProviding {
         do {
             envelope = try JSONDecoder().decode(Envelope.self, from: data)
         } catch {
+            debugLog("[LibriVox] provider=librivox decode=\(type(of: error))")
             throw AudiobookProviderError.undecodable
         }
         return envelope.books.compactMap(Self.item(from:))
+    }
+
+    static func sanitizedURL(_ url: URL) -> String {
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.user = nil
+        components?.password = nil
+        components?.fragment = nil
+        return components?.string ?? url.absoluteString
     }
 
     private static func url(title: String, author: String?, anchored: Bool) -> URL? {

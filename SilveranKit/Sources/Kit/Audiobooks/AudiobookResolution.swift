@@ -352,15 +352,24 @@ public struct CanonicalBookWork: Equatable, Sendable {
 
 public enum AudiobookResolutionFailure: Equatable, Sendable {
     case insufficientMetadata
-    case providerUnavailable(AudiobookProviderKind)
+    case providerIssue(AudiobookProviderKind, AudiobookProviderIssue)
     case playbackSourceUnavailable
 
     public var message: String {
         switch self {
             case .insufficientMetadata:
                 "This book needs a title before audiobook options can be searched."
-            case .providerUnavailable(let provider):
-                "\(provider.displayName) is unavailable right now. This book was not changed."
+            case .providerIssue(let provider, let issue):
+                switch issue {
+                    case .unreachable:
+                        "\(provider.displayName) couldn't be reached right now."
+                    case .timeout:
+                        "\(provider.displayName) timed out. Try again."
+                    case .rateLimited:
+                        "\(provider.displayName) is rate-limiting requests right now."
+                    case .unexpectedResponse:
+                        "\(provider.displayName) returned an unexpected response."
+                }
             case .playbackSourceUnavailable:
                 "Playback source unavailable."
         }
@@ -392,8 +401,10 @@ public enum AudiobookResolution {
         for provider in providers {
             do {
                 items.append(contentsOf: try await provider.search(work))
+            } catch let error as AudiobookProviderError {
+                failure = .providerIssue(provider.kind, error.issue)
             } catch {
-                failure = .providerUnavailable(provider.kind)
+                failure = .providerIssue(provider.kind, .unreachable)
             }
         }
         let ranked = AudiobookMatcher.rank(work: work, items: items)

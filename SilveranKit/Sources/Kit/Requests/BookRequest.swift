@@ -144,21 +144,33 @@ public enum BookRequests {
                 return BookRequestSubmission(provider: .lazyLibrarian, outcomes: outcomes)
             case .shelfarr:
                 let idea = readingIdea(work)
-                let sent = await ShelfarrRequestManager.request(
+                switch await ShelfarrRequestManager.request(
                     idea,
                     mediums: formats.map(\.shelfarrMedium),
-                )
-                let detail =
-                    sent
-                    ? "Request accepted. Shelfarr has it. The file is not downloaded."
-                    : "Shelfarr did not accept the request."
-                let phase: BookRequestPhase = sent ? .requested : .failed
-                return BookRequestSubmission(
-                    provider: .shelfarr,
-                    outcomes: formats.map {
-                        BookRequestOutcome(format: $0, phase: phase, detail: detail)
-                    },
-                )
+                ) {
+                    case .success:
+                        return BookRequestSubmission(
+                            provider: .shelfarr,
+                            outcomes: formats.map {
+                                BookRequestOutcome(
+                                    format: $0,
+                                    phase: .requested,
+                                    detail: "Request accepted. Shelfarr has it. The file is not downloaded.",
+                                )
+                            },
+                        )
+                    case .failure(let error):
+                        return BookRequestSubmission(
+                            provider: .shelfarr,
+                            outcomes: formats.map {
+                                BookRequestOutcome(
+                                    format: $0,
+                                    phase: .failed,
+                                    detail: error.userMessage,
+                                )
+                            },
+                        )
+                }
         }
     }
 

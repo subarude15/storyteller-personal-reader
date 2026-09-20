@@ -251,40 +251,16 @@ public struct SettingsView: View {
         }
 
     private func testShelfarrConnection() {
-        let base = config.shelfarrBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        let token = config.shelfarrAPIToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !base.isEmpty, !token.isEmpty else {
-            shelfarrConnectionStatus = .failed(errorMessage: "Base URL and token are required")
-            return
-        }
-        let urlString = base.hasSuffix("/") ? base + "api/v1/status" : base + "/api/v1/status"
-        guard let url = URL(string: urlString) else {
-            shelfarrConnectionStatus = .failed(errorMessage: "Invalid URL")
-            return
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.timeoutInterval = 5.0
-
+        let base = config.shelfarrBaseURL
+        let token = config.shelfarrAPIToken
         shelfarrConnectionStatus = nil
-
         Task { @MainActor in
-            do {
-                let (_, response) = try await URLSession.shared.data(for: request)
-                if let httpResponse = response as? HTTPURLResponse {
-                    if (200...299).contains(httpResponse.statusCode) {
-                        shelfarrConnectionStatus = .success
-                    } else {
-                        shelfarrConnectionStatus = .failed(
-                            errorMessage: "HTTP \(httpResponse.statusCode)"
-                        )
-                    }
-                } else {
-                    shelfarrConnectionStatus = .failed(errorMessage: "Invalid response")
-                }
-            } catch {
-                shelfarrConnectionStatus = .failed(errorMessage: error.localizedDescription)
+            let client = ShelfarrClient(baseURL: base, token: token)
+            switch await client.testConnection() {
+                case .success:
+                    shelfarrConnectionStatus = .success
+                case .failure(let error):
+                    shelfarrConnectionStatus = .failed(errorMessage: error.userMessage)
             }
         }
     }

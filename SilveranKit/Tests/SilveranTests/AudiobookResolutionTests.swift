@@ -217,12 +217,72 @@ struct AudiobookResolutionTests {
         #expect(items.isEmpty)
     }
 
+    @Test func emptySuccessfulSearchIsNotProviderUnavailable() async {
+        let provider = LibriVoxAudiobookProvider { _ in
+            Data("{\"books\":[]}".utf8)
+        }
+        let outcome = await AudiobookResolution.lookup(work: work(), providers: [provider])
+        #expect(outcome.results.isEmpty)
+        #expect(outcome.failure == nil)
+    }
+
+    @Test func validLibriVoxResponseReturnsItems() async throws {
+        let payload = try Data(contentsOf: fixtureURL())
+        let provider = LibriVoxAudiobookProvider { _ in payload }
+        let items = try await provider.search(work())
+        #expect(items.contains { $0.providerItemID == "52" })
+    }
+
+    @Test func http429IsRateLimited() async {
+        let provider = LibriVoxAudiobookProvider { _ in
+            throw AudiobookProviderError.rateLimited
+        }
+        let outcome = await AudiobookResolution.lookup(work: work(), providers: [provider])
+        #expect(outcome.results.isEmpty)
+        #expect(outcome.failure == .providerIssue(.librivox, .rateLimited))
+        #expect(outcome.failure?.message.contains("rate-limiting") == true)
+    }
+
+    @Test func http500IsUnexpectedResponse() async {
+        let provider = LibriVoxAudiobookProvider { _ in
+            throw AudiobookProviderError.httpStatus(500)
+        }
+        let outcome = await AudiobookResolution.lookup(work: work(), providers: [provider])
+        #expect(outcome.failure == .providerIssue(.librivox, .unexpectedResponse))
+        #expect(outcome.failure?.message.contains("unexpected response") == true)
+    }
+
+    @Test func timeoutAndNetworkErrorsAreDistinct() async {
+        let timeout = await AudiobookResolution.lookup(
+            work: work(),
+            providers: [StubProvider(error: AudiobookProviderError.timeout)],
+        )
+        #expect(timeout.failure == .providerIssue(.librivox, .timeout))
+        #expect(timeout.failure?.message.contains("timed out") == true)
+
+        let unreachable = await AudiobookResolution.lookup(
+            work: work(),
+            providers: [StubProvider(error: AudiobookProviderError.unreachable)],
+        )
+        #expect(unreachable.failure == .providerIssue(.librivox, .unreachable))
+        #expect(unreachable.failure?.message.contains("couldn't be reached") == true)
+    }
+
+    @Test func malformedJSONIsUnexpectedResponse() async {
+        let provider = LibriVoxAudiobookProvider { _ in
+            Data("not-json".utf8)
+        }
+        let outcome = await AudiobookResolution.lookup(work: work(), providers: [provider])
+        #expect(outcome.results.isEmpty)
+        #expect(outcome.failure == .providerIssue(.librivox, .unexpectedResponse))
+    }
+
     @Test func providerFailureDoesNotInventResults() async {
-        let provider = StubProvider(error: AudiobookProviderError.unavailable)
+        let provider = StubProvider(error: AudiobookProviderError.unreachable)
         let outcome = await AudiobookResolution.lookup(work: work(), providers: [provider])
         #expect(provider.calls == 1)
         #expect(outcome.results.isEmpty)
-        #expect(outcome.failure == .providerUnavailable(.librivox))
+        #expect(outcome.failure == .providerIssue(.librivox, .unreachable))
     }
 
     @Test func insufficientMetadataDoesNotQueryProviders() async {
