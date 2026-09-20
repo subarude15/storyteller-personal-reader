@@ -14,7 +14,6 @@ public struct ServiceHealthSettingsSnapshot: Sendable {
     public var shelfarrAPIToken: String
     public var bookSearchLANEnabled: Bool
     public var bookSearchLANBaseURL: String
-    public var storytellerLastSync: Date?
 
     public init(
         lazyLibrarianEnabled: Bool = false,
@@ -24,7 +23,6 @@ public struct ServiceHealthSettingsSnapshot: Sendable {
         shelfarrAPIToken: String = "",
         bookSearchLANEnabled: Bool = false,
         bookSearchLANBaseURL: String = "",
-        storytellerLastSync: Date? = nil,
     ) {
         self.lazyLibrarianEnabled = lazyLibrarianEnabled
         self.lazyLibrarianBaseURL = lazyLibrarianBaseURL
@@ -33,7 +31,6 @@ public struct ServiceHealthSettingsSnapshot: Sendable {
         self.shelfarrAPIToken = shelfarrAPIToken
         self.bookSearchLANEnabled = bookSearchLANEnabled
         self.bookSearchLANBaseURL = bookSearchLANBaseURL
-        self.storytellerLastSync = storytellerLastSync
     }
 }
 
@@ -80,10 +77,6 @@ public struct ServiceHealthDiagnostics: Sendable {
     public static func liveSettingsLoader() async -> ServiceHealthSettingsSnapshot {
         let config = await SettingsActor.shared.config
         let apiKey = (try? await AuthenticationActor.shared.loadLazyLibrarianAPIKey()) ?? ""
-        let lastSync =
-            UserDefaults.standard.object(
-                forKey: InkampStatsSyncDefaults.lastSuccessfulSyncAtKey
-            ) as? Date
         return ServiceHealthSettingsSnapshot(
             lazyLibrarianEnabled: config.lazyLibrarianEnabled,
             lazyLibrarianBaseURL: config.lazyLibrarianBaseURL,
@@ -92,7 +85,6 @@ public struct ServiceHealthDiagnostics: Sendable {
             shelfarrAPIToken: config.shelfarrAPIToken,
             bookSearchLANEnabled: config.bookSearchLANEnabled,
             bookSearchLANBaseURL: config.bookSearchLANBaseURL,
-            storytellerLastSync: lastSync,
         )
     }
 

@@ -223,12 +223,13 @@ struct ServiceHealthTests {
                 isConfigured: true,
                 isReachable: true,
                 sanitizedHost: "https://storyteller.example.com",
-                lastSync: Date().addingTimeInterval(-120),
             )
         )
         let result = await StorytellerHealthChecker(probe: probe).check(settings: .init())
         #expect(result.status == .healthy)
-        #expect(result.summary.hasPrefix("Connected"))
+        #expect(result.summary == "Connected")
+        #expect(result.detail == "Authenticated")
+        #expect(result.isActionableIssue == false)
     }
 
     @Test func storytellerUnreachable() async {
@@ -241,18 +242,36 @@ struct ServiceHealthTests {
         #expect(result.isActionableIssue)
     }
 
-    @Test func storytellerStaleSyncIsWarning() async {
+    @Test func storytellerStatsSyncAgeAloneDoesNotMakeUnhealthy() async {
+        // There is no persisted Storyteller library-sync timestamp today. Stats sync
+        // age must not be treated as library sync or produce Needs Attention.
+        let defaults = UserDefaults(suiteName: "storyteller-health-stats-\(UUID().uuidString)")!
+        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        defaults.set(
+            Date().addingTimeInterval(-24 * 3600),
+            forKey: InkampStatsSyncDefaults.lastSuccessfulSyncAtKey,
+        )
+
         let probe = StubStorytellerProbe(
             result: .init(
                 isConfigured: true,
                 isReachable: true,
-                lastSync: Date().addingTimeInterval(-12 * 3600),
+                sanitizedHost: "https://storyteller.example.com",
             )
         )
-        let result = await StorytellerHealthChecker(probe: probe).check(settings: .init())
-        #expect(result.status == .warning)
-        #expect(result.detail?.contains("12") == true)
-        #expect(result.isActionableIssue)
+        let result = await StorytellerHealthChecker(probe: probe).check(
+            settings: .init(
+                // Even if a caller somehow still carried a stale stats timestamp
+                // in another channel, health is reachability-only.
+            )
+        )
+        #expect(result.status == .healthy)
+        #expect(result.summary == "Connected")
+        #expect(result.detail == "Authenticated")
+        #expect(result.isActionableIssue == false)
+        #expect(result.suggestedAction == nil)
+        #expect(ServiceHealthAttention.items(from: [result]).isEmpty)
+        #expect(defaults.object(forKey: InkampStatsSyncDefaults.lastSuccessfulSyncAtKey) != nil)
     }
 
     // MARK: - Needs Attention
@@ -387,12 +406,8 @@ struct ServiceHealthTests {
 private struct StubStorytellerProbe: StorytellerHealthProbing {
     var result: StorytellerHealthProbeResult
 
-    func probe(lastSyncHint: Date?) async -> StorytellerHealthProbeResult {
-        var copy = result
-        if copy.lastSync == nil {
-            copy.lastSync = lastSyncHint
-        }
-        return copy
+    func probe() async -> StorytellerHealthProbeResult {
+        result
     }
 }
 
