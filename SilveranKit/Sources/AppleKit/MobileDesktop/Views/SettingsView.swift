@@ -236,7 +236,9 @@ public struct SettingsView: View {
                         shelfarrAPIToken: newValue.shelfarrAPIToken,
                         lazyLibrarianEnabled: newValue.lazyLibrarianEnabled,
                         lazyLibrarianBaseURL: newValue.lazyLibrarianBaseURL,
-                        bookRequestProvider: newValue.bookRequestProvider
+                        bookRequestProvider: newValue.bookRequestProvider,
+                        bookSearchLANEnabled: newValue.bookSearchLANEnabled,
+                        bookSearchLANBaseURL: newValue.bookSearchLANBaseURL
                     )
                 } catch {
                     await MainActor.run {
@@ -414,6 +416,8 @@ extension SettingsView {
                     shelfarrBaseURL: $config.shelfarrBaseURL,
                     shelfarrAPIToken: $config.shelfarrAPIToken,
                     bookRequestProvider: $config.bookRequestProvider,
+                    bookSearchLANEnabled: $config.bookSearchLANEnabled,
+                    bookSearchLANBaseURL: $config.bookSearchLANBaseURL,
                     shelfarrConnectionStatus: shelfarrConnectionStatus,
                     onTestShelfarr: testShelfarrConnection,
                 )
@@ -548,6 +552,11 @@ extension SettingsView {
                     } label: {
                         Label("Book Sources", systemImage: "externaldrive")
                     }
+                    NavigationLink {
+                        ServicesHealthView()
+                    } label: {
+                        Label("Services & Health", systemImage: "heart.text.square")
+                    }
                 }
 
                 Section("Podcasts") {
@@ -642,6 +651,25 @@ extension SettingsView {
                 } footer: {
                     Text(
                         "Used when both LazyLibrarian and Shelfarr are set up. Otherwise the configured one is used. A request asks that server to search. It does not mean the file is downloaded."
+                    )
+                }
+
+                Section {
+                    Toggle("Enabled", isOn: $config.bookSearchLANEnabled)
+                    TextField(
+                        "Base URL",
+                        text: $config.bookSearchLANBaseURL,
+                        prompt: Text("http://192.168.1.2:3010"),
+                    )
+                    .textContentType(.URL)
+                    .keyboardType(.URL)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                } header: {
+                    Text("Book Search (LAN-only)")
+                } footer: {
+                    Text(
+                        "Optional helper on your home network only. It has no authentication and is never exposed publicly. Off-network unavailability is informational, not an error."
                     )
                 }
 
@@ -1175,6 +1203,8 @@ private struct MacBookSourcesSettingsView: View {
     @Binding var shelfarrBaseURL: String
     @Binding var shelfarrAPIToken: String
     @Binding var bookRequestProvider: String
+    @Binding var bookSearchLANEnabled: Bool
+    @Binding var bookSearchLANBaseURL: String
     var shelfarrConnectionStatus: SettingsView.ShelfarrConnectionStatus?
     var onTestShelfarr: () -> Void
 
@@ -1183,11 +1213,19 @@ private struct MacBookSourcesSettingsView: View {
             StorytellerServerSettingsView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
-            Form {
-                LazyLibrarianSettingsSection(
-                    enabled: $lazyLibrarianEnabled,
-                    baseURL: $lazyLibrarianBaseURL,
-                )
+            NavigationStack {
+                Form {
+                    Section {
+                        NavigationLink {
+                            ServicesHealthView()
+                        } label: {
+                            Label("Services & Health", systemImage: "heart.text.square")
+                        }
+                    }
+                    LazyLibrarianSettingsSection(
+                        enabled: $lazyLibrarianEnabled,
+                        baseURL: $lazyLibrarianBaseURL,
+                    )
                 Section("Shelfarr") {
                     TextField(
                         "Base URL",
@@ -1236,8 +1274,26 @@ private struct MacBookSourcesSettingsView: View {
                         "Used when both LazyLibrarian and Shelfarr are set up. Otherwise the configured one is used. A request asks that server to search. It does not mean the file is downloaded."
                     )
                 }
+                Section {
+                    Toggle("Enabled", isOn: $bookSearchLANEnabled)
+                    TextField(
+                        "Base URL",
+                        text: $bookSearchLANBaseURL,
+                        prompt: Text("http://192.168.1.2:3010"),
+                    )
+                    .textContentType(.URL)
+                    .autocorrectionDisabled()
+                } header: {
+                    Text("Book Search (LAN-only)")
+                } footer: {
+                    Text(
+                        "Optional helper on your home network only. Off-network unavailability is informational, not an error."
+                    )
+                }
             }
-            .frame(maxHeight: 360)
+            .formStyle(.grouped)
+            .frame(maxHeight: 420)
+            }
         }
     }
 }
