@@ -27,16 +27,14 @@ struct RequestActivityTimelineTests {
     @Test func searchingToWantedAppendsOnce() {
         var current = item(provider: .lazyLibrarian, statuses: [.ebook: .searching])
         current = RequestActivityTimeline.recordingTransitions(previous: nil, incoming: current)
+        #expect(current.events?.map(\.kind) == [.searching])
+
         var next = current
         next.formatStatuses = [
             RequestFormatStatus(format: .ebook, status: .wanted, detail: "Wanted")
         ]
         next = RequestActivityTimeline.recordingTransitions(previous: current, incoming: next)
-        #expect(next.events?.map(\.kind) == [.requested, .wanted] || next.events?.map(\.kind) == [
-            .searching, .wanted,
-        ])
-        // Initial was searching (not requested) when previous was nil.
-        #expect(next.events?.filter { $0.kind == .wanted }.count == 1)
+        #expect(next.events?.map(\.kind) == [.searching, .wanted])
 
         let refreshed = RequestActivityTimeline.recordingTransitions(previous: next, incoming: next)
         #expect(refreshed.events?.filter { $0.kind == .wanted }.count == 1)
@@ -237,6 +235,40 @@ struct RequestActivityTimelineTests {
         decoder.dateDecodingStrategy = .iso8601
         let decoded = try decoder.decode(RequestActivityItem.self, from: stripped)
         #expect(decoded.events == nil)
+    }
+
+    @Test func duplicateDiagnosticsAreHiddenWhenStatusAlreadyShowsThem() {
+        var current = item(provider: .lazyLibrarian, statuses: [.audiobook: .needsAttention])
+        current.formatStatuses = [
+            RequestFormatStatus(
+                format: .audiobook,
+                status: .needsAttention,
+                detail: "Missing LazyLibrarian BookID",
+            )
+        ]
+        current.lastError = "Missing LazyLibrarian BookID"
+        current.attentionReason = "Missing LazyLibrarian BookID"
+        let extras = RequestActivityTimeline.extraDiagnostics(for: current)
+        #expect(extras.lastError == nil)
+        #expect(extras.attentionReason == nil)
+        #expect(current.lastError == "Missing LazyLibrarian BookID")
+        #expect(current.attentionReason == "Missing LazyLibrarian BookID")
+    }
+
+    @Test func distinctDiagnosticIsStillShown() {
+        var current = item(provider: .lazyLibrarian, statuses: [.ebook: .needsAttention])
+        current.formatStatuses = [
+            RequestFormatStatus(
+                format: .ebook,
+                status: .needsAttention,
+                detail: "Still waiting after 24 hours",
+            )
+        ]
+        current.lastError = "Could not reach LazyLibrarian"
+        current.attentionReason = "Still waiting after 24 hours"
+        let extras = RequestActivityTimeline.extraDiagnostics(for: current)
+        #expect(extras.lastError == "Could not reach LazyLibrarian")
+        #expect(extras.attentionReason == nil)
     }
 
     @Test func storeRecordsTransitionsOnUpsert() {

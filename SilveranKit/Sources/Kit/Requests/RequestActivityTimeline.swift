@@ -228,6 +228,42 @@ public enum RequestActivityTimeline {
         return joined.isEmpty ? nil : joined
     }
 
+    /// Presentation-only: hide Last error / Needs attention sections when they
+    /// already match a format detail shown in Status. Does not mutate stored fields.
+    public static func extraDiagnostics(for item: RequestActivityItem) -> (
+        lastError: String?,
+        attentionReason: String?
+    ) {
+        let statusDetails = Set(
+            item.formatStatuses.compactMap { status -> String? in
+                guard let detail = status.detail?.trimmingCharacters(in: .whitespacesAndNewlines),
+                    !detail.isEmpty
+                else { return nil }
+                return detail
+            }
+        )
+        let lastError = item.lastError?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let attention = item.attentionReason?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let showError: String?
+        if let lastError, !lastError.isEmpty, !statusDetails.contains(lastError) {
+            showError = lastError
+        } else {
+            showError = nil
+        }
+        let showAttention: String?
+        if let attention, !attention.isEmpty, !statusDetails.contains(attention) {
+            // Also hide when it only repeats lastError already shown above.
+            if showError == attention {
+                showAttention = nil
+            } else {
+                showAttention = attention
+            }
+        } else {
+            showAttention = nil
+        }
+        return (showError, showAttention)
+    }
+
     public static func kind(for status: RequestActivityStatus) -> RequestActivityEventKind? {
         switch status {
             case .requested:

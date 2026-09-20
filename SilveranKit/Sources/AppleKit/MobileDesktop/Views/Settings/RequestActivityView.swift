@@ -542,11 +542,6 @@ private struct RequestActivityRow: View {
             .foregroundStyle(.secondary)
             Text(item.overallStatus.label)
                 .font(.subheadline.weight(.semibold))
-            if item.fallbackKind == .automatic {
-                Text("Automatic fallback")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
             if let detail = primaryDetail {
                 Text(detail)
                     .font(.caption)
@@ -848,13 +843,14 @@ struct RequestActivityDetailView: View {
                 }
             }
 
-            if let error = item.lastError {
+            let extras = RequestActivityTimeline.extraDiagnostics(for: item)
+            if let error = extras.lastError {
                 Section("Last error") {
                     Text(error)
                 }
             }
 
-            if let reason = item.attentionReason {
+            if let reason = extras.attentionReason {
                 Section("Needs attention") {
                     Text(reason)
                 }
@@ -929,8 +925,7 @@ private struct RequestActivityTimelineRow: View {
                 if !isLast {
                     Rectangle()
                         .fill(Color.secondary.opacity(0.25))
-                        .frame(width: 2)
-                        .frame(maxHeight: .infinity)
+                        .frame(width: 2, height: 14)
                 }
             }
             .frame(width: 20)
