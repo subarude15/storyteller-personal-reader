@@ -116,7 +116,7 @@ public struct LazyLibrarianCandidate: Equatable, Sendable {
     }
 }
 
-public enum LazyLibrarianMatchFailure: Equatable, Sendable {
+public enum LazyLibrarianMatchFailure: Error, Equatable, Sendable {
     case noMatch
     case ambiguous
 }
@@ -276,7 +276,7 @@ public struct LazyLibrarianClient: Sendable {
         let found: [LazyLibrarianCandidate]
         switch await candidates(work: work, baseURL: baseURL, apiKey: key) {
             case .failure(let message):
-                return failed(formats, message, apiKey: key)
+                return failed(formats, message.text, apiKey: key)
             case .success(let rows):
                 found = rows
         }
@@ -301,7 +301,7 @@ public struct LazyLibrarianClient: Sendable {
         let record: OwnedBook
         switch await ensureBook(id: chosen.bookID, baseURL: baseURL, apiKey: key) {
             case .failure(let message):
-                return failed(formats, message, apiKey: key)
+                return failed(formats, message.text, apiKey: key)
             case .success(let owned):
                 record = owned
         }
@@ -325,7 +325,7 @@ public struct LazyLibrarianClient: Sendable {
         work: CanonicalBookWork,
         baseURL: String,
         apiKey: String,
-    ) async -> Result<[LazyLibrarianCandidate], String> {
+    ) async -> Result<[LazyLibrarianCandidate], Note> {
         var rows: [LazyLibrarianCandidate] = []
         var seen = Set<String>()
         func absorb(_ hits: [LazyLibrarianCandidate]) {
@@ -354,7 +354,7 @@ public struct LazyLibrarianClient: Sendable {
         id: String,
         baseURL: String,
         apiKey: String,
-    ) async -> Result<OwnedBook, String> {
+    ) async -> Result<OwnedBook, Note> {
         switch await getBook(id: id, baseURL: baseURL, apiKey: apiKey) {
             case .failure(let message): return .failure(message)
             case .success(let existing?): return .success(existing)
@@ -370,19 +370,19 @@ public struct LazyLibrarianClient: Sendable {
             case .failure(let message): return .failure(message)
             case .success(let body):
                 if let object = jsonObject(body) as? Bool, object == false {
-                    return .failure("LazyLibrarian did not add this book.")
+                    return .failure(note("LazyLibrarian did not add this book."))
                 }
                 if let text = String(data: body, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
                     text == "false"
                 {
-                    return .failure("LazyLibrarian did not add this book.")
+                    return .failure(note("LazyLibrarian did not add this book."))
                 }
         }
         switch await getBook(id: id, baseURL: baseURL, apiKey: apiKey) {
             case .failure(let message): return .failure(message)
             case .success(let owned?): return .success(owned)
             case .success(nil):
-                return .failure("LazyLibrarian did not add this book.")
+                return .failure(note("LazyLibrarian did not add this book."))
         }
     }
 
@@ -424,7 +424,7 @@ public struct LazyLibrarianClient: Sendable {
             timeout: 20,
         ) {
             case .failure(let message):
-                return BookRequestOutcome(format: format, phase: .failed, detail: message)
+                return BookRequestOutcome(format: format, phase: .failed, detail: message.text)
             case .success(let body):
                 if !accepted(body) {
                     return BookRequestOutcome(
@@ -467,7 +467,7 @@ public struct LazyLibrarianClient: Sendable {
         name: String,
         baseURL: String,
         apiKey: String,
-    ) async -> Result<[LazyLibrarianCandidate], String> {
+    ) async -> Result<[LazyLibrarianCandidate], Note> {
         switch await command(
             "findBook",
             parameters: ["name": name],
@@ -478,13 +478,13 @@ public struct LazyLibrarianClient: Sendable {
             case .failure(let message): return .failure(message)
             case .success(let body):
                 guard let object = jsonObject(body) else {
-                    return .failure(textDetail(body, apiKey: apiKey, fallback: "Invalid server response."))
+                    return .failure(note(textDetail(body, apiKey: apiKey, fallback: "Invalid server response.")))
                 }
                 if let error = apiError(object) {
-                    return .failure(LazyLibrarianEndpoint.redact(error, apiKey: apiKey))
+                    return .failure(note(LazyLibrarianEndpoint.redact(error, apiKey: apiKey)))
                 }
                 guard let rows = object as? [Any] else {
-                    return .failure("Invalid server response.")
+                    return .failure(note("Invalid server response."))
                 }
                 return .success(rows.compactMap(candidate(from:)))
         }
@@ -494,7 +494,7 @@ public struct LazyLibrarianClient: Sendable {
         id: String,
         baseURL: String,
         apiKey: String,
-    ) async -> Result<OwnedBook?, String> {
+    ) async -> Result<OwnedBook?, Note> {
         switch await command(
             "getBook",
             parameters: ["id": id],
@@ -505,17 +505,17 @@ public struct LazyLibrarianClient: Sendable {
             case .failure(let message): return .failure(message)
             case .success(let body):
                 guard let object = jsonObject(body) as? [String: Any] else {
-                    return .failure(textDetail(body, apiKey: apiKey, fallback: "Invalid server response."))
+                    return .failure(note(textDetail(body, apiKey: apiKey, fallback: "Invalid server response.")))
                 }
                 if let error = apiError(object) {
-                    return .failure(LazyLibrarianEndpoint.redact(error, apiKey: apiKey))
+                    return .failure(note(LazyLibrarianEndpoint.redact(error, apiKey: apiKey)))
                 }
                 guard let books = object["book"] as? [Any] else {
-                    return .failure("Invalid server response.")
+                    return .failure(note("Invalid server response."))
                 }
                 guard let first = books.first else { return .success(nil) }
                 guard let parsed = owned(from: first) else {
-                    return .failure("Invalid server response.")
+                    return .failure(note("Invalid server response."))
                 }
                 return .success(parsed)
         }
@@ -527,22 +527,26 @@ public struct LazyLibrarianClient: Sendable {
         baseURL: String,
         apiKey: String,
         timeout: TimeInterval,
-    ) async -> Result<Data, String> {
+    ) async -> Result<Data, Note> {
         guard let url = LazyLibrarianEndpoint.url(
             base: baseURL,
             apiKey: apiKey,
             command: command,
             parameters: parameters,
-        ) else { return .failure("The server URL is not valid.") }
+        ) else { return .failure(note("The server URL is not valid.")) }
         switch await call(url, timeout: timeout, apiKey: apiKey) {
             case .failure(let failure):
-                return .failure(failure.message(apiKey: apiKey))
+                return .failure(note(failure.message(apiKey: apiKey)))
             case .success(let body):
                 return .success(body)
         }
     }
 
-    private enum CallFailure {
+    private struct Note: Error, Sendable {
+        var text: String
+    }
+
+    private enum CallFailure: Error, Sendable {
         case cannotReachServer
         case unauthorized
         case invalidResponse
@@ -600,6 +604,10 @@ public struct LazyLibrarianClient: Sendable {
         return formats.map {
             BookRequestOutcome(format: $0, phase: .failed, detail: safe)
         }
+    }
+
+    private func note(_ text: String) -> Note {
+        Note(text: text)
     }
 
     private func accepted(_ body: Data) -> Bool {
