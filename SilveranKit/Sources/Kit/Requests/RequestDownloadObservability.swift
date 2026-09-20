@@ -13,6 +13,8 @@ public enum RequestDownloadObservability {
     ) -> RequestActivityItem {
         var updated = item
         var states = updated.downloadStates ?? []
+        // One newly discovered torrent claims at most one format on this pass.
+        var claimedTorrentIDs = Set<String>()
 
         for format in BookRequestFormat.allCases where item.requestedFormats.contains(format) {
             // Storyteller always wins — clear active download control for completed formats.
@@ -54,13 +56,33 @@ public enum RequestDownloadObservability {
                     )
                 }
             } else {
+                // Exclude torrents already linked to a sibling format (updated as we go)
+                // and torrents newly claimed earlier in this pass.
+                var excluding = claimedTorrentIDs
+                for state in states where state.format != format {
+                    let id = state.torrentID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    if !id.isEmpty { excluding.insert(id) }
+                }
+                if let ownID = previous?.torrentID?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                    !ownID.isEmpty
+                {
+                    excluding.remove(ownID)
+                }
                 next = resolveState(
                     item: item,
                     format: format,
                     previous: previous,
                     index: index,
+                    excludingTorrentIDs: excluding,
                     now: now,
                 )
+            }
+
+            if let claimed = next.torrentID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                !claimed.isEmpty
+            {
+                claimedTorrentIDs.insert(claimed)
             }
 
             if let idx = states.firstIndex(where: { $0.format == format }) {
@@ -148,9 +170,15 @@ public enum RequestDownloadObservability {
         format: BookRequestFormat,
         previous: RequestFormatDownloadState?,
         index: DelugeTorrentIndex,
+        excludingTorrentIDs: Set<String>,
         now: Date,
     ) -> RequestFormatDownloadState {
-        switch DelugeRequestMatcher.match(item: item, format: format, index: index) {
+        switch DelugeRequestMatcher.match(
+            item: item,
+            format: format,
+            index: index,
+            excludingTorrentIDs: excludingTorrentIDs,
+        ) {
             case .matched(let snapshot):
                 return mapSnapshot(
                     snapshot,

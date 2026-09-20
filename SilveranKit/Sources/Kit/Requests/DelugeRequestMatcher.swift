@@ -1,11 +1,20 @@
 import Foundation
 
+/// Detectable format hints in a Deluge torrent name/path.
+public enum DelugeTorrentFormatEvidence: Equatable, Sendable {
+    case audiobook
+    case ebook
+    case mixed
+    case none
+}
+
 /// Pure request ↔ Deluge torrent matching. Never guesses.
 public enum DelugeRequestMatcher {
     public static func match(
         item: RequestActivityItem,
         format: BookRequestFormat,
         index: DelugeTorrentIndex,
+        excludingTorrentIDs: Set<String> = [],
     ) -> DelugeMatchResult {
         if let existing = item.downloadState(for: format)?.torrentID?
             .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -18,14 +27,20 @@ public enum DelugeRequestMatcher {
         }
 
         let candidates = index.torrents.filter { torrent in
-            scores(item: item, format: format, torrent: torrent) != nil
+            guard !excludingTorrentIDs.contains(torrent.id) else { return false }
+            guard scores(item: item, format: format, torrent: torrent) != nil else { return false }
+            return isFormatCompatible(
+                format: format,
+                torrent: torrent,
+                requestedFormats: item.requestedFormats,
+            )
         }
         if candidates.isEmpty { return .noMatch }
         if candidates.count > 1 { return .ambiguous }
         return .matched(candidates[0])
     }
 
-    /// Returns a confidence tag when the torrent is an acceptable match.
+    /// Returns a confidence tag when the torrent is an acceptable book-identity match.
     static func scores(
         item: RequestActivityItem,
         format: BookRequestFormat,
@@ -56,6 +71,60 @@ public enum DelugeRequestMatcher {
             return nil
         }
         return nil
+    }
+
+    /// Format-aware eligibility after book identity has already matched.
+    public static func isFormatCompatible(
+        format: BookRequestFormat,
+        torrent: DelugeTorrentSnapshot,
+        requestedFormats: [BookRequestFormat],
+    ) -> Bool {
+        switch formatEvidence(name: torrent.name, savePath: torrent.savePath) {
+            case .audiobook:
+                return format == .audiobook
+            case .ebook:
+                return format == .ebook
+            case .mixed:
+                // Explicit dual signals: eligible for either; claim tracking prevents double-attach.
+                return true
+            case .none:
+                let unique = Set(requestedFormats)
+                // Single-format requests may attach a format-unknown torrent.
+                // Both-format requests must not guess.
+                return unique.count <= 1 && unique.contains(format)
+        }
+    }
+
+    /// Conservative format signals from torrent name/path. Tokenized — no loose substrings.
+    public static func formatEvidence(name: String, savePath: String?) -> DelugeTorrentFormatEvidence {
+        let haystack = normalize("\(name) \(savePath ?? "")")
+        guard !haystack.isEmpty else { return .none }
+        let tokens = Set(haystack.split(separator: " ").map(String.init))
+
+        let hasAudiobook =
+            tokens.contains("audiobook")
+            || tokens.contains("m4b")
+            || tokens.contains("mp3")
+            || tokens.contains("m4a")
+            || tokens.contains("opus")
+            || tokens.contains("flac")
+            || containsPhrase(haystack, phrase: "audio book")
+
+        let hasEbook =
+            tokens.contains("ebook")
+            || tokens.contains("epub")
+            || tokens.contains("azw")
+            || tokens.contains("azw3")
+            || tokens.contains("mobi")
+            || tokens.contains("pdf")
+            || containsPhrase(haystack, phrase: "e book")
+
+        switch (hasAudiobook, hasEbook) {
+            case (true, true): return .mixed
+            case (true, false): return .audiobook
+            case (false, true): return .ebook
+            case (false, false): return .none
+        }
     }
 
     // MARK: - Normalization
