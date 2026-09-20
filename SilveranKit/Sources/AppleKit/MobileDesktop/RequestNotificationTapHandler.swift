@@ -1,11 +1,6 @@
 import Foundation
 import SilveranKit
 
-/// Lightweight pending-navigation flag for Request Activity notification taps.
-public enum RequestActivityNavigationPending {
-    nonisolated(unsafe) public static var shouldOpen = false
-}
-
 #if canImport(UserNotifications) && (os(iOS) || os(macOS))
 import UserNotifications
 
@@ -39,15 +34,18 @@ private final class RequestNotificationCenterDelegate: NSObject, UNUserNotificat
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
     ) async {
-        let info = response.notification.request.content.userInfo
+        let request = RequestActivityNavigation.request(
+            from: response.notification.request.content.userInfo
+        )
+        // Store before posting so a cold start still has the destination when Home mounts.
+        RequestActivityNavigationCoordinator.shared.set(request.destination)
         var userInfo: [AnyHashable: Any] = [:]
-        if let requestID = info["requestID"] as? String {
-            userInfo["requestID"] = requestID
+        if let requestID = request.destination.requestID {
+            userInfo[RequestActivityNavigation.requestIDKey] = requestID
         }
-        if let kind = info["kind"] as? String {
-            userInfo["kind"] = kind
+        if let kind = request.kind {
+            userInfo[RequestActivityNavigation.kindKey] = kind
         }
-        RequestActivityNavigationPending.shouldOpen = true
         NotificationCenter.default.post(
             name: .punkRallyShowRequestActivity,
             object: nil,

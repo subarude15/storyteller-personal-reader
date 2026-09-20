@@ -12,6 +12,7 @@ struct RequestActivityLibraryEntry: View {
     @State private var tick = 0
     @State private var lastAppliedLibraryVersion: Int?
     @State private var openFromNotification = false
+    @State private var linkedRequestID: String?
 
     var body: some View {
         Group {
@@ -55,7 +56,8 @@ struct RequestActivityLibraryEntry: View {
         }
         .background {
             NavigationLink(isActive: $openFromNotification) {
-                RequestActivityView()
+                RequestActivityView(initialRequestID: linkedRequestID)
+                    .id(linkedRequestID ?? "request-activity-list")
             } label: {
                 EmptyView()
             }
@@ -64,10 +66,7 @@ struct RequestActivityLibraryEntry: View {
         .id(tick)
         .onAppear {
             applyLibraryAndReload()
-            if RequestActivityNavigationPending.shouldOpen {
-                RequestActivityNavigationPending.shouldOpen = false
-                openFromNotification = true
-            }
+            openPendingDestinationIfNeeded()
         }
         .onChange(of: mediaViewModel.libraryVersion) { _, _ in
             applyLibraryAndReload()
@@ -79,8 +78,27 @@ struct RequestActivityLibraryEntry: View {
         }
         .onReceive(
             NotificationCenter.default.publisher(for: .punkRallyShowRequestActivity)
-        ) { _ in
-            RequestActivityNavigationPending.shouldOpen = false
+        ) { note in
+            if RequestActivityNavigationCoordinator.shared.peek() == nil {
+                let parsed = RequestActivityNavigation.request(from: note.userInfo)
+                RequestActivityNavigationCoordinator.shared.set(parsed.destination)
+            }
+            openPendingDestinationIfNeeded()
+        }
+    }
+
+    /// Consume the one-shot destination. A second signal with nothing pending does not push again.
+    private func openPendingDestinationIfNeeded() {
+        guard let destination = RequestActivityNavigationCoordinator.shared.consume() else { return }
+        let nextID = destination.requestID
+        if openFromNotification, linkedRequestID == nextID { return }
+        linkedRequestID = nextID
+        if openFromNotification {
+            openFromNotification = false
+            DispatchQueue.main.async {
+                openFromNotification = true
+            }
+        } else {
             openFromNotification = true
         }
     }

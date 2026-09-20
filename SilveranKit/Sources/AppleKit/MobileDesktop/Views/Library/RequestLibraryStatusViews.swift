@@ -110,8 +110,9 @@ struct RequestLibraryStatusBadgeLink: View {
 
     var body: some View {
         if let state = index.badge(for: book) {
+            let destination = RequestActivityLibraryNavigation.badge(book: book, index: index)
             NavigationLink {
-                RequestActivityView()
+                RequestActivityView(initialRequestID: destination.requestID)
             } label: {
                 RequestLibraryStatusBadge(state: state)
             }
@@ -133,7 +134,9 @@ struct RequestLibraryPendingSection: View {
                     .foregroundStyle(.secondary)
                 ForEach(rows) { row in
                     NavigationLink {
-                        RequestActivityView()
+                        RequestActivityView(
+                            initialRequestID: RequestActivityLibraryNavigation.pendingRow(row).requestID
+                        )
                     } label: {
                         HStack(spacing: 8) {
                             VStack(alignment: .leading, spacing: 2) {
