@@ -114,7 +114,7 @@ struct BookRequestSheet: View {
                     .foregroundStyle(.secondary)
             } else if let status = tracked?.status(for: format) {
                 switch status.status {
-                    case .available, .alreadyAvailable, .downloaded:
+                    case .availableInLibrary, .available, .alreadyAvailable, .downloaded:
                         Text(status.status.label)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -138,7 +138,7 @@ struct BookRequestSheet: View {
             if owned.contains(format) { return false }
             guard let status = tracked?.status(for: format) else { return true }
             switch status.status {
-                case .available, .alreadyAvailable, .downloaded,
+                case .availableInLibrary, .available, .alreadyAvailable, .downloaded,
                     .wanted, .searching, .snatched, .requested, .alreadyRequested:
                     return false
                 case .failed, .needsAttention, .unknown:

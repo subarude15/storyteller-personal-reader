@@ -72,6 +72,7 @@ public struct RequestActivityLibrarySummary: Equatable, Sendable {
 
 extension RequestActivityGrouping {
     /// Completed / available items newer than this are mentioned in the library summary.
+    /// Only `availableInLibrary` rows land in `.completed`.
     public static let recentCompletionWindow: TimeInterval = 48 * 3600
 
     public static func librarySummary(
@@ -113,37 +114,42 @@ extension RequestActivityGrouping {
 }
 
 extension RequestActivityItem {
-    /// One-line human status for book detail (format · status).
+    /// One-line human status for book detail. Mixed formats are both listed.
     public var libraryDetailStatusLine: String {
-        if let attention = formatStatuses.first(where: { $0.status.needsAttentionBucket }) {
-            return "\(attention.format.label) · Needs attention"
+        let parts = requestedFormats.compactMap { format -> String? in
+            guard let status = status(for: format)?.status else { return nil }
+            return "\(format.label) · \(displayLabel(for: status))"
         }
-        if let active = formatStatuses.first(where: \.status.isInProgress) {
-            return "\(active.format.label) · \(humanStatusLabel(active.status))"
+        if parts.isEmpty {
+            return "\(formatsLabel) · \(displayLabel(for: overallStatus))"
         }
-        if let completed = formatStatuses.first(where: \.status.isCompleted) {
-            return "\(completed.format.label) · \(availableLabel)"
+        if parts.count == 1 { return parts[0] }
+        if formatStatuses.allSatisfy({ $0.status == .availableInLibrary }) {
+            return "Both · Available in Library"
         }
-        return "\(formatsLabel) · \(overallStatus.label)"
+        return parts.joined(separator: "; ")
     }
 
-    private var availableLabel: String {
-        switch provider {
-            case .lazyLibrarian: "Available from LazyLibrarian"
-            case .shelfarr: "Available from Shelfarr"
-            case .automatic: "Available"
-        }
-    }
-
-    private func humanStatusLabel(_ status: RequestActivityStatus) -> String {
+    private func displayLabel(for status: RequestActivityStatus) -> String {
         switch status {
-            case .wanted, .searching: "Searching"
-            case .requested, .alreadyRequested: "In progress"
-            case .snatched: "Snatched"
-            case .downloaded: "Downloaded"
-            case .available, .alreadyAvailable: "Available"
-            case .failed, .needsAttention: "Needs attention"
-            case .unknown: "In progress"
+            case .availableInLibrary:
+                "Available in Library"
+            case .available, .alreadyAvailable:
+                switch provider {
+                    case .lazyLibrarian: "Available from LazyLibrarian"
+                    case .shelfarr: "Available from Shelfarr"
+                    case .automatic: "Available"
+                }
+            case .wanted, .searching:
+                "Searching"
+            case .requested, .alreadyRequested, .unknown:
+                "In progress"
+            case .snatched:
+                "Snatched"
+            case .downloaded:
+                "Downloaded"
+            case .failed, .needsAttention:
+                "Needs attention"
         }
     }
 }

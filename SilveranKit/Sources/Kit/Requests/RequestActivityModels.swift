@@ -7,8 +7,11 @@ public enum RequestActivityStatus: String, Codable, Equatable, Sendable, CaseIte
     case wanted
     case snatched
     case downloaded
+    /// Provider reports the file (e.g. LazyLibrarian Have). Not yet in Storyteller.
     case available
     case alreadyAvailable
+    /// Storyteller library contains this format — true completion for the reader.
+    case availableInLibrary
     case alreadyRequested
     case failed
     case needsAttention
@@ -21,8 +24,9 @@ public enum RequestActivityStatus: String, Codable, Equatable, Sendable, CaseIte
             case .wanted: "Wanted"
             case .snatched: "Snatched"
             case .downloaded: "Downloaded"
-            case .available: "Available"
+            case .available: "Available from LazyLibrarian"
             case .alreadyAvailable: "Already available"
+            case .availableInLibrary: "Available in Library"
             case .alreadyRequested: "Already requested"
             case .failed: "Failed"
             case .needsAttention: "Needs attention"
@@ -30,25 +34,34 @@ public enum RequestActivityStatus: String, Codable, Equatable, Sendable, CaseIte
         }
     }
 
-    /// Still actively waiting on the provider.
+    /// Still waiting from the user's perspective (including provider-side Have).
+    /// Only `availableInLibrary` counts as fully done — the goal is to read/listen here.
     public var isInProgress: Bool {
         switch self {
-            case .requested, .searching, .wanted, .snatched, .downloaded, .alreadyRequested, .unknown:
+            case .requested, .searching, .wanted, .snatched, .downloaded, .alreadyRequested,
+                .available, .alreadyAvailable, .unknown:
                 true
-            case .available, .alreadyAvailable, .failed, .needsAttention:
+            case .availableInLibrary, .failed, .needsAttention:
                 false
         }
     }
 
+    /// Truly completed: present in the Storyteller / local library.
+    /// Provider-side `.available` / `.alreadyAvailable` / `.downloaded` stay in progress.
     public var isCompleted: Bool {
-        switch self {
-            case .available, .alreadyAvailable, .downloaded: true
-            default: false
-        }
+        self == .availableInLibrary
     }
 
     public var needsAttentionBucket: Bool {
         self == .needsAttention || self == .failed
+    }
+
+    /// LazyLibrarian (or similar) reports the file on the provider.
+    public var isProviderAvailable: Bool {
+        switch self {
+            case .available, .alreadyAvailable, .downloaded: true
+            default: false
+        }
     }
 }
 
@@ -91,6 +104,10 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
     public var formatStatuses: [RequestFormatStatus]
     public var lastError: String?
     public var attentionReason: String?
+    /// Optional matching hints — absent on older stored rows.
+    public var openLibraryWorkID: String?
+    public var openLibraryEditionID: String?
+    public var isbn: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -106,6 +123,9 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
         formatStatuses: [RequestFormatStatus] = [],
         lastError: String? = nil,
         attentionReason: String? = nil,
+        openLibraryWorkID: String? = nil,
+        openLibraryEditionID: String? = nil,
+        isbn: String? = nil,
     ) {
         self.id = id
         self.canonicalWorkID = canonicalWorkID
@@ -120,6 +140,9 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
         self.formatStatuses = formatStatuses
         self.lastError = lastError
         self.attentionReason = attentionReason
+        self.openLibraryWorkID = openLibraryWorkID
+        self.openLibraryEditionID = openLibraryEditionID
+        self.isbn = isbn
     }
 
     public var overallStatus: RequestActivityStatus {
@@ -129,8 +152,8 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
         if formatStatuses.contains(where: \.status.isInProgress) {
             return formatStatuses.first(where: \.status.isInProgress)?.status ?? .requested
         }
-        if formatStatuses.allSatisfy(\.status.isCompleted) {
-            return .available
+        if !formatStatuses.isEmpty, formatStatuses.allSatisfy(\.status.isCompleted) {
+            return .availableInLibrary
         }
         return formatStatuses.first?.status ?? .unknown
     }
@@ -144,6 +167,14 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
         if labels.count == 2 { return "Both" }
         return labels.first ?? "—"
     }
+
+    /// True when every requested format is present in Storyteller.
+    public var allRequestedFormatsInLibrary: Bool {
+        guard !requestedFormats.isEmpty else { return false }
+        return requestedFormats.allSatisfy { format in
+            status(for: format)?.status == .availableInLibrary
+        }
+    }
 }
 
 public enum RequestActivitySection: String, Sendable, CaseIterable, Hashable {
@@ -156,7 +187,7 @@ public enum RequestActivitySection: String, Sendable, CaseIterable, Hashable {
         switch self {
             case .needsAttention: "Needs Attention"
             case .inProgress: "In Progress"
-            case .completed: "Completed / Available"
+            case .completed: "Available in Library"
             case .recent: "Recent"
         }
     }

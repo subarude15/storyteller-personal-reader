@@ -488,16 +488,18 @@ struct RequestActivityTests {
             ],
             now: now,
         )
-        #expect(summary.subtitle == "1 needs attention")
-        #expect(summary.recentlyAvailableCount == 1)
+        #expect(summary.subtitle == "1 in progress · 1 needs attention")
+        // Provider-side Have is still in progress until Storyteller has the book.
+        #expect(summary.inProgressCount == 1)
+        #expect(summary.recentlyAvailableCount == 0)
     }
 
     @Test func librarySummaryCompletedOnlyRecent() {
         let now = Date()
         let summary = RequestActivityGrouping.librarySummary(
             [
-                item(id: "1", status: .available, updatedAt: now.addingTimeInterval(-2 * 3600)),
-                item(id: "2", status: .available, updatedAt: now.addingTimeInterval(-10 * 3600)),
+                item(id: "1", status: .availableInLibrary, updatedAt: now.addingTimeInterval(-2 * 3600)),
+                item(id: "2", status: .availableInLibrary, updatedAt: now.addingTimeInterval(-10 * 3600)),
             ],
             now: now,
         )
@@ -512,7 +514,7 @@ struct RequestActivityTests {
             -(RequestActivityGrouping.recentCompletionWindow + 3600)
         )
         let summary = RequestActivityGrouping.librarySummary(
-            [item(id: "1", status: .available, updatedAt: old)],
+            [item(id: "1", status: .availableInLibrary, updatedAt: old)],
             now: now,
         )
         #expect(summary.recentlyAvailableCount == 0)
@@ -527,8 +529,8 @@ struct RequestActivityTests {
         )
         let summary = RequestActivityGrouping.librarySummary(
             [
-                item(id: "recent", status: .available, updatedAt: recent),
-                item(id: "old", status: .alreadyAvailable, updatedAt: old),
+                item(id: "recent", status: .availableInLibrary, updatedAt: recent),
+                item(id: "old", status: .availableInLibrary, updatedAt: old),
             ],
             now: now,
         )
@@ -556,12 +558,24 @@ struct RequestActivityTests {
         #expect(RequestActivityStatus.wanted.isInProgress)
     }
 
-    @Test func librarySummaryAvailableCountsAsCompletedNotInProgress() {
+    @Test func librarySummaryProviderAvailableIsNotFullyCompleted() {
         let now = Date()
-        #expect(RequestActivityStatus.available.isCompleted)
-        #expect(RequestActivityStatus.available.isInProgress == false)
+        // Provider Have / Available from LazyLibrarian is not Storyteller completion.
+        #expect(RequestActivityStatus.available.isCompleted == false)
+        #expect(RequestActivityStatus.available.isInProgress)
+        #expect(RequestActivityStatus.availableInLibrary.isCompleted)
         let summary = RequestActivityGrouping.librarySummary(
             [item(id: "a", status: .available, updatedAt: now)],
+            now: now,
+        )
+        #expect(summary.inProgressCount == 1)
+        #expect(summary.recentlyAvailableCount == 0)
+    }
+
+    @Test func librarySummaryInLibraryCountsAsRecentlyAvailable() {
+        let now = Date()
+        let summary = RequestActivityGrouping.librarySummary(
+            [item(id: "a", status: .availableInLibrary, updatedAt: now)],
             now: now,
         )
         #expect(summary.inProgressCount == 0)
@@ -578,6 +592,32 @@ struct RequestActivityTests {
         let line = item(id: "1", status: .available, updatedAt: Date())
             .libraryDetailStatusLine
         #expect(line == "Ebook · Available from LazyLibrarian")
+    }
+
+    @Test func libraryDetailStatusLineAvailableInLibrary() {
+        let line = item(id: "1", status: .availableInLibrary, updatedAt: Date())
+            .libraryDetailStatusLine
+        #expect(line == "Ebook · Available in Library")
+    }
+
+    @Test func libraryDetailStatusLineMixedFormats() {
+        let now = Date()
+        let mixed = RequestActivityItem(
+            id: "mix",
+            canonicalWorkID: "mix",
+            title: "Mixed",
+            author: "A",
+            provider: .lazyLibrarian,
+            requestedFormats: [.ebook, .audiobook],
+            updatedAt: now,
+            formatStatuses: [
+                RequestFormatStatus(format: .ebook, status: .availableInLibrary, updatedAt: now),
+                RequestFormatStatus(format: .audiobook, status: .wanted, updatedAt: now),
+            ],
+        )
+        #expect(RequestActivityGrouping.section(for: mixed, now: now) == .inProgress)
+        #expect(mixed.libraryDetailStatusLine.contains("Available in Library"))
+        #expect(mixed.libraryDetailStatusLine.contains("Searching"))
     }
 
     // MARK: - Store observability
@@ -629,7 +669,7 @@ struct RequestActivityTests {
         let staleCompleted = now.addingTimeInterval(
             -(RequestActivityGrouping.completedRetentionInterval + 3600)
         )
-        store.upsert(item(id: "old", status: .available, updatedAt: staleCompleted))
+        store.upsert(item(id: "old", status: .availableInLibrary, updatedAt: staleCompleted))
 
         let counter = NotificationCounter(name: .requestActivityStoreDidChange)
         defer { counter.stop() }
