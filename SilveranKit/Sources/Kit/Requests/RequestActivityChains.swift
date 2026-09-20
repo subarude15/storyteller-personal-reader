@@ -194,25 +194,6 @@ public struct RequestActivityChain: Equatable, Sendable, Identifiable {
     public func formatState(for format: BookRequestFormat) -> RequestActivityChainFormatState? {
         formatStates.first { $0.format == format }
     }
-
-    private static func displayLabel(for status: RequestActivityStatus) -> String {
-        switch status {
-            case .availableInLibrary:
-                "Available in Library"
-            case .available, .alreadyAvailable:
-                "Available"
-            case .wanted, .searching:
-                "Searching"
-            case .requested, .alreadyRequested, .unknown:
-                "In progress"
-            case .snatched:
-                "Snatched"
-            case .downloaded:
-                "Downloaded"
-            case .failed, .needsAttention:
-                "Needs attention"
-        }
-    }
 }
 
 /// Snapshot maps for O(1) request → chain resolution. Built once per store snapshot.
