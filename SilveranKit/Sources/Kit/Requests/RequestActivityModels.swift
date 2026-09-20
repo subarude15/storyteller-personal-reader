@@ -65,6 +65,24 @@ public enum RequestActivityStatus: String, Codable, Equatable, Sendable, CaseIte
     }
 }
 
+/// Persisted notification dedupe for one Request Activity row.
+/// Optional on `RequestActivityItem` so legacy JSON keeps decoding.
+public struct RequestActivityNotificationState: Codable, Equatable, Sendable {
+    /// Formats already notified as Available in Library.
+    public var lastNotifiedAvailableFormats: [BookRequestFormat]
+    /// Fingerprint of the last Needs Attention notification (`ebook`, `audiobook`, or `audiobook,ebook`).
+    /// Cleared when the request leaves attention so a later re-entry may notify again.
+    public var lastNotifiedAttentionFingerprint: String?
+
+    public init(
+        lastNotifiedAvailableFormats: [BookRequestFormat] = [],
+        lastNotifiedAttentionFingerprint: String? = nil,
+    ) {
+        self.lastNotifiedAvailableFormats = lastNotifiedAvailableFormats
+        self.lastNotifiedAttentionFingerprint = lastNotifiedAttentionFingerprint
+    }
+}
+
 public struct RequestFormatStatus: Codable, Equatable, Sendable {
     public var format: BookRequestFormat
     public var status: RequestActivityStatus
@@ -108,6 +126,8 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
     public var openLibraryWorkID: String?
     public var openLibraryEditionID: String?
     public var isbn: String?
+    /// Local notification dedupe metadata — absent on legacy rows (safe default).
+    public var notificationState: RequestActivityNotificationState?
 
     public init(
         id: String = UUID().uuidString,
@@ -126,6 +146,7 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
         openLibraryWorkID: String? = nil,
         openLibraryEditionID: String? = nil,
         isbn: String? = nil,
+        notificationState: RequestActivityNotificationState? = nil,
     ) {
         self.id = id
         self.canonicalWorkID = canonicalWorkID
@@ -143,6 +164,7 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
         self.openLibraryWorkID = openLibraryWorkID
         self.openLibraryEditionID = openLibraryEditionID
         self.isbn = isbn
+        self.notificationState = notificationState
     }
 
     public var overallStatus: RequestActivityStatus {

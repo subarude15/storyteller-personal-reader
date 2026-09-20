@@ -127,6 +127,9 @@ public struct PunkRallyTabView: View {
                 SessionTrackerWiring.install()
                 ContinueWidgetPublisher.install()
                 ContinueWidgetPublisher.consumePendingWidgetCommands()
+                #if os(iOS) || os(macOS)
+                RequestNotificationTapHandler.install()
+                #endif
             }
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowShelf)) { _ in
                 selectedTab = .shelf
@@ -136,6 +139,9 @@ public struct PunkRallyTabView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowStats)) { _ in
                 selectedTab = .stats
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowRequestActivity)) { _ in
+                selectedTab = .home
             }
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyOpenContinue)) { note in
                 selectedTab = .home

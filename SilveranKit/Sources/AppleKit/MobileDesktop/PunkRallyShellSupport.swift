@@ -105,6 +105,10 @@ extension Notification.Name {
     )
     /// Continue widget / `punkrally://continue` — open Home Continue / Now Playing.
     public static let punkRallyOpenContinue = Notification.Name("punkRallyOpenContinue")
+    /// User tapped a Request Activity local notification — open Request Activity if navigation allows.
+    public static let punkRallyShowRequestActivity = Notification.Name(
+        "punkRallyShowRequestActivity"
+    )
     /// Host selected Home after OpenContinue — HomeTabView opens the Continue item.
     public static let punkRallyPerformContinue = Notification.Name("punkRallyPerformContinue")
 }

@@ -777,6 +777,8 @@ extension SettingsView {
                     )
                 }
 
+                RequestNotificationsSettingsSection()
+
                 Section {
                     Toggle("Enabled", isOn: $config.bookSearchLANEnabled)
                     TextField(
@@ -1432,6 +1434,7 @@ private struct MacBookSourcesSettingsView: View {
                         "Automatic prefers LazyLibrarian when it is set up, otherwise Shelfarr. Explicit choices never silently switch providers."
                     )
                 }
+                RequestNotificationsSettingsSection()
                 Section {
                     Toggle("Enabled", isOn: $bookSearchLANEnabled)
                     TextField(
