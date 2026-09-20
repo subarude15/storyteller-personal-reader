@@ -130,6 +130,14 @@ public final class RequestActivityStore: @unchecked Sendable {
         }
         item.requestedFormats = BookRequestFormat.allCases.filter { formats.contains($0) }
         item = RequestActivityAttention.apply(item, now: now)
+        // Drop stale lastError after a successful retry/submission when nothing
+        // remains failed / needs attention. Keep it if this batch failed or
+        // another requested format is still in an attention state.
+        let submissionFailed = outcomes.contains { $0.phase == .failed }
+        let stillNeedsAttention = item.formatStatuses.contains { $0.status.needsAttentionBucket }
+        if !submissionFailed, !stillNeedsAttention {
+            item.lastError = nil
+        }
         if let existingIndex {
             items[existingIndex] = item
         } else {

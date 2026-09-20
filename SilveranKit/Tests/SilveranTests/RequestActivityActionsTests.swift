@@ -249,6 +249,213 @@ struct RequestActivityActionsTests {
         #expect(store.item(forWorkID: "/works/OL1W")?.status(for: .ebook)?.status == .searching)
     }
 
+    @Test func successfulRetryClearsStaleLastError() {
+        let defaults = UserDefaults(suiteName: "request-retry-clear-err-\(UUID().uuidString)")!
+        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let store = RequestActivityStore(defaults: defaults)
+        let work = CanonicalBookWork(
+            workID: "work/clear-err",
+            title: "Dune",
+            subtitle: nil,
+            authors: ["Frank Herbert"],
+            language: "en",
+            isbn: nil,
+            openLibraryWorkID: "/works/OLClear",
+            openLibraryEditionID: nil,
+            publicationYear: "1965",
+        )
+        store.recordSubmission(
+            work: work,
+            provider: .lazyLibrarian,
+            outcomes: [
+                BookRequestOutcome(
+                    format: .ebook,
+                    phase: .failed,
+                    detail: "Could not reach LazyLibrarian",
+                    providerBookID: nil,
+                )
+            ],
+        )
+        let failed = store.item(forWorkID: "/works/OLClear")
+        #expect(failed?.lastError == "Could not reach LazyLibrarian")
+        #expect(failed?.attentionReason != nil)
+        #expect(failed?.status(for: .ebook)?.status == .needsAttention)
+
+        store.recordSubmission(
+            work: work,
+            provider: .lazyLibrarian,
+            outcomes: [
+                BookRequestOutcome(
+                    format: .ebook,
+                    phase: .searching,
+                    detail: "Searching",
+                    providerBookID: "OLClear",
+                )
+            ],
+        )
+        let recovered = store.item(forWorkID: "/works/OLClear")
+        #expect(recovered?.status(for: .ebook)?.status == .searching)
+        #expect(recovered?.attentionReason == nil)
+        #expect(recovered?.lastError == nil)
+    }
+
+    @Test func successfulAudiobookRetryClearsErrorWhenEbookAlreadyInLibrary() {
+        let defaults = UserDefaults(suiteName: "request-retry-mixed-ok-\(UUID().uuidString)")!
+        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let store = RequestActivityStore(defaults: defaults)
+        let work = CanonicalBookWork(
+            workID: "work/mixed-ok",
+            title: "Dune",
+            subtitle: nil,
+            authors: ["Frank Herbert"],
+            language: "en",
+            isbn: nil,
+            openLibraryWorkID: "/works/OLMixedOk",
+            openLibraryEditionID: nil,
+            publicationYear: "1965",
+        )
+        // Seed: ebook already in library, audiobook failed.
+        var seeded = RequestActivityItem(
+            canonicalWorkID: "/works/OLMixedOk",
+            title: "Dune",
+            author: "Frank Herbert",
+            provider: .lazyLibrarian,
+            providerBookID: "OLMixedOk",
+            requestedFormats: [.ebook, .audiobook],
+            formatStatuses: [
+                RequestFormatStatus(format: .ebook, status: .availableInLibrary),
+                RequestFormatStatus(
+                    format: .audiobook,
+                    status: .failed,
+                    detail: "Audio queue failed",
+                ),
+            ],
+            lastError: "Audio queue failed",
+            attentionReason: "Audio queue failed",
+            openLibraryWorkID: "/works/OLMixedOk",
+        )
+        seeded = RequestActivityAttention.apply(seeded)
+        store.upsert(seeded)
+        #expect(store.item(forWorkID: "/works/OLMixedOk")?.lastError == "Audio queue failed")
+
+        store.recordSubmission(
+            work: work,
+            provider: .lazyLibrarian,
+            outcomes: [
+                BookRequestOutcome(
+                    format: .audiobook,
+                    phase: .searching,
+                    detail: "Searching",
+                    providerBookID: "OLMixedOk",
+                )
+            ],
+        )
+        let recovered = store.item(forWorkID: "/works/OLMixedOk")
+        #expect(recovered?.status(for: .ebook)?.status == .availableInLibrary)
+        #expect(recovered?.status(for: .audiobook)?.status == .searching)
+        #expect(recovered?.attentionReason == nil)
+        #expect(recovered?.lastError == nil)
+    }
+
+    @Test func partialRetryKeepsLastErrorWhenSiblingStillNeedsAttention() {
+        let defaults = UserDefaults(suiteName: "request-retry-partial-\(UUID().uuidString)")!
+        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let store = RequestActivityStore(defaults: defaults)
+        let work = CanonicalBookWork(
+            workID: "work/partial",
+            title: "Dune",
+            subtitle: nil,
+            authors: ["Frank Herbert"],
+            language: "en",
+            isbn: nil,
+            openLibraryWorkID: "/works/OLPartial",
+            openLibraryEditionID: nil,
+            publicationYear: "1965",
+        )
+        store.recordSubmission(
+            work: work,
+            provider: .lazyLibrarian,
+            outcomes: [
+                BookRequestOutcome(
+                    format: .ebook,
+                    phase: .failed,
+                    detail: "Ebook failed",
+                    providerBookID: "OLPartial",
+                ),
+                BookRequestOutcome(
+                    format: .audiobook,
+                    phase: .failed,
+                    detail: "Audiobook failed",
+                    providerBookID: "OLPartial",
+                ),
+            ],
+        )
+        let bothFailed = store.item(forWorkID: "/works/OLPartial")
+        #expect(bothFailed?.lastError == "Audiobook failed")
+        #expect(bothFailed?.formatStatuses.filter { $0.status.needsAttentionBucket }.count == 2)
+
+        // Retry only ebook successfully; audiobook still needs attention.
+        store.recordSubmission(
+            work: work,
+            provider: .lazyLibrarian,
+            outcomes: [
+                BookRequestOutcome(
+                    format: .ebook,
+                    phase: .searching,
+                    detail: "Searching",
+                    providerBookID: "OLPartial",
+                )
+            ],
+        )
+        let partial = store.item(forWorkID: "/works/OLPartial")
+        #expect(partial?.status(for: .ebook)?.status == .searching)
+        #expect(partial?.status(for: .audiobook)?.status == .needsAttention)
+        #expect(partial?.attentionReason != nil)
+        #expect(partial?.lastError == "Audiobook failed")
+    }
+
+    @Test func failedResubmissionKeepsLastError() {
+        let defaults = UserDefaults(suiteName: "request-retry-fail-again-\(UUID().uuidString)")!
+        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let store = RequestActivityStore(defaults: defaults)
+        let work = CanonicalBookWork(
+            workID: "work/fail-again",
+            title: "Dune",
+            subtitle: nil,
+            authors: ["Frank Herbert"],
+            language: "en",
+            isbn: nil,
+            openLibraryWorkID: "/works/OLFailAgain",
+            openLibraryEditionID: nil,
+            publicationYear: "1965",
+        )
+        store.recordSubmission(
+            work: work,
+            provider: .lazyLibrarian,
+            outcomes: [
+                BookRequestOutcome(
+                    format: .ebook,
+                    phase: .failed,
+                    detail: "First failure",
+                )
+            ],
+        )
+        store.recordSubmission(
+            work: work,
+            provider: .lazyLibrarian,
+            outcomes: [
+                BookRequestOutcome(
+                    format: .ebook,
+                    phase: .failed,
+                    detail: "Second failure",
+                )
+            ],
+        )
+        let item = store.item(forWorkID: "/works/OLFailAgain")
+        #expect(item?.lastError == "Second failure")
+        #expect(item?.status(for: .ebook)?.status == .needsAttention)
+    }
+
     @Test func localDuplicateShortCircuitSkipsWantedAndHave() {
         let defaults = UserDefaults(suiteName: "request-retry-skip-\(UUID().uuidString)")!
         defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
