@@ -380,6 +380,82 @@ struct RequestActivityFallbackTests {
         )
     }
 
+    // MARK: - Cross-provider duplicate gate
+
+    @Test func normalSubmitKeepsAnActiveRequestOnTheOriginalProvider() {
+        let existing = failedItem(
+            provider: .lazyLibrarian,
+            statuses: [.audiobook: .wanted],
+        )
+        // providerOverride without a fallback id is a normal request, including retry.
+        let result = BookRequestDuplicates.evaluate(
+            workID: existing.canonicalWorkID,
+            formats: [.audiobook],
+            provider: .shelfarr,
+            items: [existing],
+            fallbackFromRequestID: nil,
+        )
+        #expect(result.toSend.isEmpty)
+        #expect(result.persistedOutcomes.isEmpty)
+        #expect(result.callerOutcomes.map(\.phase) == [.alreadyRequested])
+    }
+
+    @Test func manualFallbackIsNotBlockedByTheOriginalProvider() {
+        let original = failedItem(
+            id: "ll-attention",
+            provider: .lazyLibrarian,
+            statuses: [.audiobook: .needsAttention],
+        )
+        let result = BookRequestDuplicates.evaluate(
+            workID: original.canonicalWorkID,
+            formats: [.audiobook],
+            provider: .shelfarr,
+            items: [original],
+            fallbackFromRequestID: original.id,
+        )
+        #expect(result.toSend == [.audiobook])
+        #expect(result.callerOutcomes.isEmpty)
+    }
+
+    @Test func activeShelfarrRowBlocksAnotherShelfarrFallback() {
+        let original = failedItem(
+            id: "ll-attention",
+            provider: .lazyLibrarian,
+            statuses: [.audiobook: .needsAttention],
+        )
+        let shelfarr = failedItem(
+            id: "shelf-active",
+            provider: .shelfarr,
+            statuses: [.audiobook: .requested],
+        )
+        let result = BookRequestDuplicates.evaluate(
+            workID: original.canonicalWorkID,
+            formats: [.audiobook],
+            provider: .shelfarr,
+            items: [original, shelfarr],
+            fallbackFromRequestID: original.id,
+        )
+        #expect(result.toSend.isEmpty)
+        #expect(result.callerOutcomes.map(\.phase) == [.alreadyRequested])
+        #expect(result.persistedOutcomes.map(\.phase) == [.alreadyRequested])
+    }
+
+    @Test func sameProviderFailureStillSendsOnRetry() {
+        let failed = failedItem(
+            provider: .lazyLibrarian,
+            statuses: [.audiobook: .failed],
+        )
+        let result = BookRequestDuplicates.evaluate(
+            workID: failed.canonicalWorkID,
+            formats: [.audiobook],
+            provider: .lazyLibrarian,
+            items: [failed],
+            fallbackFromRequestID: nil,
+        )
+        #expect(result.toSend == [.audiobook])
+        #expect(result.callerOutcomes.isEmpty)
+    }
+
     @Test func legacyItemWithoutFallbackIDDecodes() throws {
         let item = failedItem(provider: .lazyLibrarian, statuses: [.ebook: .failed])
         let encoder = JSONEncoder()
