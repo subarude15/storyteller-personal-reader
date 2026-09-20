@@ -14,6 +14,9 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
     public var themes: Themes
     public var shelfarrBaseURL: String = ""
     public var shelfarrAPIToken: String = ""
+    public var lazyLibrarianEnabled: Bool = false
+    public var lazyLibrarianBaseURL: String = ""
+    public var bookRequestProvider: String = BookRequestProviderKind.lazyLibrarian.rawValue
 
     public init(
         reading: Reading = Reading(),
@@ -41,10 +44,16 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
         themes = (try? container.decode(Themes.self, forKey: .themes)) ?? Themes()
         shelfarrBaseURL = (try? container.decode(String.self, forKey: .shelfarrBaseURL)) ?? ""
         shelfarrAPIToken = (try? container.decode(String.self, forKey: .shelfarrAPIToken)) ?? ""
+        lazyLibrarianEnabled = (try? container.decode(Bool.self, forKey: .lazyLibrarianEnabled)) ?? false
+        lazyLibrarianBaseURL = (try? container.decode(String.self, forKey: .lazyLibrarianBaseURL)) ?? ""
+        bookRequestProvider =
+            (try? container.decode(String.self, forKey: .bookRequestProvider))
+            ?? BookRequestProviderKind.lazyLibrarian.rawValue
     }
 
     private enum TopLevelCodingKeys: String, CodingKey {
-        case reading, playback, readingBar, sync, library, themes, shelfarrBaseURL, shelfarrAPIToken
+        case reading, playback, readingBar, sync, library, themes, shelfarrBaseURL, shelfarrAPIToken,
+            lazyLibrarianEnabled, lazyLibrarianBaseURL, bookRequestProvider
     }
 
     public struct Reading: Codable, Equatable, Sendable {
@@ -742,6 +751,9 @@ public actor SettingsActor {
         builtInThemeOverrides: [ReaderTheme]? = nil,
         shelfarrBaseURL: String? = nil,
         shelfarrAPIToken: String? = nil,
+        lazyLibrarianEnabled: Bool? = nil,
+        lazyLibrarianBaseURL: String? = nil,
+        bookRequestProvider: String? = nil,
     ) throws {
         var updated = config
 
@@ -901,6 +913,15 @@ public actor SettingsActor {
         }
         if let shelfarrAPIToken {
             updated.shelfarrAPIToken = shelfarrAPIToken
+        }
+        if let lazyLibrarianEnabled {
+            updated.lazyLibrarianEnabled = lazyLibrarianEnabled
+        }
+        if let lazyLibrarianBaseURL {
+            updated.lazyLibrarianBaseURL = lazyLibrarianBaseURL
+        }
+        if let bookRequestProvider {
+            updated.bookRequestProvider = bookRequestProvider
         }
 
         #if os(iOS)
