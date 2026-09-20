@@ -458,7 +458,6 @@ struct IndexerHealthTests {
 
     private func jackettTransport(body: String) -> ScriptHTTP {
         let transport = ScriptHTTP()
-        transport.stubs["/" + JackettHealthClient.indexerListPath] = .init(body: Data(body.utf8))
         transport.stubs[JackettHealthClient.indexerListPath] = .init(body: Data(body.utf8))
         return transport
     }
