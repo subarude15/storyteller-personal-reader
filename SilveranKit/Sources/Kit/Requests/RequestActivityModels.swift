@@ -146,6 +146,32 @@ public struct RequestFormatStatus: Codable, Equatable, Sendable {
     }
 }
 
+/// How a cross-provider fallback row was created.
+public enum RequestFallbackKind: String, Codable, Equatable, Sendable {
+    case manual
+    case automatic
+}
+
+/// One automatic hop already attempted for a format on the source row.
+public struct AutomaticFallbackAttempt: Codable, Equatable, Sendable {
+    public var format: BookRequestFormat
+    public var targetProvider: BookRequestProviderKind
+    public var attemptedAt: Date
+    public var resultingRequestID: String?
+
+    public init(
+        format: BookRequestFormat,
+        targetProvider: BookRequestProviderKind,
+        attemptedAt: Date = Date(),
+        resultingRequestID: String? = nil,
+    ) {
+        self.format = format
+        self.targetProvider = targetProvider
+        self.attemptedAt = attemptedAt
+        self.resultingRequestID = resultingRequestID
+    }
+}
+
 public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
     public var id: String
     public var canonicalWorkID: String
@@ -168,6 +194,10 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
     public var notificationState: RequestActivityNotificationState?
     /// Request Activity row this attempt was started from. Absent on older rows.
     public var fallbackFromRequestID: String?
+    /// How the fallback started. Absent on legacy / non-fallback rows.
+    public var fallbackKind: RequestFallbackKind?
+    /// One-hop automatic attempts already made from this row. Absent on legacy rows.
+    public var automaticFallbackAttempts: [AutomaticFallbackAttempt]?
 
     public init(
         id: String = UUID().uuidString,
@@ -188,6 +218,8 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
         isbn: String? = nil,
         notificationState: RequestActivityNotificationState? = nil,
         fallbackFromRequestID: String? = nil,
+        fallbackKind: RequestFallbackKind? = nil,
+        automaticFallbackAttempts: [AutomaticFallbackAttempt]? = nil,
     ) {
         self.id = id
         self.canonicalWorkID = canonicalWorkID
@@ -207,6 +239,8 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
         self.isbn = isbn
         self.notificationState = notificationState
         self.fallbackFromRequestID = fallbackFromRequestID
+        self.fallbackKind = fallbackKind
+        self.automaticFallbackAttempts = automaticFallbackAttempts
     }
 
     public var overallStatus: RequestActivityStatus {

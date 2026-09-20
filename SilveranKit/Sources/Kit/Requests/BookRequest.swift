@@ -239,6 +239,7 @@ public enum BookRequests {
         now: Date = Date(),
         providerOverride: BookRequestProviderKind? = nil,
         fallbackFromRequestID: String? = nil,
+        fallbackKind: RequestFallbackKind? = nil,
     ) async -> BookRequestSubmission {
         let settings = await SettingsActor.shared.config
         let key = (try? await AuthenticationActor.shared.loadLazyLibrarianAPIKey()) ?? ""
@@ -343,6 +344,7 @@ public enum BookRequests {
                 outcomes: persisted,
                 now: now,
                 fallbackFromRequestID: fallbackFromRequestID,
+                fallbackKind: fallbackKind,
             )
         }
         debugLog(

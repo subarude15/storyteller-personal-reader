@@ -96,6 +96,7 @@ public final class RequestActivityStore: @unchecked Sendable {
         outcomes: [BookRequestOutcome],
         now: Date = Date(),
         fallbackFromRequestID: String? = nil,
+        fallbackKind: RequestFallbackKind? = nil,
     ) {
         guard !outcomes.isEmpty else { return }
         let workID = work.openLibraryWorkID ?? work.workID
@@ -130,6 +131,9 @@ public final class RequestActivityStore: @unchecked Sendable {
             !fallbackFromRequestID.isEmpty
         {
             item.fallbackFromRequestID = fallbackFromRequestID
+        }
+        if item.fallbackKind == nil, let fallbackKind {
+            item.fallbackKind = fallbackKind
         }
         if let bookID = outcomes.compactMap(\.providerBookID).first {
             item.providerBookID = bookID
