@@ -261,9 +261,3 @@ public enum DelugeMatchResult: Equatable, Sendable {
     case noMatch
     case ambiguous
 }
-
-private extension Comparable {
-    func clamped(to range: ClosedRange<Self>) -> Self {
-        min(max(self, range.lowerBound), range.upperBound)
-    }
-}
