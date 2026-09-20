@@ -34,6 +34,13 @@ public final class RequestActivityStore: @unchecked Sendable {
         allItems().first { $0.canonicalWorkID == workID }
     }
 
+    public func item(
+        forWorkID workID: String,
+        provider: BookRequestProviderKind,
+    ) -> RequestActivityItem? {
+        allItems().first { $0.canonicalWorkID == workID && $0.provider == provider }
+    }
+
     public func item(id: String) -> RequestActivityItem? {
         allItems().first { $0.id == id }
     }
@@ -88,6 +95,7 @@ public final class RequestActivityStore: @unchecked Sendable {
         provider: BookRequestProviderKind,
         outcomes: [BookRequestOutcome],
         now: Date = Date(),
+        fallbackFromRequestID: String? = nil,
     ) {
         guard !outcomes.isEmpty else { return }
         let workID = work.openLibraryWorkID ?? work.workID
@@ -117,6 +125,12 @@ public final class RequestActivityStore: @unchecked Sendable {
         if item.openLibraryWorkID == nil { item.openLibraryWorkID = work.openLibraryWorkID }
         if item.openLibraryEditionID == nil { item.openLibraryEditionID = work.openLibraryEditionID }
         if item.isbn == nil || item.isbn?.isEmpty == true { item.isbn = work.isbn }
+        if item.fallbackFromRequestID == nil,
+            let fallbackFromRequestID,
+            !fallbackFromRequestID.isEmpty
+        {
+            item.fallbackFromRequestID = fallbackFromRequestID
+        }
         if let bookID = outcomes.compactMap(\.providerBookID).first {
             item.providerBookID = bookID
             debugLog(

@@ -130,6 +130,106 @@ public enum BookRequestLibrary {
     }
 }
 
+/// Local duplicate gate used by `BookRequests.submit`.
+///
+/// `fallbackFromRequestID == nil` checks every provider for the work.
+/// A non-nil id is an explicit manual fallback and checks only `provider`.
+enum BookRequestDuplicates {
+    struct Evaluation: Equatable {
+        /// Outcomes the caller should see, including cross-provider duplicates.
+        var callerOutcomes: [BookRequestOutcome]
+        /// Outcomes stored on `provider`. Empty when the only hits are other providers.
+        var persistedOutcomes: [BookRequestOutcome]
+        var toSend: [BookRequestFormat]
+    }
+
+    static func evaluate(
+        workID: String,
+        formats: [BookRequestFormat],
+        provider: BookRequestProviderKind,
+        items: [RequestActivityItem],
+        fallbackFromRequestID: String?,
+    ) -> Evaluation {
+        let rows = items.filter { $0.canonicalWorkID == workID }
+        let considered =
+            fallbackFromRequestID == nil
+            ? rows
+            : rows.filter { $0.provider == provider }
+
+        var callerOutcomes: [BookRequestOutcome] = []
+        var persistedOutcomes: [BookRequestOutcome] = []
+        var toSend: [BookRequestFormat] = []
+        for format in formats {
+            guard let match = blockingMatch(for: format, in: considered, preferredProvider: provider)
+            else {
+                toSend.append(format)
+                continue
+            }
+            let outcome = outcome(for: format, match: match)
+            callerOutcomes.append(outcome)
+            if match.item.provider == provider {
+                persistedOutcomes.append(outcome)
+            }
+        }
+        return Evaluation(
+            callerOutcomes: callerOutcomes,
+            persistedOutcomes: persistedOutcomes,
+            toSend: toSend,
+        )
+    }
+
+    private struct Match {
+        var item: RequestActivityItem
+        var status: RequestFormatStatus
+    }
+
+    /// Active or completed wins. A failed / needs-attention row does not block.
+    /// Prefer the chosen provider when it is itself the blocker, so a retry
+    /// updates that row instead of looking like a new provider.
+    private static func blockingMatch(
+        for format: BookRequestFormat,
+        in items: [RequestActivityItem],
+        preferredProvider: BookRequestProviderKind,
+    ) -> Match? {
+        let matches: [Match] = items.compactMap { item in
+            guard let status = item.status(for: format), blocks(status.status) else { return nil }
+            return Match(item: item, status: status)
+        }
+        return matches.first { $0.item.provider == preferredProvider } ?? matches.first
+    }
+
+    private static func blocks(_ status: RequestActivityStatus) -> Bool {
+        switch status {
+            case .availableInLibrary, .available, .alreadyAvailable, .downloaded,
+                .wanted, .searching, .snatched, .requested, .alreadyRequested:
+                return true
+            case .failed, .needsAttention, .unknown:
+                return false
+        }
+    }
+
+    private static func outcome(for format: BookRequestFormat, match: Match) -> BookRequestOutcome {
+        switch match.status.status {
+            case .availableInLibrary, .available, .alreadyAvailable, .downloaded:
+                return BookRequestOutcome(
+                    format: format,
+                    phase: .alreadyAvailable,
+                    detail: match.status.detail ?? "Already available. Not queued again.",
+                    providerBookID: match.item.providerBookID,
+                )
+            case .wanted, .searching, .snatched, .requested, .alreadyRequested:
+                return BookRequestOutcome(
+                    format: format,
+                    phase: .alreadyRequested,
+                    detail: match.status.detail ?? "Already requested. Not queued again.",
+                    providerBookID: match.item.providerBookID,
+                )
+            case .failed, .needsAttention, .unknown:
+                preconditionFailure("blockingMatch only returns active or completed statuses")
+        }
+    }
+}
+
 public enum BookRequests {
     public static func submit(
         work: CanonicalBookWork,
@@ -138,6 +238,7 @@ public enum BookRequests {
         history: RequestActivityStore = .shared,
         now: Date = Date(),
         providerOverride: BookRequestProviderKind? = nil,
+        fallbackFromRequestID: String? = nil,
     ) async -> BookRequestSubmission {
         let settings = await SettingsActor.shared.config
         let key = (try? await AuthenticationActor.shared.loadLazyLibrarianAPIKey()) ?? ""
@@ -175,55 +276,33 @@ public enum BookRequests {
             "[RequestActivity] request start work=\(work.workID) provider=\(provider.rawValue) formats=\(formats.map(\.rawValue).joined(separator: ","))"
         )
 
-        // Local duplicate short-circuit before hitting providers.
-        let existing = history.item(forWorkID: work.openLibraryWorkID ?? work.workID)
-        var toSend: [BookRequestFormat] = []
-        var localOutcomes: [BookRequestOutcome] = []
-        for format in formats {
-            if let prior = existing?.status(for: format) {
-                switch prior.status {
-                    case .availableInLibrary, .available, .alreadyAvailable, .downloaded:
-                        debugLog(
-                            "[RequestActivity] duplicate avoided work=\(work.workID) format=\(format.rawValue) reason=alreadyAvailable"
-                        )
-                        localOutcomes.append(
-                            BookRequestOutcome(
-                                format: format,
-                                phase: .alreadyAvailable,
-                                detail: prior.detail ?? "Already available. Not queued again.",
-                                providerBookID: existing?.providerBookID,
-                            )
-                        )
-                        continue
-                    case .wanted, .searching, .snatched, .requested, .alreadyRequested:
-                        debugLog(
-                            "[RequestActivity] duplicate avoided work=\(work.workID) format=\(format.rawValue) reason=alreadyRequested"
-                        )
-                        localOutcomes.append(
-                            BookRequestOutcome(
-                                format: format,
-                                phase: .alreadyRequested,
-                                detail: prior.detail ?? "Already requested. Not queued again.",
-                                providerBookID: existing?.providerBookID,
-                            )
-                        )
-                        continue
-                    case .failed, .needsAttention, .unknown:
-                        break
-                }
-            }
-            toSend.append(format)
+        // Normal submits look across providers. Manual fallback
+        // (fallbackFromRequestID set) looks only at the chosen provider,
+        // so the original row does not block a confirmed alternate.
+        let workID = work.openLibraryWorkID ?? work.workID
+        let guardResult = BookRequestDuplicates.evaluate(
+            workID: workID,
+            formats: formats,
+            provider: provider,
+            items: history.allItems(),
+            fallbackFromRequestID: fallbackFromRequestID,
+        )
+        for outcome in guardResult.callerOutcomes
+        where outcome.phase == .alreadyAvailable || outcome.phase == .alreadyRequested {
+            debugLog(
+                "[RequestActivity] duplicate avoided work=\(work.workID) format=\(outcome.format.rawValue) reason=\(outcome.phase == .alreadyAvailable ? "alreadyAvailable" : "alreadyRequested")"
+            )
         }
 
         var providerOutcomes: [BookRequestOutcome] = []
-        if !toSend.isEmpty {
+        if !guardResult.toSend.isEmpty {
             switch provider {
                 case .automatic:
                     preconditionFailure("BookRequestRouting.choose never returns automatic")
                 case .lazyLibrarian:
                     providerOutcomes = await client.request(
                         work: work,
-                        formats: toSend,
+                        formats: guardResult.toSend,
                         baseURL: settings.lazyLibrarianBaseURL,
                         apiKey: key,
                     )
@@ -231,10 +310,10 @@ public enum BookRequests {
                     let idea = readingIdea(work)
                     switch await ShelfarrRequestManager.request(
                         idea,
-                        mediums: toSend.map(\.shelfarrMedium),
+                        mediums: guardResult.toSend.map(\.shelfarrMedium),
                     ) {
                         case .success:
-                            providerOutcomes = toSend.map {
+                            providerOutcomes = guardResult.toSend.map {
                                 BookRequestOutcome(
                                     format: $0,
                                     phase: .requested,
@@ -242,7 +321,7 @@ public enum BookRequests {
                                 )
                             }
                         case .failure(let error):
-                            providerOutcomes = toSend.map {
+                            providerOutcomes = guardResult.toSend.map {
                                 BookRequestOutcome(
                                     format: $0,
                                     phase: .failed,
@@ -253,13 +332,19 @@ public enum BookRequests {
             }
         }
 
-        let outcomes = localOutcomes + providerOutcomes
-        history.recordSubmission(
-            work: work,
-            provider: provider,
-            outcomes: outcomes,
-            now: now,
-        )
+        let outcomes = guardResult.callerOutcomes + providerOutcomes
+        // A cross-provider duplicate is returned to the caller but not stored
+        // as a new provider row. Same-provider duplicates still update that row.
+        let persisted = guardResult.persistedOutcomes + providerOutcomes
+        if !persisted.isEmpty {
+            history.recordSubmission(
+                work: work,
+                provider: provider,
+                outcomes: persisted,
+                now: now,
+                fallbackFromRequestID: fallbackFromRequestID,
+            )
+        }
         debugLog(
             "[RequestActivity] request end work=\(work.workID) provider=\(provider.rawValue) outcomes=\(outcomes.count)"
         )

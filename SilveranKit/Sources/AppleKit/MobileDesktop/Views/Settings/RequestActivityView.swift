@@ -12,6 +12,8 @@ final class RequestActivityViewModel: ObservableObject {
     @Published var actionError: String?
     @Published var actionInfo: String?
     @Published private(set) var actionContext = RequestActivityActionContext()
+    @Published private(set) var fallbackItemID: String?
+    @Published var fallbackNotice: RequestFallbackNotice?
 
     private let history: RequestActivityStore
     private let refreshService: RequestActivityRefreshService
@@ -89,9 +91,10 @@ final class RequestActivityViewModel: ObservableObject {
 
     /// Per-request status check — reuses RequestActivityRefreshService.
     func checkStatus(itemID: String) {
-        guard checkingItemID == nil, retryingItemID == nil else { return }
+        guard checkingItemID == nil, retryingItemID == nil, fallbackItemID == nil else { return }
         actionError = nil
         actionInfo = nil
+        fallbackNotice = nil
         checkingItemID = itemID
         let books = libraryBooks
         Task { [weak self] in
@@ -141,9 +144,10 @@ final class RequestActivityViewModel: ObservableObject {
 
     /// Retry only formats RequestActivityRetryPolicy marks retryable.
     func retryRequest(itemID: String) {
-        guard checkingItemID == nil, retryingItemID == nil else { return }
+        guard checkingItemID == nil, retryingItemID == nil, fallbackItemID == nil else { return }
         actionError = nil
         actionInfo = nil
+        fallbackNotice = nil
         // Re-check Storyteller before offering/sending a retry.
         _ = refreshService.applyLibraryPresence(libraryBooks: libraryBooks)
         items = history.allItems()
@@ -178,6 +182,107 @@ final class RequestActivityViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    /// User-confirmed fallback. Re-checks the library, then submits only missing formats
+    /// to the chosen provider. Does not cancel or rewrite the original row.
+    func submitAlternateProvider(
+        itemID: String,
+        provider: BookRequestProviderKind,
+        formats: [BookRequestFormat],
+    ) {
+        guard checkingItemID == nil, retryingItemID == nil, fallbackItemID == nil else { return }
+        actionError = nil
+        actionInfo = nil
+        fallbackNotice = nil
+        _ = refreshService.applyLibraryPresence(libraryBooks: libraryBooks)
+        items = history.allItems()
+        guard let current = history.item(id: itemID) else {
+            actionError = "Request not found."
+            return
+        }
+        let decision = RequestActivityFallbackPolicy.decision(
+            item: current,
+            provider: provider,
+            formats: formats,
+            history: items,
+        )
+        guard !decision.formats.isEmpty else {
+            fallbackNotice = RequestFallbackNotice(
+                sourceID: itemID,
+                text: decision.message ?? RequestActivityFallbackPolicy.alreadyInLibraryMessage,
+            )
+            return
+        }
+        fallbackItemID = itemID
+        let work = current.canonicalWorkForRetry()
+        let fromID = current.id
+        let formatsToSend = decision.formats
+        let override = decision.providerOverride
+        Task { [weak self] in
+            guard let self else { return }
+            defer {
+                Task { @MainActor in
+                    self.fallbackItemID = nil
+                }
+            }
+            let submission = await BookRequests.submit(
+                work: work,
+                formats: formatsToSend,
+                history: self.history,
+                providerOverride: override,
+                fallbackFromRequestID: fromID,
+            )
+            let created = self.history.item(
+                forWorkID: current.canonicalWorkID,
+                provider: override,
+            )
+            await MainActor.run {
+                self.items = self.history.allItems()
+                if let message = submission.message, !message.isEmpty {
+                    self.actionError = message
+                    return
+                }
+                if let failed = submission.outcomes.first(where: { $0.phase == .failed }) {
+                    self.actionError = failed.detail
+                    return
+                }
+                let queued = submission.outcomes.contains {
+                    $0.phase == .requested || $0.phase == .searching
+                }
+                if queued {
+                    self.fallbackNotice = RequestFallbackNotice(
+                        sourceID: itemID,
+                        text: RequestActivityFallbackPolicy.requestedMessage(provider: override),
+                        createdID: created?.id,
+                        providerName: override.shortName,
+                    )
+                    return
+                }
+                if submission.outcomes.contains(where: { $0.phase == .alreadyRequested }) {
+                    self.fallbackNotice = RequestFallbackNotice(
+                        sourceID: itemID,
+                        text: RequestActivityFallbackPolicy.alreadyRequestedMessage(
+                            provider: override
+                        ),
+                    )
+                    return
+                }
+                if submission.outcomes.contains(where: { $0.phase == .alreadyAvailable }) {
+                    self.fallbackNotice = RequestFallbackNotice(
+                        sourceID: itemID,
+                        text: RequestActivityFallbackPolicy.alreadyInLibraryMessage,
+                    )
+                }
+            }
+        }
+    }
+
+    func unavailableFallbackProviders() -> (lazyLibrarian: Bool, shelfarr: Bool) {
+        (
+            lazyLibrarian: ServiceHealthCache.shared.result(for: .lazyLibrarian)?.status == .unavailable,
+            shelfarr: ServiceHealthCache.shared.result(for: .shelfarr)?.status == .unavailable,
+        )
     }
 
     func browseURL(for action: RequestActivityBrowseTarget) -> URL? {
@@ -240,8 +345,13 @@ final class RequestActivityViewModel: ObservableObject {
 
     private func reloadActionContext() async {
         let config = await SettingsActor.shared.config
+        let key = (try? await AuthenticationActor.shared.loadLazyLibrarianAPIKey()) ?? ""
+        let hasKey = !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         await MainActor.run {
-            self.actionContext = RequestActivityActionContext(config: config)
+            self.actionContext = RequestActivityActionContext(
+                config: config,
+                lazyLibrarianHasAPIKey: hasKey,
+            )
         }
     }
 }
@@ -250,6 +360,13 @@ enum RequestActivityBrowseTarget {
     case lazyLibrarian
     case shelfarr
     case bookSearchLAN
+}
+
+struct RequestFallbackNotice: Equatable {
+    var sourceID: String
+    var text: String
+    var createdID: String?
+    var providerName: String?
 }
 
 public struct RequestActivityView: View {
@@ -437,6 +554,7 @@ struct RequestActivityDetailView: View {
     @Environment(\.openURL) private var openURL
     @State private var confirmRemove = false
     @State private var openingAlternate = false
+    @State private var showingFallback = false
 
     private var item: RequestActivityItem? {
         model.item(id: itemID)
@@ -448,7 +566,8 @@ struct RequestActivityDetailView: View {
     }
 
     private var isBusy: Bool {
-        model.checkingItemID == itemID || model.retryingItemID == itemID || openingAlternate
+        model.checkingItemID == itemID || model.retryingItemID == itemID
+            || model.fallbackItemID == itemID || openingAlternate
     }
 
     var body: some View {
@@ -491,6 +610,37 @@ struct RequestActivityDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Local tracking only. Your LazyLibrarian / Shelfarr queue is unchanged.")
+        }
+        .sheet(isPresented: $showingFallback) {
+            if let item {
+                RequestFallbackSheet(
+                    item: item,
+                    offer: RequestActivityFallbackPolicy.offer(
+                        for: item,
+                        context: model.actionContext,
+                    ),
+                    unavailableLazyLibrarian: model.unavailableFallbackProviders().lazyLibrarian,
+                    unavailableShelfarr: model.unavailableFallbackProviders().shelfarr,
+                    onSubmit: { provider, formats in
+                        showingFallback = false
+                        model.submitAlternateProvider(
+                            itemID: itemID,
+                            provider: provider,
+                            formats: formats,
+                        )
+                    },
+                    onSearch: {
+                        showingFallback = false
+                        Task {
+                            openingAlternate = true
+                            defer { openingAlternate = false }
+                            if let url = await model.prepareAlternateSearchOpen() {
+                                openURL(url)
+                            }
+                        }
+                    },
+                )
+            }
         }
     }
 
@@ -558,6 +708,31 @@ struct RequestActivityDetailView: View {
                             }
                         }
                         .disabled(isBusy)
+                    }
+
+                    if availability.canTryAnotherSource {
+                        Button {
+                            showingFallback = true
+                        } label: {
+                            if model.fallbackItemID == itemID {
+                                Label("Requesting…", systemImage: "arrow.left.arrow.right")
+                            } else {
+                                Label("Try Another Source", systemImage: "arrow.left.arrow.right")
+                            }
+                        }
+                        .disabled(isBusy)
+                        if let notice = model.fallbackNotice, notice.sourceID == itemID {
+                            Text(notice.text)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                            if let createdID = notice.createdID, let name = notice.providerName {
+                                NavigationLink {
+                                    RequestActivityDetailView(itemID: createdID, model: model)
+                                } label: {
+                                    Label("View \(name) request", systemImage: "arrow.right")
+                                }
+                            }
+                        }
                     }
 
                     if availability.canOpenLazyLibrarian {
@@ -653,6 +828,156 @@ struct RequestActivityDetailView: View {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+}
+
+private struct RequestFallbackSheet: View {
+    let item: RequestActivityItem
+    let offer: RequestFallbackOffer
+    let unavailableLazyLibrarian: Bool
+    let unavailableShelfarr: Bool
+    let onSubmit: (BookRequestProviderKind, [BookRequestFormat]) -> Void
+    let onSearch: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var formats: [BookRequestFormat]
+    @State private var pendingProvider: BookRequestProviderKind?
+
+    init(
+        item: RequestActivityItem,
+        offer: RequestFallbackOffer,
+        unavailableLazyLibrarian: Bool,
+        unavailableShelfarr: Bool,
+        onSubmit: @escaping (BookRequestProviderKind, [BookRequestFormat]) -> Void,
+        onSearch: @escaping () -> Void,
+    ) {
+        self.item = item
+        self.offer = offer
+        self.unavailableLazyLibrarian = unavailableLazyLibrarian
+        self.unavailableShelfarr = unavailableShelfarr
+        self.onSubmit = onSubmit
+        self.onSearch = onSearch
+        let start = offer.eligibleFormats.count == 1 ? offer.eligibleFormats : []
+        _formats = State(initialValue: start)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if formats.isEmpty {
+                    formatPicker
+                } else if let pendingProvider {
+                    confirm(pendingProvider)
+                } else {
+                    options
+                }
+            }
+            .navigationTitle("Try another source")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    @ViewBuilder
+    private var formatPicker: some View {
+        Section {
+            if Set(offer.eligibleFormats) == Set(BookRequestFormat.allCases) {
+                Button("Both") {
+                    formats = BookRequestFormat.allCases
+                }
+            }
+            ForEach(offer.eligibleFormats, id: \.self) { format in
+                Button(format.label) {
+                    formats = [format]
+                }
+            }
+        } header: {
+            Text("Choose a format")
+        } footer: {
+            Text(RequestActivityFallbackPolicy.optionsHeading(item: item, formats: offer.eligibleFormats))
+        }
+    }
+
+    @ViewBuilder
+    private var options: some View {
+        Section {
+            if offer.options.isEmpty {
+                Text("No alternate sources are configured.")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(Array(offer.options.enumerated()), id: \.offset) { _, option in
+                optionButton(option)
+            }
+        } header: {
+            Text("Available alternatives")
+        } footer: {
+            Text(RequestActivityFallbackPolicy.optionsHeading(item: item, formats: formats))
+        }
+    }
+
+    @ViewBuilder
+    private func optionButton(_ option: RequestFallbackOption) -> some View {
+        switch option {
+            case .provider(let provider):
+                Button {
+                    pendingProvider = provider
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Try \(provider.shortName)")
+                        if isUnavailable(provider) {
+                            Text("Currently unavailable")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            case .alternateSearch:
+                Button("Search Alternate Sources") {
+                    onSearch()
+                }
+        }
+    }
+
+    @ViewBuilder
+    private func confirm(_ provider: BookRequestProviderKind) -> some View {
+        let copy = RequestActivityFallbackPolicy.confirmation(
+            bookTitle: item.title,
+            formats: formats,
+            alternate: provider,
+            currentProviderName: RequestActivityFallbackPolicy.resolvedProvider(item)?.shortName
+                ?? item.provider.shortName,
+        )
+        Section {
+            Text(copy.prompt)
+                .font(.headline)
+            Text(copy.footer)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Button(copy.confirmTitle) {
+                onSubmit(provider, formats)
+            }
+            Button("Back") {
+                pendingProvider = nil
+            }
+        }
+    }
+
+    private func isUnavailable(_ provider: BookRequestProviderKind) -> Bool {
+        switch provider {
+            case .lazyLibrarian:
+                unavailableLazyLibrarian
+            case .shelfarr:
+                unavailableShelfarr
+            case .automatic:
+                false
+        }
     }
 }
 #endif
