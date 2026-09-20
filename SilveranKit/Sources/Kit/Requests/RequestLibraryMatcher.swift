@@ -59,8 +59,12 @@ public struct RequestLibraryMatcher: Sendable {
                 merge(&byISBN, key: isbn, availability)
             }
 
-            if let pair = Self.titleAuthorKey(title: book.title, authorNames: book.authors?.compactMap(\.name) ?? []) {
-                merge(&byTitleAuthor, key: pair, availability)
+            // Index each listed author separately so any one can match.
+            let authorNames = book.authors?.compactMap(\.name) ?? []
+            for author in authorNames {
+                if let pair = Self.titleAuthorKey(title: book.title, authorNames: [author]) {
+                    merge(&byTitleAuthor, key: pair, availability)
+                }
             }
         }
     }
@@ -82,14 +86,14 @@ public struct RequestLibraryMatcher: Sendable {
             return hit
         }
 
-        let authorNames = item.author
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        if let pair = Self.titleAuthorKey(title: item.title, authorNames: authorNames),
-            let hit = byTitleAuthor[pair]
-        {
-            return hit
+        // Try whole author string first, then carefully parsed multi-author units.
+        // Never blindly split on commas — "Le Guin, Ursula K." is one author.
+        for author in Self.authorCandidates(from: item.author) {
+            if let pair = Self.titleAuthorKey(title: item.title, authorNames: [author]),
+                let hit = byTitleAuthor[pair]
+            {
+                return hit
+            }
         }
 
         return nil
@@ -161,6 +165,69 @@ public struct RequestLibraryMatcher: Sendable {
             .filter { !$0.isEmpty }
             .sorted()
             .joined(separator: " ")
+    }
+
+    /// Author strings to try for title+author fallback.
+    /// Always includes the full stored string first so "Le Guin, Ursula K." stays intact.
+    public static func authorCandidates(from stored: String) -> [String] {
+        let trimmed = stored.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        var candidates: [String] = [trimmed]
+        let units = authorUnits(from: trimmed)
+        if units.count > 1 {
+            for unit in units where !candidates.contains(unit) {
+                candidates.append(unit)
+            }
+        }
+        return candidates
+    }
+
+    /// Split `", "`-joined authors without breaking "Last, First" names.
+    /// Written as `work.authors.joined(separator: ", ")`.
+    public static func authorUnits(from stored: String) -> [String] {
+        let parts = stored.components(separatedBy: ", ")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard parts.count >= 2 else { return parts.isEmpty ? [] : parts }
+
+        var units: [String] = []
+        var index = 0
+        while index < parts.count {
+            if index + 1 < parts.count,
+                isSurnameGivenPair(surnameSide: parts[index], givenSide: parts[index + 1])
+            {
+                units.append("\(parts[index]), \(parts[index + 1])")
+                index += 2
+            } else {
+                units.append(parts[index])
+                index += 1
+            }
+        }
+        return units
+    }
+
+    /// "Herbert"+"Frank" / "Le Guin"+"Ursula K." → true.
+    /// "Frank Herbert"+"Brian Herbert" → false (two complete display names).
+    public static func isSurnameGivenPair(surnameSide: String, givenSide: String) -> Bool {
+        if looksLikeFullDisplayName(surnameSide), looksLikeFullDisplayName(givenSide) {
+            return false
+        }
+        return true
+    }
+
+    /// "Brian Herbert" / "Frank Herbert" — two+ non-initial tokens.
+    /// "Ursula K." / "Frank" / "Le Guin" — not a complete First Last display name.
+    public static func looksLikeFullDisplayName(_ raw: String) -> Bool {
+        let tokens = raw
+            .split(whereSeparator: \.isWhitespace)
+            .map {
+                $0.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            }
+            .filter { !$0.isEmpty }
+        guard tokens.count >= 2 else { return false }
+        if tokens.contains(where: { $0.count == 1 }) { return false }
+        return true
     }
 
     public static func titleAuthorKey(title: String, authorNames: [String]) -> String? {

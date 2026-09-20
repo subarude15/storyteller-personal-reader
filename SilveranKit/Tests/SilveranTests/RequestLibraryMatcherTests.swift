@@ -61,6 +61,42 @@ struct RequestLibraryMatcherTests {
         #expect(matcher.availability(for: item)?.hasAudiobook == true)
     }
 
+    @Test func matchesInvertedAuthorHerbertFrank() {
+        let book = libraryBook(
+            uuid: "dune-hf",
+            title: "Dune",
+            authors: ["Frank Herbert"],
+            ebook: true,
+        )
+        let matcher = RequestLibraryMatcher(books: [book])
+        let item = requestItem(
+            canonicalWorkID: "other-id",
+            title: "Dune",
+            author: "Herbert, Frank",
+            formats: [.ebook],
+            status: .wanted,
+        )
+        #expect(matcher.hasFormat(.ebook, for: item))
+    }
+
+    @Test func matchesPlainAuthorFrankHerbert() {
+        let book = libraryBook(
+            uuid: "dune-fh",
+            title: "Dune",
+            authors: ["Frank Herbert"],
+            ebook: true,
+        )
+        let matcher = RequestLibraryMatcher(books: [book])
+        let item = requestItem(
+            canonicalWorkID: "other-id",
+            title: "Dune",
+            author: "Frank Herbert",
+            formats: [.ebook],
+            status: .wanted,
+        )
+        #expect(matcher.hasFormat(.ebook, for: item))
+    }
+
     @Test func sameTitleConflictingAuthorDoesNotMatch() {
         let book = libraryBook(
             uuid: "conflict",
@@ -77,6 +113,71 @@ struct RequestLibraryMatcherTests {
             status: .wanted,
         )
         #expect(matcher.availability(for: item) == nil)
+    }
+
+    @Test func invertedConflictingAuthorDoesNotMatch() {
+        let book = libraryBook(
+            uuid: "conflict-inv",
+            title: "Dune",
+            authors: ["Frank Herbert"],
+            ebook: true,
+        )
+        let matcher = RequestLibraryMatcher(books: [book])
+        let item = requestItem(
+            canonicalWorkID: "other",
+            title: "Dune",
+            author: "Herbert, Brian",
+            formats: [.ebook],
+            status: .wanted,
+        )
+        #expect(matcher.availability(for: item) == nil)
+    }
+
+    @Test func multiAuthorJoinedStringMatchesEitherAuthor() {
+        let book = libraryBook(
+            uuid: "multi",
+            title: "Good Omens",
+            authors: ["Terry Pratchett", "Neil Gaiman"],
+            ebook: true,
+        )
+        let matcher = RequestLibraryMatcher(books: [book])
+        // App stores joined authors as work.authors.joined(separator: ", ")
+        let item = requestItem(
+            canonicalWorkID: "multi-req",
+            title: "Good Omens",
+            author: "Terry Pratchett, Neil Gaiman",
+            formats: [.ebook],
+            status: .wanted,
+        )
+        #expect(matcher.hasFormat(.ebook, for: item))
+
+        let onlySecond = requestItem(
+            canonicalWorkID: "multi-req-2",
+            title: "Good Omens",
+            author: "Neil Gaiman",
+            formats: [.ebook],
+            status: .wanted,
+        )
+        #expect(matcher.hasFormat(.ebook, for: onlySecond))
+    }
+
+    @Test func authorCandidatesKeepLastFirstIntact() {
+        let candidates = RequestLibraryMatcher.authorCandidates(from: "Le Guin, Ursula K.")
+        #expect(candidates.first == "Le Guin, Ursula K.")
+        #expect(candidates.count == 1)
+        #expect(
+            RequestLibraryMatcher.normalizeAuthor("Le Guin, Ursula K.")
+                == RequestLibraryMatcher.normalizeAuthor("Ursula K. Le Guin")
+        )
+        #expect(
+            RequestLibraryMatcher.normalizeAuthor("Herbert, Frank")
+                == RequestLibraryMatcher.normalizeAuthor("Frank Herbert")
+        )
+    }
+
+    @Test func authorUnitsSplitTwoFullNames() {
+        let units = RequestLibraryMatcher.authorUnits(from: "Terry Pratchett, Neil Gaiman")
+        #expect(units == ["Terry Pratchett", "Neil Gaiman"])
     }
 
     @Test func unrelatedTitleDoesNotMatch() {
