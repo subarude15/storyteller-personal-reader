@@ -213,10 +213,36 @@ struct ManualDownloadHistoryTests {
     }
 
     @Test func failedDelugeRoutingExposesRetryMove() {
-        let job = sampleJob(backend: .deluge, status: .failed, hash: "hashabc")
+        var job = sampleJob(backend: .deluge, status: .failed, hash: "hashabc")
+        job.delugeReachedFinalRouting = true
         #expect(job.canRetryRoutingNow)
         #expect(!job.canRetryTorrentNow)
         #expect(job.retryAction == .retryRouting)
+    }
+
+    @Test func failedDelugeSubmitWithMagnetHashUsesTorrentRetryNotMove() {
+        // makeJob derives backendJobID from magnet BTIH even when addMagnet fails.
+        let magnet =
+            "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Example"
+        let hash = TorrentHash.fromMagnet(magnet)
+        #expect(hash == "0123456789abcdef0123456789abcdef01234567")
+        let job = ManualDownloadJob(
+            title: "Example",
+            author: "",
+            sourceURL: magnet,
+            sourceHost: "magnet",
+            backend: .deluge,
+            mediaType: .ebook,
+            destination: "/volume1/media/books/books",
+            backendJobID: hash,
+            status: .failed,
+            lastError: "Deluge rejected the credentials.\nCheck the Deluge connection in Settings.",
+            delugeReachedFinalRouting: nil,
+        )
+        #expect(!job.hasReachedDelugeFinalRouting)
+        #expect(!job.canRetryRoutingNow)
+        #expect(job.canRetryTorrentNow)
+        #expect(job.retryAction == .retryTorrent)
     }
 }
 

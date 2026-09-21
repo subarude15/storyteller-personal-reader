@@ -217,6 +217,7 @@ struct DelugeManualRoutingTests {
         let updated = await refresh.refresh()
         #expect(updated[0].status == .failed)
         #expect(updated[0].lastError?.contains("move_storage") == true)
+        #expect(updated[0].hasReachedDelugeFinalRouting)
         #expect(updated[0].canRetryRoutingNow)
         #expect(transport.moveDestinations == [ebookFinal])
     }

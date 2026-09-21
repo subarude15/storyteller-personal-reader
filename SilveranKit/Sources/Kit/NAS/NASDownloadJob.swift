@@ -89,6 +89,9 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
     public var downloadRate: Int?
     public var totalSize: Int64?
     public var lastStatusAt: Date?
+    /// Set once this Deluge job reaches `readyToRoute` / `routing`. Distinguishes
+    /// final-move failures from initial addMagnet failures that still carry a BTIH.
+    public var delugeReachedFinalRouting: Bool?
 
     public init(
         id: String = UUID().uuidString,
@@ -110,6 +113,7 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
         downloadRate: Int? = nil,
         totalSize: Int64? = nil,
         lastStatusAt: Date? = nil,
+        delugeReachedFinalRouting: Bool? = nil,
     ) {
         self.id = id
         self.title = title
@@ -130,6 +134,11 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
         self.downloadRate = downloadRate
         self.totalSize = totalSize
         self.lastStatusAt = lastStatusAt
+        self.delugeReachedFinalRouting = delugeReachedFinalRouting
+    }
+
+    public var hasReachedDelugeFinalRouting: Bool {
+        delugeReachedFinalRouting == true
     }
 
     public var canRetryUploadNow: Bool {
@@ -147,10 +156,11 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
             && (sourceURL != nil || hasStagedFile)
     }
 
-    /// Failed after Deluge accepted the torrent — retry `move_storage`, do not re-add.
+    /// Failed after reaching final routing — retry `move_storage`, do not re-add.
     public var canRetryRoutingNow: Bool {
         backend == .deluge
             && status == .failed
+            && hasReachedDelugeFinalRouting
             && !(backendJobID ?? "").isEmpty
             && !destination.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }

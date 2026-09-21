@@ -118,6 +118,7 @@ public enum ManualDownloadStatusMapping {
         if live.status != .failed {
             updated.lastError = nil
         }
+        updated.markDelugeFinalRoutingIfNeeded()
         return updated
     }
 
@@ -150,6 +151,13 @@ public enum ManualDownloadStatusMapping {
         updated.progress = 1
         updated.lastError = nil
         updated.lastStatusAt = date
+        updated.markDelugeFinalRoutingIfNeeded()
+        return updated
+    }
+
+    public static func markEnteringFinalRouting(_ job: ManualDownloadJob) -> ManualDownloadJob {
+        var updated = job
+        updated.markDelugeFinalRoutingIfNeeded(force: true)
         return updated
     }
 
@@ -163,5 +171,23 @@ public enum ManualDownloadStatusMapping {
             return progress >= 0.999
         }
         return progress >= 0.999 && (state.contains("seed") || state.contains("up"))
+    }
+}
+
+extension ManualDownloadJob {
+    /// Persist that this Deluge job entered the final-routing phase.
+    mutating func markDelugeFinalRoutingIfNeeded(force: Bool = false) {
+        guard backend == .deluge else { return }
+        if force {
+            delugeReachedFinalRouting = true
+            return
+        }
+        switch status {
+            case .readyToRoute, .routing, .complete:
+                delugeReachedFinalRouting = true
+            case .submitted, .queued, .downloading, .delugeFinishing, .downloaded, .uploading,
+                .failed, .unknown:
+                break
+        }
     }
 }

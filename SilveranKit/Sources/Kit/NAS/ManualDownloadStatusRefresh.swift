@@ -51,6 +51,7 @@ public struct ManualDownloadStatusRefresh: Sendable {
         }
         var pending = job
         pending.status = .readyToRoute
+        pending.markDelugeFinalRoutingIfNeeded(force: true)
         pending.lastError = nil
         pending.lastStatusAt = Date()
         await jobs.record(pending)
@@ -192,6 +193,7 @@ public struct ManualDownloadStatusRefresh: Sendable {
 
         var routing = job
         routing.status = .routing
+        routing.markDelugeFinalRoutingIfNeeded(force: true)
         routing.progress = snapshot?.progress ?? job.progress ?? 1
         routing.downloadRate = snapshot?.downloadRate
         routing.totalSize = snapshot?.totalSize ?? job.totalSize
