@@ -9,6 +9,13 @@
 
 import Foundation
 
+public enum ManualDownloadRetryAction: String, Sendable, Equatable {
+    case none
+    case retryUpload
+    case retryDownload
+    case retryTorrent
+}
+
 public enum ManualDownloadJobStatus: String, Codable, Sendable, CaseIterable {
     case submitted
     case queued
@@ -115,13 +122,20 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
     }
 
     public var canRetryDownloadNow: Bool {
-        status == .failed && sourceURL != nil && !hasStagedFile
+        backend == .synology && status == .failed && sourceURL != nil && !hasStagedFile
     }
 
     public var canRetryTorrentNow: Bool {
         (backend == .qbittorrent || backend == .deluge)
             && status == .failed
             && sourceURL != nil
+    }
+
+    public var retryAction: ManualDownloadRetryAction {
+        if canRetryUploadNow { return .retryUpload }
+        if canRetryTorrentNow { return .retryTorrent }
+        if canRetryDownloadNow { return .retryDownload }
+        return .none
     }
 
     public var stagedFileURL: URL? {

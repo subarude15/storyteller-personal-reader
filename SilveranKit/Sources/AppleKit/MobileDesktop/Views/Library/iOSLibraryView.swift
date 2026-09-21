@@ -692,7 +692,15 @@ struct MoreMenuView: View {
                     }
                 }
                 NavigationLink(value: MoreDestination.manualDownloads) {
-                    Label(DownloadsNavigation.downloadsDestination, systemImage: "arrow.down.circle")
+                    Label {
+                        HStack {
+                            Text(DownloadsNavigation.downloadsDestination)
+                            Spacer()
+                            DownloadsAttentionBadge()
+                        }
+                    } icon: {
+                        Image(systemName: "arrow.down.circle")
+                    }
                 }
                 NavigationLink(value: MoreDestination.addBook) {
                     Label("Add Book", systemImage: "plus.circle")

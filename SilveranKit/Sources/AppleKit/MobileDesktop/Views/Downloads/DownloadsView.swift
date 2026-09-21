@@ -190,17 +190,20 @@ private struct DownloadsJobRow: View {
     @ViewBuilder
     private var actions: some View {
         HStack {
-            if job.canRetryUploadNow {
-                Button("Retry Upload") { Task { await onRetryUpload() } }
-                    .disabled(busyID != nil)
-                Button("Delete Local Copy", role: .destructive) { Task { await onDeleteLocal() } }
-                    .disabled(busyID != nil)
-            } else if job.canRetryDownloadNow {
-                Button("Retry Download") { Task { await onRetryDownload() } }
-                    .disabled(busyID != nil)
-            } else if job.canRetryTorrentNow {
-                Button("Retry") { Task { await onRetry() } }
-                    .disabled(busyID != nil)
+            switch job.retryAction {
+                case .retryUpload:
+                    Button("Retry Upload") { Task { await onRetryUpload() } }
+                        .disabled(busyID != nil)
+                    Button("Delete Local Copy", role: .destructive) { Task { await onDeleteLocal() } }
+                        .disabled(busyID != nil)
+                case .retryDownload:
+                    Button("Retry Download") { Task { await onRetryDownload() } }
+                        .disabled(busyID != nil)
+                case .retryTorrent:
+                    Button("Retry") { Task { await onRetry() } }
+                        .disabled(busyID != nil)
+                case .none:
+                    EmptyView()
             }
         }
         .font(.subheadline)
@@ -208,6 +211,33 @@ private struct DownloadsJobRow: View {
 
     private func progressText(_ progress: Double) -> String {
         "\(Int((min(max(progress, 0), 1) * 100).rounded()))%"
+    }
+}
+
+struct DownloadsAttentionBadge: View {
+    @State private var count = 0
+
+    var body: some View {
+        Group {
+            if count > 0 {
+                Text(count > 9 ? "9+" : "\(count)")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.red))
+                    .accessibilityLabel("\(count) downloads need attention")
+            }
+        }
+        .task { await reload() }
+        .onReceive(NotificationCenter.default.publisher(for: .inkampManualDownloadJobsDidChange)) { _ in
+            Task { await reload() }
+        }
+    }
+
+    private func reload() async {
+        let jobs = await ManualDownloadJobStore.shared.allJobs()
+        count = ManualDownloadBuckets.partition(jobs).attentionCount
     }
 }
 

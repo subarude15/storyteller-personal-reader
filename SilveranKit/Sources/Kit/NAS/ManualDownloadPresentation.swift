@@ -88,4 +88,5 @@ public enum DownloadsNavigation {
     public static let settingsDestination = "NAS Downloads"
     public static let downloadsDestination = "Downloads"
     public static let settingsContainsOperationalList = false
+    public static let settingsKeepsNASConfiguration = true
 }

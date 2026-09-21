@@ -15,6 +15,7 @@ struct DownloadsNavigationTests {
         #expect(DownloadsNavigation.downloadsDestination == "Downloads")
         #expect(DownloadsNavigation.settingsDestination != DownloadsNavigation.downloadsDestination)
         #expect(DownloadsNavigation.settingsContainsOperationalList == false)
+        #expect(DownloadsNavigation.settingsKeepsNASConfiguration)
     }
 }
 
@@ -103,17 +104,21 @@ struct ManualDownloadHistoryTests {
         #expect(job.canRetryUploadNow)
         #expect(!job.canRetryDownloadNow)
         #expect(!job.canRetryTorrentNow)
+        #expect(job.retryAction == .retryUpload)
     }
 
     @Test func failedDirectDownloadExposesRetryDownload() {
         let job = sampleJob(backend: .synology, status: .failed, staged: false)
         #expect(job.canRetryDownloadNow)
         #expect(!job.canRetryUploadNow)
+        #expect(job.retryAction == .retryDownload)
     }
 
     @Test func failedTorrentExposesRetryWhenSourceRemains() {
         let job = sampleJob(backend: .qbittorrent, status: .failed)
         #expect(job.canRetryTorrentNow)
+        #expect(!job.canRetryDownloadNow)
+        #expect(job.retryAction == .retryTorrent)
     }
 }
 
