@@ -1,6 +1,7 @@
 #if os(iOS)
 import AVFoundation
 import SwiftUI
+import UIKit
 
 /// Full-screen card for a streaming RSS podcast episode.
 ///
@@ -26,6 +27,7 @@ public struct PodcastPlayerView: View {
     @State private var isResolvingYouTube = false
     @State private var showYouTubeMatch = false
     @State private var matchEpoch = 0
+    @State private var videoPresentation = PodcastVideoPresentationCoordinator.shared
 
     public init(episode: PodcastPlayerPresenter.Episode, onClose: @escaping () -> Void) {
         self.episode = episode
@@ -54,6 +56,131 @@ public struct PodcastPlayerView: View {
     }
 
     public var body: some View {
+        ZStack {
+            if videoPresentation.isFullscreen, live.isVideo {
+                // Same AVPlayer as portrait — presentation-only swap of chrome.
+                PodcastVideoFullscreenView(
+                    title: live.title,
+                    player: videoPlayer,
+                    isPlaying: isPlaying,
+                    isOpening: isOpening,
+                    currentRate: currentRate,
+                    snapshot: snapshot,
+                    onExit: { videoPresentation.exitFullscreenManually() },
+                    onUserInteraction: {},
+                    scrubFraction: $scrubFraction,
+                    isScrubbing: $isScrubbing
+                )
+                .transition(.opacity)
+            } else {
+                portraitPlayerContent
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: videoPresentation.isFullscreen)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background {
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { syncInterfaceOrientation(size: geo.size) }
+                    .onChange(of: geo.size) { _, newSize in
+                        syncInterfaceOrientation(size: newSize)
+                    }
+            }
+        }
+        .toolbar(.hidden, for: .tabBar)
+        .toolbar(videoPresentation.isFullscreen ? .hidden : .automatic, for: .navigationBar)
+        .task(id: "\(live.id)-\(live.isVideo)-\(live.audioURL.absoluteString)") {
+            await refreshVideoPlayer()
+            syncVideoPresentationContext()
+        }
+        .onChange(of: presenter.isOpening) { _, opening in
+            if !opening {
+                Task { await refreshVideoPlayer() }
+            }
+        }
+        .onChange(of: live.isVideo) { _, _ in
+            syncVideoPresentationContext()
+        }
+        .onAppear {
+            monitor.start()
+            scrubFraction = monitor.snapshot?.bookProgress ?? 0
+            syncVideoPresentationContext()
+            syncInterfaceOrientation(size: nil)
+        }
+        .onDisappear {
+            videoPresentation.updatePlayerVisibility(expanded: false, isInternalVideo: false)
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)
+        ) { _ in
+            syncInterfaceOrientation(size: nil)
+        }
+        .onChange(of: monitor.snapshot?.bookProgress ?? 0) { _, newValue in
+            if !isScrubbing { scrubFraction = newValue }
+        }
+        .onChange(of: presenter.startError) { _, message in
+            if let message {
+                errorMessage = message
+                // Don't trap the user in immersive chrome when start fails.
+                if videoPresentation.isFullscreen {
+                    videoPresentation.exitFullscreenManually()
+                }
+            }
+        }
+        .alert("Podcast Error", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 {
+                errorMessage = nil
+                presenter.clearStartError()
+            } }
+        )) {
+            Button("OK") {
+                errorMessage = nil
+                presenter.clearStartError()
+            }
+        } message: {
+            if let errorMessage { Text(errorMessage) }
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    onClose()
+                } label: {
+                    Label("Podcasts", systemImage: "chevron.left")
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showPlaybackQueue = true
+                } label: {
+                    Label("Play queue", systemImage: "list.bullet")
+                }
+            }
+        }
+        .sheet(isPresented: $showPlaybackQueue) {
+            PodcastPlaybackQueueView()
+        }
+        .sheet(isPresented: $showYouTubeMatch) {
+            PodcastYouTubeMatchSheet(
+                showTitle: live.showTitle,
+                episodeTitle: live.title,
+                onPick: { hit in
+                    showYouTubeMatch = false
+                    PodcastMatchedYouTubeStore.shared.save(watchURL: hit.watchURL, for: live.id)
+                    matchEpoch += 1
+                    Task { await playYouTubeInApp(watchURL: hit.watchURL) }
+                },
+                onCancel: { showYouTubeMatch = false }
+            )
+            .presentationDetents([.medium, .large])
+        }
+        .navigationBarBackButtonHidden(true)
+        .statusBarHidden(videoPresentation.isFullscreen)
+    }
+
+    /// Existing portrait Now Playing layout (unchanged chrome).
+    private var portraitPlayerContent: some View {
         VStack(spacing: 24) {
             Spacer(minLength: 0)
 
@@ -142,75 +269,6 @@ public struct PodcastPlayerView: View {
         .padding(.vertical, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(uiColor: .systemBackground))
-        .toolbar(.hidden, for: .tabBar)
-        .task(id: "\(live.id)-\(live.isVideo)-\(live.audioURL.absoluteString)") {
-            await refreshVideoPlayer()
-        }
-        .onChange(of: presenter.isOpening) { _, opening in
-            if !opening {
-                Task { await refreshVideoPlayer() }
-            }
-        }
-        .onAppear {
-            monitor.start()
-            scrubFraction = monitor.snapshot?.bookProgress ?? 0
-        }
-        .onChange(of: monitor.snapshot?.bookProgress ?? 0) { _, newValue in
-            if !isScrubbing { scrubFraction = newValue }
-        }
-        .onChange(of: presenter.startError) { _, message in
-            if let message {
-                errorMessage = message
-            }
-        }
-        .alert("Podcast Error", isPresented: Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 {
-                errorMessage = nil
-                presenter.clearStartError()
-            } }
-        )) {
-            Button("OK") {
-                errorMessage = nil
-                presenter.clearStartError()
-            }
-        } message: {
-            if let errorMessage { Text(errorMessage) }
-        }
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    onClose()
-                } label: {
-                    Label("Podcasts", systemImage: "chevron.left")
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showPlaybackQueue = true
-                } label: {
-                    Label("Play queue", systemImage: "list.bullet")
-                }
-            }
-        }
-        .sheet(isPresented: $showPlaybackQueue) {
-            PodcastPlaybackQueueView()
-        }
-        .sheet(isPresented: $showYouTubeMatch) {
-            PodcastYouTubeMatchSheet(
-                showTitle: live.showTitle,
-                episodeTitle: live.title,
-                onPick: { hit in
-                    showYouTubeMatch = false
-                    PodcastMatchedYouTubeStore.shared.save(watchURL: hit.watchURL, for: live.id)
-                    matchEpoch += 1
-                    Task { await playYouTubeInApp(watchURL: hit.watchURL) }
-                },
-                onCancel: { showYouTubeMatch = false }
-            )
-            .presentationDetents([.medium, .large])
-        }
-        .navigationBarBackButtonHidden(true)
     }
 
     /// Pause only when audio is truly playing — never while opening/buffering.
@@ -249,6 +307,20 @@ public struct PodcastPlayerView: View {
                         }
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(alignment: .topTrailing) {
+                        Button {
+                            videoPresentation.enterFullscreenManually()
+                        } label: {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(8)
+                                .background(Circle().fill(Color.black.opacity(0.45)))
+                        }
+                        .buttonStyle(.plain)
+                        .padding(10)
+                        .accessibilityLabel("Enter fullscreen")
+                    }
                 }
                 .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
                 .layoutPriority(1)
@@ -393,7 +465,29 @@ public struct PodcastPlayerView: View {
             videoPlayer = nil
             return
         }
+        // Reuse the session AVPlayer — never allocate a second engine for fullscreen.
         videoPlayer = await AudioSessionActor.shared.podcastAVPlayer()
+    }
+
+    private func syncVideoPresentationContext() {
+        videoPresentation.updatePlayerVisibility(
+            expanded: true,
+            isInternalVideo: live.isVideo
+        )
+    }
+
+    private func syncInterfaceOrientation(size: CGSize?) {
+        let fromScene = PodcastVideoInterfaceOrientationMapping.current()
+        if fromScene != .ignored {
+            videoPresentation.setInterfaceOrientation(fromScene)
+            return
+        }
+        if let size {
+            let fromSize = PodcastVideoInterfaceOrientationMapping.fromSize(size)
+            if fromSize != .ignored {
+                videoPresentation.setInterfaceOrientation(fromSize)
+            }
+        }
     }
 
     /// Resolve via Settings YouTube URL → same openPodcast + video surface as RSS video.

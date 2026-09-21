@@ -4,6 +4,10 @@ import SwiftUI
 import UIKit
 
 /// Renders the shared podcast `AVPlayer` into an `AVPlayerLayer` (no extra controls).
+///
+/// Portrait and landscape fullscreen must pass the same `AVPlayer` instance from
+/// `AudioSessionActor.podcastAVPlayer()` — never allocate a second engine when
+/// re-hosting this surface.
 struct PodcastVideoSurfaceView: UIViewRepresentable {
     let player: AVPlayer
 
