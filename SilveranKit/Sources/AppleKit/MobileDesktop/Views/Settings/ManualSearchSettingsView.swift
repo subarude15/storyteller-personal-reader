@@ -192,159 +192,32 @@ private struct ManualSearchProviderEditor: View {
         ManualSearchSymbolName.resolve(provider.symbolName, isValidSymbol: Self.isValidSFSymbol)
     }
 
-    private var inlineTemplateFeedback: String? {
-        ManualSearchProviderValidation.inlineTemplateFeedback(provider.searchURLTemplate)
-    }
-
     private var canSave: Bool {
         !provider.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && (ebook || audiobook)
     }
 
+    private var showTestAlert: Binding<Bool> {
+        Binding(
+            get: { testResult != nil },
+            set: { if !$0 { testResult = nil } },
+        )
+    }
+
+    private var showSaveAlert: Binding<Bool> {
+        Binding(
+            get: { saveFieldError != nil },
+            set: { if !$0 { saveFieldError = nil } },
+        )
+    }
+
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    Toggle("Enabled", isOn: $provider.enabled)
-                    LabeledContent("Provider Name") {
-                        TextField("Audiobook Provider", text: $provider.name)
-                    }
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Search URL Template")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        TextField(
-                            "https://example.com/search?q={query}",
-                            text: $provider.searchURLTemplate,
-                            axis: .vertical,
-                        )
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.URL)
-                        #endif
-                        .autocorrectionDisabled()
-                        .textContentType(.URL)
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Use placeholders to insert book information into the search.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            ForEach(ManualSearchProviderValidation.placeholderHelpLines, id: \.token) { line in
-                                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                    Text(line.token)
-                                        .font(.caption.monospaced())
-                                    Text(line.meaning)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            Text("Example: \(ManualSearchProviderValidation.exampleTemplate)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .padding(.top, 2)
-                        }
-
-                        if let inlineTemplateFeedback {
-                            Label(
-                                inlineTemplateFeedback,
-                                systemImage: ManualSearchProviderValidation.containsSupportedPlaceholder(
-                                    provider.searchURLTemplate
-                                ) ? "checkmark.circle" : "exclamationmark.triangle",
-                            )
-                            .font(.caption)
-                            .foregroundStyle(
-                                ManualSearchProviderValidation.containsSupportedPlaceholder(
-                                    provider.searchURLTemplate
-                                ) ? Color.secondary : Color.orange
-                            )
-                        }
-                    }
-                } header: {
-                    Text("Provider")
-                } footer: {
-                    Text("Do not put passwords or API keys in the URL.")
-                }
-
-                Section {
-                    HStack(spacing: 12) {
-                        Image(systemName: resolvedSymbol.name)
-                            .font(.title2)
-                            .frame(width: 36, height: 36)
-                            .accessibilityHidden(true)
-                        TextField("SF Symbol name", text: $provider.symbolName)
-                            #if os(iOS)
-                            .textInputAutocapitalization(.never)
-                            #endif
-                            .autocorrectionDisabled()
-                    }
-                    if resolvedSymbol.usedFallback,
-                        !provider.symbolName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    {
-                        Text("Unknown symbol — using globe.")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(ManualSearchSymbolName.suggestions, id: \.self) { name in
-                                Button {
-                                    provider.symbolName = name
-                                } label: {
-                                    Label(name, systemImage: name)
-                                        .labelStyle(.iconOnly)
-                                        .padding(8)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .fill(
-                                                    resolvedSymbol.name == name
-                                                        ? Color.accentColor.opacity(0.15)
-                                                        : Color.secondary.opacity(0.12)
-                                                )
-                                        )
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel(name)
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Icon")
-                } footer: {
-                    Text("Uses an Apple SF Symbol. Pick a suggestion or type a symbol name.")
-                }
-
-                Section {
-                    Toggle("eBooks", isOn: $ebook)
-                    Toggle("Audiobooks", isOn: $audiobook)
-                    if !ebook && !audiobook {
-                        Text("Select at least one format.")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
-                } header: {
-                    Text("Formats")
-                } footer: {
-                    Text("Choose which searches this provider should appear for.")
-                }
-
-                Section {
-                    Button("Test Search") {
-                        testResult = ManualSearchProviderValidation.testSearch(provider.searchURLTemplate)
-                    }
-                    Button("Save") {
-                        attemptSave()
-                    }
-                    .disabled(!canSave)
-                    if provider.isBuiltIn {
-                        Button("Reset Built-in") {
-                            onReset(provider.id)
-                        }
-                    } else if !isNew {
-                        Button("Delete", role: .destructive) {
-                            onDelete(provider.id)
-                        }
-                    }
-                }
+                providerBasicsSection
+                iconSection
+                formatsSection
+                actionsSection
             }
             .navigationTitle(isNew ? "Add Provider" : "Edit Provider")
             #if os(iOS)
@@ -357,28 +230,92 @@ private struct ManualSearchProviderEditor: View {
             }
             .alert(
                 testResult?.title ?? "Test Search",
-                isPresented: Binding(
-                    get: { testResult != nil },
-                    set: { if !$0 { testResult = nil } },
-                ),
+                isPresented: showTestAlert,
             ) {
-                if let url = testResult?.exampleURL {
-                    Button("Open Test Search") {
-                        openURL(url)
-                        testResult = nil
-                    }
-                }
-                Button("OK", role: .cancel) { testResult = nil }
+                testAlertActions
             } message: {
                 Text(testResult?.detail ?? "")
             }
-            .alert("Couldn't Save", isPresented: Binding(
-                get: { saveFieldError != nil },
-                set: { if !$0 { saveFieldError = nil } },
-            )) {
+            .alert("Couldn't Save", isPresented: showSaveAlert) {
                 Button("OK", role: .cancel) { saveFieldError = nil }
             } message: {
                 Text(saveFieldError ?? "")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var testAlertActions: some View {
+        if let url = testResult?.exampleURL {
+            Button("Open Test Search") {
+                openURL(url)
+                testResult = nil
+            }
+        }
+        Button("OK", role: .cancel) { testResult = nil }
+    }
+
+    private var providerBasicsSection: some View {
+        Section {
+            Toggle("Enabled", isOn: $provider.enabled)
+            LabeledContent("Provider Name") {
+                TextField("Audiobook Provider", text: $provider.name)
+            }
+            ProviderTemplateFields(template: $provider.searchURLTemplate)
+        } header: {
+            Text("Provider")
+        } footer: {
+            Text("Do not put passwords or API keys in the URL.")
+        }
+    }
+
+    private var iconSection: some View {
+        Section {
+            ProviderIconPicker(
+                symbolName: $provider.symbolName,
+                resolvedName: resolvedSymbol.name,
+                usedFallback: resolvedSymbol.usedFallback,
+            )
+        } header: {
+            Text("Icon")
+        } footer: {
+            Text("Uses an Apple SF Symbol. Pick a suggestion or type a symbol name.")
+        }
+    }
+
+    private var formatsSection: some View {
+        Section {
+            Toggle("eBooks", isOn: $ebook)
+            Toggle("Audiobooks", isOn: $audiobook)
+            if !ebook && !audiobook {
+                Text("Select at least one format.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        } header: {
+            Text("Formats")
+        } footer: {
+            Text("Choose which searches this provider should appear for.")
+        }
+    }
+
+    private var actionsSection: some View {
+        Section {
+            Button("Test Search") {
+                testResult = ManualSearchProviderValidation.testSearch(provider.searchURLTemplate)
+            }
+            Button("Save") {
+                attemptSave()
+            }
+            .disabled(!canSave)
+            if provider.isBuiltIn {
+                Button("Reset Built-in") {
+                    onReset(provider.id)
+                }
+            } else if !isNew {
+                Button("Delete", role: .destructive) {
+                    onDelete(provider.id)
+                }
             }
         }
     }
@@ -417,6 +354,129 @@ private struct ManualSearchProviderEditor: View {
         #else
         return !name.isEmpty
         #endif
+    }
+}
+
+private struct ProviderTemplateFields: View {
+    @Binding var template: String
+
+    private var inlineFeedback: String? {
+        ManualSearchProviderValidation.inlineTemplateFeedback(template)
+    }
+
+    private var hasPlaceholder: Bool {
+        ManualSearchProviderValidation.containsSupportedPlaceholder(template)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Search URL Template")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            TextField(
+                "https://example.com/search?q={query}",
+                text: $template,
+                axis: .vertical,
+            )
+            #if os(iOS)
+            .textInputAutocapitalization(.never)
+            .keyboardType(.URL)
+            #endif
+            .autocorrectionDisabled()
+            .textContentType(.URL)
+
+            placeholderHelp
+            inlineFeedbackLabel
+        }
+    }
+
+    private var placeholderHelp: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Use placeholders to insert book information into the search.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ForEach(ManualSearchProviderValidation.placeholderHelpLines, id: \.token) { line in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(line.token)
+                        .font(.caption.monospaced())
+                    Text(line.meaning)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text("Example: \(ManualSearchProviderValidation.exampleTemplate)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 2)
+        }
+    }
+
+    @ViewBuilder
+    private var inlineFeedbackLabel: some View {
+        if let inlineFeedback {
+            Label(
+                inlineFeedback,
+                systemImage: hasPlaceholder ? "checkmark.circle" : "exclamationmark.triangle",
+            )
+            .font(.caption)
+            .foregroundStyle(hasPlaceholder ? Color.secondary : Color.orange)
+        }
+    }
+}
+
+private struct ProviderIconPicker: View {
+    @Binding var symbolName: String
+    let resolvedName: String
+    let usedFallback: Bool
+
+    private var showFallbackWarning: Bool {
+        usedFallback && !symbolName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: resolvedName)
+                .font(.title2)
+                .frame(width: 36, height: 36)
+                .accessibilityHidden(true)
+            TextField("SF Symbol name", text: $symbolName)
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                #endif
+                .autocorrectionDisabled()
+        }
+        if showFallbackWarning {
+            Text("Unknown symbol — using globe.")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        }
+        suggestionChips
+    }
+
+    private var suggestionChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(ManualSearchSymbolName.suggestions, id: \.self) { name in
+                    Button {
+                        symbolName = name
+                    } label: {
+                        Label(name, systemImage: name)
+                            .labelStyle(.iconOnly)
+                            .padding(8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(
+                                        resolvedName == name
+                                            ? Color.accentColor.opacity(0.15)
+                                            : Color.secondary.opacity(0.12)
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(name)
+                }
+            }
+        }
     }
 }
 #endif
