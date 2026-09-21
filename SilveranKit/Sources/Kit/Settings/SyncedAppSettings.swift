@@ -11,6 +11,7 @@
 //  schemaVersion
 //  integrations
 //    lazyLibrarian   enabled, baseURL
+//    manualSearch    providers, openInAppBrowser
 //    shelfarr        (future)
 //  playback            (future)
 //  podcastPreferences  (future)
@@ -51,7 +52,7 @@ public struct LazyLibrarianLocalSettings: Equatable, Sendable {
 
 /// Versioned account settings blob. Credentials are not fields on this type.
 public struct SyncedAppSettings: Codable, Equatable, Sendable {
-    public static let schemaVersion = 1
+    public static let schemaVersion = 2
     /// Hidden private collection, same prefix as `.inkamp.podcastSync.v1`.
     public static let collectionName = ".inkamp.settings.v1"
 
@@ -67,16 +68,45 @@ public struct SyncedAppSettings: Codable, Equatable, Sendable {
     }
 
     public var hasAnySetting: Bool {
-        integrations.lazyLibrarian.enabled != nil || integrations.lazyLibrarian.baseURL != nil
+        integrations.lazyLibrarian.enabled != nil
+            || integrations.lazyLibrarian.baseURL != nil
+            || integrations.manualSearch.providers != nil
+            || integrations.manualSearch.openInAppBrowser != nil
     }
 
     public struct Integrations: Codable, Equatable, Sendable {
         public var lazyLibrarian: LazyLibrarian
+        public var manualSearch: ManualSearch
         // Shelfarr and later integrations: add a timestamped group here.
         // Bump `SyncedAppSettings.schemaVersion` so older apps refuse to rewrite the blob.
 
-        public init(lazyLibrarian: LazyLibrarian = LazyLibrarian()) {
+        public init(
+            lazyLibrarian: LazyLibrarian = LazyLibrarian(),
+            manualSearch: ManualSearch = ManualSearch(),
+        ) {
             self.lazyLibrarian = lazyLibrarian
+            self.manualSearch = manualSearch
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            lazyLibrarian =
+                (try container.decodeIfPresent(LazyLibrarian.self, forKey: .lazyLibrarian))
+                ?? LazyLibrarian()
+            manualSearch =
+                (try container.decodeIfPresent(ManualSearch.self, forKey: .manualSearch))
+                ?? ManualSearch()
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(lazyLibrarian, forKey: .lazyLibrarian)
+            try container.encode(manualSearch, forKey: .manualSearch)
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case lazyLibrarian
+            case manualSearch
         }
     }
 
@@ -90,6 +120,19 @@ public struct SyncedAppSettings: Codable, Equatable, Sendable {
         ) {
             self.enabled = enabled
             self.baseURL = baseURL
+        }
+    }
+
+    public struct ManualSearch: Codable, Equatable, Sendable {
+        public var providers: TimestampedSetting<[ManualSearchProvider]>?
+        public var openInAppBrowser: TimestampedSetting<Bool>?
+
+        public init(
+            providers: TimestampedSetting<[ManualSearchProvider]>? = nil,
+            openInAppBrowser: TimestampedSetting<Bool>? = nil,
+        ) {
+            self.providers = providers
+            self.openInAppBrowser = openInAppBrowser
         }
     }
 }
@@ -173,6 +216,7 @@ public enum SettingsSyncMerge {
 
     public static func merge(local: SyncedAppSettings, remote: SyncedAppSettings) -> SyncedAppSettings {
         SyncedAppSettings(
+            schemaVersion: resolvedSchemaVersion(local: local, remote: remote),
             integrations: SyncedAppSettings.Integrations(
                 lazyLibrarian: SyncedAppSettings.LazyLibrarian(
                     enabled: latest(
@@ -182,6 +226,16 @@ public enum SettingsSyncMerge {
                     baseURL: latest(
                         local.integrations.lazyLibrarian.baseURL,
                         remote.integrations.lazyLibrarian.baseURL,
+                    ),
+                ),
+                manualSearch: SyncedAppSettings.ManualSearch(
+                    providers: latest(
+                        local.integrations.manualSearch.providers,
+                        remote.integrations.manualSearch.providers,
+                    ),
+                    openInAppBrowser: latest(
+                        local.integrations.manualSearch.openInAppBrowser,
+                        remote.integrations.manualSearch.openInAppBrowser,
                     ),
                 ),
             ),
@@ -210,6 +264,52 @@ public enum SettingsSyncMerge {
             )
         }
         return updated
+    }
+
+    public static func applyManualSearchEdit(
+        _ document: SyncedAppSettings,
+        providers: [ManualSearchProvider],
+        openInAppBrowser: Bool,
+        at date: Date,
+    ) -> SyncedAppSettings {
+        var updated = document
+        let stamped = SettingsSyncClock.stamp(date)
+        if updated.integrations.manualSearch.providers?.value != providers {
+            updated.integrations.manualSearch.providers = TimestampedSetting(
+                value: providers,
+                modifiedAt: stamped,
+            )
+        }
+        if updated.integrations.manualSearch.openInAppBrowser?.value != openInAppBrowser {
+            updated.integrations.manualSearch.openInAppBrowser = TimestampedSetting(
+                value: openInAppBrowser,
+                modifiedAt: stamped,
+            )
+        }
+        return promoteSchemaIfNeeded(updated)
+    }
+
+    /// Schema-2 fields (Manual Search) must not be written under schema 1.
+    /// Never lowers an already-newer version.
+    public static func promoteSchemaIfNeeded(_ document: SyncedAppSettings) -> SyncedAppSettings {
+        guard hasSchema2Fields(document) else { return document }
+        guard document.schemaVersion < SyncedAppSettings.schemaVersion else { return document }
+        var updated = document
+        updated.schemaVersion = SyncedAppSettings.schemaVersion
+        return updated
+    }
+
+    public static func resolvedSchemaVersion(local: SyncedAppSettings, remote: SyncedAppSettings) -> Int {
+        let highest = max(local.schemaVersion, remote.schemaVersion)
+        if hasSchema2Fields(local) || hasSchema2Fields(remote) {
+            return max(highest, SyncedAppSettings.schemaVersion)
+        }
+        return highest
+    }
+
+    public static func hasSchema2Fields(_ document: SyncedAppSettings) -> Bool {
+        document.integrations.manualSearch.providers != nil
+            || document.integrations.manualSearch.openInAppBrowser != nil
     }
 
     private static func canonical<Value: Encodable>(_ value: Value) -> String {
@@ -302,6 +402,23 @@ public enum SettingsSyncApply {
         return LazyLibrarianLocalSettings(
             enabled: lazyLibrarian.enabled?.value ?? config.enabled,
             baseURL: lazyLibrarian.baseURL?.value ?? config.baseURL,
+        )
+    }
+
+    public static func manualSearch(
+        document: SyncedAppSettings,
+        current: ManualSearchSettingsSnapshot = ManualSearchSettingsSnapshot(),
+    ) -> ManualSearchSettingsSnapshot {
+        let section = document.integrations.manualSearch
+        let providers: [ManualSearchProvider]
+        if let synced = section.providers?.value {
+            providers = ManualSearchCatalog.resolve(synced: synced)
+        } else {
+            providers = current.providers
+        }
+        return ManualSearchSettingsSnapshot(
+            providers: providers,
+            openInAppBrowser: section.openInAppBrowser?.value ?? current.openInAppBrowser,
         )
     }
 }
@@ -478,6 +595,27 @@ public struct SettingsSyncJournal {
         return edited
     }
 
+    @discardableResult
+    public func recordManualSearchChange(
+        providers: [ManualSearchProvider],
+        openInAppBrowser: Bool,
+        at date: Date,
+    ) throws -> SyncedAppSettings {
+        // Do not call migrateIfNeeded(.unset) here — that would mark
+        // LazyLibrarian migration complete without seeding existing config.
+        let current = load() ?? SyncedAppSettings()
+        let edited = SettingsSyncMerge.applyManualSearchEdit(
+            current,
+            providers: providers,
+            openInAppBrowser: openInAppBrowser,
+            at: date,
+        )
+        guard edited != current else { return current }
+        try save(edited)
+        needsSync = true
+        return edited
+    }
+
     private func syncedFieldNames(_ document: SyncedAppSettings) -> String {
         var names: [String] = []
         if document.integrations.lazyLibrarian.enabled != nil {
@@ -485,6 +623,12 @@ public struct SettingsSyncJournal {
         }
         if document.integrations.lazyLibrarian.baseURL != nil {
             names.append("lazyLibrarian.baseURL")
+        }
+        if document.integrations.manualSearch.providers != nil {
+            names.append("manualSearch.providers")
+        }
+        if document.integrations.manualSearch.openInAppBrowser != nil {
+            names.append("manualSearch.openInAppBrowser")
         }
         return names.isEmpty ? "none" : names.joined(separator: ",")
     }

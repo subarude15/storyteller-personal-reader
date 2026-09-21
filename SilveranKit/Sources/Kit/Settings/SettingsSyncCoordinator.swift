@@ -14,6 +14,9 @@ extension Notification.Name {
     public static let inkampSettingsSyncStatusDidChange = Notification.Name(
         "inkampSettingsSyncStatusDidChange"
     )
+    public static let inkampManualSearchSettingsDidChange = Notification.Name(
+        "inkampManualSearchSettingsDidChange"
+    )
 }
 
 /// Coordinates the local settings journal with the Storyteller private blob.
@@ -102,6 +105,29 @@ public final class SettingsSyncCoordinator {
         }
         guard journal.needsSync else { return }
         debugLog("[SettingsSync] local edit lazyLibrarian")
+        scheduleSyncAfterLocalChange()
+    }
+
+    public func noteLocalManualSearchChange(
+        providers: [ManualSearchProvider],
+        openInAppBrowser: Bool,
+        at date: Date,
+    ) {
+        do {
+            document = try journal.recordManualSearchChange(
+                providers: providers,
+                openInAppBrowser: openInAppBrowser,
+                at: date,
+            )
+        } catch {
+            debugLog("[SettingsSync] failure journal save")
+            return
+        }
+        ManualSearchSettingsStore.shared.applySynced(
+            SettingsSyncApply.manualSearch(document: document)
+        )
+        guard journal.needsSync else { return }
+        debugLog("[SettingsSync] local edit manualSearch")
         scheduleSyncAfterLocalChange()
     }
 
@@ -215,6 +241,15 @@ public final class SettingsSyncCoordinator {
         } catch {
             debugLog("[SettingsSync] failure apply local config")
         }
+        applyManualSearch(document)
+    }
+
+    private func applyManualSearch(_ document: SyncedAppSettings) {
+        let applied = SettingsSyncApply.manualSearch(
+            document: document,
+            current: ManualSearchSettingsStore.shared.snapshot,
+        )
+        ManualSearchSettingsStore.shared.applySynced(applied)
     }
 
     private func publish() {

@@ -968,6 +968,8 @@ extension SettingsView {
                     )
                 }
 
+                ManualSearchSettingsSection()
+
                                 Section {
                                     NavigationLink {
                                         IOSDebugLogView()
@@ -1628,6 +1630,7 @@ private struct MacBookSourcesSettingsView: View {
                         "Optional helper on your home network only. Off-network unavailability is informational, not an error."
                     )
                 }
+                ManualSearchSettingsSection()
             }
             .formStyle(.grouped)
             .frame(maxHeight: 420)

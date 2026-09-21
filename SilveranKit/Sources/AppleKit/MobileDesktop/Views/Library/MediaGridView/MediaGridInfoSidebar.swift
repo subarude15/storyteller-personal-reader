@@ -37,6 +37,7 @@ struct MediaGridInfoSidebar: View {
     @State private var showingFormatLink = false
     @State private var showingAudiobookOptions = false
     @State private var showingBookRequest = false
+    @State private var showingManualSearch = false
     @State private var alignmentOverride: ReadaloudAlignment?
     @State private var formatActionError: String?
 
@@ -131,6 +132,13 @@ struct MediaGridInfoSidebar: View {
             .presentationDragIndicator(.visible)
             #endif
         }
+        .sheet(isPresented: $showingManualSearch) {
+            ManualSearchView(book: ManualSearchBookContext.from(CanonicalBookWork.library(currentItem)))
+            #if os(iOS)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            #endif
+        }
         .alert("Couldn't update formats", isPresented: formatErrorPresented) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -154,6 +162,7 @@ struct MediaGridInfoSidebar: View {
             formatActionError = nil
             showingAudiobookOptions = false
             showingBookRequest = false
+            showingManualSearch = false
             prepareForDisplay()
             loadDescription()
         }
@@ -251,6 +260,7 @@ struct MediaGridInfoSidebar: View {
                 formatLinkButton
                 findAudiobookButton
                 requestBookButton
+                manualSearchButton
                 BookRequestStatusIndicator(book: currentItem)
                 formatAlignmentNote
 
@@ -620,6 +630,7 @@ struct MediaGridInfoSidebar: View {
                 formatLinkButton
                 findAudiobookButton
                 requestBookButton
+                manualSearchButton
                 BookRequestStatusIndicator(book: currentItem)
                 formatAlignmentNote
 
@@ -880,6 +891,19 @@ struct MediaGridInfoSidebar: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint("Asks LazyLibrarian or Shelfarr to search for this book.")
+    }
+
+    @ViewBuilder
+    private var manualSearchButton: some View {
+        Button {
+            showingManualSearch = true
+        } label: {
+            Label("Search manually", systemImage: "globe")
+                .font(.subheadline.weight(.semibold))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("search-manually")
+        .accessibilityHint("Search websites yourself when automatic tools cannot find this book.")
     }
 
     @ViewBuilder

@@ -280,6 +280,79 @@ struct SettingsSyncTests {
         #expect(SettingsSyncCodec.inspect("") == .empty)
     }
 
+    @Test func schema1ManualSearchEditPromotesToCurrent() throws {
+        let store = try journal()
+        var v1 = SyncedAppSettings(schemaVersion: 1)
+        v1.integrations.lazyLibrarian.enabled = TimestampedSetting(value: true, modifiedAt: date(10))
+        v1.integrations.lazyLibrarian.baseURL = TimestampedSetting(
+            value: "https://ll.home",
+            modifiedAt: date(10),
+        )
+        try store.save(v1)
+        store.migrationCompleted = true
+        #expect(store.load()?.schemaVersion == 1)
+
+        let provider = ManualSearchProvider(
+            id: "custom-anna",
+            name: "My Index",
+            searchURLTemplate: "https://index.example/search?q={query}",
+            sortOrder: 0,
+            isBuiltIn: false,
+        )
+        let edited = try store.recordManualSearchChange(
+            providers: [provider],
+            openInAppBrowser: true,
+            at: date(40),
+        )
+        #expect(edited.schemaVersion == SyncedAppSettings.schemaVersion)
+        #expect(edited.integrations.lazyLibrarian.enabled?.value == true)
+        #expect(edited.integrations.lazyLibrarian.baseURL?.value == "https://ll.home")
+        #expect(edited.integrations.lazyLibrarian.baseURL?.modifiedAt == date(10))
+        #expect(edited.integrations.manualSearch.providers?.value.first?.id == "custom-anna")
+
+        let raw = try SettingsSyncCodec.encode(edited)
+        guard case .document(let decoded) = SettingsSyncCodec.inspect(raw) else {
+            Issue.record("promoted document should round-trip")
+            return
+        }
+        #expect(decoded == edited)
+        #expect(decoded.schemaVersion == 2)
+        #expect(raw.contains("\"schemaVersion\":2"))
+    }
+
+    @Test func schema1LazyLibrarianEditDoesNotPromote() throws {
+        let store = try journal()
+        var v1 = SyncedAppSettings(schemaVersion: 1)
+        v1.integrations.lazyLibrarian.enabled = TimestampedSetting(value: true, modifiedAt: date(10))
+        v1.integrations.lazyLibrarian.baseURL = TimestampedSetting(
+            value: "https://ll.home",
+            modifiedAt: date(10),
+        )
+        try store.save(v1)
+        store.migrationCompleted = true
+        let edited = try store.recordLazyLibrarianChange(
+            enabled: false,
+            baseURL: "https://ll.home",
+            previousEnabled: true,
+            previousBaseURL: "https://ll.home",
+            at: date(40),
+        )
+        #expect(edited.schemaVersion == 1)
+        #expect(edited.integrations.manualSearch.providers == nil)
+        #expect(edited.integrations.lazyLibrarian.enabled?.value == false)
+        let merged = SettingsSyncMerge.merge(local: edited, remote: v1)
+        #expect(merged.schemaVersion == 1)
+    }
+
+    @Test func promoteDoesNotDowngradeNewerSchema() {
+        var newer = SyncedAppSettings(schemaVersion: 9)
+        newer.integrations.manualSearch.openInAppBrowser = TimestampedSetting(
+            value: true,
+            modifiedAt: date(10),
+        )
+        #expect(SettingsSyncMerge.promoteSchemaIfNeeded(newer).schemaVersion == 9)
+    }
+
     @Test func roundTripPreservesValuesAndDropsNothing() throws {
         let document = ll(enabled: false, enabledAt: 15, baseURL: "https://ll", baseURLAt: 15)
         let raw = try SettingsSyncCodec.encode(document)
@@ -288,6 +361,7 @@ struct SettingsSyncTests {
             return
         }
         #expect(decoded == document)
+        #expect(decoded.schemaVersion == SyncedAppSettings.schemaVersion)
     }
 
     @Test func credentialsAreNotSerialized() throws {

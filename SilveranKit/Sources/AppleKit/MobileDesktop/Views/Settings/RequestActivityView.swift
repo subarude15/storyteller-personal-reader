@@ -605,6 +605,7 @@ struct RequestActivityChainDetailView: View {
     @State private var confirmRemove = false
     @State private var openingAlternate = false
     @State private var showingFallback = false
+    @State private var showingManualSearch = false
 
     private var chain: RequestActivityChain? {
         model.chain(id: chainID)
@@ -701,7 +702,20 @@ struct RequestActivityChainDetailView: View {
                             }
                         }
                     },
+                    onManualSearch: {
+                        showingFallback = false
+                        showingManualSearch = true
+                    },
                 )
+            }
+        }
+        .sheet(isPresented: $showingManualSearch) {
+            if let item = actionItem {
+                ManualSearchView(book: manualSearchBook(from: item))
+                #if os(iOS)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                #endif
             }
         }
     }
@@ -908,6 +922,14 @@ struct RequestActivityChainDetailView: View {
                         }
                         .disabled(isBusy)
                     }
+
+                    Button {
+                        showingManualSearch = true
+                    } label: {
+                        Label("Search manually", systemImage: "globe")
+                    }
+                    .accessibilityIdentifier("search-manually")
+                    .disabled(isBusy)
                 }
             }
 
@@ -1038,6 +1060,7 @@ struct RequestActivityDetailView: View {
     @State private var confirmRemove = false
     @State private var openingAlternate = false
     @State private var showingFallback = false
+    @State private var showingManualSearch = false
 
     private var item: RequestActivityItem? {
         model.item(id: itemID)
@@ -1122,7 +1145,20 @@ struct RequestActivityDetailView: View {
                             }
                         }
                     },
+                    onManualSearch: {
+                        showingFallback = false
+                        showingManualSearch = true
+                    },
                 )
+            }
+        }
+        .sheet(isPresented: $showingManualSearch) {
+            if let item {
+                ManualSearchView(book: manualSearchBook(from: item))
+                #if os(iOS)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                #endif
             }
         }
     }
@@ -1302,6 +1338,14 @@ struct RequestActivityDetailView: View {
                         }
                         .disabled(isBusy)
                     }
+
+                    Button {
+                        showingManualSearch = true
+                    } label: {
+                        Label("Search manually", systemImage: "globe")
+                    }
+                    .accessibilityIdentifier("search-manually")
+                    .disabled(isBusy)
                 }
             }
 
@@ -1452,6 +1496,7 @@ private struct RequestFallbackSheet: View {
     let unavailableShelfarr: Bool
     let onSubmit: (BookRequestProviderKind, [BookRequestFormat]) -> Void
     let onSearch: () -> Void
+    let onManualSearch: () -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var formats: [BookRequestFormat]
@@ -1464,6 +1509,7 @@ private struct RequestFallbackSheet: View {
         unavailableShelfarr: Bool,
         onSubmit: @escaping (BookRequestProviderKind, [BookRequestFormat]) -> Void,
         onSearch: @escaping () -> Void,
+        onManualSearch: @escaping () -> Void,
     ) {
         self.item = item
         self.offer = offer
@@ -1471,6 +1517,7 @@ private struct RequestFallbackSheet: View {
         self.unavailableShelfarr = unavailableShelfarr
         self.onSubmit = onSubmit
         self.onSearch = onSearch
+        self.onManualSearch = onManualSearch
         let start = offer.eligibleFormats.count == 1 ? offer.eligibleFormats : []
         _formats = State(initialValue: start)
     }
@@ -1480,10 +1527,13 @@ private struct RequestFallbackSheet: View {
             List {
                 if formats.isEmpty {
                     formatPicker
+                    manualSearchRow
                 } else if let pendingProvider {
                     confirm(pendingProvider)
+                    manualSearchRow
                 } else {
                     options
+                    manualSearchRow
                 }
             }
             .navigationTitle("Try another source")
@@ -1560,6 +1610,20 @@ private struct RequestFallbackSheet: View {
     }
 
     @ViewBuilder
+    private var manualSearchRow: some View {
+        Section {
+            Button {
+                onManualSearch()
+            } label: {
+                Label("Search manually", systemImage: "globe")
+            }
+            .accessibilityIdentifier("search-manually")
+        } footer: {
+            Text("Open a website in the app and look yourself. Detected downloads are not sent to the NAS yet.")
+        }
+    }
+
+    @ViewBuilder
     private func confirm(_ provider: BookRequestProviderKind) -> some View {
         let copy = RequestActivityFallbackPolicy.confirmation(
             bookTitle: item.title,
@@ -1593,5 +1657,14 @@ private struct RequestFallbackSheet: View {
                 false
         }
     }
+}
+
+private func manualSearchBook(from item: RequestActivityItem) -> ManualSearchBookContext {
+    ManualSearchBookContext(
+        title: item.title,
+        authors: item.author.isEmpty ? [] : [item.author],
+        openLibraryWorkID: item.openLibraryWorkID,
+        isbn: item.isbn,
+    )
 }
 #endif

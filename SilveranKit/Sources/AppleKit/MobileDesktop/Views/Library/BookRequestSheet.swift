@@ -11,6 +11,7 @@ struct BookRequestSheet: View {
     @State private var submission: BookRequestSubmission?
     @State private var providerName: String?
     @State private var tracked: RequestActivityItem?
+    @State private var showingManualSearch = false
 
     var body: some View {
         NavigationStack {
@@ -59,6 +60,17 @@ struct BookRequestSheet: View {
                         "Request accepted means the server will search. It does not mean the book is downloaded."
                     )
                 }
+
+                Section {
+                    Button {
+                        showingManualSearch = true
+                    } label: {
+                        Label("Search manually", systemImage: "globe")
+                    }
+                    .accessibilityIdentifier("search-manually")
+                } footer: {
+                    Text("Look on a website yourself if LazyLibrarian or Shelfarr cannot find it.")
+                }
                 if sending {
                     Section {
                         HStack {
@@ -95,6 +107,13 @@ struct BookRequestSheet: View {
                     Button("Done") { dismiss() }
                 }
             }
+        }
+        .sheet(isPresented: $showingManualSearch) {
+            ManualSearchView(book: ManualSearchBookContext.from(work))
+            #if os(iOS)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            #endif
         }
         .task {
             await loadProvider()
