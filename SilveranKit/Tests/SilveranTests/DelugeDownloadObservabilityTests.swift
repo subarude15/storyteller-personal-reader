@@ -184,6 +184,56 @@ struct DelugeDownloadObservabilityTests {
         #expect(hash == "hashdef")
     }
 
+    @Test func addTorrentFileUsesBase64Filedump() async throws {
+        let torrentURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("inkamp-deluge-test-\(UUID().uuidString).torrent")
+        let payload = Data("d8:announce13:http://a.come")
+        try payload.write(to: torrentURL)
+        defer { try? FileManager.default.removeItem(at: torrentURL) }
+
+        let transport = DelugeScript()
+        transport.handler = { method, body, cookie in
+            switch method {
+                case "auth.login":
+                    return DelugeHTTP(
+                        status: 200,
+                        body: Data(#"{"result":true,"error":null,"id":1}"#.utf8),
+                        setCookie: "_session_id=abc; Path=/",
+                    )
+                case "web.connected":
+                    return DelugeHTTP(
+                        status: 200,
+                        body: Data(#"{"result":true,"error":null,"id":2}"#.utf8),
+                        setCookie: cookie,
+                    )
+                case "core.add_torrent_file":
+                    let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+                    let params = json?["params"] as? [Any]
+                    #expect(params?[0] as? String == "hobbit.torrent")
+                    #expect(params?[1] as? String == payload.base64EncodedString())
+                    let options = params?[2] as? [String: Any]
+                    #expect(options?["download_location"] as? String == "/media/audiobooks")
+                    #expect(options?["add_paused"] as? Bool == true)
+                    return DelugeHTTP(
+                        status: 200,
+                        body: Data(#"{"result":"hashfile","error":null,"id":11}"#.utf8),
+                    )
+                default:
+                    return DelugeHTTP(status: 200, body: Data(#"{"result":null,"error":null,"id":0}"#.utf8))
+            }
+        }
+        let client = DelugeWebClient(transport: transport)
+        let hash = try await client.addTorrentFile(
+            baseURL: "http://deluge.example:8112",
+            password: "secret",
+            fileURL: torrentURL,
+            filename: "hobbit.torrent",
+            downloadLocation: "/media/audiobooks",
+            start: false,
+        )
+        #expect(hash == "hashfile")
+    }
+
     @Test func jsonNullErrorIsNotAFailure() {
         let null = try? JSONSerialization.jsonObject(with: Data(#"{"error":null}"#.utf8)) as? [String: Any]
         #expect(DelugeWebClient.jsonValue(null?["error"]) == nil)

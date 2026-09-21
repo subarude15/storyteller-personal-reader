@@ -84,6 +84,8 @@ public struct ManualAcquisitionCandidate: Equatable, Sendable, Hashable {
     /// Session cookies from the in-app browser. Not persisted.
     public var cookieHeader: String?
     public var referer: String?
+    /// Ephemeral staged `.torrent` from WKDownload. Not a media file.
+    public var localTorrentFileURL: URL?
 
     public init(
         sourceURL: URL,
@@ -95,6 +97,7 @@ public struct ManualAcquisitionCandidate: Equatable, Sendable, Hashable {
         providerID: String? = nil,
         cookieHeader: String? = nil,
         referer: String? = nil,
+        localTorrentFileURL: URL? = nil,
     ) {
         self.sourceURL = sourceURL
         self.detectedType = detectedType
@@ -105,10 +108,15 @@ public struct ManualAcquisitionCandidate: Equatable, Sendable, Hashable {
         self.providerID = providerID
         self.cookieHeader = cookieHeader
         self.referer = referer
+        self.localTorrentFileURL = localTorrentFileURL
     }
 
     public var displayFilename: String {
         if let filename, !filename.isEmpty { return filename }
+        if let localTorrentFileURL {
+            let last = localTorrentFileURL.lastPathComponent
+            if !last.isEmpty { return last }
+        }
         if detectedType == .magnet { return "Magnet link" }
         let last = sourceURL.lastPathComponent
         if !last.isEmpty, last != "/" { return last }
@@ -122,5 +130,16 @@ public struct ManualAcquisitionCandidate: Equatable, Sendable, Hashable {
 
     public var transportKind: ManualAcquisitionTransportKind {
         detectedType.transportKind
+    }
+
+    public var hasStagedTorrentFile: Bool {
+        guard let localTorrentFileURL else { return false }
+        return ManualDownloadStaging.exists(localTorrentFileURL)
+    }
+
+    /// Drop a WK-staged `.torrent` that is not owned by a retryable job yet.
+    public func discardStagedTorrentFile() {
+        guard let localTorrentFileURL else { return }
+        ManualDownloadStaging.remove(localTorrentFileURL)
     }
 }

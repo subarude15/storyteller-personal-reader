@@ -302,7 +302,7 @@ private struct ManualSearchProviderEditor: View {
     private var actionsSection: some View {
         Section {
             Button("Test Search") {
-                testResult = ManualSearchProviderValidation.testSearch(template: provider.searchURLTemplate)
+                testResult = ManualSearchProviderValidation.testSearch(provider.searchURLTemplate)
             }
             Button("Save") {
                 attemptSave()

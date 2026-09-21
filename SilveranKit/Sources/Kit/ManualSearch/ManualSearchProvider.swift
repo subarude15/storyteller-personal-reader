@@ -291,7 +291,7 @@ public enum ManualSearchProviderValidation: Equatable, Sendable {
         }
     }
 
-    public static func testSearch(template: String) -> ManualSearchTemplateTestResult {
+    public static func testSearch(_ template: String) -> ManualSearchTemplateTestResult {
         switch assessTemplate(template) {
             case .looksGood(let url):
                 return ManualSearchTemplateTestResult(

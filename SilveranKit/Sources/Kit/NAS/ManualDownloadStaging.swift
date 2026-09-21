@@ -72,6 +72,19 @@ public enum ManualDownloadStaging {
         if cleaned.isEmpty || cleaned == "Magnet link" { return fallback }
         return cleaned
     }
+
+    /// Destination for a browser-captured `.torrent` (tiny metadata file, not book media).
+    public static func prepareTorrent(
+        suggestedFilename: String,
+        jobID: String = UUID().uuidString,
+        fileManager: FileManager = .default,
+    ) throws -> URL {
+        var name = safeFilename(suggestedFilename, fallback: "download.torrent")
+        if !name.lowercased().hasSuffix(".torrent") {
+            name += ".torrent"
+        }
+        return try prepare(jobID: jobID, filename: name, fileManager: fileManager)
+    }
 }
 
 public protocol ManualFileDownloadTransport: Sendable {

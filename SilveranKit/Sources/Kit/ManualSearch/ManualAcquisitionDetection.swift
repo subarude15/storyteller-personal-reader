@@ -3,7 +3,8 @@
 //  SilveranKit
 //
 //  Identifies acquisition links from a URL and optional HTTP metadata.
-//  Never downloads the file body.
+//  Does not download media bodies. Tiny `.torrent` metadata may be staged
+//  by the in-app browser when WebKit produces a real WKDownload.
 //
 //  SPDX-License-Identifier: AGPL-3.0-only
 

@@ -47,6 +47,18 @@ struct ManualDownloadStagingTests {
         ManualDownloadStaging.remove(staged.fileURL)
     }
 
+    @Test func prepareTorrentAddsExtensionAndStaysUnderStagingRoot() throws {
+        let url = try ManualDownloadStaging.prepareTorrent(
+            suggestedFilename: "Hobbit Download",
+            jobID: "torrent-meta",
+        )
+        #expect(url.lastPathComponent.hasSuffix(".torrent"))
+        #expect(url.path.contains("ManualDownloads"))
+        #expect(url.path.contains("Staging"))
+        #expect(url.path.contains("torrent-meta"))
+        ManualDownloadStaging.remove(url)
+    }
+
     @Test func httpFailureIsNotMarkedComplete() async {
         let transport = StagingDownloadScript(bytes: Data("partial".utf8), status: 500)
         do {

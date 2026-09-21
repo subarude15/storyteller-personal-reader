@@ -118,6 +118,50 @@ public struct DelugeWebClient: Sendable {
         )
     }
 
+    public func addTorrentFile(
+        baseURL: String,
+        password: String,
+        fileURL: URL,
+        filename: String? = nil,
+        downloadLocation: String,
+        start: Bool,
+    ) async throws -> String? {
+        let session = try await authenticate(baseURL: baseURL, password: password)
+        let name = ManualDownloadStaging.safeFilename(
+            filename ?? fileURL.lastPathComponent,
+            fallback: "download.torrent",
+        )
+        let data: Data
+        do {
+            data = try Data(contentsOf: fileURL)
+        } catch {
+            throw DelugeClientError.invalidResponse
+        }
+        guard !data.isEmpty else { throw DelugeClientError.rejected }
+        let filedump = data.base64EncodedString()
+        let options: [String: Any] = [
+            "download_location": downloadLocation,
+            "add_paused": !start,
+        ]
+        let response = try await rpc(
+            endpoint: session.endpoint,
+            method: "core.add_torrent_file",
+            params: [name, filedump, options] as [Any],
+            cookie: session.cookie,
+            id: 11,
+        )
+        if response.error != nil {
+            throw DelugeClientError.rejected
+        }
+        if let hash = response.result as? String, !hash.isEmpty {
+            return hash
+        }
+        if response.result == nil {
+            throw DelugeClientError.rejected
+        }
+        return nil
+    }
+
     // MARK: - Session
 
     private struct Session {
