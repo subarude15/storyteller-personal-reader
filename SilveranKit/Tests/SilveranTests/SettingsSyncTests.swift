@@ -52,17 +52,24 @@ struct SettingsSyncTests {
     @Test func migrationKeepsExistingLazyLibrarianSettings() {
         let document = SettingsSyncMigration.initialDocument(
             settings: LazyLibrarianLocalSettings(enabled: true, baseURL: " https://ll.home:5299 "),
-            modifiedAt: date(1_700_000_000),
+            configModifiedAt: date(1_700_000_000),
         )
         #expect(document.integrations.lazyLibrarian.enabled?.value == true)
         #expect(document.integrations.lazyLibrarian.baseURL?.value == "https://ll.home:5299")
-        #expect(document.integrations.lazyLibrarian.enabled?.modifiedAt == date(1_700_000_000))
+        #expect(
+            document.integrations.lazyLibrarian.enabled?.modifiedAt
+                == SettingsSyncMigration.unversionedModifiedAt
+        )
+        #expect(
+            document.integrations.lazyLibrarian.baseURL?.modifiedAt
+                == SettingsSyncMigration.unversionedModifiedAt
+        )
     }
 
     @Test func migrationOmitsUntouchedDefaults() {
         let document = SettingsSyncMigration.initialDocument(
             settings: .unset,
-            modifiedAt: date(1_700_000_000),
+            configModifiedAt: date(1_700_000_000),
         )
         #expect(document.hasAnySetting == false)
     }
@@ -70,7 +77,7 @@ struct SettingsSyncTests {
     @Test func migrationKeepsDisabledIntegrationWhenURLWasSaved() {
         let document = SettingsSyncMigration.initialDocument(
             settings: LazyLibrarianLocalSettings(enabled: false, baseURL: "https://ll.home"),
-            modifiedAt: date(50),
+            configModifiedAt: date(50),
         )
         #expect(document.integrations.lazyLibrarian.enabled?.value == false)
         #expect(document.integrations.lazyLibrarian.baseURL?.value == "https://ll.home")
@@ -80,15 +87,75 @@ struct SettingsSyncTests {
         let store = try journal()
         let first = try store.migrateIfNeeded(
             settings: LazyLibrarianLocalSettings(enabled: true, baseURL: "https://phone"),
-            modifiedAt: date(10),
+            configModifiedAt: date(10),
         )
         let second = try store.migrateIfNeeded(
             settings: LazyLibrarianLocalSettings(enabled: false, baseURL: "https://should-not-replace"),
-            modifiedAt: date(99),
+            configModifiedAt: date(99_000),
         )
         #expect(second == first)
         #expect(second.integrations.lazyLibrarian.baseURL?.value == "https://phone")
+        #expect(
+            second.integrations.lazyLibrarian.baseURL?.modifiedAt
+                == SettingsSyncMigration.unversionedModifiedAt
+        )
         #expect(store.migrationCompleted)
+    }
+
+    @Test func staleLocalWithNewerConfigMtimeDoesNotOverwriteRemote() throws {
+        let store = try journal()
+        let legacy = try store.migrateIfNeeded(
+            settings: LazyLibrarianLocalSettings(enabled: true, baseURL: "https://stale"),
+            configModifiedAt: date(9_000),
+        )
+        #expect(
+            legacy.integrations.lazyLibrarian.baseURL?.modifiedAt
+                == SettingsSyncMigration.unversionedModifiedAt
+        )
+        let remote = ll(enabled: true, enabledAt: 100, baseURL: "https://correct", baseURLAt: 200)
+        let plan = SettingsSyncEngine.resolve(local: legacy, remote: .document(remote))
+        #expect(plan.document.integrations.lazyLibrarian.baseURL?.value == "https://correct")
+        #expect(plan.document.integrations.lazyLibrarian.baseURL?.modifiedAt == date(200))
+        #expect(plan.document.integrations.lazyLibrarian.enabled?.value == true)
+        #expect(plan.push == false)
+    }
+
+    @Test func missingRemoteSeedsLocalLazyLibrarian() throws {
+        let store = try journal()
+        let legacy = try store.migrateIfNeeded(
+            settings: LazyLibrarianLocalSettings(enabled: false, baseURL: "https://ll.home"),
+            configModifiedAt: date(9_000),
+        )
+        let plan = SettingsSyncEngine.resolve(local: legacy, remote: .empty)
+        #expect(plan.push)
+        #expect(plan.status == .synced)
+        #expect(plan.document.integrations.lazyLibrarian.baseURL?.value == "https://ll.home")
+        #expect(plan.document.integrations.lazyLibrarian.enabled?.value == false)
+    }
+
+    @Test func explicitEditAfterMigrationKeepsPerFieldLastWriteWins() throws {
+        let store = try journal()
+        _ = try store.migrateIfNeeded(
+            settings: LazyLibrarianLocalSettings(enabled: true, baseURL: "https://old"),
+            configModifiedAt: date(9_000),
+        )
+        let edited = try store.recordLazyLibrarianChange(
+            enabled: true,
+            baseURL: "https://new",
+            previousEnabled: true,
+            previousBaseURL: "https://old",
+            at: date(300),
+        )
+        #expect(
+            edited.integrations.lazyLibrarian.enabled?.modifiedAt
+                == SettingsSyncMigration.unversionedModifiedAt
+        )
+        #expect(edited.integrations.lazyLibrarian.baseURL?.value == "https://new")
+        #expect(edited.integrations.lazyLibrarian.baseURL?.modifiedAt == date(300))
+        let remote = ll(enabled: false, enabledAt: 250, baseURL: "https://remote", baseURLAt: 100)
+        let merged = SettingsSyncMerge.merge(local: edited, remote: remote)
+        #expect(merged.integrations.lazyLibrarian.baseURL?.value == "https://new")
+        #expect(merged.integrations.lazyLibrarian.enabled?.value == false)
     }
 
     @Test func firstDeviceCreatesRemoteFromLocalSettings() {
@@ -169,8 +236,9 @@ struct SettingsSyncTests {
         let edited = try store.recordLazyLibrarianChange(
             enabled: true,
             baseURL: "https://offline",
+            previousEnabled: false,
+            previousBaseURL: "",
             at: date(30),
-            migrationModifiedAt: date(30),
         )
         #expect(store.needsSync)
         let parked = SettingsSyncEngine.resolve(local: edited, remote: .unreachable)
@@ -226,7 +294,7 @@ struct SettingsSyncTests {
         let apiKey = "ll-secret-api-key-should-not-appear"
         let document = SettingsSyncMigration.initialDocument(
             settings: LazyLibrarianLocalSettings(enabled: true, baseURL: "https://ll.example:5299"),
-            modifiedAt: date(10),
+            configModifiedAt: date(10),
         )
         let raw = try SettingsSyncCodec.encode(document)
         #expect(!raw.contains(apiKey))

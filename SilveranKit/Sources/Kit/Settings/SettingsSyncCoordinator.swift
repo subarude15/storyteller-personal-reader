@@ -76,18 +76,25 @@ public final class SettingsSyncCoordinator {
         inFlight = nil
     }
 
-    public func syncPendingOnBackground() {
+    public func syncPendingOnBackground() async {
         guard journal.needsSync else { return }
-        Task { await syncNow(reason: "background") }
+        await syncNow(reason: "background")
     }
 
-    public func noteLocalLazyLibrarianChange(enabled: Bool, baseURL: String, at date: Date) {
+    public func noteLocalLazyLibrarianChange(
+        enabled: Bool,
+        baseURL: String,
+        previousEnabled: Bool,
+        previousBaseURL: String,
+        at date: Date,
+    ) {
         do {
             document = try journal.recordLazyLibrarianChange(
                 enabled: enabled,
                 baseURL: baseURL,
+                previousEnabled: previousEnabled,
+                previousBaseURL: previousBaseURL,
                 at: date,
-                migrationModifiedAt: date,
             )
         } catch {
             debugLog("[SettingsSync] failure journal save")
@@ -103,14 +110,12 @@ public final class SettingsSyncCoordinator {
         publish()
 
         let snapshot = await SettingsActor.shared.lazyLibrarianSyncSnapshot()
-        let migrationDate = SettingsSyncClock.stamp(snapshot.configModifiedAt ?? Date())
         do {
             document = try journal.migrateIfNeeded(
                 settings: LazyLibrarianLocalSettings(
                     enabled: snapshot.enabled,
                     baseURL: snapshot.baseURL,
                 ),
-                modifiedAt: migrationDate,
             )
         } catch {
             debugLog("[SettingsSync] failure migration")

@@ -69,12 +69,14 @@ struct SilveranReaderApp: App {
                 Task {
                     guard await SilveranRuntime.start() else { return }
                     await BookServiceActor.shared.setActive(false, source: .mac)
+                    await SettingsSyncCoordinator.shared.syncPendingOnBackground()
                 }
             case .active:
                 debugLog("[macApp] App becoming active")
                 Task {
                     guard await SilveranRuntime.start() else { return }
                     await BookServiceActor.shared.setActive(true, source: .mac)
+                    await SettingsSyncCoordinator.shared.syncNow(reason: "appActive")
                 }
             case .inactive:
                 break
@@ -99,6 +101,9 @@ struct SilveranReaderApp: App {
         .onChange(of: scenePhase) { _, newPhase in
             handleScenePhaseChange(newPhase)
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            Task { await SettingsSyncCoordinator.shared.syncPendingOnBackground() }
+        }
         .commands {
             // Most secondary windows (reader, metadata editor, server tools) only make
             // sense when opened from a book context, so drop the synthesized File > New items.
@@ -120,6 +125,7 @@ struct SilveranReaderApp: App {
                     guard await SilveranRuntime.start() else { return }
                     await mediaViewModel.start()
                     await BookServiceActor.shared.setActive(true, source: .mac)
+                    await SettingsSyncCoordinator.shared.syncNow(reason: "appActive")
                     guard !didOpenSecondaryWindows else { return }
                     didOpenSecondaryWindows = true
                 }

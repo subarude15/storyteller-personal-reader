@@ -983,9 +983,11 @@ public actor SettingsActor {
         updated.readingBar.showPlayerControls = true
         #endif
 
+        let previousLazyLibrarianEnabled = config.lazyLibrarianEnabled
+        let previousLazyLibrarianBaseURL = config.lazyLibrarianBaseURL
         let lazyLibrarianChanged =
-            updated.lazyLibrarianEnabled != config.lazyLibrarianEnabled
-            || updated.lazyLibrarianBaseURL != config.lazyLibrarianBaseURL
+            updated.lazyLibrarianEnabled != previousLazyLibrarianEnabled
+            || updated.lazyLibrarianBaseURL != previousLazyLibrarianBaseURL
         let lazyLibrarianEnabled = updated.lazyLibrarianEnabled
         let lazyLibrarianBaseURL = updated.lazyLibrarianBaseURL
 
@@ -1001,6 +1003,8 @@ public actor SettingsActor {
                 SettingsSyncCoordinator.shared.noteLocalLazyLibrarianChange(
                     enabled: lazyLibrarianEnabled,
                     baseURL: lazyLibrarianBaseURL,
+                    previousEnabled: previousLazyLibrarianEnabled,
+                    previousBaseURL: previousLazyLibrarianBaseURL,
                     at: editedAt,
                 )
             }
@@ -1023,11 +1027,9 @@ public actor SettingsActor {
     }
 
     public func lazyLibrarianSyncSnapshot() -> LazyLibrarianSyncSnapshot {
-        let modified = (try? fileManager.attributesOfItem(atPath: storageURL.path)[.modificationDate]) as? Date
-        return LazyLibrarianSyncSnapshot(
+        LazyLibrarianSyncSnapshot(
             enabled: config.lazyLibrarianEnabled,
             baseURL: config.lazyLibrarianBaseURL,
-            configModifiedAt: modified,
         )
     }
 
@@ -1044,12 +1046,10 @@ public actor SettingsActor {
 public struct LazyLibrarianSyncSnapshot: Sendable, Equatable {
     public var enabled: Bool
     public var baseURL: String
-    public var configModifiedAt: Date?
 
-    public init(enabled: Bool, baseURL: String, configModifiedAt: Date?) {
+    public init(enabled: Bool, baseURL: String) {
         self.enabled = enabled
         self.baseURL = baseURL
-        self.configModifiedAt = configModifiedAt
     }
 }
 

@@ -226,17 +226,25 @@ public enum SettingsSyncMerge {
 }
 
 public enum SettingsSyncMigration {
+    /// Legacy config has no per-field clock. Epoch is older than any real edit,
+    /// so an existing remote value wins. `SilveranGlobalConfig.json`'s mtime is
+    /// not evidence these fields changed — unrelated saves rewrite that file.
+    public static let unversionedModifiedAt = Date(timeIntervalSince1970: 0)
+
     /// First-launch seed. Defaults are omitted so an untouched install cannot
     /// clobber another device. A saved URL with enabled=false is explicit.
+    /// `configModifiedAt` is accepted and ignored so a newer file mtime cannot
+    /// be mistaken for a newer LazyLibrarian value.
     public static func initialDocument(
         settings: LazyLibrarianLocalSettings,
-        modifiedAt: Date,
+        configModifiedAt: Date? = nil,
     ) -> SyncedAppSettings {
+        _ = configModifiedAt
         var document = SyncedAppSettings()
         let url = settings.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let configured = settings.enabled || !url.isEmpty
         guard configured else { return document }
-        let stamped = SettingsSyncClock.stamp(modifiedAt)
+        let stamped = unversionedModifiedAt
         if settings.enabled || !url.isEmpty {
             document.integrations.lazyLibrarian.enabled = TimestampedSetting(
                 value: settings.enabled,
@@ -413,17 +421,18 @@ public struct SettingsSyncJournal {
     }
 
     /// Idempotent. A completed migration returns the saved document unchanged.
+    /// `configModifiedAt` does not affect the seed clock.
     @discardableResult
     public func migrateIfNeeded(
         settings: LazyLibrarianLocalSettings,
-        modifiedAt: Date,
+        configModifiedAt: Date? = nil,
     ) throws -> SyncedAppSettings {
         if migrationCompleted, let existing = load() {
             return existing
         }
         let seeded = SettingsSyncMigration.initialDocument(
             settings: settings,
-            modifiedAt: modifiedAt,
+            configModifiedAt: configModifiedAt,
         )
         let merged: SyncedAppSettings
         if let existing = load() {
@@ -441,16 +450,21 @@ public struct SettingsSyncJournal {
         return merged
     }
 
+    /// Seeds any not-yet-migrated legacy values, then stamps only the fields
+    /// this edit actually changed. Unchanged legacy fields stay unversioned.
     @discardableResult
     public func recordLazyLibrarianChange(
         enabled: Bool,
         baseURL: String,
+        previousEnabled: Bool,
+        previousBaseURL: String,
         at date: Date,
-        migrationModifiedAt: Date,
     ) throws -> SyncedAppSettings {
         let migrated = try migrateIfNeeded(
-            settings: LazyLibrarianLocalSettings(enabled: enabled, baseURL: baseURL),
-            modifiedAt: migrationModifiedAt,
+            settings: LazyLibrarianLocalSettings(
+                enabled: previousEnabled,
+                baseURL: previousBaseURL,
+            ),
         )
         let edited = SettingsSyncMerge.applyLocalEdit(
             migrated,
