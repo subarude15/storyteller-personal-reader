@@ -287,10 +287,10 @@ struct NASDownloadsSettingsView: View {
     private var delugeURLBinding: Binding<String> {
         Binding(
             get: { snapshot.delugeBaseURL },
-            set: {
-                snapshot.delugeBaseURL = $0
+            set: { newValue in
+                snapshot.delugeBaseURL = newValue
                 persist()
-                Task { try? await SettingsActor.shared.updateConfig(delugeBaseURL: $0) }
+                Task { try? await SettingsActor.shared.updateConfig(delugeBaseURL: newValue) }
             },
         )
     }
