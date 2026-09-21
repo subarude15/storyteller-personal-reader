@@ -288,6 +288,7 @@ struct SettingsSyncTests {
             return
         }
         #expect(decoded == document)
+        #expect(decoded.schemaVersion == SyncedAppSettings.schemaVersion)
     }
 
     @Test func credentialsAreNotSerialized() throws {

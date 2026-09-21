@@ -435,6 +435,7 @@ struct IdeaDetailView: View {
     @State private var loadingSummary = false
     @State private var showingAudiobookOptions = false
     @State private var showingBookRequest = false
+    @State private var showingManualSearch = false
 
     private var description: String? {
         if let fetched, let desc = fetched.description, !desc.isEmpty { return desc }
@@ -527,6 +528,15 @@ struct IdeaDetailView: View {
                 .buttonStyle(.bordered)
                 .accessibilityHint("Asks LazyLibrarian or Shelfarr to search for this book.")
                 Button {
+                    showingManualSearch = true
+                } label: {
+                    Label("Search manually", systemImage: "globe")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("search-manually")
+                .accessibilityHint("Search websites yourself when automatic tools cannot find this book.")
+                Button {
                     if isSaved {
                         SavedReadingIdeas.remove(idea.id)
                     } else {
@@ -569,6 +579,11 @@ struct IdeaDetailView: View {
         .sheet(isPresented: $showingBookRequest) {
             BookRequestSheet(work: CanonicalBookWork.idea(idea), owned: [])
                 .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showingManualSearch) {
+            ManualSearchView(book: ManualSearchBookContext.from(CanonicalBookWork.idea(idea)))
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
         .task {
