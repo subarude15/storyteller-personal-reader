@@ -112,6 +112,36 @@ struct QBittorrentClientTests {
         )
     }
 
+    @Test func torrentInfoReturnsProgressAndState() async throws {
+        let transport = QBittorrentScript()
+        transport.handler = { url, method, _, _ in
+            if url.path.hasSuffix("/auth/login") {
+                return QBittorrentHTTP(status: 200, body: Data("Ok.".utf8), setCookie: "SID=x")
+            }
+            #expect(url.path.hasSuffix("/torrents/info"))
+            #expect(method == "GET")
+            #expect(url.query?.contains("hashes=") == true)
+            return QBittorrentHTTP(
+                status: 200,
+                body: Data(
+                    #"""
+                    [{"hash":"ABC","state":"downloading","progress":0.63,"dlspeed":1200,"size":100,"completed":63}]
+                    """#.utf8
+                ),
+            )
+        }
+        let client = QBittorrentClient(transport: transport)
+        let snapshots = try await client.torrentStatuses(
+            baseURL: "http://qb.example:8080",
+            username: "admin",
+            password: "secret",
+            hashes: ["ABC"],
+        )
+        #expect(snapshots["abc"]?.state == "downloading")
+        #expect(snapshots["abc"]?.progress == 0.63)
+        #expect(snapshots["abc"]?.liveStatus.status == .downloading)
+    }
+
     @Test func rejectedAddSurfacesHandoffError() async {
         let transport = QBittorrentScript()
         transport.handler = { url, _, _, _ in

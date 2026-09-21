@@ -139,7 +139,7 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
         }
         let candidate = ManualAcquisitionCandidate(
             sourceURL: url,
-            detectedType: job.mediaType == .audiobook ? .m4b : .epub,
+            detectedType: TorrentHash.retryDetectedType(sourceURL: source, mediaType: job.mediaType),
             filename: job.filename,
             sourceHost: job.sourceHost,
             bookMetadata: ManualSearchBookContext(
@@ -318,7 +318,7 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
             backend: plan.backend,
             mediaType: plan.media,
             destination: plan.destination,
-            backendJobID: backendJobID,
+            backendJobID: backendJobID ?? TorrentHash.fromMagnet(candidate.sourceURL.absoluteString),
             status: status,
             lastError: lastError,
         )
@@ -335,14 +335,15 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
             case .qbittorrent:
                 switch candidate.transportKind {
                     case .magnet:
-                        return try await qbittorrent.addMagnet(
+                        let added = try await qbittorrent.addMagnet(
                             baseURL: settings.trimmedQBittorrentBaseURL,
                             username: settings.qbittorrentUsername,
                             password: credentials.qbittorrentPassword,
                             uri: candidate.sourceURL.absoluteString,
                             savePath: plan.destination,
                             start: start,
-                        ).jobID
+                        )
+                        return added.jobID ?? TorrentHash.fromMagnet(candidate.sourceURL.absoluteString)
                     case .torrent:
                         return try await qbittorrent.addTorrentURL(
                             baseURL: settings.trimmedQBittorrentBaseURL,

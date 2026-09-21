@@ -975,16 +975,15 @@ extension SettingsView {
 
                 NASDownloadsSettingsSection()
 
-                                Section {
-                                    NavigationLink {
-                                        IOSDebugLogView()
-                                    } label: {
-                                        Label("Debug Log", systemImage: "doc.text")
-                                    }
-                                }
-
                 Section {
+                    NavigationLink {
+                        IOSDebugLogView()
+                    } label: {
+                        Label("Debug Log", systemImage: "doc.text")
+                    }
                     LabeledContent("Build", value: PunkRallyBuildIdentity.stamp)
+                } header: {
+                    Text("Advanced")
                 } footer: {
                     Text("AltStore identity stamp (America/New_York MMDDYY.HHmm).")
                 }

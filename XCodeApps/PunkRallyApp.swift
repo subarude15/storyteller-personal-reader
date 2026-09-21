@@ -25,6 +25,7 @@ public struct PunkRallyTabView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab: Tab = .home
+    @State private var showDownloads = false
     @State private var shellToastMessage: String?
     @State private var shellToastTask: Task<Void, Never>?
     @State private var podcastPresenter = PodcastPlayerPresenter.shared
@@ -123,6 +124,20 @@ public struct PunkRallyTabView: View {
             }
             .tint(PunkRallyTheme.Accent.primary)
             .preferredColorScheme(nil) // follow system appearance
+            .sheet(isPresented: $showDownloads) {
+                NavigationStack {
+                    DownloadsView()
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button("Done") { showDownloads = false }
+                            }
+                        }
+                }
+                .punkRallyMiniPlayerInset()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .inkampShowManualDownloads)) { _ in
+                showDownloads = true
+            }
             .onAppear {
                 SessionTrackerWiring.install()
                 ContinueWidgetPublisher.install()
@@ -440,6 +455,7 @@ private struct HomeTabView: View {
                             }
                             .accessibilityLabel("Server connection issue")
                         }
+                        DownloadsToolbarButton()
                         Button {
                             showSettings = true
                         } label: {

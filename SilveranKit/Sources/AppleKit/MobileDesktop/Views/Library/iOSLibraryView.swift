@@ -55,6 +55,7 @@ public struct iOSLibraryView: View {
     @State private var searchText: String = ""
     @State private var selectedTab: Tab = .home
     @State private var showSettings = false
+    @State private var showDownloads = false
     @State private var showOfflineSheet = false
     @State private var sections: [SidebarSectionDescription] = LibrarySidebarDefaults.getSections()
     @State private var selectedItem: SidebarItemDescription? = nil
@@ -220,6 +221,19 @@ public struct iOSLibraryView: View {
                         }
                     }
             }
+        }
+        .sheet(isPresented: $showDownloads) {
+            NavigationStack {
+                DownloadsView()
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { showDownloads = false }
+                        }
+                    }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .inkampShowManualDownloads)) { _ in
+            showDownloads = true
         }
         .sheet(isPresented: $showOfflineSheet) {
             OfflineStatusSheet(
@@ -599,6 +613,7 @@ struct MoreMenuView: View {
         case addBook
         case createReadaloud
         case appleWatch
+        case manualDownloads
     }
 
     private var hasConnectionError: Bool {
@@ -676,6 +691,9 @@ struct MoreMenuView: View {
                         Label("Downloading", systemImage: "arrow.down.circle.dotted")
                     }
                 }
+                NavigationLink(value: MoreDestination.manualDownloads) {
+                    Label(DownloadsNavigation.downloadsDestination, systemImage: "arrow.down.circle")
+                }
                 NavigationLink(value: MoreDestination.addBook) {
                     Label("Add Book", systemImage: "plus.circle")
                 }
@@ -723,6 +741,7 @@ struct MoreMenuView: View {
                                 .foregroundStyle(.red)
                         }
                     }
+                    DownloadsToolbarButton()
                     Button {
                         showSettings = true
                     } label: {
@@ -811,6 +830,12 @@ struct MoreMenuView: View {
                         )
                 case .currentlyDownloading:
                     CurrentlyDownloadingView()
+                        .iOSLibraryToolbar(
+                            showSettings: $showSettings,
+                            showOfflineSheet: $showOfflineSheet,
+                        )
+                case .manualDownloads:
+                    DownloadsView()
                         .iOSLibraryToolbar(
                             showSettings: $showSettings,
                             showOfflineSheet: $showOfflineSheet,
@@ -1427,6 +1452,7 @@ struct IOSLibraryToolbarModifier: ViewModifier {
                                     .foregroundStyle(.red)
                             }
                         }
+                        DownloadsToolbarButton()
                         Button {
                             showSettings = true
                         } label: {

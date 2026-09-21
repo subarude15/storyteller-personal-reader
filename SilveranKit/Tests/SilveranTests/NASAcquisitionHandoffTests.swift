@@ -62,6 +62,30 @@ struct NASAcquisitionHandoffTests {
         #expect(jobs.jobs[0].destination == "/volume1/media/books/audiobooks")
     }
 
+    @Test func magnetPersistsExplicitBtihHash() async {
+        let jobs = RecordingManualDownloadJobStore()
+        let magnet = "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567"
+        let handler = NASAcquisitionHandler(
+            environment: StaticNASHandoffEnvironment(
+                context: NASHandoffContext(
+                    settings: synologySettings(),
+                    credentials: NASBackendCredentials(qbittorrentPassword: "secret"),
+                )
+            ),
+            qbittorrent: QBittorrentClient(transport: QBittorrentCapture()),
+            jobs: jobs,
+        )
+        _ = await handler.handle(
+            ManualAcquisitionCandidate(
+                sourceURL: URL(string: magnet)!,
+                detectedType: .magnet,
+                bookMetadata: audiobook,
+            )
+        )
+        #expect(jobs.jobs[0].backendJobID == "0123456789abcdef0123456789abcdef01234567")
+        #expect(jobs.jobs[0].status == .submitted)
+    }
+
     @Test func epubDownloadsThenUploadsToEbookFolder() async throws {
         let download = FileDownloadCapture(contents: Data("epub-bytes".utf8))
         let upload = UploadCapture()

@@ -128,6 +128,80 @@ public struct QBittorrentAddResult: Equatable, Sendable {
     }
 }
 
+public struct QBittorrentTorrentSnapshot: Equatable, Sendable {
+    public var hash: String
+    public var state: String
+    public var progress: Double
+    public var downloadRate: Int
+    public var size: Int64
+    public var completed: Int64
+
+    public init(
+        hash: String,
+        state: String,
+        progress: Double,
+        downloadRate: Int = 0,
+        size: Int64 = 0,
+        completed: Int64 = 0,
+    ) {
+        self.hash = hash
+        self.state = state
+        self.progress = progress
+        self.downloadRate = downloadRate
+        self.size = size
+        self.completed = completed
+    }
+
+    public var liveStatus: ManualTorrentLiveStatus {
+        ManualTorrentLiveStatus(
+            status: ManualDownloadStatusMapping.qbittorrent(state: state, progress: progress),
+            progress: progress,
+            downloadRate: downloadRate,
+            totalSize: size > 0 ? size : nil,
+            completedSize: completed > 0 ? completed : nil,
+        )
+    }
+
+    public static func parse(_ fields: [String: Any]) -> QBittorrentTorrentSnapshot? {
+        let hash = string(fields["hash"]) ?? ""
+        guard !hash.isEmpty else { return nil }
+        let progressRaw = double(fields["progress"]) ?? 0
+        return QBittorrentTorrentSnapshot(
+            hash: hash,
+            state: string(fields["state"]) ?? "unknown",
+            progress: min(max(progressRaw, 0), 1),
+            downloadRate: int(fields["dlspeed"]) ?? 0,
+            size: int64(fields["size"]) ?? 0,
+            completed: int64(fields["completed"]) ?? 0,
+        )
+    }
+
+    private static func string(_ any: Any?) -> String? {
+        if let text = any as? String { return text }
+        return nil
+    }
+
+    private static func double(_ any: Any?) -> Double? {
+        if let value = any as? Double { return value }
+        if let value = any as? Int { return Double(value) }
+        if let value = any as? NSNumber { return value.doubleValue }
+        return nil
+    }
+
+    private static func int(_ any: Any?) -> Int? {
+        if let value = any as? Int { return value }
+        if let value = any as? NSNumber { return value.intValue }
+        return nil
+    }
+
+    private static func int64(_ any: Any?) -> Int64? {
+        if let value = any as? Int64 { return value }
+        if let value = any as? Int { return Int64(value) }
+        if let value = any as? NSNumber { return value.int64Value }
+        return nil
+    }
+}
+
 public struct QBittorrentClient: Sendable {
     public var transport: any QBittorrentTransport
     public var timeout: TimeInterval
@@ -171,6 +245,47 @@ public struct QBittorrentClient: Sendable {
             savePath: savePath,
             start: start,
         )
+    }
+
+    public func torrentStatuses(
+        baseURL: String,
+        username: String,
+        password: String,
+        hashes: [String],
+    ) async throws -> [String: QBittorrentTorrentSnapshot] {
+        let unique = Array(Set(hashes.filter { !$0.isEmpty }))
+        guard !unique.isEmpty else { return [:] }
+        let cookie = try await login(baseURL: baseURL, username: username, password: password)
+        guard var endpoint = Self.apiURL(from: baseURL, path: "torrents/info") else {
+            throw QBittorrentClientError.invalidURL
+        }
+        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "hashes", value: unique.joined(separator: "|"))]
+        guard let url = components?.url else { throw QBittorrentClientError.invalidURL }
+        endpoint = url
+        let http: QBittorrentHTTP
+        do {
+            http = try await transport.send(
+                url: endpoint,
+                method: "GET",
+                body: nil,
+                contentType: nil,
+                cookie: cookie,
+                timeout: timeout,
+            )
+        } catch let error as URLError {
+            throw Self.clientError(from: error)
+        }
+        try Self.throwIfHTTPFailed(http)
+        guard let list = try? JSONSerialization.jsonObject(with: http.body) as? [[String: Any]] else {
+            throw QBittorrentClientError.invalidResponse
+        }
+        var result: [String: QBittorrentTorrentSnapshot] = [:]
+        for item in list {
+            guard let snapshot = QBittorrentTorrentSnapshot.parse(item) else { continue }
+            result[snapshot.hash.lowercased()] = snapshot
+        }
+        return result
     }
 
     public func addTorrentURL(
