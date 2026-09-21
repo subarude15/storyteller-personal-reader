@@ -110,3 +110,62 @@ public enum InkAmpPrimaryNavigation {
         InkAmpMoreDestination.secondary.contains(.services)
     }
 }
+
+/// NavigationPath values for the More hub. Manual list rows use a nil requestID;
+/// notification deep links carry the coordinator's requestID.
+public enum InkAmpMoreNavRoute: Hashable, Sendable {
+    case downloads
+    case settings
+    case stats
+    case services
+    case requestsActivity(requestID: String?)
+
+    public static func from(_ destination: InkAmpMoreDestination) -> InkAmpMoreNavRoute {
+        switch destination {
+            case .downloads: .downloads
+            case .settings: .settings
+            case .stats: .stats
+            case .services: .services
+            case .requestsActivity: .requestsActivity(requestID: nil)
+        }
+    }
+
+    public var requestActivityID: String? {
+        switch self {
+            case .requestsActivity(let requestID): requestID
+            case .downloads, .settings, .stats, .services: nil
+        }
+    }
+
+    public var opensGenericRequestActivityList: Bool {
+        switch self {
+            case .requestsActivity(let requestID):
+                requestID == nil
+            case .downloads, .settings, .stats, .services:
+                false
+        }
+    }
+}
+
+/// Consumes the existing one-shot Request Activity coordinator into a More route.
+public enum InkAmpMoreRequestActivityDeepLink {
+    /// Returns a route when a pending destination exists. Second call returns nil
+    /// until something sets the coordinator again — prevents duplicate pushes.
+    public static func consumePendingRoute(
+        coordinator: RequestActivityNavigationCoordinator = .shared,
+    ) -> InkAmpMoreNavRoute? {
+        guard let destination = coordinator.consume() else { return nil }
+        return .requestsActivity(requestID: destination.requestID)
+    }
+
+    /// Ensure the coordinator holds a destination parsed from notification userInfo
+    /// when nothing is pending yet (e.g. a re-posted signal).
+    public static func ensurePending(
+        from userInfo: [AnyHashable: Any]?,
+        coordinator: RequestActivityNavigationCoordinator = .shared,
+    ) {
+        if coordinator.peek() == nil {
+            coordinator.set(RequestActivityNavigation.request(from: userInfo).destination)
+        }
+    }
+}

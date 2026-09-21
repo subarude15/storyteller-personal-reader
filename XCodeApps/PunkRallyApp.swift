@@ -138,6 +138,7 @@ public struct PunkRallyTabView: View {
                 RequestNotificationTapHandler.install()
                 #endif
                 Task { await reloadMoreBadge() }
+                openPendingRequestActivityIfNeeded()
             }
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowShelf)) { _ in
                 selectedTab = .shelf
@@ -148,8 +149,10 @@ public struct PunkRallyTabView: View {
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowStats)) { _ in
                 openMoreDestination(.stats)
             }
-            .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowRequestActivity)) { _ in
-                openMoreDestination(.requestsActivity)
+            .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowRequestActivity)) { note in
+                InkAmpMoreRequestActivityDeepLink.ensurePending(from: note.userInfo)
+                selectedTab = .more
+                openPendingRequestActivityIfNeeded()
             }
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyOpenContinue)) { note in
                 selectedTab = .home
@@ -223,7 +226,16 @@ public struct PunkRallyTabView: View {
     private func openMoreDestination(_ destination: InkAmpMoreDestination) {
         selectedTab = .more
         morePath = NavigationPath()
-        morePath.append(destination)
+        morePath.append(InkAmpMoreNavRoute.from(destination))
+    }
+
+    /// Consume a pending Request Activity deep link into More → Requests & Activity.
+    /// Safe to call repeatedly: consume() returns nil after the first take.
+    private func openPendingRequestActivityIfNeeded() {
+        guard let route = InkAmpMoreRequestActivityDeepLink.consumePendingRoute() else { return }
+        selectedTab = .more
+        morePath = NavigationPath()
+        morePath.append(route)
     }
 
     private func reloadMoreBadge() async {

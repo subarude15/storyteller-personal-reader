@@ -38,21 +38,29 @@ struct MoreTabView: View {
                 }
             }
             .navigationTitle(InkAmpPrimaryTab.more.title)
-            .navigationDestination(for: InkAmpMoreDestination.self) { destination in
-                moreDestinationView(destination)
+            .navigationDestination(for: InkAmpMoreNavRoute.self) { route in
+                moreDestinationView(route)
             }
         }
         .task { await reloadAttention() }
+        .onAppear {
+            // Cold start / late tab mount: parent may have switched to More before this
+            // view existed. Consume is one-shot, so a second call is a no-op.
+            openPendingRequestActivityIfNeeded()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .inkampManualDownloadJobsDidChange)) { _ in
             Task { await reloadAttention() }
         }
+        // Live notification routing lives on PunkRallyApp (owns morePath + tab switch).
+        // Do not also onReceive here — ensurePending after a parent consume would re-inject
+        // the same destination and push a duplicate route.
     }
 
     @ViewBuilder
     private func primaryRow(_ destination: InkAmpMoreDestination) -> some View {
         switch destination {
             case .downloads:
-                NavigationLink(value: destination) {
+                NavigationLink(value: InkAmpMoreNavRoute.from(destination)) {
                     moreLabel(
                         title: destination.title,
                         subtitle: destination.subtitle,
@@ -81,7 +89,7 @@ struct MoreTabView: View {
 
     @ViewBuilder
     private func secondaryRow(_ destination: InkAmpMoreDestination) -> some View {
-        NavigationLink(value: destination) {
+        NavigationLink(value: InkAmpMoreNavRoute.from(destination)) {
             Label(destination.title, systemImage: destination.systemImage)
         }
     }
@@ -122,19 +130,27 @@ struct MoreTabView: View {
     }
 
     @ViewBuilder
-    private func moreDestinationView(_ destination: InkAmpMoreDestination) -> some View {
-        switch destination {
+    private func moreDestinationView(_ route: InkAmpMoreNavRoute) -> some View {
+        switch route {
             case .downloads:
                 DownloadsView()
             case .settings:
                 SettingsView()
             case .stats:
                 StatsView()
-            case .requestsActivity:
-                RequestActivityView()
+            case .requestsActivity(let requestID):
+                RequestActivityView(initialRequestID: requestID)
+                    .id(requestID ?? "request-activity-list")
             case .services:
                 ServicesHealthView()
         }
+    }
+
+    /// One-shot: consume pending coordinator destination into the More path.
+    private func openPendingRequestActivityIfNeeded() {
+        guard let route = InkAmpMoreRequestActivityDeepLink.consumePendingRoute() else { return }
+        path = NavigationPath()
+        path.append(route)
     }
 
     private func reloadAttention() async {
