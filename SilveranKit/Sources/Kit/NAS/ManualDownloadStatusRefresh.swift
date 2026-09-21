@@ -49,7 +49,7 @@ public struct ManualDownloadStatusRefresh: Sendable {
             $0.backend == .qbittorrent && $0.status.isActive && !($0.backendJobID ?? "").isEmpty
         }
         guard !targets.isEmpty else { return [] }
-        let hashes = targets.compactMap(\.backendJobID)
+        let hashes = targets.compactMap { TorrentHash.normalized($0.backendJobID) }
         do {
             let snapshots = try await qbittorrent.torrentStatuses(
                 baseURL: context.settings.trimmedQBittorrentBaseURL,
@@ -59,7 +59,9 @@ public struct ManualDownloadStatusRefresh: Sendable {
             )
             var changed: [ManualDownloadJob] = []
             for job in targets {
-                guard let hash = job.backendJobID?.lowercased(), let snapshot = snapshots[hash] else {
+                guard let hash = TorrentHash.normalized(job.backendJobID)?.lowercased(),
+                    let snapshot = snapshots[hash]
+                else {
                     let next = ManualDownloadStatusMapping.markUnknown(job)
                     await jobs.record(next)
                     changed.append(next)
@@ -93,7 +95,9 @@ public struct ManualDownloadStatusRefresh: Sendable {
             case .success(let index):
                 var changed: [ManualDownloadJob] = []
                 for job in targets {
-                    guard let hash = job.backendJobID, let snapshot = index.torrent(id: hash) ?? index.byID[hash.lowercased()] else {
+                    guard let hash = TorrentHash.normalized(job.backendJobID),
+                        let snapshot = index.torrent(id: hash) ?? index.byID[hash.lowercased()]
+                    else {
                         let next = ManualDownloadStatusMapping.markUnknown(job)
                         await jobs.record(next)
                         changed.append(next)

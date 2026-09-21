@@ -75,6 +75,71 @@ struct ManualDownloadStatusMappingTests {
             ) == .torrent
         )
     }
+
+    @Test func retryTypeUsesURLPathNotQueryOrFragment() {
+        #expect(
+            TorrentHash.retryDetectedType(
+                sourceURL: "https://files.example/hobbit.torrent",
+                mediaType: .ebook,
+            ) == .torrent
+        )
+        #expect(
+            TorrentHash.retryDetectedType(
+                sourceURL: "https://files.example/hobbit.torrent?token=abc",
+                mediaType: .ebook,
+            ) == .torrent
+        )
+        #expect(
+            TorrentHash.retryDetectedType(
+                sourceURL: "https://files.example/hobbit.torrent#fragment",
+                mediaType: .ebook,
+            ) == .torrent
+        )
+        #expect(
+            TorrentHash.retryDetectedType(
+                sourceURL: "https://files.example/hobbit.torrent?token=abc#fragment",
+                mediaType: .ebook,
+            ) == .torrent
+        )
+        #expect(
+            TorrentHash.retryDetectedType(
+                sourceURL: "https://files.example/HOBBIT.TORRENT?token=abc",
+                mediaType: .audiobook,
+            ) == .torrent
+        )
+        #expect(
+            TorrentHash.retryDetectedType(
+                sourceURL: "https://files.example/hobbit.epub?token=abc",
+                mediaType: .ebook,
+            ) == .epub
+        )
+        #expect(
+            TorrentHash.retryDetectedType(
+                sourceURL: "https://files.example/download?id=12",
+                mediaType: .ebook,
+            ) == .epub
+        )
+        #expect(
+            TorrentHash.retryDetectedType(
+                sourceURL: "https://files.example/download?file=book.torrent",
+                mediaType: .ebook,
+            ) == .epub
+        )
+    }
+
+    @Test func infoHashNormalizesHexAndBase32() {
+        let hex = "0123456789abcdef0123456789abcdef01234567"
+        #expect(TorrentHash.canonicalInfoHash(hex) == hex)
+        #expect(TorrentHash.canonicalInfoHash(hex.uppercased()) == hex)
+        #expect(TorrentHash.fromMagnet("magnet:?xt=urn:btih:\(hex.uppercased())") == hex)
+        #expect(TorrentHash.canonicalInfoHash("AERUKZ4JVPG66AJDIVTYTK6N54ASGRLH") == hex)
+        #expect(TorrentHash.canonicalInfoHash("aerukz4jvpg66ajdivtytk6n54asgrlh") == hex)
+        #expect(TorrentHash.fromMagnet("magnet:?xt=urn:btih:AERUKZ4JVPG66AJDIVTYTK6N54ASGRLH") == hex)
+        #expect(TorrentHash.canonicalInfoHash("AERUKZ4JVPG66AJDIVTYTK6N54ASGRL1") == nil)
+        #expect(TorrentHash.canonicalInfoHash("0123456789abcdef0123456789abcdef0123456") == nil)
+        #expect(TorrentHash.canonicalInfoHash("0123456789abcdef0123456789abcdef012345678") == nil)
+        #expect(TorrentHash.fromMagnet("magnet:?xt=urn:btih:not-a-hash") == nil)
+    }
 }
 
 @Suite("Manual download history buckets")
@@ -147,6 +212,41 @@ struct ManualDownloadStatusRefreshTests {
         #expect(jobs.jobs[0].status != .failed)
     }
 
+    @Test func qbittorrentRefreshMatchesJobCreatedFromBase32Btih() async {
+        let hex = "0123456789abcdef0123456789abcdef01234567"
+        let jobs = RecordingManualDownloadJobStore()
+        let magnet = "magnet:?xt=urn:btih:AERUKZ4JVPG66AJDIVTYTK6N54ASGRLH"
+        #expect(TorrentHash.fromMagnet(magnet) == hex)
+        await jobs.record(
+            sampleJob(backend: .qbittorrent, status: .submitted, hash: TorrentHash.fromMagnet(magnet))
+        )
+        let transport = SnapshotQBittorrent(
+            hash: hex,
+            state: "downloading",
+            progress: 0.5,
+        )
+        let refresh = ManualDownloadStatusRefresh(
+            environment: StaticNASHandoffEnvironment(
+                context: NASHandoffContext(
+                    settings: NASDownloadSettingsSnapshot(
+                        torrentClient: .qbittorrent,
+                        qbittorrentBaseURL: "http://qb.example:8080",
+                    ),
+                    credentials: NASBackendCredentials(qbittorrentPassword: "x"),
+                )
+            ),
+            qbittorrent: QBittorrentClient(transport: transport),
+            jobs: jobs,
+        )
+        _ = await refresh.refresh()
+        #expect(jobs.jobs.count == 1)
+        #expect(jobs.jobs[0].backendJobID == hex)
+        #expect(jobs.jobs[0].status == .downloading)
+        #expect(jobs.jobs[0].progress == 0.5)
+        #expect(jobs.jobs[0].status != .failed)
+        #expect(jobs.jobs[0].status != .unknown)
+    }
+
     @Test func delugePollFailureMarksUnknown() async {
         let jobs = RecordingManualDownloadJobStore()
         await jobs.record(sampleJob(backend: .deluge, status: .submitted, hash: "hashabc"))
@@ -197,6 +297,37 @@ private func sampleJob(
         backendJobID: hash,
         status: status,
     )
+}
+
+private final class SnapshotQBittorrent: QBittorrentTransport, @unchecked Sendable {
+    var hash: String
+    var state: String
+    var progress: Double
+
+    init(hash: String, state: String, progress: Double) {
+        self.hash = hash
+        self.state = state
+        self.progress = progress
+    }
+
+    func send(
+        url: URL,
+        method _: String,
+        body _: Data?,
+        contentType _: String?,
+        cookie _: String?,
+        timeout _: TimeInterval,
+    ) async throws -> QBittorrentHTTP {
+        if url.path.hasSuffix("/auth/login") {
+            return QBittorrentHTTP(status: 200, body: Data("Ok.".utf8), setCookie: "SID=x")
+        }
+        let body = Data(
+            """
+            [{"hash":"\(hash)","state":"\(state)","progress":\(progress),"dlspeed":1,"size":100,"completed":50}]
+            """.utf8
+        )
+        return QBittorrentHTTP(status: 200, body: body)
+    }
 }
 
 private final class FailingQBittorrent: QBittorrentTransport, @unchecked Sendable {

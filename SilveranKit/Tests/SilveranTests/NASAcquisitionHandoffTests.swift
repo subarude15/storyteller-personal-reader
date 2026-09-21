@@ -375,11 +375,123 @@ struct NASAcquisitionHandoffTests {
         #expect(!text.contains("super-secret"))
         #expect(text.contains("••••"))
     }
+
+    @Test func successfulQBittorrentRetryReusesFailedJob() async {
+        let qb = QBittorrentCapture()
+        let jobs = RecordingManualDownloadJobStore()
+        let handler = NASAcquisitionHandler(
+            environment: StaticNASHandoffEnvironment(
+                context: NASHandoffContext(
+                    settings: synologySettings(),
+                    credentials: NASBackendCredentials(qbittorrentPassword: "secret"),
+                )
+            ),
+            qbittorrent: QBittorrentClient(transport: qb),
+            jobs: jobs,
+        )
+        let failed = failedTorrentJob(backend: .qbittorrent)
+        await jobs.record(failed)
+        let result = await handler.retryDownload(job: failed)
+        #expect(result.isSubmitted)
+        #expect(jobs.jobs.count == 1)
+        #expect(jobs.jobs[0].id == failed.id)
+        #expect(jobs.jobs[0].status == .submitted)
+        #expect(jobs.jobs[0].lastError == nil)
+        #expect(jobs.jobs[0].retryAction == .none)
+        let buckets = ManualDownloadBuckets.partition(jobs.jobs)
+        #expect(buckets.failed.isEmpty)
+        #expect(buckets.active.map(\.id) == [failed.id])
+        #expect(buckets.attentionCount == 1)
+        #expect(qb.addedURLs.count == 1)
+
+        let stale = failed
+        let again = await handler.retryDownload(job: stale)
+        #expect(again.isSubmitted)
+        #expect(qb.addedURLs.count == 1)
+        #expect(jobs.jobs.count == 1)
+        #expect(jobs.jobs[0].id == failed.id)
+        #expect(jobs.jobs[0].status == .submitted)
+        #expect(jobs.jobs[0].retryAction == .none)
+    }
+
+    @Test func successfulDelugeRetryReusesFailedJob() async {
+        let deluge = DelugeCapture()
+        let jobs = RecordingManualDownloadJobStore()
+        var settings = synologySettings()
+        settings.torrentClient = .deluge
+        settings.delugeBaseURL = "http://deluge.example:8112"
+        let handler = NASAcquisitionHandler(
+            environment: StaticNASHandoffEnvironment(
+                context: NASHandoffContext(
+                    settings: settings,
+                    credentials: NASBackendCredentials(delugePassword: "secret"),
+                )
+            ),
+            deluge: DelugeWebClient(transport: deluge),
+            jobs: jobs,
+        )
+        let failed = failedTorrentJob(backend: .deluge)
+        await jobs.record(failed)
+        let result = await handler.retryDownload(job: failed)
+        #expect(result.isSubmitted)
+        #expect(jobs.jobs.count == 1)
+        #expect(jobs.jobs[0].id == failed.id)
+        #expect(jobs.jobs[0].status == .submitted)
+        #expect(jobs.jobs[0].lastError == nil)
+        #expect(jobs.jobs[0].retryAction == .none)
+        #expect(ManualDownloadBuckets.partition(jobs.jobs).failed.isEmpty)
+        #expect(deluge.magnets.count == 1)
+    }
+
+    @Test func failedTorrentRetryLeavesOriginalJobRetryable() async {
+        let qb = QBittorrentCapture()
+        qb.rejectAdds = true
+        let jobs = RecordingManualDownloadJobStore()
+        let handler = NASAcquisitionHandler(
+            environment: StaticNASHandoffEnvironment(
+                context: NASHandoffContext(
+                    settings: synologySettings(),
+                    credentials: NASBackendCredentials(qbittorrentPassword: "secret"),
+                )
+            ),
+            qbittorrent: QBittorrentClient(transport: qb),
+            jobs: jobs,
+        )
+        let failed = failedTorrentJob(backend: .qbittorrent)
+        await jobs.record(failed)
+        let result = await handler.retryDownload(job: failed)
+        guard case .failed = result else {
+            Issue.record("retry should stay failed")
+            return
+        }
+        #expect(jobs.jobs.count == 1)
+        #expect(jobs.jobs[0].id == failed.id)
+        #expect(jobs.jobs[0].status == .failed)
+        #expect(jobs.jobs[0].retryAction == .retryTorrent)
+        #expect(ManualDownloadBuckets.partition(jobs.jobs).failed.map(\.id) == [failed.id])
+    }
+
+    private func failedTorrentJob(backend: NASDownloadBackend) -> ManualDownloadJob {
+        ManualDownloadJob(
+            id: "failed-\(backend.rawValue)",
+            title: "The Hobbit",
+            author: "J.R.R. Tolkien",
+            sourceURL: "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567",
+            sourceHost: "example",
+            backend: backend,
+            mediaType: .audiobook,
+            destination: "/volume1/media/books/audiobooks",
+            submittedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            status: .failed,
+            lastError: "qBittorrent rejected the add.",
+        )
+    }
 }
 
 private final class QBittorrentCapture: QBittorrentTransport, @unchecked Sendable {
     var addedURLs: [String] = []
     var savePaths: [String] = []
+    var rejectAdds = false
 
     func send(
         url: URL,
@@ -398,6 +510,9 @@ private final class QBittorrentCapture: QBittorrentTransport, @unchecked Sendabl
         }
         if let path = value(named: "savepath", in: form) {
             savePaths.append(path.removingPercentEncoding ?? path)
+        }
+        if rejectAdds, url.path.hasSuffix("/torrents/add") {
+            return QBittorrentHTTP(status: 200, body: Data("Fails.".utf8))
         }
         return QBittorrentHTTP(status: 200, body: Data("Ok.".utf8))
     }

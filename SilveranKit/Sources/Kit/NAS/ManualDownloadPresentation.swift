@@ -62,15 +62,29 @@ public enum TorrentHash {
             if let amp = hash.firstIndex(of: "&") {
                 hash = String(hash[..<amp])
             }
-            hash = hash.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-            if hash.count == 40, hash.allSatisfy(\.isHexDigit) {
-                return hash.lowercased()
-            }
-            if hash.count == 32 {
-                return hash.uppercased()
-            }
+            return canonicalInfoHash(hash)
         }
         return nil
+    }
+
+    /// 40-char hex or 32-char RFC 4648 base32 → lowercase 40-char hex. Invalid → nil.
+    public static func canonicalInfoHash(_ raw: String) -> String? {
+        let hash = raw.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        if hash.count == 40, hash.allSatisfy(\.isHexDigit) {
+            return hash.lowercased()
+        }
+        if hash.count == 32 {
+            return decodeBase32InfoHash(hash)
+        }
+        return nil
+    }
+
+    /// Canonical hex when `raw` is a btih; otherwise keep a non-empty backend id as-is.
+    public static func normalized(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return canonicalInfoHash(trimmed) ?? trimmed
     }
 
     public static func retryDetectedType(sourceURL: String, mediaType: NASMediaKind)
@@ -78,9 +92,30 @@ public enum TorrentHash {
     {
         let trimmed = sourceURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.lowercased().hasPrefix("magnet:") { return .magnet }
-        let path = (trimmed as NSString).pathExtension.lowercased()
-        if path == "torrent" { return .torrent }
+        if let url = URL(string: trimmed), url.pathExtension.lowercased() == "torrent" {
+            return .torrent
+        }
         return mediaType == .audiobook ? .m4b : .epub
+    }
+
+    /// 20-byte SHA-1 info hash encoded as RFC 4648 base32 (no padding).
+    private static func decodeBase32InfoHash(_ raw: String) -> String? {
+        let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+        var bits: UInt64 = 0
+        var bitCount = 0
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(20)
+        for character in raw.uppercased() {
+            guard let index = alphabet.firstIndex(of: character) else { return nil }
+            bits = (bits << 5) | UInt64(alphabet.distance(from: alphabet.startIndex, to: index))
+            bitCount += 5
+            if bitCount >= 8 {
+                bitCount -= 8
+                bytes.append(UInt8(truncatingIfNeeded: bits >> bitCount))
+            }
+        }
+        guard bytes.count == 20, bitCount == 0 else { return nil }
+        return bytes.map { String(format: "%02x", $0) }.joined()
     }
 }
 
