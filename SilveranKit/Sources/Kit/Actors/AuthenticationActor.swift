@@ -13,6 +13,8 @@ public actor AuthenticationActor {
     private let prowlarrAPIKey = "prowlarrAPIKey"
     private let jackettAPIKey = "jackettAPIKey"
     private let delugePassword = "delugePassword"
+    private let qbittorrentPassword = "qbittorrentPassword"
+    private let aria2RPCSecret = "aria2RPCSecret"
 
     private init() {}
 
@@ -197,6 +199,50 @@ public actor AuthenticationActor {
     public func hasDelugePassword() async -> Bool {
         guard let password = try? await loadDelugePassword() else { return false }
         return !password.isEmpty
+    }
+
+    public func saveQBittorrentPassword(_ password: String) async throws {
+        let trimmed = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            try await deleteQBittorrentPassword()
+            return
+        }
+        try await saveString(trimmed, for: qbittorrentPassword)
+    }
+
+    public func loadQBittorrentPassword() async throws -> String? {
+        try await loadString(for: qbittorrentPassword)
+    }
+
+    public func deleteQBittorrentPassword() async throws {
+        try await keychain.removeItem(account: qbittorrentPassword)
+    }
+
+    public func hasQBittorrentPassword() async -> Bool {
+        guard let password = try? await loadQBittorrentPassword() else { return false }
+        return !password.isEmpty
+    }
+
+    public func saveAria2RPCSecret(_ secret: String) async throws {
+        let trimmed = secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            try await deleteAria2RPCSecret()
+            return
+        }
+        try await saveString(trimmed, for: aria2RPCSecret)
+    }
+
+    public func loadAria2RPCSecret() async throws -> String? {
+        try await loadString(for: aria2RPCSecret)
+    }
+
+    public func deleteAria2RPCSecret() async throws {
+        try await keychain.removeItem(account: aria2RPCSecret)
+    }
+
+    public func hasAria2RPCSecret() async -> Bool {
+        guard let secret = try? await loadAria2RPCSecret() else { return false }
+        return !secret.isEmpty
     }
 
     private func saveString(_ value: String, for account: String) async throws {

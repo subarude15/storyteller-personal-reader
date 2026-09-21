@@ -17,6 +17,8 @@ struct ManualAcquisitionHandoffTests {
         let candidate = try #require(
             ManualAcquisitionDetection.candidate(
                 url: url,
+                mimeType: "application/epub+zip",
+                suggestedFilename: "hobbit.epub",
                 bookMetadata: book,
                 providerID: "open-library",
             )
@@ -47,6 +49,8 @@ struct ManualAcquisitionHandoffTests {
                 #expect(!message.lowercased().contains("sent"))
                 #expect(!message.lowercased().contains("queued"))
                 #expect(!message.lowercased().contains("downloaded"))
+            case .submitted, .failed:
+                Issue.record("placeholder handler must not submit or fail")
         }
     }
 

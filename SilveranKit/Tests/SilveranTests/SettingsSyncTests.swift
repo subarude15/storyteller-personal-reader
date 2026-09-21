@@ -304,7 +304,7 @@ struct SettingsSyncTests {
             openInAppBrowser: true,
             at: date(40),
         )
-        #expect(edited.schemaVersion == SyncedAppSettings.schemaVersion)
+        #expect(edited.schemaVersion == 2)
         #expect(edited.integrations.lazyLibrarian.enabled?.value == true)
         #expect(edited.integrations.lazyLibrarian.baseURL?.value == "https://ll.home")
         #expect(edited.integrations.lazyLibrarian.baseURL?.modifiedAt == date(10))
@@ -381,6 +381,104 @@ struct SettingsSyncTests {
         #expect(keys.contains("enabled"))
         #expect(keys.contains("baseURL"))
         #expect(!keys.contains("lazyLibrarianAPIKey"))
+    }
+
+    @Test func nasDownloadsPromoteSchema2To3AndRoundTripFolders() throws {
+        let store = try journal()
+        var v2 = SyncedAppSettings(schemaVersion: 2)
+        v2.integrations.manualSearch.openInAppBrowser = TimestampedSetting(
+            value: true,
+            modifiedAt: date(10),
+        )
+        try store.save(v2)
+        store.migrationCompleted = true
+
+        let settings = NASDownloadSettingsSnapshot(
+            torrentClient: .qbittorrent,
+            qbittorrentBaseURL: "http://qb.example:8080",
+            qbittorrentUsername: "admin",
+            delugeBaseURL: "http://deluge.example:8112",
+            aria2RPCURL: "http://aria.example:6800/jsonrpc",
+            audiobookFolder: "/media/audiobooks",
+            ebookFolder: "/media/books",
+            startAutomatically: true,
+            createTitleAuthorSubfolders: false,
+        )
+        let edited = try store.recordNASDownloadsChange(settings, at: date(40))
+        #expect(edited.schemaVersion == 3)
+        #expect(edited.integrations.nasDownloads.audiobookFolder?.value == "/media/audiobooks")
+        #expect(edited.integrations.nasDownloads.ebookFolder?.value == "/media/books")
+        #expect(edited.integrations.nasDownloads.torrentClient?.value == .qbittorrent)
+        #expect(edited.integrations.manualSearch.openInAppBrowser?.modifiedAt == date(10))
+
+        let raw = try SettingsSyncCodec.encode(edited)
+        #expect(raw.contains("\"schemaVersion\":3"))
+        #expect(!raw.contains("password"))
+        #expect(!raw.contains("secret"))
+        #expect(!raw.contains("qbittorrentPassword"))
+        #expect(!raw.contains("aria2RPCSecret"))
+        guard case .document(let decoded) = SettingsSyncCodec.inspect(raw) else {
+            Issue.record("NAS document should round-trip")
+            return
+        }
+        #expect(decoded.schemaVersion == 3)
+        let applied = SettingsSyncApply.nasDownloads(document: decoded)
+        #expect(applied.audiobookFolder == "/media/audiobooks")
+        #expect(applied.ebookFolder == "/media/books")
+        #expect(applied.qbittorrentBaseURL == "http://qb.example:8080")
+        #expect(applied.aria2RPCURL == "http://aria.example:6800/jsonrpc")
+    }
+
+    @Test func nasCredentialsDoNotSerializeIntoSyncJSON() throws {
+        let secret = "nas-super-secret-password"
+        var document = SyncedAppSettings(schemaVersion: 3)
+        document.integrations.nasDownloads.qbittorrentBaseURL = TimestampedSetting(
+            value: "http://qb.example:8080",
+            modifiedAt: date(10),
+        )
+        let raw = try SettingsSyncCodec.encode(document)
+        #expect(!raw.contains(secret))
+        let json = try JSONSerialization.jsonObject(with: Data(raw.utf8))
+        let keys = keyNames(in: json)
+        for key in ["password", "token", "secret", "apiKey", "qbittorrentPassword", "aria2RPCSecret"] {
+            #expect(!keys.contains(key))
+        }
+        #expect(keys.contains("qbittorrentBaseURL"))
+        #expect(keys.contains("nasDownloads"))
+    }
+
+    @Test func nasMissingFieldDoesNotClearLocalFolders() {
+        var document = SyncedAppSettings(schemaVersion: 3)
+        document.integrations.nasDownloads.audiobookFolder = TimestampedSetting(
+            value: "/media/audiobooks",
+            modifiedAt: date(10),
+        )
+        let applied = SettingsSyncApply.nasDownloads(
+            document: document,
+            current: NASDownloadSettingsSnapshot(
+                ebookFolder: "/media/books",
+                createTitleAuthorSubfolders: true,
+            ),
+        )
+        #expect(applied.audiobookFolder == "/media/audiobooks")
+        #expect(applied.ebookFolder == "/media/books")
+        #expect(applied.createTitleAuthorSubfolders == true)
+    }
+
+    @Test func schema2ManualSearchMergeDoesNotInventNASFields() {
+        var local = SyncedAppSettings(schemaVersion: 2)
+        local.integrations.manualSearch.openInAppBrowser = TimestampedSetting(
+            value: true,
+            modifiedAt: date(10),
+        )
+        var remote = SyncedAppSettings(schemaVersion: 2)
+        remote.integrations.manualSearch.providers = TimestampedSetting(
+            value: [],
+            modifiedAt: date(12),
+        )
+        let merged = SettingsSyncMerge.merge(local: local, remote: remote)
+        #expect(merged.schemaVersion == 2)
+        #expect(SettingsSyncMerge.hasSchema3Fields(merged) == false)
     }
 
     private func keyNames(in json: Any) -> Set<String> {

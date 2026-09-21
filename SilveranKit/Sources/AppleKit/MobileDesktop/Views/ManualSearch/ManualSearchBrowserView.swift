@@ -19,6 +19,7 @@ struct ManualSearchBrowserView: View {
     @Environment(\.openURL) private var openURL
     @StateObject private var controller: ManualSearchBrowserController
     @State private var candidate: ManualAcquisitionCandidate?
+    @State private var handoffTitle = "Send to NAS"
     @State private var handoffMessage: String?
 
     init(session: ManualSearchBrowserSession, router: ManualAcquisitionRouter = ManualAcquisitionRouter()) {
@@ -108,12 +109,11 @@ struct ManualSearchBrowserView: View {
         .sheet(item: $candidate) { found in
             ManualAcquisitionConfirmSheet(
                 candidate: found,
-                onSendToNAS: {
-                    Task {
-                        let result = await router.submit(found)
-                        candidate = nil
-                        handoffMessage = result.message
-                    }
+                router: router,
+                onFinished: { title, message in
+                    candidate = nil
+                    handoffTitle = title
+                    handoffMessage = message
                 },
                 onContinue: {
                     candidate = nil
@@ -127,7 +127,7 @@ struct ManualSearchBrowserView: View {
                 },
             )
         }
-        .alert("Send to NAS", isPresented: Binding(
+        .alert(handoffTitle, isPresented: Binding(
             get: { handoffMessage != nil },
             set: { if !$0 { handoffMessage = nil } },
         )) {
@@ -140,10 +140,32 @@ struct ManualSearchBrowserView: View {
 
 struct ManualAcquisitionConfirmSheet: View {
     let candidate: ManualAcquisitionCandidate
-    let onSendToNAS: () -> Void
+    var router: ManualAcquisitionRouter
+    let onFinished: (String, String) -> Void
     let onContinue: () -> Void
     let onOpenExternally: () -> Void
     let onCancel: () -> Void
+
+    @State private var settings = NASDownloadSettingsSnapshot()
+    @State private var overrideKind: NASMediaKind?
+    @State private var sending = false
+    @State private var sendError: String?
+
+    private var preview: NASHandoffPreview {
+        NASHandoffPreview.make(
+            candidate: candidateForSubmit,
+            override: overrideKind,
+            settings: settings,
+        )
+    }
+
+    private var candidateForSubmit: ManualAcquisitionCandidate {
+        var copy = candidate
+        if let overrideKind {
+            copy.bookMetadata.requestedMediaType = overrideKind == .audiobook ? .audiobook : .ebook
+        }
+        return copy
+    }
 
     var body: some View {
         NavigationStack {
@@ -157,26 +179,87 @@ struct ManualAcquisitionConfirmSheet: View {
                     }
                 }
                 Section {
+                    LabeledContent("Type", value: preview.mediaKind?.label ?? "Unknown")
+                    LabeledContent("Download via", value: preview.backendLabel)
+                    LabeledContent("Destination", value: preview.destination.isEmpty ? "—" : preview.destination)
                     LabeledContent("Source", value: candidate.displayHost)
                     LabeledContent("File", value: candidate.displayFilename)
-                    LabeledContent("Type", value: candidate.detectedType.label)
+                }
+                if preview.needsMediaTypeChoice {
+                    Section {
+                        Picker("Save as", selection: Binding(
+                            get: { overrideKind },
+                            set: { overrideKind = $0 },
+                        )) {
+                            Text("Choose…").tag(Optional<NASMediaKind>.none)
+                            Text(NASMediaKind.ebook.label).tag(Optional(NASMediaKind.ebook))
+                            Text(NASMediaKind.audiobook.label).tag(Optional(NASMediaKind.audiobook))
+                        }
+                    } footer: {
+                        Text("This file type is ambiguous. Choose eBook or Audiobook.")
+                    }
+                }
+                if let sendError {
+                    Section {
+                        Text(sendError)
+                            .foregroundStyle(.red)
+                    }
+                } else if let blocking = preview.blockingMessage {
+                    Section {
+                        Text(blocking)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Section {
-                    Button("Send to NAS", action: onSendToNAS)
-                        .accessibilityIdentifier("manual-search-send-to-nas")
+                    Button {
+                        Task { await send() }
+                    } label: {
+                        if sending {
+                            ProgressView()
+                        } else {
+                            Text(sendError == nil ? "Send to NAS" : "Retry")
+                        }
+                    }
+                    .disabled(sending || !preview.canSubmit)
+                    .accessibilityIdentifier("manual-search-send-to-nas")
                     Button("Continue in Browser", action: onContinue)
                     Button("Open Externally", action: onOpenExternally)
                     Button("Cancel", role: .cancel, action: onCancel)
                 }
             }
-            .navigationTitle("Download found")
+            .navigationTitle("Send to NAS")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
+            .task { await loadSettings() }
         }
         #if os(iOS)
         .presentationDetents([.medium, .large])
         #endif
+    }
+
+    private func loadSettings() async {
+        var snapshot = NASDownloadSettingsStore.shared.snapshot
+        let configURL = await SettingsActor.shared.config.delugeBaseURL
+        if snapshot.trimmedDelugeBaseURL.isEmpty {
+            snapshot.delugeBaseURL = configURL
+        }
+        settings = snapshot
+    }
+
+    private func send() async {
+        sending = true
+        sendError = nil
+        defer { sending = false }
+        let result = await router.submit(candidateForSubmit)
+        switch result {
+            case .submitted(let message):
+                onFinished("Sent to NAS", message)
+            case .failed(let message):
+                sendError = message
+            case .placeholder(let message):
+                onFinished("Send to NAS", message)
+        }
     }
 }
 

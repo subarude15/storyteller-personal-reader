@@ -12,6 +12,7 @@
 //  integrations
 //    lazyLibrarian   enabled, baseURL
 //    manualSearch    providers, openInAppBrowser
+//    nasDownloads    torrent client, URLs, folders, routing prefs
 //    shelfarr        (future)
 //  playback            (future)
 //  podcastPreferences  (future)
@@ -52,7 +53,7 @@ public struct LazyLibrarianLocalSettings: Equatable, Sendable {
 
 /// Versioned account settings blob. Credentials are not fields on this type.
 public struct SyncedAppSettings: Codable, Equatable, Sendable {
-    public static let schemaVersion = 2
+    public static let schemaVersion = 3
     /// Hidden private collection, same prefix as `.inkamp.podcastSync.v1`.
     public static let collectionName = ".inkamp.settings.v1"
 
@@ -72,20 +73,24 @@ public struct SyncedAppSettings: Codable, Equatable, Sendable {
             || integrations.lazyLibrarian.baseURL != nil
             || integrations.manualSearch.providers != nil
             || integrations.manualSearch.openInAppBrowser != nil
+            || SettingsSyncMerge.hasSchema3Fields(self)
     }
 
     public struct Integrations: Codable, Equatable, Sendable {
         public var lazyLibrarian: LazyLibrarian
         public var manualSearch: ManualSearch
+        public var nasDownloads: NASDownloads
         // Shelfarr and later integrations: add a timestamped group here.
         // Bump `SyncedAppSettings.schemaVersion` so older apps refuse to rewrite the blob.
 
         public init(
             lazyLibrarian: LazyLibrarian = LazyLibrarian(),
             manualSearch: ManualSearch = ManualSearch(),
+            nasDownloads: NASDownloads = NASDownloads(),
         ) {
             self.lazyLibrarian = lazyLibrarian
             self.manualSearch = manualSearch
+            self.nasDownloads = nasDownloads
         }
 
         public init(from decoder: Decoder) throws {
@@ -96,17 +101,22 @@ public struct SyncedAppSettings: Codable, Equatable, Sendable {
             manualSearch =
                 (try container.decodeIfPresent(ManualSearch.self, forKey: .manualSearch))
                 ?? ManualSearch()
+            nasDownloads =
+                (try container.decodeIfPresent(NASDownloads.self, forKey: .nasDownloads))
+                ?? NASDownloads()
         }
 
         public func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
             try container.encode(lazyLibrarian, forKey: .lazyLibrarian)
             try container.encode(manualSearch, forKey: .manualSearch)
+            try container.encode(nasDownloads, forKey: .nasDownloads)
         }
 
         private enum CodingKeys: String, CodingKey {
             case lazyLibrarian
             case manualSearch
+            case nasDownloads
         }
     }
 
@@ -133,6 +143,41 @@ public struct SyncedAppSettings: Codable, Equatable, Sendable {
         ) {
             self.providers = providers
             self.openInAppBrowser = openInAppBrowser
+        }
+    }
+
+    /// Non-secret NAS download preferences. Passwords are never fields here.
+    public struct NASDownloads: Codable, Equatable, Sendable {
+        public var torrentClient: TimestampedSetting<NASTorrentClient>?
+        public var qbittorrentBaseURL: TimestampedSetting<String>?
+        public var qbittorrentUsername: TimestampedSetting<String>?
+        public var delugeBaseURL: TimestampedSetting<String>?
+        public var aria2RPCURL: TimestampedSetting<String>?
+        public var audiobookFolder: TimestampedSetting<String>?
+        public var ebookFolder: TimestampedSetting<String>?
+        public var startAutomatically: TimestampedSetting<Bool>?
+        public var createTitleAuthorSubfolders: TimestampedSetting<Bool>?
+
+        public init(
+            torrentClient: TimestampedSetting<NASTorrentClient>? = nil,
+            qbittorrentBaseURL: TimestampedSetting<String>? = nil,
+            qbittorrentUsername: TimestampedSetting<String>? = nil,
+            delugeBaseURL: TimestampedSetting<String>? = nil,
+            aria2RPCURL: TimestampedSetting<String>? = nil,
+            audiobookFolder: TimestampedSetting<String>? = nil,
+            ebookFolder: TimestampedSetting<String>? = nil,
+            startAutomatically: TimestampedSetting<Bool>? = nil,
+            createTitleAuthorSubfolders: TimestampedSetting<Bool>? = nil,
+        ) {
+            self.torrentClient = torrentClient
+            self.qbittorrentBaseURL = qbittorrentBaseURL
+            self.qbittorrentUsername = qbittorrentUsername
+            self.delugeBaseURL = delugeBaseURL
+            self.aria2RPCURL = aria2RPCURL
+            self.audiobookFolder = audiobookFolder
+            self.ebookFolder = ebookFolder
+            self.startAutomatically = startAutomatically
+            self.createTitleAuthorSubfolders = createTitleAuthorSubfolders
         }
     }
 }
@@ -238,6 +283,30 @@ public enum SettingsSyncMerge {
                         remote.integrations.manualSearch.openInAppBrowser,
                     ),
                 ),
+                nasDownloads: mergeNASDownloads(
+                    local: local.integrations.nasDownloads,
+                    remote: remote.integrations.nasDownloads,
+                ),
+            ),
+        )
+    }
+
+    private static func mergeNASDownloads(
+        local: SyncedAppSettings.NASDownloads,
+        remote: SyncedAppSettings.NASDownloads,
+    ) -> SyncedAppSettings.NASDownloads {
+        SyncedAppSettings.NASDownloads(
+            torrentClient: latest(local.torrentClient, remote.torrentClient),
+            qbittorrentBaseURL: latest(local.qbittorrentBaseURL, remote.qbittorrentBaseURL),
+            qbittorrentUsername: latest(local.qbittorrentUsername, remote.qbittorrentUsername),
+            delugeBaseURL: latest(local.delugeBaseURL, remote.delugeBaseURL),
+            aria2RPCURL: latest(local.aria2RPCURL, remote.aria2RPCURL),
+            audiobookFolder: latest(local.audiobookFolder, remote.audiobookFolder),
+            ebookFolder: latest(local.ebookFolder, remote.ebookFolder),
+            startAutomatically: latest(local.startAutomatically, remote.startAutomatically),
+            createTitleAuthorSubfolders: latest(
+                local.createTitleAuthorSubfolders,
+                remote.createTitleAuthorSubfolders,
             ),
         )
     }
@@ -289,20 +358,50 @@ public enum SettingsSyncMerge {
         return promoteSchemaIfNeeded(updated)
     }
 
-    /// Schema-2 fields (Manual Search) must not be written under schema 1.
+    public static func applyNASDownloadsEdit(
+        _ document: SyncedAppSettings,
+        settings: NASDownloadSettingsSnapshot,
+        at date: Date,
+    ) -> SyncedAppSettings {
+        var updated = document
+        let stamped = SettingsSyncClock.stamp(date)
+        var section = updated.integrations.nasDownloads
+        stamp(&section.torrentClient, settings.torrentClient, at: stamped)
+        stamp(&section.qbittorrentBaseURL, settings.qbittorrentBaseURL, at: stamped)
+        stamp(&section.qbittorrentUsername, settings.qbittorrentUsername, at: stamped)
+        stamp(&section.delugeBaseURL, settings.delugeBaseURL, at: stamped)
+        stamp(&section.aria2RPCURL, settings.aria2RPCURL, at: stamped)
+        stamp(&section.audiobookFolder, settings.audiobookFolder, at: stamped)
+        stamp(&section.ebookFolder, settings.ebookFolder, at: stamped)
+        stamp(&section.startAutomatically, settings.startAutomatically, at: stamped)
+        stamp(&section.createTitleAuthorSubfolders, settings.createTitleAuthorSubfolders, at: stamped)
+        updated.integrations.nasDownloads = section
+        return promoteSchemaIfNeeded(updated)
+    }
+
+    /// Promote only as far as the fields present require.
     /// Never lowers an already-newer version.
     public static func promoteSchemaIfNeeded(_ document: SyncedAppSettings) -> SyncedAppSettings {
-        guard hasSchema2Fields(document) else { return document }
-        guard document.schemaVersion < SyncedAppSettings.schemaVersion else { return document }
+        let required = requiredSchemaVersion(for: document)
+        guard document.schemaVersion < required else { return document }
         var updated = document
-        updated.schemaVersion = SyncedAppSettings.schemaVersion
+        updated.schemaVersion = required
         return updated
+    }
+
+    public static func requiredSchemaVersion(for document: SyncedAppSettings) -> Int {
+        if hasSchema3Fields(document) { return max(document.schemaVersion, 3) }
+        if hasSchema2Fields(document) { return max(document.schemaVersion, 2) }
+        return document.schemaVersion
     }
 
     public static func resolvedSchemaVersion(local: SyncedAppSettings, remote: SyncedAppSettings) -> Int {
         let highest = max(local.schemaVersion, remote.schemaVersion)
+        if hasSchema3Fields(local) || hasSchema3Fields(remote) {
+            return max(highest, 3)
+        }
         if hasSchema2Fields(local) || hasSchema2Fields(remote) {
-            return max(highest, SyncedAppSettings.schemaVersion)
+            return max(highest, 2)
         }
         return highest
     }
@@ -310,6 +409,29 @@ public enum SettingsSyncMerge {
     public static func hasSchema2Fields(_ document: SyncedAppSettings) -> Bool {
         document.integrations.manualSearch.providers != nil
             || document.integrations.manualSearch.openInAppBrowser != nil
+    }
+
+    public static func hasSchema3Fields(_ document: SyncedAppSettings) -> Bool {
+        let nas = document.integrations.nasDownloads
+        return nas.torrentClient != nil
+            || nas.qbittorrentBaseURL != nil
+            || nas.qbittorrentUsername != nil
+            || nas.delugeBaseURL != nil
+            || nas.aria2RPCURL != nil
+            || nas.audiobookFolder != nil
+            || nas.ebookFolder != nil
+            || nas.startAutomatically != nil
+            || nas.createTitleAuthorSubfolders != nil
+    }
+
+    private static func stamp<Value: Equatable>(
+        _ field: inout TimestampedSetting<Value>?,
+        _ value: Value,
+        at date: Date,
+    ) {
+        if field?.value != value {
+            field = TimestampedSetting(value: value, modifiedAt: date)
+        }
     }
 
     private static func canonical<Value: Encodable>(_ value: Value) -> String {
@@ -419,6 +541,25 @@ public enum SettingsSyncApply {
         return ManualSearchSettingsSnapshot(
             providers: providers,
             openInAppBrowser: section.openInAppBrowser?.value ?? current.openInAppBrowser,
+        )
+    }
+
+    public static func nasDownloads(
+        document: SyncedAppSettings,
+        current: NASDownloadSettingsSnapshot = NASDownloadSettingsSnapshot(),
+    ) -> NASDownloadSettingsSnapshot {
+        let section = document.integrations.nasDownloads
+        return NASDownloadSettingsSnapshot(
+            torrentClient: section.torrentClient?.value ?? current.torrentClient,
+            qbittorrentBaseURL: section.qbittorrentBaseURL?.value ?? current.qbittorrentBaseURL,
+            qbittorrentUsername: section.qbittorrentUsername?.value ?? current.qbittorrentUsername,
+            delugeBaseURL: section.delugeBaseURL?.value ?? current.delugeBaseURL,
+            aria2RPCURL: section.aria2RPCURL?.value ?? current.aria2RPCURL,
+            audiobookFolder: section.audiobookFolder?.value ?? current.audiobookFolder,
+            ebookFolder: section.ebookFolder?.value ?? current.ebookFolder,
+            startAutomatically: section.startAutomatically?.value ?? current.startAutomatically,
+            createTitleAuthorSubfolders:
+                section.createTitleAuthorSubfolders?.value ?? current.createTitleAuthorSubfolders,
         )
     }
 }
@@ -616,6 +757,23 @@ public struct SettingsSyncJournal {
         return edited
     }
 
+    @discardableResult
+    public func recordNASDownloadsChange(
+        _ settings: NASDownloadSettingsSnapshot,
+        at date: Date,
+    ) throws -> SyncedAppSettings {
+        let current = load() ?? SyncedAppSettings()
+        let edited = SettingsSyncMerge.applyNASDownloadsEdit(
+            current,
+            settings: settings,
+            at: date,
+        )
+        guard edited != current else { return current }
+        try save(edited)
+        needsSync = true
+        return edited
+    }
+
     private func syncedFieldNames(_ document: SyncedAppSettings) -> String {
         var names: [String] = []
         if document.integrations.lazyLibrarian.enabled != nil {
@@ -629,6 +787,15 @@ public struct SettingsSyncJournal {
         }
         if document.integrations.manualSearch.openInAppBrowser != nil {
             names.append("manualSearch.openInAppBrowser")
+        }
+        if document.integrations.nasDownloads.torrentClient != nil {
+            names.append("nasDownloads.torrentClient")
+        }
+        if document.integrations.nasDownloads.audiobookFolder != nil {
+            names.append("nasDownloads.audiobookFolder")
+        }
+        if document.integrations.nasDownloads.ebookFolder != nil {
+            names.append("nasDownloads.ebookFolder")
         }
         return names.isEmpty ? "none" : names.joined(separator: ",")
     }

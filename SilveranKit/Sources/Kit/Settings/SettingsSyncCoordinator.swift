@@ -17,6 +17,9 @@ extension Notification.Name {
     public static let inkampManualSearchSettingsDidChange = Notification.Name(
         "inkampManualSearchSettingsDidChange"
     )
+    public static let inkampNASDownloadSettingsDidChange = Notification.Name(
+        "inkampNASDownloadSettingsDidChange"
+    )
 }
 
 /// Coordinates the local settings journal with the Storyteller private blob.
@@ -131,6 +134,24 @@ public final class SettingsSyncCoordinator {
         scheduleSyncAfterLocalChange()
     }
 
+    public func noteLocalNASDownloadsChange(
+        _ settings: NASDownloadSettingsSnapshot,
+        at date: Date,
+    ) {
+        do {
+            document = try journal.recordNASDownloadsChange(settings, at: date)
+        } catch {
+            debugLog("[SettingsSync] failure journal save")
+            return
+        }
+        NASDownloadSettingsStore.shared.applySynced(
+            SettingsSyncApply.nasDownloads(document: document, current: settings)
+        )
+        guard journal.needsSync else { return }
+        debugLog("[SettingsSync] local edit nasDownloads")
+        scheduleSyncAfterLocalChange()
+    }
+
     private func performSync(reason: String) async {
         status = .syncing
         publish()
@@ -242,6 +263,7 @@ public final class SettingsSyncCoordinator {
             debugLog("[SettingsSync] failure apply local config")
         }
         applyManualSearch(document)
+        await applyNASDownloads(document)
     }
 
     private func applyManualSearch(_ document: SyncedAppSettings) {
@@ -250,6 +272,21 @@ public final class SettingsSyncCoordinator {
             current: ManualSearchSettingsStore.shared.snapshot,
         )
         ManualSearchSettingsStore.shared.applySynced(applied)
+    }
+
+    private func applyNASDownloads(_ document: SyncedAppSettings) async {
+        let applied = SettingsSyncApply.nasDownloads(
+            document: document,
+            current: NASDownloadSettingsStore.shared.snapshot,
+        )
+        NASDownloadSettingsStore.shared.applySynced(applied)
+        if !applied.trimmedDelugeBaseURL.isEmpty {
+            do {
+                try await SettingsActor.shared.applySyncedDelugeBaseURL(applied.trimmedDelugeBaseURL)
+            } catch {
+                debugLog("[SettingsSync] failure apply deluge URL")
+            }
+        }
     }
 
     private func publish() {

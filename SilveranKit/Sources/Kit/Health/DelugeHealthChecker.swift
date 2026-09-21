@@ -102,7 +102,7 @@ public struct DelugeHealthChecker: ServiceHealthChecking {
                 action = "Check the Deluge WebUI URL in Settings"
             case .notConnectedToDaemon:
                 action = "Connect Deluge WebUI to a daemon"
-            default:
+            case .cannotReachServer, .timeout, .invalidResponse, .rejected:
                 action = "Check the Deluge URL and that the WebUI is running"
         }
         return ServiceHealthResult(
