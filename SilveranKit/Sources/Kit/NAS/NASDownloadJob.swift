@@ -10,19 +10,32 @@
 import Foundation
 
 public enum ManualDownloadJobStatus: String, Codable, Sendable, CaseIterable {
+    case submitted
     case queued
     case downloading
+    case downloaded
+    case uploading
     case complete
     case failed
     case unknown
 
     public var label: String {
         switch self {
+            case .submitted: "Submitted"
             case .queued: "Queued"
             case .downloading: "Downloading"
+            case .downloaded: "Downloaded"
+            case .uploading: "Uploading"
             case .complete: "Complete"
             case .failed: "Failed"
             case .unknown: "Unknown"
+        }
+    }
+
+    public var canRetryUpload: Bool {
+        switch self {
+            case .downloaded, .failed: true
+            case .submitted, .queued, .downloading, .uploading, .complete, .unknown: false
         }
     }
 }
@@ -31,10 +44,14 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
     public var id: String
     public var title: String
     public var author: String
+    public var sourceURL: String?
     public var sourceHost: String
+    public var filename: String?
     public var backend: NASDownloadBackend
     public var mediaType: NASMediaKind
     public var destination: String
+    public var stagedFilePath: String?
+    public var byteCount: Int64?
     public var submittedAt: Date
     public var backendJobID: String?
     public var status: ManualDownloadJobStatus
@@ -44,10 +61,14 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
         id: String = UUID().uuidString,
         title: String,
         author: String,
+        sourceURL: String? = nil,
         sourceHost: String,
+        filename: String? = nil,
         backend: NASDownloadBackend,
         mediaType: NASMediaKind,
         destination: String,
+        stagedFilePath: String? = nil,
+        byteCount: Int64? = nil,
         submittedAt: Date = Date(),
         backendJobID: String? = nil,
         status: ManualDownloadJobStatus,
@@ -56,20 +77,35 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
         self.id = id
         self.title = title
         self.author = author
+        self.sourceURL = sourceURL
         self.sourceHost = sourceHost
+        self.filename = filename
         self.backend = backend
         self.mediaType = mediaType
         self.destination = destination
+        self.stagedFilePath = stagedFilePath
+        self.byteCount = byteCount
         self.submittedAt = submittedAt
         self.backendJobID = backendJobID
         self.status = status
         self.lastError = lastError
+    }
+
+    public var stagedFileURL: URL? {
+        guard let stagedFilePath, !stagedFilePath.isEmpty else { return nil }
+        return URL(fileURLWithPath: stagedFilePath)
+    }
+
+    public var hasStagedFile: Bool {
+        guard let url = stagedFileURL else { return false }
+        return ManualDownloadStaging.exists(url)
     }
 }
 
 public protocol ManualDownloadJobStoring: Sendable {
     func record(_ job: ManualDownloadJob) async
     func allJobs() async -> [ManualDownloadJob]
+    func job(id: String) async -> ManualDownloadJob?
 }
 
 public actor ManualDownloadJobStore: ManualDownloadJobStoring {
@@ -106,6 +142,10 @@ public actor ManualDownloadJobStore: ManualDownloadJobStoring {
 
     public func allJobs() -> [ManualDownloadJob] {
         jobs
+    }
+
+    public func job(id: String) -> ManualDownloadJob? {
+        jobs.first { $0.id == id }
     }
 
     private func save() {
@@ -149,5 +189,9 @@ public final class RecordingManualDownloadJobStore: ManualDownloadJobStoring, @u
 
     public func allJobs() async -> [ManualDownloadJob] {
         jobs
+    }
+
+    public func job(id: String) async -> ManualDownloadJob? {
+        jobs.first { $0.id == id }
     }
 }

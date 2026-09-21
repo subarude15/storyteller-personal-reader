@@ -25,23 +25,34 @@ public enum NASTorrentClient: String, Codable, Sendable, CaseIterable {
 public enum NASDownloadBackend: String, Codable, Sendable {
     case qbittorrent
     case deluge
-    case aria2
+    case synology
 
     public var label: String {
         switch self {
             case .qbittorrent: "qBittorrent"
             case .deluge: "Deluge"
-            case .aria2: "aria2"
+            case .synology: "Synology"
+        }
+    }
+
+    public var methodLabel: String {
+        switch self {
+            case .qbittorrent, .deluge: label
+            case .synology: "Download on this device, then upload to NAS"
         }
     }
 }
 
 public struct NASDownloadSettingsSnapshot: Equatable, Sendable {
+    public static let defaultAudiobookFolder = "/volume1/media/books/audiobooks"
+    public static let defaultEbookFolder = "/volume1/media/books/books"
+
     public var torrentClient: NASTorrentClient
     public var qbittorrentBaseURL: String
     public var qbittorrentUsername: String
     public var delugeBaseURL: String
-    public var aria2RPCURL: String
+    public var synologyBaseURL: String
+    public var synologyUsername: String
     public var audiobookFolder: String
     public var ebookFolder: String
     public var startAutomatically: Bool
@@ -52,9 +63,10 @@ public struct NASDownloadSettingsSnapshot: Equatable, Sendable {
         qbittorrentBaseURL: String = "",
         qbittorrentUsername: String = "",
         delugeBaseURL: String = "",
-        aria2RPCURL: String = "",
-        audiobookFolder: String = "",
-        ebookFolder: String = "",
+        synologyBaseURL: String = "",
+        synologyUsername: String = "",
+        audiobookFolder: String = NASDownloadSettingsSnapshot.defaultAudiobookFolder,
+        ebookFolder: String = NASDownloadSettingsSnapshot.defaultEbookFolder,
         startAutomatically: Bool = true,
         createTitleAuthorSubfolders: Bool = false,
     ) {
@@ -62,7 +74,8 @@ public struct NASDownloadSettingsSnapshot: Equatable, Sendable {
         self.qbittorrentBaseURL = qbittorrentBaseURL
         self.qbittorrentUsername = qbittorrentUsername
         self.delugeBaseURL = delugeBaseURL
-        self.aria2RPCURL = aria2RPCURL
+        self.synologyBaseURL = synologyBaseURL
+        self.synologyUsername = synologyUsername
         self.audiobookFolder = audiobookFolder
         self.ebookFolder = ebookFolder
         self.startAutomatically = startAutomatically
@@ -79,8 +92,12 @@ public struct NASDownloadSettingsSnapshot: Equatable, Sendable {
         delugeBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    public var trimmedAria2RPCURL: String {
-        aria2RPCURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    public var trimmedSynologyBaseURL: String {
+        synologyBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public var trimmedSynologyUsername: String {
+        synologyUsername.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     public var trimmedAudiobookFolder: String {
@@ -91,8 +108,8 @@ public struct NASDownloadSettingsSnapshot: Equatable, Sendable {
         ebookFolder.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    public var isAria2Configured: Bool {
-        !trimmedAria2RPCURL.isEmpty
+    public var isSynologyConfigured: Bool {
+        !trimmedSynologyBaseURL.isEmpty && !trimmedSynologyUsername.isEmpty
     }
 
     public func folder(for kind: NASMediaKind) -> String {

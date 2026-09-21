@@ -152,7 +152,8 @@ public struct SyncedAppSettings: Codable, Equatable, Sendable {
         public var qbittorrentBaseURL: TimestampedSetting<String>?
         public var qbittorrentUsername: TimestampedSetting<String>?
         public var delugeBaseURL: TimestampedSetting<String>?
-        public var aria2RPCURL: TimestampedSetting<String>?
+        public var synologyBaseURL: TimestampedSetting<String>?
+        public var synologyUsername: TimestampedSetting<String>?
         public var audiobookFolder: TimestampedSetting<String>?
         public var ebookFolder: TimestampedSetting<String>?
         public var startAutomatically: TimestampedSetting<Bool>?
@@ -163,7 +164,8 @@ public struct SyncedAppSettings: Codable, Equatable, Sendable {
             qbittorrentBaseURL: TimestampedSetting<String>? = nil,
             qbittorrentUsername: TimestampedSetting<String>? = nil,
             delugeBaseURL: TimestampedSetting<String>? = nil,
-            aria2RPCURL: TimestampedSetting<String>? = nil,
+            synologyBaseURL: TimestampedSetting<String>? = nil,
+            synologyUsername: TimestampedSetting<String>? = nil,
             audiobookFolder: TimestampedSetting<String>? = nil,
             ebookFolder: TimestampedSetting<String>? = nil,
             startAutomatically: TimestampedSetting<Bool>? = nil,
@@ -173,7 +175,8 @@ public struct SyncedAppSettings: Codable, Equatable, Sendable {
             self.qbittorrentBaseURL = qbittorrentBaseURL
             self.qbittorrentUsername = qbittorrentUsername
             self.delugeBaseURL = delugeBaseURL
-            self.aria2RPCURL = aria2RPCURL
+            self.synologyBaseURL = synologyBaseURL
+            self.synologyUsername = synologyUsername
             self.audiobookFolder = audiobookFolder
             self.ebookFolder = ebookFolder
             self.startAutomatically = startAutomatically
@@ -300,7 +303,8 @@ public enum SettingsSyncMerge {
             qbittorrentBaseURL: latest(local.qbittorrentBaseURL, remote.qbittorrentBaseURL),
             qbittorrentUsername: latest(local.qbittorrentUsername, remote.qbittorrentUsername),
             delugeBaseURL: latest(local.delugeBaseURL, remote.delugeBaseURL),
-            aria2RPCURL: latest(local.aria2RPCURL, remote.aria2RPCURL),
+            synologyBaseURL: latest(local.synologyBaseURL, remote.synologyBaseURL),
+            synologyUsername: latest(local.synologyUsername, remote.synologyUsername),
             audiobookFolder: latest(local.audiobookFolder, remote.audiobookFolder),
             ebookFolder: latest(local.ebookFolder, remote.ebookFolder),
             startAutomatically: latest(local.startAutomatically, remote.startAutomatically),
@@ -370,7 +374,8 @@ public enum SettingsSyncMerge {
         stamp(&section.qbittorrentBaseURL, settings.qbittorrentBaseURL, at: stamped)
         stamp(&section.qbittorrentUsername, settings.qbittorrentUsername, at: stamped)
         stamp(&section.delugeBaseURL, settings.delugeBaseURL, at: stamped)
-        stamp(&section.aria2RPCURL, settings.aria2RPCURL, at: stamped)
+        stamp(&section.synologyBaseURL, settings.synologyBaseURL, at: stamped)
+        stamp(&section.synologyUsername, settings.synologyUsername, at: stamped)
         stamp(&section.audiobookFolder, settings.audiobookFolder, at: stamped)
         stamp(&section.ebookFolder, settings.ebookFolder, at: stamped)
         stamp(&section.startAutomatically, settings.startAutomatically, at: stamped)
@@ -417,7 +422,8 @@ public enum SettingsSyncMerge {
             || nas.qbittorrentBaseURL != nil
             || nas.qbittorrentUsername != nil
             || nas.delugeBaseURL != nil
-            || nas.aria2RPCURL != nil
+            || nas.synologyBaseURL != nil
+            || nas.synologyUsername != nil
             || nas.audiobookFolder != nil
             || nas.ebookFolder != nil
             || nas.startAutomatically != nil
@@ -554,7 +560,8 @@ public enum SettingsSyncApply {
             qbittorrentBaseURL: section.qbittorrentBaseURL?.value ?? current.qbittorrentBaseURL,
             qbittorrentUsername: section.qbittorrentUsername?.value ?? current.qbittorrentUsername,
             delugeBaseURL: section.delugeBaseURL?.value ?? current.delugeBaseURL,
-            aria2RPCURL: section.aria2RPCURL?.value ?? current.aria2RPCURL,
+            synologyBaseURL: section.synologyBaseURL?.value ?? current.synologyBaseURL,
+            synologyUsername: section.synologyUsername?.value ?? current.synologyUsername,
             audiobookFolder: section.audiobookFolder?.value ?? current.audiobookFolder,
             ebookFolder: section.ebookFolder?.value ?? current.ebookFolder,
             startAutomatically: section.startAutomatically?.value ?? current.startAutomatically,

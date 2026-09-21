@@ -9,7 +9,7 @@
 
 import Foundation
 
-/// How the next PR should think about sending this file.
+/// How NAS handoff should send this file.
 public enum ManualAcquisitionTransportKind: String, Codable, Sendable {
     case magnet
     case torrent
@@ -72,7 +72,7 @@ public enum ManualAcquisitionDetectedType: String, Codable, Sendable, CaseIterab
     }
 }
 
-/// Enough information for PR 68 to pick a backend without re-inspecting the page.
+/// Enough information to pick a backend without re-inspecting the page.
 public struct ManualAcquisitionCandidate: Equatable, Sendable, Hashable {
     public var sourceURL: URL
     public var detectedType: ManualAcquisitionDetectedType
@@ -81,6 +81,9 @@ public struct ManualAcquisitionCandidate: Equatable, Sendable, Hashable {
     public var mimeType: String?
     public var bookMetadata: ManualSearchBookContext
     public var providerID: String?
+    /// Session cookies from the in-app browser. Not persisted.
+    public var cookieHeader: String?
+    public var referer: String?
 
     public init(
         sourceURL: URL,
@@ -90,6 +93,8 @@ public struct ManualAcquisitionCandidate: Equatable, Sendable, Hashable {
         mimeType: String? = nil,
         bookMetadata: ManualSearchBookContext,
         providerID: String? = nil,
+        cookieHeader: String? = nil,
+        referer: String? = nil,
     ) {
         self.sourceURL = sourceURL
         self.detectedType = detectedType
@@ -98,6 +103,8 @@ public struct ManualAcquisitionCandidate: Equatable, Sendable, Hashable {
         self.mimeType = mimeType
         self.bookMetadata = bookMetadata
         self.providerID = providerID
+        self.cookieHeader = cookieHeader
+        self.referer = referer
     }
 
     public var displayFilename: String {

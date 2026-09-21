@@ -220,25 +220,88 @@ struct NASBackendRoutingTests {
         let qb = NASDownloadSettingsSnapshot(
             torrentClient: .qbittorrent,
             qbittorrentBaseURL: "http://qb.example:8080",
-            aria2RPCURL: "http://aria.example:6800",
+            synologyBaseURL: "http://nas.example:5000",
+            synologyUsername: "josh",
         )
         #expect(NASBackendRouting.backend(transport: .magnet, settings: qb) == .success(.qbittorrent))
         #expect(NASBackendRouting.backend(transport: .torrent, settings: qb) == .success(.qbittorrent))
-        #expect(NASBackendRouting.backend(transport: .directHTTP, settings: qb) == .success(.aria2))
+        #expect(NASBackendRouting.backend(transport: .directHTTP, settings: qb) == .success(.synology))
     }
 
-    @Test func magnetDoesNotUseAria2() {
+    @Test func magnetDoesNotUseSynologyUpload() {
         let deluge = NASDownloadSettingsSnapshot(
             torrentClient: .deluge,
             delugeBaseURL: "http://deluge.example:8112",
-            aria2RPCURL: "http://aria.example:6800",
+            synologyBaseURL: "http://nas.example:5000",
+            synologyUsername: "josh",
         )
         #expect(NASBackendRouting.backend(transport: .magnet, settings: deluge) == .success(.deluge))
-        #expect(NASBackendRouting.backend(transport: .directHTTP, settings: deluge) == .success(.aria2))
+        #expect(NASBackendRouting.backend(transport: .directHTTP, settings: deluge) == .success(.synology))
     }
 
     @Test func missingTorrentClientFailsCleanly() {
-        let none = NASDownloadSettingsSnapshot(torrentClient: .none, aria2RPCURL: "http://aria")
+        let none = NASDownloadSettingsSnapshot(
+            torrentClient: .none,
+            synologyBaseURL: "http://nas.example:5000",
+            synologyUsername: "josh",
+        )
         #expect(NASBackendRouting.backend(transport: .magnet, settings: none) == .failure(.torrentClientNotSelected))
+    }
+
+    @Test func defaultFoldersAreTheSynologyVolumePaths() {
+        let defaults = NASDownloadSettingsSnapshot()
+        #expect(defaults.audiobookFolder == "/volume1/media/books/audiobooks")
+        #expect(defaults.ebookFolder == "/volume1/media/books/books")
+        let epub = ManualAcquisitionCandidate(
+            sourceURL: URL(string: "https://files.example/hobbit.epub")!,
+            detectedType: .epub,
+            bookMetadata: ManualSearchBookContext(title: "The Hobbit"),
+        )
+        let m4b = ManualAcquisitionCandidate(
+            sourceURL: URL(string: "https://files.example/hobbit.m4b")!,
+            detectedType: .m4b,
+            bookMetadata: ManualSearchBookContext(title: "The Hobbit"),
+        )
+        #expect(
+            NASDestinationRouting.destination(for: epub, kind: .ebook, settings: defaults)
+                == .success("/volume1/media/books/books")
+        )
+        #expect(
+            NASDestinationRouting.destination(for: m4b, kind: .audiobook, settings: defaults)
+                == .success("/volume1/media/books/audiobooks")
+        )
+    }
+}
+
+@Suite("Synology path mapping")
+struct SynologyPathMappingTests {
+    @Test func volumePathBecomesShareRelative() {
+        guard case .success(let mapped) = SynologyPathMapping.resolve("/volume1/media/books/books")
+        else {
+            Issue.record("expected mapping")
+            return
+        }
+        #expect(mapped.volumePath == "/volume1/media/books/books")
+        #expect(mapped.fileStationPath == "/media/books/books")
+        #expect(mapped.shareName == "media")
+    }
+
+    @Test func audiobookVolumePathMaps() {
+        guard case .success(let mapped) = SynologyPathMapping.resolve("/volume1/media/books/audiobooks")
+        else {
+            Issue.record("expected mapping")
+            return
+        }
+        #expect(mapped.fileStationPath == "/media/books/audiobooks")
+        #expect(mapped.shareName == "media")
+    }
+
+    @Test func alreadyShareRelativePathIsKept() {
+        guard case .success(let mapped) = SynologyPathMapping.resolve("/media/books/books") else {
+            Issue.record("expected mapping")
+            return
+        }
+        #expect(mapped.fileStationPath == "/media/books/books")
+        #expect(mapped.shareName == "media")
     }
 }

@@ -398,16 +398,17 @@ struct SettingsSyncTests {
             qbittorrentBaseURL: "http://qb.example:8080",
             qbittorrentUsername: "admin",
             delugeBaseURL: "http://deluge.example:8112",
-            aria2RPCURL: "http://aria.example:6800/jsonrpc",
-            audiobookFolder: "/media/audiobooks",
-            ebookFolder: "/media/books",
+            synologyBaseURL: "http://nas.example:5000",
+            synologyUsername: "josh",
+            audiobookFolder: "/volume1/media/books/audiobooks",
+            ebookFolder: "/volume1/media/books/books",
             startAutomatically: true,
             createTitleAuthorSubfolders: false,
         )
         let edited = try store.recordNASDownloadsChange(settings, at: date(40))
         #expect(edited.schemaVersion == 3)
-        #expect(edited.integrations.nasDownloads.audiobookFolder?.value == "/media/audiobooks")
-        #expect(edited.integrations.nasDownloads.ebookFolder?.value == "/media/books")
+        #expect(edited.integrations.nasDownloads.audiobookFolder?.value == "/volume1/media/books/audiobooks")
+        #expect(edited.integrations.nasDownloads.ebookFolder?.value == "/volume1/media/books/books")
         #expect(edited.integrations.nasDownloads.torrentClient?.value == .qbittorrent)
         #expect(edited.integrations.manualSearch.openInAppBrowser?.modifiedAt == date(10))
 
@@ -416,17 +417,19 @@ struct SettingsSyncTests {
         #expect(!raw.contains("password"))
         #expect(!raw.contains("secret"))
         #expect(!raw.contains("qbittorrentPassword"))
-        #expect(!raw.contains("aria2RPCSecret"))
+        #expect(!raw.contains("synologyPassword"))
+        #expect(!raw.contains("sid"))
         guard case .document(let decoded) = SettingsSyncCodec.inspect(raw) else {
             Issue.record("NAS document should round-trip")
             return
         }
         #expect(decoded.schemaVersion == 3)
         let applied = SettingsSyncApply.nasDownloads(document: decoded)
-        #expect(applied.audiobookFolder == "/media/audiobooks")
-        #expect(applied.ebookFolder == "/media/books")
+        #expect(applied.audiobookFolder == "/volume1/media/books/audiobooks")
+        #expect(applied.ebookFolder == "/volume1/media/books/books")
         #expect(applied.qbittorrentBaseURL == "http://qb.example:8080")
-        #expect(applied.aria2RPCURL == "http://aria.example:6800/jsonrpc")
+        #expect(applied.synologyBaseURL == "http://nas.example:5000")
+        #expect(applied.synologyUsername == "josh")
     }
 
     @Test func nasCredentialsDoNotSerializeIntoSyncJSON() throws {
@@ -440,7 +443,7 @@ struct SettingsSyncTests {
         #expect(!raw.contains(secret))
         let json = try JSONSerialization.jsonObject(with: Data(raw.utf8))
         let keys = keyNames(in: json)
-        for key in ["password", "token", "secret", "apiKey", "qbittorrentPassword", "aria2RPCSecret"] {
+        for key in ["password", "token", "secret", "apiKey", "qbittorrentPassword", "synologyPassword"] {
             #expect(!keys.contains(key))
         }
         #expect(keys.contains("qbittorrentBaseURL"))

@@ -16,7 +16,7 @@ struct ManualSearchSettingsSection: View {
             Text("Manual Search")
         } footer: {
             Text(
-                "When LazyLibrarian or Shelfarr cannot find a book, search a website yourself. Detected links are sent to qBittorrent, Deluge, or aria2 using the folders in NAS Downloads."
+                "When LazyLibrarian or Shelfarr cannot find a book, search a website yourself. Torrents go to qBittorrent or Deluge. Direct files download on this device, then upload to Synology."
             )
         }
     }

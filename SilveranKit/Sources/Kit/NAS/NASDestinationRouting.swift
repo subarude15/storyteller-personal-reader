@@ -115,11 +115,80 @@ public enum NASBackendRouting {
                         return .failure(.torrentClientNotSelected)
                 }
             case .directHTTP:
-                if settings.isAria2Configured {
-                    return .success(.aria2)
+                if settings.isSynologyConfigured {
+                    return .success(.synology)
                 }
-                return .failure(.backendNotConfigured(.aria2))
+                return .failure(.backendNotConfigured(.synology))
         }
+    }
+}
+
+/// `/volume1/media/books/books` is a DSM volume path. File Station wants
+/// `/media/books/books` (share-relative). qBittorrent/Deluge keep the volume path.
+public struct SynologyFileStationPath: Equatable, Sendable {
+    public var volumePath: String
+    public var fileStationPath: String
+    public var shareName: String
+
+    public init(volumePath: String, fileStationPath: String, shareName: String) {
+        self.volumePath = volumePath
+        self.fileStationPath = fileStationPath
+        self.shareName = shareName
+    }
+}
+
+public enum SynologyPathMapping {
+    public static func resolve(_ raw: String) -> Result<SynologyFileStationPath, NASDestinationError> {
+        guard let normalized = NASPathSafety.normalizeBase(raw) else {
+            return .failure(
+                raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? .emptyDestination
+                    : .invalidBase
+            )
+        }
+        let fileStation: String
+        if let stripped = stripVolumePrefix(normalized) {
+            fileStation = stripped
+        } else {
+            fileStation = normalized
+        }
+        guard fileStation.hasPrefix("/"), fileStation.count > 1 else {
+            return .failure(.invalidBase)
+        }
+        let parts = fileStation.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        guard let share = parts.first, !share.isEmpty, share != ".." else {
+            return .failure(.invalidBase)
+        }
+        return .success(
+            SynologyFileStationPath(
+                volumePath: normalized,
+                fileStationPath: fileStation,
+                shareName: share,
+            )
+        )
+    }
+
+    public static func filePath(directory: String, filename: String) -> Result<String, NASDestinationError> {
+        let safe = NASPathSafety.sanitizeComponent(filename)
+        guard !safe.isEmpty else { return .failure(.invalidBase) }
+        switch resolve(directory) {
+            case .failure(let error):
+                return .failure(error)
+            case .success(let mapped):
+                let joined = mapped.fileStationPath + "/" + safe
+                guard NASPathSafety.staysWithin(root: mapped.fileStationPath, path: joined) else {
+                    return .failure(.escapedRoot)
+                }
+                return .success(joined)
+        }
+    }
+
+    private static func stripVolumePrefix(_ path: String) -> String? {
+        let pattern = #"^/volume\d+(/.*)?$"#
+        guard path.range(of: pattern, options: .regularExpression) != nil else { return nil }
+        guard let slash = path.dropFirst().firstIndex(of: "/") else { return nil }
+        let remainder = String(path[slash...])
+        return remainder.isEmpty ? nil : remainder
     }
 }
 

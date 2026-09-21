@@ -14,7 +14,7 @@ public actor AuthenticationActor {
     private let jackettAPIKey = "jackettAPIKey"
     private let delugePassword = "delugePassword"
     private let qbittorrentPassword = "qbittorrentPassword"
-    private let aria2RPCSecret = "aria2RPCSecret"
+    private let synologyPassword = "synologyPassword"
 
     private init() {}
 
@@ -223,26 +223,26 @@ public actor AuthenticationActor {
         return !password.isEmpty
     }
 
-    public func saveAria2RPCSecret(_ secret: String) async throws {
-        let trimmed = secret.trimmingCharacters(in: .whitespacesAndNewlines)
+    public func saveSynologyPassword(_ password: String) async throws {
+        let trimmed = password.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            try await deleteAria2RPCSecret()
+            try await deleteSynologyPassword()
             return
         }
-        try await saveString(trimmed, for: aria2RPCSecret)
+        try await saveString(trimmed, for: synologyPassword)
     }
 
-    public func loadAria2RPCSecret() async throws -> String? {
-        try await loadString(for: aria2RPCSecret)
+    public func loadSynologyPassword() async throws -> String? {
+        try await loadString(for: synologyPassword)
     }
 
-    public func deleteAria2RPCSecret() async throws {
-        try await keychain.removeItem(account: aria2RPCSecret)
+    public func deleteSynologyPassword() async throws {
+        try await keychain.removeItem(account: synologyPassword)
     }
 
-    public func hasAria2RPCSecret() async -> Bool {
-        guard let secret = try? await loadAria2RPCSecret() else { return false }
-        return !secret.isEmpty
+    public func hasSynologyPassword() async -> Bool {
+        guard let password = try? await loadSynologyPassword() else { return false }
+        return !password.isEmpty
     }
 
     private func saveString(_ value: String, for account: String) async throws {

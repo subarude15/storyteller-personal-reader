@@ -110,6 +110,8 @@ struct ManualSearchBrowserView: View {
             ManualAcquisitionConfirmSheet(
                 candidate: found,
                 router: router,
+                cookieHeader: { await controller.cookieHeader(for: found.sourceURL) },
+                referer: controller.currentURL?.absoluteString,
                 onFinished: { title, message in
                     candidate = nil
                     handoffTitle = title
@@ -141,6 +143,8 @@ struct ManualSearchBrowserView: View {
 struct ManualAcquisitionConfirmSheet: View {
     let candidate: ManualAcquisitionCandidate
     var router: ManualAcquisitionRouter
+    var cookieHeader: () async -> String? = { nil }
+    var referer: String? = nil
     let onFinished: (String, String) -> Void
     let onContinue: () -> Void
     let onOpenExternally: () -> Void
@@ -180,10 +184,18 @@ struct ManualAcquisitionConfirmSheet: View {
                 }
                 Section {
                     LabeledContent("Type", value: preview.mediaKind?.label ?? "Unknown")
-                    LabeledContent("Download via", value: preview.backendLabel)
+                    if preview.backend == .synology {
+                        LabeledContent("Method", value: preview.backendLabel)
+                    } else {
+                        LabeledContent("Download via", value: preview.backendLabel)
+                    }
                     LabeledContent("Destination", value: preview.destination.isEmpty ? "—" : preview.destination)
                     LabeledContent("Source", value: candidate.displayHost)
                     LabeledContent("File", value: candidate.displayFilename)
+                } footer: {
+                    if let note = preview.methodNote {
+                        Text(note)
+                    }
                 }
                 if preview.needsMediaTypeChoice {
                     Section {
@@ -251,9 +263,14 @@ struct ManualAcquisitionConfirmSheet: View {
         sending = true
         sendError = nil
         defer { sending = false }
-        let result = await router.submit(candidateForSubmit)
+        var sendingCandidate = candidateForSubmit
+        sendingCandidate.cookieHeader = await cookieHeader()
+        sendingCandidate.referer = referer
+        let result = await router.submit(sendingCandidate)
         switch result {
             case .submitted(let message):
+                onFinished("Sent to NAS", message)
+            case .completed(let message):
                 onFinished("Sent to NAS", message)
             case .failed(let message):
                 sendError = message
@@ -302,6 +319,20 @@ final class ManualSearchBrowserController: NSObject, ObservableObject {
     func goForward() { webView?.goForward() }
     func reload() { webView?.reload() }
     func stop() { webView?.stopLoading() }
+
+    func cookieHeader(for url: URL) async -> String? {
+        guard let store = webView?.configuration.websiteDataStore.httpCookieStore else { return nil }
+        let cookies: [HTTPCookie] = await withCheckedContinuation { continuation in
+            store.getAllCookies { continuation.resume(returning: $0) }
+        }
+        let host = url.host?.lowercased() ?? ""
+        let matching = cookies.filter { cookie in
+            let domain = cookie.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            return host == domain || host.hasSuffix(".\(domain)")
+        }
+        let fields = HTTPCookie.requestHeaderFields(with: matching.isEmpty ? cookies : matching)
+        return fields["Cookie"]
+    }
 
     fileprivate func handleCandidate(_ candidate: ManualAcquisitionCandidate) {
         candidatePublisher.send(candidate)

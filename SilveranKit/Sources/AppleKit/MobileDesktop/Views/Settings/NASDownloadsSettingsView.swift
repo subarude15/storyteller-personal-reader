@@ -19,7 +19,7 @@ struct NASDownloadsSettingsSection: View {
             Text("NAS Downloads")
         } footer: {
             Text(
-                "Manual Search sends torrents to qBittorrent or Deluge and direct files to aria2. Passwords stay on this device."
+                "Torrents go to qBittorrent or Deluge. Direct files download on this device, then upload through Synology File Station. Passwords stay on this device."
             )
         }
     }
@@ -29,10 +29,10 @@ struct NASDownloadsSettingsView: View {
     @State private var snapshot = NASDownloadSettingsStore.shared.snapshot
     @State private var qbPasswordDraft = ""
     @State private var qbPasswordSaved = false
-    @State private var aria2SecretDraft = ""
-    @State private var aria2SecretSaved = false
+    @State private var synologyPasswordDraft = ""
+    @State private var synologyPasswordSaved = false
     @State private var qbStatus: QBittorrentConnection?
-    @State private var aria2Status: Aria2Connection?
+    @State private var synologyStatus: SynologyConnection?
     @State private var delugeStatus: DelugeConnection?
     @State private var checking: String?
     @State private var secretError: String?
@@ -51,7 +51,7 @@ struct NASDownloadsSettingsView: View {
                 Text("Routing")
             } footer: {
                 Text(
-                    "Torrents and magnets go to the selected torrent client. Direct HTTP links go to aria2. Subfolders stay under the configured folder."
+                    "Torrents and magnets go to the selected torrent client. Direct HTTP files download locally, then upload to Synology. Subfolders stay under the configured folder."
                 )
             }
 
@@ -59,7 +59,7 @@ struct NASDownloadsSettingsView: View {
                 TextField(
                     "Audiobooks",
                     text: audiobookBinding,
-                    prompt: Text("/media/audiobooks"),
+                    prompt: Text(NASDownloadSettingsSnapshot.defaultAudiobookFolder),
                 )
                 .textContentType(.none)
                 .autocorrectionDisabled()
@@ -70,7 +70,7 @@ struct NASDownloadsSettingsView: View {
                 TextField(
                     "eBooks",
                     text: ebookBinding,
-                    prompt: Text("/media/books"),
+                    prompt: Text(NASDownloadSettingsSnapshot.defaultEbookFolder),
                 )
                 .textContentType(.none)
                 .autocorrectionDisabled()
@@ -158,9 +158,9 @@ struct NASDownloadsSettingsView: View {
 
             Section {
                 TextField(
-                    "RPC URL",
-                    text: aria2URLBinding,
-                    prompt: Text("http://host:6800/jsonrpc"),
+                    "DSM URL",
+                    text: synologyURLBinding,
+                    prompt: Text("http://diskstation.local:5000"),
                 )
                 .textContentType(.URL)
                 .autocorrectionDisabled()
@@ -168,29 +168,44 @@ struct NASDownloadsSettingsView: View {
                 .keyboardType(.URL)
                 .textInputAutocapitalization(.never)
                 #endif
+                .onSubmit { persist() }
+                TextField(
+                    "Username",
+                    text: synologyUserBinding,
+                    prompt: Text("admin"),
+                )
+                .textContentType(.username)
+                .autocorrectionDisabled()
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                #endif
                 SecureField(
-                    "RPC secret",
-                    text: $aria2SecretDraft,
-                    prompt: Text(aria2SecretSaved ? "Saved — enter a new secret to replace" : "Optional token"),
+                    "Password",
+                    text: $synologyPasswordDraft,
+                    prompt: Text(
+                        synologyPasswordSaved ? "Saved — enter a new password to replace" : "DSM password"
+                    ),
                 )
                 .textContentType(.password)
-                .onSubmit { Task { await saveAria2Secret() } }
-                if aria2SecretSaved, aria2SecretDraft.isEmpty {
-                    Text("Secret saved")
+                .onSubmit { Task { await saveSynologyPassword() } }
+                if synologyPasswordSaved, synologyPasswordDraft.isEmpty {
+                    Text("Password saved")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Button("Remove Secret", role: .destructive) {
-                        Task { await removeAria2Secret() }
+                    Button("Remove Password", role: .destructive) {
+                        Task { await removeSynologyPassword() }
                     }
                 }
-                testButton(id: "aria2", title: "Test Connection") {
-                    await testAria2()
+                testButton(id: "synology", title: "Test Connection") {
+                    await testSynology()
                 }
-                statusRow(ok: aria2Status == .ok, message: aria2Status?.message)
+                statusRow(ok: synologyStatus == .ok, message: synologyStatus?.message)
             } header: {
-                Text("aria2")
+                Text("Synology File Station")
             } footer: {
-                Text("Direct HTTP and HTTPS files are added with aria2.addUri. The NAS fetches the file.")
+                Text(
+                    "Direct files upload through the DSM File Station API. Volume paths such as /volume1/media/… are converted to share paths automatically."
+                )
             }
 
             if let secretError {
@@ -208,7 +223,7 @@ struct NASDownloadsSettingsView: View {
         .task {
             snapshot = NASDownloadSettingsStore.shared.snapshot
             qbPasswordSaved = await AuthenticationActor.shared.hasQBittorrentPassword()
-            aria2SecretSaved = await AuthenticationActor.shared.hasAria2RPCSecret()
+            synologyPasswordSaved = await AuthenticationActor.shared.hasSynologyPassword()
             let configURL = await SettingsActor.shared.config.delugeBaseURL
             if snapshot.delugeBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                 !configURL.isEmpty
@@ -223,13 +238,13 @@ struct NASDownloadsSettingsView: View {
         .onDisappear {
             persist()
             let qbDraft = qbPasswordDraft
-            let ariaDraft = aria2SecretDraft
+            let synologyDraft = synologyPasswordDraft
             Task {
                 if !qbDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     try? await AuthenticationActor.shared.saveQBittorrentPassword(qbDraft)
                 }
-                if !ariaDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    try? await AuthenticationActor.shared.saveAria2RPCSecret(ariaDraft)
+                if !synologyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    try? await AuthenticationActor.shared.saveSynologyPassword(synologyDraft)
                 }
             }
         }
@@ -257,31 +272,19 @@ struct NASDownloadsSettingsView: View {
     }
 
     private var audiobookBinding: Binding<String> {
-        Binding(
-            get: { snapshot.audiobookFolder },
-            set: { snapshot.audiobookFolder = $0 },
-        )
+        Binding(get: { snapshot.audiobookFolder }, set: { snapshot.audiobookFolder = $0 })
     }
 
     private var ebookBinding: Binding<String> {
-        Binding(
-            get: { snapshot.ebookFolder },
-            set: { snapshot.ebookFolder = $0 },
-        )
+        Binding(get: { snapshot.ebookFolder }, set: { snapshot.ebookFolder = $0 })
     }
 
     private var qbURLBinding: Binding<String> {
-        Binding(
-            get: { snapshot.qbittorrentBaseURL },
-            set: { snapshot.qbittorrentBaseURL = $0 },
-        )
+        Binding(get: { snapshot.qbittorrentBaseURL }, set: { snapshot.qbittorrentBaseURL = $0 })
     }
 
     private var qbUserBinding: Binding<String> {
-        Binding(
-            get: { snapshot.qbittorrentUsername },
-            set: { snapshot.qbittorrentUsername = $0 },
-        )
+        Binding(get: { snapshot.qbittorrentUsername }, set: { snapshot.qbittorrentUsername = $0 })
     }
 
     private var delugeURLBinding: Binding<String> {
@@ -295,11 +298,12 @@ struct NASDownloadsSettingsView: View {
         )
     }
 
-    private var aria2URLBinding: Binding<String> {
-        Binding(
-            get: { snapshot.aria2RPCURL },
-            set: { snapshot.aria2RPCURL = $0 },
-        )
+    private var synologyURLBinding: Binding<String> {
+        Binding(get: { snapshot.synologyBaseURL }, set: { snapshot.synologyBaseURL = $0 })
+    }
+
+    private var synologyUserBinding: Binding<String> {
+        Binding(get: { snapshot.synologyUsername }, set: { snapshot.synologyUsername = $0 })
     }
 
     private func persist() {
@@ -356,28 +360,28 @@ struct NASDownloadsSettingsView: View {
         }
     }
 
-    private func saveAria2Secret() async {
-        let draft = aria2SecretDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func saveSynologyPassword() async {
+        let draft = synologyPasswordDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !draft.isEmpty else { return }
         do {
-            try await AuthenticationActor.shared.saveAria2RPCSecret(draft)
-            aria2SecretDraft = ""
-            aria2SecretSaved = true
+            try await AuthenticationActor.shared.saveSynologyPassword(draft)
+            synologyPasswordDraft = ""
+            synologyPasswordSaved = true
             secretError = nil
         } catch {
-            secretError = "Could not save the aria2 secret."
+            secretError = "Could not save the Synology password."
         }
     }
 
-    private func removeAria2Secret() async {
+    private func removeSynologyPassword() async {
         do {
-            try await AuthenticationActor.shared.deleteAria2RPCSecret()
-            aria2SecretDraft = ""
-            aria2SecretSaved = false
-            aria2Status = nil
+            try await AuthenticationActor.shared.deleteSynologyPassword()
+            synologyPasswordDraft = ""
+            synologyPasswordSaved = false
+            synologyStatus = nil
             secretError = nil
         } catch {
-            secretError = "Could not remove the aria2 secret."
+            secretError = "Could not remove the Synology password."
         }
     }
 
@@ -407,22 +411,24 @@ struct NASDownloadsSettingsView: View {
         )
     }
 
-    private func testAria2() async {
-        checking = "aria2"
-        aria2Status = nil
+    private func testSynology() async {
+        checking = "synology"
+        synologyStatus = nil
         defer { checking = nil }
         persist()
-        await saveAria2Secret()
-        let secret = (try? await AuthenticationActor.shared.loadAria2RPCSecret()) ?? ""
-        aria2Status = await Aria2Client().testConnection(
-            rpcURL: snapshot.aria2RPCURL,
-            secret: secret,
+        await saveSynologyPassword()
+        let password = (try? await AuthenticationActor.shared.loadSynologyPassword()) ?? ""
+        synologyStatus = await SynologyFileStationClient().testConnection(
+            baseURL: snapshot.synologyBaseURL,
+            username: snapshot.synologyUsername,
+            password: password,
         )
     }
 }
 
 struct ManualDownloadsView: View {
     @State private var jobs: [ManualDownloadJob] = []
+    @State private var busyID: String?
 
     var body: some View {
         List {
@@ -430,7 +436,7 @@ struct ManualDownloadsView: View {
                 Section {
                     Text("No manual downloads yet")
                         .foregroundStyle(.secondary)
-                    Text("When you send a Manual Search result to the NAS, it appears here as submitted.")
+                    Text("When you send a Manual Search result to the NAS, it appears here.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -448,11 +454,17 @@ struct ManualDownloadsView: View {
                         LabeledContent("Via", value: job.backend.label)
                         LabeledContent("Status", value: job.status.label)
                         LabeledContent("Destination", value: job.destination)
-                        LabeledContent("Submitted", value: job.submittedAt.formatted(date: .abbreviated, time: .shortened))
+                        LabeledContent(
+                            "Submitted",
+                            value: job.submittedAt.formatted(date: .abbreviated, time: .shortened),
+                        )
                         if let error = job.lastError, !error.isEmpty {
                             Text(error)
                                 .font(.caption)
                                 .foregroundStyle(.red)
+                        }
+                        if job.backend == .synology {
+                            retryRow(job)
                         }
                     }
                     .padding(.vertical, 4)
@@ -469,8 +481,51 @@ struct ManualDownloadsView: View {
         }
     }
 
+    @ViewBuilder
+    private func retryRow(_ job: ManualDownloadJob) -> some View {
+        HStack {
+            if job.hasStagedFile {
+                Button("Retry Upload") {
+                    Task { await retryUpload(job) }
+                }
+                .disabled(busyID != nil)
+                Button("Delete Local Copy", role: .destructive) {
+                    Task { await deleteLocal(job) }
+                }
+                .disabled(busyID != nil)
+            } else if job.status == .failed, job.sourceURL != nil {
+                Button("Retry Download") {
+                    Task { await retryDownload(job) }
+                }
+                .disabled(busyID != nil)
+            }
+        }
+        .font(.subheadline)
+    }
+
     private func reload() async {
         jobs = await ManualDownloadJobStore.shared.allJobs()
+    }
+
+    private func retryUpload(_ job: ManualDownloadJob) async {
+        busyID = job.id
+        defer { busyID = nil }
+        _ = await NASAcquisitionHandler.live().retryUpload(job: job)
+        await reload()
+    }
+
+    private func retryDownload(_ job: ManualDownloadJob) async {
+        busyID = job.id
+        defer { busyID = nil }
+        _ = await NASAcquisitionHandler.live().retryDownload(job: job)
+        await reload()
+    }
+
+    private func deleteLocal(_ job: ManualDownloadJob) async {
+        busyID = job.id
+        defer { busyID = nil }
+        await NASAcquisitionHandler.live().deleteLocalCopy(job: job)
+        await reload()
     }
 }
 #endif
