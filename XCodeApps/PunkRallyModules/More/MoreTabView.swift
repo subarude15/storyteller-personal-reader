@@ -75,10 +75,6 @@ struct MoreTabView: View {
                 }
                 .buttonStyle(.plain)
             case .stats, .requestsActivity, .services:
-                let _ = { () -> Never in
-                    assertionFailure("Secondary destination \(destination) in primary section")
-                    return fatalError()
-                }()
                 EmptyView()
         }
     }
