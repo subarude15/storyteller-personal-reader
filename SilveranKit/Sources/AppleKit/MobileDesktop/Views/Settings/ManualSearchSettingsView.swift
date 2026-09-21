@@ -11,12 +11,12 @@ struct ManualSearchSettingsSection: View {
                 Label("Search providers", systemImage: "magnifyingglass")
             }
             LabeledContent("Open searches", value: "In-app browser")
-            LabeledContent("Download handling", value: "NAS handoff (coming next)")
+            LabeledContent("Download handling", value: "Send to NAS")
         } header: {
             Text("Manual Search")
         } footer: {
             Text(
-                "When LazyLibrarian or Shelfarr cannot find a book, search a website yourself. Detected download links are prepared for a later NAS handoff — nothing is sent yet."
+                "When LazyLibrarian or Shelfarr cannot find a book, search a website yourself. Torrents go to qBittorrent or Deluge. Direct files download on this device, then upload to Synology."
             )
         }
     }

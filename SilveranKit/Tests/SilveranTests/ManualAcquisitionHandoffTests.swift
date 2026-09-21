@@ -17,6 +17,8 @@ struct ManualAcquisitionHandoffTests {
         let candidate = try #require(
             ManualAcquisitionDetection.candidate(
                 url: url,
+                mimeType: "application/epub+zip",
+                suggestedFilename: "hobbit.epub",
                 bookMetadata: book,
                 providerID: "open-library",
             )
@@ -47,13 +49,15 @@ struct ManualAcquisitionHandoffTests {
                 #expect(!message.lowercased().contains("sent"))
                 #expect(!message.lowercased().contains("queued"))
                 #expect(!message.lowercased().contains("downloaded"))
+            case .submitted, .completed, .failed:
+                Issue.record("placeholder handler must not submit or fail")
         }
     }
 
     @Test func routerDoesNotReferenceNASClients() {
         let routerType = String(describing: ManualAcquisitionRouter.self)
         let handlerType = String(describing: PlaceholderManualAcquisitionHandler.self)
-        for name in ["qBittorrent", "Deluge", "aria2", "QBittorrent"] {
+        for name in ["qBittorrent", "Deluge", "Synology", "QBittorrent"] {
             #expect(!routerType.contains(name))
             #expect(!handlerType.contains(name))
         }

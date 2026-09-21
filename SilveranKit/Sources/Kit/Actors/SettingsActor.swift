@@ -1026,6 +1026,15 @@ public actor SettingsActor {
         notifySettingsObservers()
     }
 
+    public func applySyncedDelugeBaseURL(_ baseURL: String) throws {
+        guard config.delugeBaseURL != baseURL else { return }
+        var updated = config
+        updated.delugeBaseURL = baseURL
+        config = updated
+        try persistCurrentConfig()
+        notifySettingsObservers()
+    }
+
     public func lazyLibrarianSyncSnapshot() -> LazyLibrarianSyncSnapshot {
         LazyLibrarianSyncSnapshot(
             enabled: config.lazyLibrarianEnabled,

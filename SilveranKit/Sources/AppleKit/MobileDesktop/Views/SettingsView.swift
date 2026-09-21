@@ -499,6 +499,9 @@ private struct DelugeSettingsSection: View {
                 "Read-only download observability for LazyLibrarian. The WebUI password is stored in the keychain. Test Connection never adds, pauses, or removes torrents."
             )
         }
+        .onChange(of: baseURL) { _, newValue in
+            NASDownloadSettingsStore.shared.setDelugeBaseURL(newValue)
+        }
         .task {
             passwordSaved = await AuthenticationActor.shared.hasDelugePassword()
         }
@@ -969,6 +972,8 @@ extension SettingsView {
                 }
 
                 ManualSearchSettingsSection()
+
+                NASDownloadsSettingsSection()
 
                                 Section {
                                     NavigationLink {
@@ -1631,6 +1636,8 @@ private struct MacBookSourcesSettingsView: View {
                     )
                 }
                 ManualSearchSettingsSection()
+
+                NASDownloadsSettingsSection()
             }
             .formStyle(.grouped)
             .frame(maxHeight: 420)

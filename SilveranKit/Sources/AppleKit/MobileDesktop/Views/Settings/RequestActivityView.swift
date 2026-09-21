@@ -431,6 +431,14 @@ public struct RequestActivityView: View {
 
     public var body: some View {
         List {
+            Section {
+                NavigationLink {
+                    ManualDownloadsView()
+                } label: {
+                    Label("Manual Downloads", systemImage: "arrow.down.circle")
+                }
+            }
+
             if let missingRequestMessage {
                 Section {
                     Text(missingRequestMessage)

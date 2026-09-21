@@ -84,17 +84,91 @@ public struct DelugeWebClient: Sendable {
         }
     }
 
+    public func addMagnet(
+        baseURL: String,
+        password: String,
+        uri: String,
+        downloadLocation: String,
+        start: Bool,
+    ) async throws -> String? {
+        let session = try await authenticate(baseURL: baseURL, password: password)
+        return try await add(
+            session: session,
+            method: "core.add_torrent_magnet",
+            source: uri,
+            downloadLocation: downloadLocation,
+            start: start,
+        )
+    }
+
+    public func addTorrentURL(
+        baseURL: String,
+        password: String,
+        url: String,
+        downloadLocation: String,
+        start: Bool,
+    ) async throws -> String? {
+        let session = try await authenticate(baseURL: baseURL, password: password)
+        return try await add(
+            session: session,
+            method: "core.add_torrent_url",
+            source: url,
+            downloadLocation: downloadLocation,
+            start: start,
+        )
+    }
+
     // MARK: - Session
 
-    private func authenticateAndList(baseURL: String, password: String) async throws
-        -> [DelugeTorrentSnapshot]
-    {
+    private struct Session {
+        var endpoint: URL
+        var cookie: String
+    }
+
+    private func authenticate(baseURL: String, password: String) async throws -> Session {
         guard let endpoint = Self.jsonEndpoint(from: baseURL) else {
             throw DelugeClientError.invalidURL
         }
         var cookie = try await login(endpoint: endpoint, password: password)
         try await ensureDaemonConnected(endpoint: endpoint, cookie: &cookie)
-        return try await listTorrents(endpoint: endpoint, cookie: cookie)
+        return Session(endpoint: endpoint, cookie: cookie)
+    }
+
+    private func authenticateAndList(baseURL: String, password: String) async throws
+        -> [DelugeTorrentSnapshot]
+    {
+        let session = try await authenticate(baseURL: baseURL, password: password)
+        return try await listTorrents(endpoint: session.endpoint, cookie: session.cookie)
+    }
+
+    private func add(
+        session: Session,
+        method: String,
+        source: String,
+        downloadLocation: String,
+        start: Bool,
+    ) async throws -> String? {
+        let options: [String: Any] = [
+            "download_location": downloadLocation,
+            "add_paused": !start,
+        ]
+        let response = try await rpc(
+            endpoint: session.endpoint,
+            method: method,
+            params: [source, options] as [Any],
+            cookie: session.cookie,
+            id: 10,
+        )
+        if response.error != nil {
+            throw DelugeClientError.rejected
+        }
+        if let hash = response.result as? String, !hash.isEmpty {
+            return hash
+        }
+        if response.result == nil {
+            throw DelugeClientError.rejected
+        }
+        return nil
     }
 
     private func login(endpoint: URL, password: String) async throws -> String {
@@ -249,11 +323,18 @@ public struct DelugeWebClient: Sendable {
             throw DelugeClientError.invalidResponse
         }
         return RPCResponse(
-            result: json["result"],
-            error: json["error"],
+            result: Self.jsonValue(json["result"]),
+            error: Self.jsonValue(json["error"]),
             status: http.status,
             setCookie: http.setCookie,
         )
+    }
+
+    /// `JSONSerialization` turns JSON `null` into `NSNull`. Treat that as Swift `nil`
+    /// so `"error": null` is success, not a rejected RPC.
+    public static func jsonValue(_ raw: Any?) -> Any? {
+        if raw is NSNull { return nil }
+        return raw
     }
 
     // MARK: - Decode

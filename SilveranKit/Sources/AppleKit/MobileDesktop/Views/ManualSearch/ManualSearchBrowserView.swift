@@ -19,6 +19,7 @@ struct ManualSearchBrowserView: View {
     @Environment(\.openURL) private var openURL
     @StateObject private var controller: ManualSearchBrowserController
     @State private var candidate: ManualAcquisitionCandidate?
+    @State private var handoffTitle = "Send to NAS"
     @State private var handoffMessage: String?
 
     init(session: ManualSearchBrowserSession, router: ManualAcquisitionRouter = ManualAcquisitionRouter()) {
@@ -108,12 +109,13 @@ struct ManualSearchBrowserView: View {
         .sheet(item: $candidate) { found in
             ManualAcquisitionConfirmSheet(
                 candidate: found,
-                onSendToNAS: {
-                    Task {
-                        let result = await router.submit(found)
-                        candidate = nil
-                        handoffMessage = result.message
-                    }
+                router: router,
+                cookieHeader: { await controller.cookieHeader(for: found.sourceURL) },
+                referer: controller.currentURL?.absoluteString,
+                onFinished: { title, message in
+                    candidate = nil
+                    handoffTitle = title
+                    handoffMessage = message
                 },
                 onContinue: {
                     candidate = nil
@@ -127,7 +129,7 @@ struct ManualSearchBrowserView: View {
                 },
             )
         }
-        .alert("Send to NAS", isPresented: Binding(
+        .alert(handoffTitle, isPresented: Binding(
             get: { handoffMessage != nil },
             set: { if !$0 { handoffMessage = nil } },
         )) {
@@ -140,10 +142,34 @@ struct ManualSearchBrowserView: View {
 
 struct ManualAcquisitionConfirmSheet: View {
     let candidate: ManualAcquisitionCandidate
-    let onSendToNAS: () -> Void
+    var router: ManualAcquisitionRouter
+    var cookieHeader: () async -> String? = { nil }
+    var referer: String? = nil
+    let onFinished: (String, String) -> Void
     let onContinue: () -> Void
     let onOpenExternally: () -> Void
     let onCancel: () -> Void
+
+    @State private var settings = NASDownloadSettingsSnapshot()
+    @State private var overrideKind: NASMediaKind?
+    @State private var sending = false
+    @State private var sendError: String?
+
+    private var preview: NASHandoffPreview {
+        NASHandoffPreview.make(
+            candidate: candidateForSubmit,
+            override: overrideKind,
+            settings: settings,
+        )
+    }
+
+    private var candidateForSubmit: ManualAcquisitionCandidate {
+        var copy = candidate
+        if let overrideKind {
+            copy.bookMetadata.requestedMediaType = overrideKind == .audiobook ? .audiobook : .ebook
+        }
+        return copy
+    }
 
     var body: some View {
         NavigationStack {
@@ -157,26 +183,98 @@ struct ManualAcquisitionConfirmSheet: View {
                     }
                 }
                 Section {
+                    LabeledContent("Type", value: preview.mediaKind?.label ?? "Unknown")
+                    if preview.backend == .synology {
+                        LabeledContent("Method", value: preview.backendLabel)
+                    } else {
+                        LabeledContent("Download via", value: preview.backendLabel)
+                    }
+                    LabeledContent("Destination", value: preview.destination.isEmpty ? "—" : preview.destination)
                     LabeledContent("Source", value: candidate.displayHost)
                     LabeledContent("File", value: candidate.displayFilename)
-                    LabeledContent("Type", value: candidate.detectedType.label)
+                } footer: {
+                    if let note = preview.methodNote {
+                        Text(note)
+                    }
+                }
+                if preview.needsMediaTypeChoice {
+                    Section {
+                        Picker("Save as", selection: Binding(
+                            get: { overrideKind },
+                            set: { overrideKind = $0 },
+                        )) {
+                            Text("Choose…").tag(Optional<NASMediaKind>.none)
+                            Text(NASMediaKind.ebook.label).tag(Optional(NASMediaKind.ebook))
+                            Text(NASMediaKind.audiobook.label).tag(Optional(NASMediaKind.audiobook))
+                        }
+                    } footer: {
+                        Text("This file type is ambiguous. Choose eBook or Audiobook.")
+                    }
+                }
+                if let sendError {
+                    Section {
+                        Text(sendError)
+                            .foregroundStyle(.red)
+                    }
+                } else if let blocking = preview.blockingMessage {
+                    Section {
+                        Text(blocking)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Section {
-                    Button("Send to NAS", action: onSendToNAS)
-                        .accessibilityIdentifier("manual-search-send-to-nas")
+                    Button {
+                        Task { await send() }
+                    } label: {
+                        if sending {
+                            ProgressView()
+                        } else {
+                            Text(sendError == nil ? "Send to NAS" : "Retry")
+                        }
+                    }
+                    .disabled(sending || !preview.canSubmit)
+                    .accessibilityIdentifier("manual-search-send-to-nas")
                     Button("Continue in Browser", action: onContinue)
                     Button("Open Externally", action: onOpenExternally)
                     Button("Cancel", role: .cancel, action: onCancel)
                 }
             }
-            .navigationTitle("Download found")
+            .navigationTitle("Send to NAS")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
+            .task { await loadSettings() }
         }
         #if os(iOS)
         .presentationDetents([.medium, .large])
         #endif
+    }
+
+    private func loadSettings() async {
+        var snapshot = NASDownloadSettingsStore.shared.snapshot
+        let configURL = await SettingsActor.shared.config.delugeBaseURL
+        snapshot.delugeBaseURL = snapshot.resolvedDelugeBaseURL(configURL: configURL)
+        settings = snapshot
+    }
+
+    private func send() async {
+        sending = true
+        sendError = nil
+        defer { sending = false }
+        var sendingCandidate = candidateForSubmit
+        sendingCandidate.cookieHeader = await cookieHeader()
+        sendingCandidate.referer = referer
+        let result = await router.submit(sendingCandidate)
+        switch result {
+            case .submitted(let message):
+                onFinished("Sent to NAS", message)
+            case .completed(let message):
+                onFinished("Sent to NAS", message)
+            case .failed(let message):
+                sendError = message
+            case .placeholder(let message):
+                onFinished("Send to NAS", message)
+        }
     }
 }
 
@@ -219,6 +317,20 @@ final class ManualSearchBrowserController: NSObject, ObservableObject {
     func goForward() { webView?.goForward() }
     func reload() { webView?.reload() }
     func stop() { webView?.stopLoading() }
+
+    func cookieHeader(for url: URL) async -> String? {
+        guard let store = webView?.configuration.websiteDataStore.httpCookieStore else { return nil }
+        let cookies: [HTTPCookie] = await withCheckedContinuation { continuation in
+            store.getAllCookies { continuation.resume(returning: $0) }
+        }
+        let host = url.host?.lowercased() ?? ""
+        let matching = cookies.filter { cookie in
+            let domain = cookie.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            return host == domain || host.hasSuffix(".\(domain)")
+        }
+        let fields = HTTPCookie.requestHeaderFields(with: matching.isEmpty ? cookies : matching)
+        return fields["Cookie"]
+    }
 
     fileprivate func handleCandidate(_ candidate: ManualAcquisitionCandidate) {
         candidatePublisher.send(candidate)

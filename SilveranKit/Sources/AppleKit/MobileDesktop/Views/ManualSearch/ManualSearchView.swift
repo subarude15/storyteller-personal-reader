@@ -115,11 +115,11 @@ struct ManualSearchView: View {
             }
             #if os(iOS)
             .fullScreenCover(item: $browserSession) { session in
-                ManualSearchBrowserView(session: session)
+                ManualSearchBrowserView(session: session, router: .nasLive())
             }
             #else
             .sheet(item: $browserSession) { session in
-                ManualSearchBrowserView(session: session)
+                ManualSearchBrowserView(session: session, router: .nasLive())
                     .frame(minWidth: 720, minHeight: 640)
             }
             #endif

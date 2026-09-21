@@ -13,6 +13,8 @@ public actor AuthenticationActor {
     private let prowlarrAPIKey = "prowlarrAPIKey"
     private let jackettAPIKey = "jackettAPIKey"
     private let delugePassword = "delugePassword"
+    private let qbittorrentPassword = "qbittorrentPassword"
+    private let synologyPassword = "synologyPassword"
 
     private init() {}
 
@@ -196,6 +198,50 @@ public actor AuthenticationActor {
 
     public func hasDelugePassword() async -> Bool {
         guard let password = try? await loadDelugePassword() else { return false }
+        return !password.isEmpty
+    }
+
+    public func saveQBittorrentPassword(_ password: String) async throws {
+        let trimmed = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            try await deleteQBittorrentPassword()
+            return
+        }
+        try await saveString(trimmed, for: qbittorrentPassword)
+    }
+
+    public func loadQBittorrentPassword() async throws -> String? {
+        try await loadString(for: qbittorrentPassword)
+    }
+
+    public func deleteQBittorrentPassword() async throws {
+        try await keychain.removeItem(account: qbittorrentPassword)
+    }
+
+    public func hasQBittorrentPassword() async -> Bool {
+        guard let password = try? await loadQBittorrentPassword() else { return false }
+        return !password.isEmpty
+    }
+
+    public func saveSynologyPassword(_ password: String) async throws {
+        let trimmed = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            try await deleteSynologyPassword()
+            return
+        }
+        try await saveString(trimmed, for: synologyPassword)
+    }
+
+    public func loadSynologyPassword() async throws -> String? {
+        try await loadString(for: synologyPassword)
+    }
+
+    public func deleteSynologyPassword() async throws {
+        try await keychain.removeItem(account: synologyPassword)
+    }
+
+    public func hasSynologyPassword() async -> Bool {
+        guard let password = try? await loadSynologyPassword() else { return false }
         return !password.isEmpty
     }
 

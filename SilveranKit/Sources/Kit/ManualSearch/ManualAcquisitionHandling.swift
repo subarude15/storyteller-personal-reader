@@ -2,26 +2,47 @@
 //  ManualAcquisitionHandling.swift
 //  SilveranKit
 //
-//  Handoff boundary for PR 68. The browser produces a candidate and
-//  calls this protocol. It does not know about qBittorrent, Deluge,
-//  aria2, or NAS paths.
+//  Handoff boundary. The browser produces a candidate and calls this
+//  protocol. It does not know about qBittorrent, Deluge, Synology, or
+//  NAS paths.
 //
 //  SPDX-License-Identifier: AGPL-3.0-only
 
 import Foundation
 
 public enum ManualAcquisitionHandoffResult: Equatable, Sendable {
-    /// This PR's only outcome. The next PR replaces the placeholder handler.
+    /// Kept so older tests and fallback wiring still compile.
     case placeholder(message: String)
+    /// Torrent accepted by qBittorrent or Deluge. Not a completed download.
+    case submitted(message: String)
+    /// Direct file uploaded and verified on the NAS.
+    case completed(message: String)
+    case failed(message: String)
 
     public var message: String {
         switch self {
-            case .placeholder(let message): message
+            case .placeholder(let message), .submitted(let message), .completed(let message),
+                .failed(let message):
+                message
+        }
+    }
+
+    public var isSubmitted: Bool {
+        switch self {
+            case .submitted: true
+            case .placeholder, .completed, .failed: false
+        }
+    }
+
+    public var isSuccess: Bool {
+        switch self {
+            case .submitted, .completed: true
+            case .placeholder, .failed: false
         }
     }
 }
 
-/// Implementations live outside the browser. PR 68 swaps the placeholder.
+/// Implementations live outside the browser. The browser never imports a NAS client.
 public protocol ManualAcquisitionHandling: Sendable {
     func handle(_ candidate: ManualAcquisitionCandidate) async -> ManualAcquisitionHandoffResult
 }

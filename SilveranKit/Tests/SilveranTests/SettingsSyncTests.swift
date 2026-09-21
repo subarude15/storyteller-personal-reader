@@ -304,7 +304,7 @@ struct SettingsSyncTests {
             openInAppBrowser: true,
             at: date(40),
         )
-        #expect(edited.schemaVersion == SyncedAppSettings.schemaVersion)
+        #expect(edited.schemaVersion == 2)
         #expect(edited.integrations.lazyLibrarian.enabled?.value == true)
         #expect(edited.integrations.lazyLibrarian.baseURL?.value == "https://ll.home")
         #expect(edited.integrations.lazyLibrarian.baseURL?.modifiedAt == date(10))
@@ -361,7 +361,8 @@ struct SettingsSyncTests {
             return
         }
         #expect(decoded == document)
-        #expect(decoded.schemaVersion == SyncedAppSettings.schemaVersion)
+        #expect(decoded.schemaVersion == document.schemaVersion)
+        #expect(decoded.schemaVersion == SyncedAppSettings.baselineSchemaVersion)
     }
 
     @Test func credentialsAreNotSerialized() throws {
@@ -381,6 +382,234 @@ struct SettingsSyncTests {
         #expect(keys.contains("enabled"))
         #expect(keys.contains("baseURL"))
         #expect(!keys.contains("lazyLibrarianAPIKey"))
+    }
+
+    @Test func nasDownloadsPromoteSchema2To3AndRoundTripFolders() throws {
+        let store = try journal()
+        var v2 = SyncedAppSettings(schemaVersion: 2)
+        v2.integrations.manualSearch.openInAppBrowser = TimestampedSetting(
+            value: true,
+            modifiedAt: date(10),
+        )
+        try store.save(v2)
+        store.migrationCompleted = true
+
+        let settings = NASDownloadSettingsSnapshot(
+            torrentClient: .qbittorrent,
+            qbittorrentBaseURL: "http://qb.example:8080",
+            qbittorrentUsername: "admin",
+            delugeBaseURL: "http://deluge.example:8112",
+            synologyBaseURL: "http://nas.example:5000",
+            synologyUsername: "josh",
+            audiobookFolder: "/volume1/media/books/audiobooks",
+            ebookFolder: "/volume1/media/books/books",
+            startAutomatically: true,
+            createTitleAuthorSubfolders: false,
+        )
+        let edited = try store.recordNASDownloadsChange(settings, at: date(40))
+        #expect(edited.schemaVersion == 3)
+        #expect(edited.integrations.nasDownloads.audiobookFolder?.value == "/volume1/media/books/audiobooks")
+        #expect(edited.integrations.nasDownloads.ebookFolder?.value == "/volume1/media/books/books")
+        #expect(edited.integrations.nasDownloads.torrentClient?.value == .qbittorrent)
+        #expect(edited.integrations.manualSearch.openInAppBrowser?.modifiedAt == date(10))
+
+        let raw = try SettingsSyncCodec.encode(edited)
+        #expect(raw.contains("\"schemaVersion\":3"))
+        #expect(!raw.contains("password"))
+        #expect(!raw.contains("secret"))
+        #expect(!raw.contains("qbittorrentPassword"))
+        #expect(!raw.contains("synologyPassword"))
+        #expect(!raw.contains("sid"))
+        guard case .document(let decoded) = SettingsSyncCodec.inspect(raw) else {
+            Issue.record("NAS document should round-trip")
+            return
+        }
+        #expect(decoded.schemaVersion == 3)
+        let applied = SettingsSyncApply.nasDownloads(document: decoded)
+        #expect(applied.audiobookFolder == "/volume1/media/books/audiobooks")
+        #expect(applied.ebookFolder == "/volume1/media/books/books")
+        #expect(applied.qbittorrentBaseURL == "http://qb.example:8080")
+        #expect(applied.synologyBaseURL == "http://nas.example:5000")
+        #expect(applied.synologyUsername == "josh")
+    }
+
+    @Test func nasCredentialsDoNotSerializeIntoSyncJSON() throws {
+        let secret = "nas-super-secret-password"
+        var document = SyncedAppSettings(schemaVersion: 3)
+        document.integrations.nasDownloads.qbittorrentBaseURL = TimestampedSetting(
+            value: "http://qb.example:8080",
+            modifiedAt: date(10),
+        )
+        let raw = try SettingsSyncCodec.encode(document)
+        #expect(!raw.contains(secret))
+        let json = try JSONSerialization.jsonObject(with: Data(raw.utf8))
+        let keys = keyNames(in: json)
+        for key in ["password", "token", "secret", "apiKey", "qbittorrentPassword", "synologyPassword"] {
+            #expect(!keys.contains(key))
+        }
+        #expect(keys.contains("qbittorrentBaseURL"))
+        #expect(keys.contains("nasDownloads"))
+    }
+
+    @Test func nasMissingFieldDoesNotClearLocalFolders() {
+        var document = SyncedAppSettings(schemaVersion: 3)
+        document.integrations.nasDownloads.audiobookFolder = TimestampedSetting(
+            value: "/media/audiobooks",
+            modifiedAt: date(10),
+        )
+        let applied = SettingsSyncApply.nasDownloads(
+            document: document,
+            current: NASDownloadSettingsSnapshot(
+                ebookFolder: "/media/books",
+                createTitleAuthorSubfolders: true,
+            ),
+        )
+        #expect(applied.audiobookFolder == "/media/audiobooks")
+        #expect(applied.ebookFolder == "/media/books")
+        #expect(applied.createTitleAuthorSubfolders == true)
+    }
+
+    @Test func explicitEmptyDelugeURLClearsLocalAndStopsFallback() {
+        var remote = SyncedAppSettings(schemaVersion: 3)
+        remote.integrations.nasDownloads.delugeBaseURL = TimestampedSetting(
+            value: "",
+            modifiedAt: date(40),
+        )
+        var local = SyncedAppSettings(schemaVersion: 3)
+        local.integrations.nasDownloads.delugeBaseURL = TimestampedSetting(
+            value: "http://deluge.example:8112",
+            modifiedAt: date(10),
+        )
+        let merged = SettingsSyncMerge.merge(local: local, remote: remote)
+        #expect(merged.integrations.nasDownloads.delugeBaseURL?.value == "")
+        let applied = SettingsSyncApply.nasDownloads(
+            document: merged,
+            current: NASDownloadSettingsSnapshot(delugeBaseURL: "http://deluge.example:8112"),
+        )
+        #expect(applied.delugeBaseURL == "")
+        #expect(SettingsSyncApply.delugeBaseURLToApply(document: merged) == "")
+        #expect(applied.resolvedDelugeBaseURL(configURL: "") == "")
+        #expect(applied.resolvedDelugeBaseURL(configURL: "   ") == "")
+        var reopened = applied
+        let resurrected = reopened.resolvedDelugeBaseURL(configURL: "")
+        if reopened.trimmedDelugeBaseURL.isEmpty, !resurrected.isEmpty {
+            reopened.delugeBaseURL = resurrected
+        }
+        #expect(reopened.delugeBaseURL == "")
+    }
+
+    @Test func missingDelugeURLLeavesLocalConfig() {
+        var document = SyncedAppSettings(schemaVersion: 3)
+        document.integrations.nasDownloads.torrentClient = TimestampedSetting(
+            value: .qbittorrent,
+            modifiedAt: date(20),
+        )
+        let current = NASDownloadSettingsSnapshot(delugeBaseURL: "http://keep.example:8112")
+        let applied = SettingsSyncApply.nasDownloads(document: document, current: current)
+        #expect(applied.delugeBaseURL == "http://keep.example:8112")
+        #expect(SettingsSyncApply.delugeBaseURLToApply(document: document) == nil)
+        #expect(
+            NASDownloadSettingsSnapshot(delugeBaseURL: "").resolvedDelugeBaseURL(
+                configURL: "http://keep.example:8112"
+            ) == "http://keep.example:8112"
+        )
+    }
+
+    @Test func nonEmptyDelugeURLStillSyncs() {
+        var remote = SyncedAppSettings(schemaVersion: 3)
+        remote.integrations.nasDownloads.delugeBaseURL = TimestampedSetting(
+            value: "http://new.example:8112",
+            modifiedAt: date(20),
+        )
+        let applied = SettingsSyncApply.nasDownloads(
+            document: remote,
+            current: NASDownloadSettingsSnapshot(delugeBaseURL: "http://old.example:8112"),
+        )
+        #expect(applied.delugeBaseURL == "http://new.example:8112")
+        #expect(SettingsSyncApply.delugeBaseURLToApply(document: remote) == "http://new.example:8112")
+    }
+
+    @Test func freshDocumentStaysOnBaselineSchema() {
+        let empty = SyncedAppSettings()
+        #expect(empty.schemaVersion == SyncedAppSettings.baselineSchemaVersion)
+        #expect(empty.schemaVersion != 3)
+        #expect(SettingsSyncMerge.hasSchema2Fields(empty) == false)
+        #expect(SettingsSyncMerge.hasSchema3Fields(empty) == false)
+        #expect(SettingsSyncMerge.requiredSchemaVersion(for: empty) == 1)
+    }
+
+    @Test func emptyDocumentPlusManualSearchEditIsSchema2() throws {
+        let store = try journal()
+        store.migrationCompleted = true
+        let edited = try store.recordManualSearchChange(
+            providers: [],
+            openInAppBrowser: true,
+            at: date(10),
+        )
+        #expect(edited.schemaVersion == 2)
+        #expect(SettingsSyncMerge.hasSchema3Fields(edited) == false)
+    }
+
+    @Test func emptyDocumentPlusNASEditIsSchema3() throws {
+        let store = try journal()
+        store.migrationCompleted = true
+        let edited = try store.recordNASDownloadsChange(
+            NASDownloadSettingsSnapshot(delugeBaseURL: "http://deluge.example:8112"),
+            at: date(10),
+        )
+        #expect(edited.schemaVersion == 3)
+        #expect(edited.integrations.nasDownloads.delugeBaseURL?.value == "http://deluge.example:8112")
+    }
+
+    @Test func emptyLocalPlusSchema2RemoteStaysSchema2() {
+        var remote = SyncedAppSettings(schemaVersion: 2)
+        remote.integrations.manualSearch.openInAppBrowser = TimestampedSetting(
+            value: true,
+            modifiedAt: date(10),
+        )
+        let merged = SettingsSyncMerge.merge(local: SyncedAppSettings(), remote: remote)
+        #expect(merged.schemaVersion == 2)
+        #expect(SettingsSyncMerge.hasSchema3Fields(merged) == false)
+    }
+
+    @Test func schema2RemotePlusLocalNASFieldsIsSchema3() {
+        var local = SyncedAppSettings(schemaVersion: 2)
+        local.integrations.nasDownloads.audiobookFolder = TimestampedSetting(
+            value: "/volume1/media/books/audiobooks",
+            modifiedAt: date(20),
+        )
+        var remote = SyncedAppSettings(schemaVersion: 2)
+        remote.integrations.manualSearch.openInAppBrowser = TimestampedSetting(
+            value: true,
+            modifiedAt: date(10),
+        )
+        let merged = SettingsSyncMerge.merge(local: local, remote: remote)
+        #expect(merged.schemaVersion == 3)
+        #expect(merged.integrations.nasDownloads.audiobookFolder?.value == "/volume1/media/books/audiobooks")
+        #expect(merged.integrations.manualSearch.openInAppBrowser?.value == true)
+    }
+
+    @Test func lazyLibrarianOnlyRemainsSchema1() {
+        let document = ll(enabled: true, enabledAt: 10, baseURL: "https://ll", baseURLAt: 10)
+        #expect(document.schemaVersion == 1)
+        #expect(SettingsSyncMerge.requiredSchemaVersion(for: document) == 1)
+        #expect(SettingsSyncMerge.promoteSchemaIfNeeded(document).schemaVersion == 1)
+    }
+
+    @Test func schema2ManualSearchMergeDoesNotInventNASFields() {
+        var local = SyncedAppSettings(schemaVersion: 2)
+        local.integrations.manualSearch.openInAppBrowser = TimestampedSetting(
+            value: true,
+            modifiedAt: date(10),
+        )
+        var remote = SyncedAppSettings(schemaVersion: 2)
+        remote.integrations.manualSearch.providers = TimestampedSetting(
+            value: [],
+            modifiedAt: date(12),
+        )
+        let merged = SettingsSyncMerge.merge(local: local, remote: remote)
+        #expect(merged.schemaVersion == 2)
+        #expect(SettingsSyncMerge.hasSchema3Fields(merged) == false)
     }
 
     private func keyNames(in json: Any) -> Set<String> {

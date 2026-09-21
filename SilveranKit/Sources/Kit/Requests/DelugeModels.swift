@@ -184,6 +184,7 @@ public enum DelugeClientError: Error, Equatable, Sendable {
     case timeout
     case invalidResponse
     case notConnectedToDaemon
+    case rejected
 
     public var connection: DelugeConnection {
         switch self {
@@ -191,7 +192,7 @@ public enum DelugeClientError: Error, Equatable, Sendable {
             case .cannotReachServer: .cannotReachServer
             case .authenticationFailed: .authenticationFailed
             case .timeout: .timeout
-            case .invalidResponse, .notConnectedToDaemon: .invalidResponse
+            case .invalidResponse, .notConnectedToDaemon, .rejected: .invalidResponse
         }
     }
 
@@ -203,6 +204,17 @@ public enum DelugeClientError: Error, Equatable, Sendable {
             case .timeout: "Deluge timed out"
             case .invalidResponse: "Unexpected Deluge response"
             case .notConnectedToDaemon: "Deluge WebUI is not connected to a daemon"
+            case .rejected: "Deluge rejected the request"
+        }
+    }
+
+    public var handoff: NASHandoffError {
+        switch self {
+            case .invalidURL: .invalidURL(.deluge)
+            case .cannotReachServer, .notConnectedToDaemon: .unreachable(.deluge)
+            case .authenticationFailed: .authenticationFailed(.deluge)
+            case .timeout: .timeout(.deluge)
+            case .invalidResponse, .rejected: .rejected(.deluge)
         }
     }
 }
