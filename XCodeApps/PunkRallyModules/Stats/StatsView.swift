@@ -11,7 +11,8 @@
 
 import SwiftUI
 
-/// Stats tab — reading/listening time, streak, finished count, average session.
+/// Stats destination — reading/listening time, streak, finished count, average session.
+/// Hosted under More (not a primary tab). Expects an enclosing NavigationStack.
 struct StatsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
@@ -34,23 +35,21 @@ struct StatsView: View {
         let _ = tracker.revision
         let _ = sync.revision
         let _ = tick
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    segmentPicker
-                    switch segment {
-                        case .stats:
-                            statsBody
-                        case .timeline:
-                            StoryTimelineView()
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                segmentPicker
+                switch segment {
+                    case .stats:
+                        statsBody
+                    case .timeline:
+                        StoryTimelineView()
                 }
-                .padding(.horizontal, PunkRallyTheme.Metric.screenInset)
-                .padding(.vertical, 12)
             }
-            .background(chrome.bg)
-            .navigationTitle("Stats")
+            .padding(.horizontal, PunkRallyTheme.Metric.screenInset)
+            .padding(.vertical, 12)
         }
+        .background(chrome.bg)
+        .navigationTitle("Stats")
         .task {
             tracker.pruneOldSessions()
             await sync.syncNow(reason: "statsAppear")

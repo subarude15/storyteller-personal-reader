@@ -76,6 +76,7 @@ public struct ManualSearchQueryValues: Equatable, Sendable {
 }
 
 public enum ManualSearchTemplateError: Error, Equatable, Sendable {
+    case emptyName
     case emptyTemplate
     case malformedTemplate
     case invalidURL
@@ -84,6 +85,10 @@ public enum ManualSearchTemplateError: Error, Equatable, Sendable {
 
 public enum ManualSearchQueryTemplate {
     public static let placeholders = ["title", "author", "isbn", "workId", "query"]
+
+    public static func containsSupportedPlaceholder(_ template: String) -> Bool {
+        placeholders.contains { template.contains("{\($0)}") }
+    }
 
     public static func url(
         template: String,

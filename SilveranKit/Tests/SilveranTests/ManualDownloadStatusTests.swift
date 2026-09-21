@@ -16,6 +16,9 @@ struct DownloadsNavigationTests {
         #expect(DownloadsNavigation.settingsDestination != DownloadsNavigation.downloadsDestination)
         #expect(DownloadsNavigation.settingsContainsOperationalList == false)
         #expect(DownloadsNavigation.settingsKeepsNASConfiguration)
+        #expect(DownloadsNavigation.moreDestination == "More")
+        #expect(DownloadsNavigation.statsLivesUnderMore)
+        #expect(!DownloadsNavigation.primaryTabBarIncludesStats)
     }
 }
 

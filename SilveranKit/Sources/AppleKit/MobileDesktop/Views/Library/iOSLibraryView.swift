@@ -1437,6 +1437,8 @@ extension OfflineStatusSheet.ErrorType {
 struct IOSLibraryToolbarModifier: ViewModifier {
     @Binding var showSettings: Bool
     @Binding var showOfflineSheet: Bool
+    /// When false (ink+amp Home/Library/Shelf), Downloads and Settings live under More.
+    var includeDownloadsAndSettingsShortcuts: Bool = true
     @Environment(MediaViewModel.self) private var mediaViewModel
 
     private var hasConnectionError: Bool {
@@ -1450,21 +1452,25 @@ struct IOSLibraryToolbarModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 12) {
-                        if hasConnectionError {
-                            Button {
-                                showOfflineSheet = true
-                            } label: {
-                                Image(systemName: connectionErrorIcon)
-                                    .foregroundStyle(.red)
+                if hasConnectionError || includeDownloadsAndSettingsShortcuts {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        HStack(spacing: 12) {
+                            if hasConnectionError {
+                                Button {
+                                    showOfflineSheet = true
+                                } label: {
+                                    Image(systemName: connectionErrorIcon)
+                                        .foregroundStyle(.red)
+                                }
                             }
-                        }
-                        DownloadsToolbarButton()
-                        Button {
-                            showSettings = true
-                        } label: {
-                            Label("Settings", systemImage: "gearshape")
+                            if includeDownloadsAndSettingsShortcuts {
+                                DownloadsToolbarButton()
+                                Button {
+                                    showSettings = true
+                                } label: {
+                                    Label("Settings", systemImage: "gearshape")
+                                }
+                            }
                         }
                     }
                 }
@@ -1473,13 +1479,16 @@ struct IOSLibraryToolbarModifier: ViewModifier {
 }
 
 extension View {
-    func iOSLibraryToolbar(showSettings: Binding<Bool>, showOfflineSheet: Binding<Bool>)
-        -> some View
-    {
+    func iOSLibraryToolbar(
+        showSettings: Binding<Bool>,
+        showOfflineSheet: Binding<Bool>,
+        includeDownloadsAndSettingsShortcuts: Bool = true,
+    ) -> some View {
         modifier(
             IOSLibraryToolbarModifier(
                 showSettings: showSettings,
                 showOfflineSheet: showOfflineSheet,
+                includeDownloadsAndSettingsShortcuts: includeDownloadsAndSettingsShortcuts,
             )
         )
     }

@@ -14,7 +14,7 @@ struct NASDownloadsSettingsSection: View {
             Text("NAS Downloads")
         } footer: {
             Text(
-                "Configure torrent clients, Synology upload, and destination folders. Active jobs live in Downloads."
+                "Configure torrent clients, Synology upload, and destination folders. Active jobs live in Downloads (More → Downloads)."
             )
         }
     }
@@ -199,7 +199,7 @@ struct NASDownloadsSettingsView: View {
                 Text("Synology File Station")
             } footer: {
                 Text(
-                    "Direct files upload through the DSM File Station API. Volume paths such as /volume1/media/… are converted to share paths automatically."
+                    "Used for direct file downloads after they finish downloading to this device. Uploads go through the DSM File Station API. Volume paths such as /volume1/media/… are converted to share paths automatically."
                 )
             }
 

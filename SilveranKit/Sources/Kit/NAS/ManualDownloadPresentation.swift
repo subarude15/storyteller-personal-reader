@@ -122,6 +122,9 @@ public enum TorrentHash {
 public enum DownloadsNavigation {
     public static let settingsDestination = "NAS Downloads"
     public static let downloadsDestination = "Downloads"
+    public static let moreDestination = "More"
     public static let settingsContainsOperationalList = false
     public static let settingsKeepsNASConfiguration = true
+    public static let primaryTabBarIncludesStats = false
+    public static let statsLivesUnderMore = true
 }
