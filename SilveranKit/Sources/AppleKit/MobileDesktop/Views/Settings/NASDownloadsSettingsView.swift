@@ -10,16 +10,11 @@ struct NASDownloadsSettingsSection: View {
             } label: {
                 Label("NAS Downloads", systemImage: "externaldrive.badge.icloud")
             }
-            NavigationLink {
-                ManualDownloadsView()
-            } label: {
-                Label("Manual Downloads", systemImage: "arrow.down.circle")
-            }
         } header: {
             Text("NAS Downloads")
         } footer: {
             Text(
-                "Torrents go to qBittorrent or Deluge. Direct files download on this device, then upload through Synology File Station. Passwords stay on this device."
+                "Configure torrent clients, Synology upload, and destination folders. Active jobs live in Downloads."
             )
         }
     }
@@ -425,106 +420,4 @@ struct NASDownloadsSettingsView: View {
     }
 }
 
-struct ManualDownloadsView: View {
-    @State private var jobs: [ManualDownloadJob] = []
-    @State private var busyID: String?
-
-    var body: some View {
-        List {
-            if jobs.isEmpty {
-                Section {
-                    Text("No manual downloads yet")
-                        .foregroundStyle(.secondary)
-                    Text("When you send a Manual Search result to the NAS, it appears here.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                ForEach(jobs) { job in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(job.title.isEmpty ? "Untitled" : job.title)
-                            .font(.headline)
-                        if !job.author.isEmpty {
-                            Text(job.author)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        LabeledContent("Type", value: job.mediaType.label)
-                        LabeledContent("Via", value: job.backend.label)
-                        LabeledContent("Status", value: job.status.label)
-                        LabeledContent("Destination", value: job.destination)
-                        LabeledContent(
-                            "Submitted",
-                            value: job.submittedAt.formatted(date: .abbreviated, time: .shortened),
-                        )
-                        if let error = job.lastError, !error.isEmpty {
-                            Text(error)
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
-                        if job.backend == .synology {
-                            retryRow(job)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-            }
-        }
-        .navigationTitle("Manual Downloads")
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .task { await reload() }
-        .onReceive(NotificationCenter.default.publisher(for: .inkampManualDownloadJobsDidChange)) { _ in
-            Task { await reload() }
-        }
-    }
-
-    @ViewBuilder
-    private func retryRow(_ job: ManualDownloadJob) -> some View {
-        HStack {
-            if job.hasStagedFile {
-                Button("Retry Upload") {
-                    Task { await retryUpload(job) }
-                }
-                .disabled(busyID != nil)
-                Button("Delete Local Copy", role: .destructive) {
-                    Task { await deleteLocal(job) }
-                }
-                .disabled(busyID != nil)
-            } else if job.status == .failed, job.sourceURL != nil {
-                Button("Retry Download") {
-                    Task { await retryDownload(job) }
-                }
-                .disabled(busyID != nil)
-            }
-        }
-        .font(.subheadline)
-    }
-
-    private func reload() async {
-        jobs = await ManualDownloadJobStore.shared.allJobs()
-    }
-
-    private func retryUpload(_ job: ManualDownloadJob) async {
-        busyID = job.id
-        defer { busyID = nil }
-        _ = await NASAcquisitionHandler.live().retryUpload(job: job)
-        await reload()
-    }
-
-    private func retryDownload(_ job: ManualDownloadJob) async {
-        busyID = job.id
-        defer { busyID = nil }
-        _ = await NASAcquisitionHandler.live().retryDownload(job: job)
-        await reload()
-    }
-
-    private func deleteLocal(_ job: ManualDownloadJob) async {
-        busyID = job.id
-        defer { busyID = nil }
-        await NASAcquisitionHandler.live().deleteLocalCopy(job: job)
-        await reload()
-    }
-}
 #endif

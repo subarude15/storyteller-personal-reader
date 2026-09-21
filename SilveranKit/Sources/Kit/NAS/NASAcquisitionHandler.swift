@@ -107,18 +107,7 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
     }
 
     public func handle(_ candidate: ManualAcquisitionCandidate) async -> ManualAcquisitionHandoffResult {
-        let prepared = await prepare(candidate)
-        switch prepared {
-            case .failure(let error):
-                return .failed(message: error.message)
-            case .success(let plan):
-                switch plan.backend {
-                    case .qbittorrent, .deluge:
-                        return await submitTorrent(candidate, plan: plan)
-                    case .synology:
-                        return await downloadAndUpload(candidate, plan: plan)
-                }
-        }
+        await acquire(candidate, replacing: nil)
     }
 
     public func retryUpload(job: ManualDownloadJob) async -> ManualAcquisitionHandoffResult {
@@ -134,12 +123,15 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
     }
 
     public func retryDownload(job: ManualDownloadJob) async -> ManualAcquisitionHandoffResult {
+        if let current = await jobs.job(id: job.id), current.status != .failed {
+            return outcome(for: current)
+        }
         guard let source = job.sourceURL, let url = URL(string: source) else {
             return .failed(message: NASHandoffError.downloadFailed.message)
         }
         let candidate = ManualAcquisitionCandidate(
             sourceURL: url,
-            detectedType: job.mediaType == .audiobook ? .m4b : .epub,
+            detectedType: TorrentHash.retryDetectedType(sourceURL: source, mediaType: job.mediaType),
             filename: job.filename,
             sourceHost: job.sourceHost,
             bookMetadata: ManualSearchBookContext(
@@ -148,7 +140,7 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
                 requestedMediaType: job.mediaType == .audiobook ? .audiobook : .ebook,
             ),
         )
-        return await handle(candidate)
+        return await acquire(candidate, replacing: job)
     }
 
     public func deleteLocalCopy(job: ManualDownloadJob) async {
@@ -195,9 +187,39 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
         }
     }
 
+    private func acquire(
+        _ candidate: ManualAcquisitionCandidate,
+        replacing: ManualDownloadJob?,
+    ) async -> ManualAcquisitionHandoffResult {
+        let prepared = await prepare(candidate)
+        switch prepared {
+            case .failure(let error):
+                return .failed(message: error.message)
+            case .success(let plan):
+                switch plan.backend {
+                    case .qbittorrent, .deluge:
+                        return await submitTorrent(candidate, plan: plan, replacing: replacing)
+                    case .synology:
+                        return await downloadAndUpload(candidate, plan: plan, replacing: replacing)
+                }
+        }
+    }
+
+    private func outcome(for job: ManualDownloadJob) -> ManualAcquisitionHandoffResult {
+        switch job.status {
+            case .complete:
+                return .completed(message: NASHandoffMessages.uploaded())
+            case .failed:
+                return .failed(message: job.lastError ?? NASHandoffError.downloadFailed.message)
+            case .submitted, .queued, .downloading, .downloaded, .uploading, .unknown:
+                return .submitted(message: NASHandoffMessages.submitted(backend: job.backend))
+        }
+    }
+
     private func submitTorrent(
         _ candidate: ManualAcquisitionCandidate,
         plan: Plan,
+        replacing: ManualDownloadJob?,
     ) async -> ManualAcquisitionHandoffResult {
         do {
             let jobID = try await submitToTorrentClient(candidate, plan: plan)
@@ -207,25 +229,32 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
                     plan: plan,
                     status: .submitted,
                     backendJobID: jobID,
+                    replacing: replacing,
                 )
             )
             return .submitted(message: NASHandoffMessages.submitted(backend: plan.backend))
         } catch let error as QBittorrentClientError {
-            return await recordFailure(candidate, plan: plan, error: error.handoff)
+            return await recordFailure(candidate, plan: plan, error: error.handoff, replacing: replacing)
         } catch let error as DelugeClientError {
-            return await recordFailure(candidate, plan: plan, error: error.handoff)
+            return await recordFailure(candidate, plan: plan, error: error.handoff, replacing: replacing)
         } catch let error as NASHandoffError {
-            return await recordFailure(candidate, plan: plan, error: error)
+            return await recordFailure(candidate, plan: plan, error: error, replacing: replacing)
         } catch {
-            return await recordFailure(candidate, plan: plan, error: .rejected(plan.backend))
+            return await recordFailure(
+                candidate,
+                plan: plan,
+                error: .rejected(plan.backend),
+                replacing: replacing,
+            )
         }
     }
 
     private func downloadAndUpload(
         _ candidate: ManualAcquisitionCandidate,
         plan: Plan,
+        replacing: ManualDownloadJob?,
     ) async -> ManualAcquisitionHandoffResult {
-        var job = makeJob(candidate, plan: plan, status: .downloading)
+        var job = makeJob(candidate, plan: plan, status: .downloading, replacing: replacing)
         await jobs.record(job)
         let staged: ManualStagedFile
         do {
@@ -297,8 +326,17 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
         _ candidate: ManualAcquisitionCandidate,
         plan: Plan,
         error: NASHandoffError,
+        replacing: ManualDownloadJob?,
     ) async -> ManualAcquisitionHandoffResult {
-        await jobs.record(makeJob(candidate, plan: plan, status: .failed, lastError: error.message))
+        await jobs.record(
+            makeJob(
+                candidate,
+                plan: plan,
+                status: .failed,
+                lastError: error.message,
+                replacing: replacing,
+            )
+        )
         return .failed(message: error.message)
     }
 
@@ -308,8 +346,10 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
         status: ManualDownloadJobStatus,
         backendJobID: String? = nil,
         lastError: String? = nil,
+        replacing: ManualDownloadJob? = nil,
     ) -> ManualDownloadJob {
         ManualDownloadJob(
+            id: replacing?.id ?? UUID().uuidString,
             title: candidate.bookMetadata.title,
             author: candidate.bookMetadata.authorDisplay,
             sourceURL: candidate.sourceURL.absoluteString,
@@ -318,9 +358,12 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
             backend: plan.backend,
             mediaType: plan.media,
             destination: plan.destination,
-            backendJobID: backendJobID,
+            submittedAt: replacing?.submittedAt ?? Date(),
+            backendJobID: TorrentHash.normalized(backendJobID)
+                ?? TorrentHash.fromMagnet(candidate.sourceURL.absoluteString),
             status: status,
             lastError: lastError,
+            lastStatusAt: Date(),
         )
     }
 
@@ -335,14 +378,16 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
             case .qbittorrent:
                 switch candidate.transportKind {
                     case .magnet:
-                        return try await qbittorrent.addMagnet(
+                        let added = try await qbittorrent.addMagnet(
                             baseURL: settings.trimmedQBittorrentBaseURL,
                             username: settings.qbittorrentUsername,
                             password: credentials.qbittorrentPassword,
                             uri: candidate.sourceURL.absoluteString,
                             savePath: plan.destination,
                             start: start,
-                        ).jobID
+                        )
+                        return TorrentHash.normalized(added.jobID)
+                            ?? TorrentHash.fromMagnet(candidate.sourceURL.absoluteString)
                     case .torrent:
                         return try await qbittorrent.addTorrentURL(
                             baseURL: settings.trimmedQBittorrentBaseURL,

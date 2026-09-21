@@ -9,6 +9,13 @@
 
 import Foundation
 
+public enum ManualDownloadRetryAction: String, Sendable, Equatable {
+    case none
+    case retryUpload
+    case retryDownload
+    case retryTorrent
+}
+
 public enum ManualDownloadJobStatus: String, Codable, Sendable, CaseIterable {
     case submitted
     case queued
@@ -38,6 +45,13 @@ public enum ManualDownloadJobStatus: String, Codable, Sendable, CaseIterable {
             case .submitted, .queued, .downloading, .uploading, .complete, .unknown: false
         }
     }
+
+    public var isActive: Bool {
+        switch self {
+            case .queued, .submitted, .downloading, .downloaded, .uploading, .unknown: true
+            case .complete, .failed: false
+        }
+    }
 }
 
 public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
@@ -56,6 +70,10 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
     public var backendJobID: String?
     public var status: ManualDownloadJobStatus
     public var lastError: String?
+    public var progress: Double?
+    public var downloadRate: Int?
+    public var totalSize: Int64?
+    public var lastStatusAt: Date?
 
     public init(
         id: String = UUID().uuidString,
@@ -73,6 +91,10 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
         backendJobID: String? = nil,
         status: ManualDownloadJobStatus,
         lastError: String? = nil,
+        progress: Double? = nil,
+        downloadRate: Int? = nil,
+        totalSize: Int64? = nil,
+        lastStatusAt: Date? = nil,
     ) {
         self.id = id
         self.title = title
@@ -89,6 +111,31 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
         self.backendJobID = backendJobID
         self.status = status
         self.lastError = lastError
+        self.progress = progress
+        self.downloadRate = downloadRate
+        self.totalSize = totalSize
+        self.lastStatusAt = lastStatusAt
+    }
+
+    public var canRetryUploadNow: Bool {
+        backend == .synology && hasStagedFile && status.canRetryUpload
+    }
+
+    public var canRetryDownloadNow: Bool {
+        backend == .synology && status == .failed && sourceURL != nil && !hasStagedFile
+    }
+
+    public var canRetryTorrentNow: Bool {
+        (backend == .qbittorrent || backend == .deluge)
+            && status == .failed
+            && sourceURL != nil
+    }
+
+    public var retryAction: ManualDownloadRetryAction {
+        if canRetryUploadNow { return .retryUpload }
+        if canRetryTorrentNow { return .retryTorrent }
+        if canRetryDownloadNow { return .retryDownload }
+        return .none
     }
 
     public var stagedFileURL: URL? {
@@ -106,6 +153,7 @@ public protocol ManualDownloadJobStoring: Sendable {
     func record(_ job: ManualDownloadJob) async
     func allJobs() async -> [ManualDownloadJob]
     func job(id: String) async -> ManualDownloadJob?
+    func clearCompleted() async
 }
 
 public actor ManualDownloadJobStore: ManualDownloadJobStoring {
@@ -148,6 +196,14 @@ public actor ManualDownloadJobStore: ManualDownloadJobStoring {
         jobs.first { $0.id == id }
     }
 
+    public func clearCompleted() {
+        jobs.removeAll { $0.status == .complete }
+        save()
+        Task { @MainActor in
+            NotificationCenter.default.post(name: .inkampManualDownloadJobsDidChange, object: nil)
+        }
+    }
+
     private func save() {
         let directory = fileURL.deletingLastPathComponent()
         if !FileManager.default.fileExists(atPath: directory.path) {
@@ -172,6 +228,9 @@ extension Notification.Name {
     public static let inkampManualDownloadJobsDidChange = Notification.Name(
         "inkampManualDownloadJobsDidChange"
     )
+    public static let inkampShowManualDownloads = Notification.Name(
+        "inkampShowManualDownloads"
+    )
 }
 
 public final class RecordingManualDownloadJobStore: ManualDownloadJobStoring, @unchecked Sendable {
@@ -193,5 +252,9 @@ public final class RecordingManualDownloadJobStore: ManualDownloadJobStoring, @u
 
     public func job(id: String) async -> ManualDownloadJob? {
         jobs.first { $0.id == id }
+    }
+
+    public func clearCompleted() async {
+        jobs.removeAll { $0.status == .complete }
     }
 }

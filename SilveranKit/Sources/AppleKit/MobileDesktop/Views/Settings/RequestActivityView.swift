@@ -433,9 +433,9 @@ public struct RequestActivityView: View {
         List {
             Section {
                 NavigationLink {
-                    ManualDownloadsView()
+                    DownloadsView()
                 } label: {
-                    Label("Manual Downloads", systemImage: "arrow.down.circle")
+                    Label("Downloads", systemImage: "arrow.down.circle")
                 }
             }
 
