@@ -72,6 +72,11 @@ public enum PodcastVideoPresentationEvent: Equatable, Sendable {
 ///
 /// Invariant: entering/exiting fullscreen must never replace the shared
 /// `AudioSessionActor` / `AVPlayer` session — views only re-host the surface.
+///
+/// Landscape eligibility changes must trigger a UIKit supported-orientation
+/// refresh (`setNeedsUpdateOfSupportedInterfaceOrientations`) so the app
+/// delegate mask is re-queried. Physical rotation is not forced with
+/// `requestGeometryUpdate(.landscape…)`.
 public enum PodcastVideoPresentationLogic {
     public static func shouldEnterFullscreen(
         mediaIsInternalVideo: Bool,
@@ -145,5 +150,25 @@ public enum PodcastVideoPresentationLogic {
             case .mediaBecameNonVideo, .playerCollapsed:
                 return .portrait
         }
+    }
+
+    /// iPhone landscape is allowed only while the expanded internal video player
+    /// is up. iPad stays freely rotatable, so eligibility never flips there.
+    public static func allowsLandscapeOrientation(
+        isPhone: Bool,
+        isPlayerExpanded: Bool,
+        isInternalVideo: Bool
+    ) -> Bool {
+        guard isPhone else { return true }
+        return isPlayerExpanded && isInternalVideo
+    }
+
+    /// True only when the delegate mask would change. Callers must refresh
+    /// supported orientations on that edge and must not refresh when it is false.
+    public static func shouldRefreshSupportedOrientations(
+        previousAllowsLandscape: Bool,
+        nextAllowsLandscape: Bool
+    ) -> Bool {
+        previousAllowsLandscape != nextAllowsLandscape
     }
 }

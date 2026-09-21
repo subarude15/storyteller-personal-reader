@@ -198,4 +198,68 @@ struct PodcastVideoPresentationLogicTests {
         )
         #expect(next.mode == .portrait)
     }
+
+    @Test func landscapeEligibilityRefreshEdges() {
+        // Landscape eligibility changes must trigger a supported-orientation refresh.
+        let portrait = PodcastVideoPresentationLogic.allowsLandscapeOrientation(
+            isPhone: true,
+            isPlayerExpanded: false,
+            isInternalVideo: false
+        )
+        let expandedVideo = PodcastVideoPresentationLogic.allowsLandscapeOrientation(
+            isPhone: true,
+            isPlayerExpanded: true,
+            isInternalVideo: true
+        )
+        let expandedAudio = PodcastVideoPresentationLogic.allowsLandscapeOrientation(
+            isPhone: true,
+            isPlayerExpanded: true,
+            isInternalVideo: false
+        )
+        let iPad = PodcastVideoPresentationLogic.allowsLandscapeOrientation(
+            isPhone: false,
+            isPlayerExpanded: false,
+            isInternalVideo: false
+        )
+
+        #expect(portrait == false)
+        #expect(expandedVideo == true)
+        #expect(expandedAudio == false)
+        #expect(iPad == true)
+
+        #expect(
+            PodcastVideoPresentationLogic.shouldRefreshSupportedOrientations(
+                previousAllowsLandscape: portrait,
+                nextAllowsLandscape: expandedVideo
+            )
+        )
+        #expect(
+            PodcastVideoPresentationLogic.shouldRefreshSupportedOrientations(
+                previousAllowsLandscape: expandedVideo,
+                nextAllowsLandscape: expandedAudio
+            )
+        )
+        #expect(
+            PodcastVideoPresentationLogic.shouldRefreshSupportedOrientations(
+                previousAllowsLandscape: expandedVideo,
+                nextAllowsLandscape: portrait
+            )
+        )
+        #expect(
+            !PodcastVideoPresentationLogic.shouldRefreshSupportedOrientations(
+                previousAllowsLandscape: expandedAudio,
+                nextAllowsLandscape: portrait
+            )
+        )
+        #expect(
+            !PodcastVideoPresentationLogic.shouldRefreshSupportedOrientations(
+                previousAllowsLandscape: iPad,
+                nextAllowsLandscape: PodcastVideoPresentationLogic.allowsLandscapeOrientation(
+                    isPhone: false,
+                    isPlayerExpanded: true,
+                    isInternalVideo: true
+                )
+            )
+        )
+    }
 }
