@@ -64,6 +64,18 @@ public enum ManualAcquisitionDetection {
         return scheme == "http" || scheme == "https"
     }
 
+    /// Navigation-action stage: only schemes that never have HTTP metadata.
+    public static func actionStageCandidate(
+        url: URL,
+        bookMetadata: ManualSearchBookContext,
+        providerID: String? = nil,
+    ) -> ManualAcquisitionCandidate? {
+        if url.scheme?.lowercased() == "magnet" {
+            return candidate(url: url, bookMetadata: bookMetadata, providerID: providerID)
+        }
+        return nil
+    }
+
     public static func candidate(
         url: URL,
         mimeType: String? = nil,
@@ -97,6 +109,16 @@ public enum ManualAcquisitionDetection {
 
         if isHTML(mimeType) { return nil }
 
+        // HTTP/HTTPS: path extension is not enough. Wait for MIME,
+        // Content-Disposition, or a WebKit suggested filename.
+        guard hasHTTPClassificationMetadata(
+            mimeType: mimeType,
+            contentDisposition: contentDisposition,
+            suggestedFilename: suggestedFilename,
+        ) else {
+            return nil
+        }
+
         let detected =
             typeFromFilename(filename)
             ?? typeFromPath(url)
@@ -113,6 +135,23 @@ public enum ManualAcquisitionDetection {
             bookMetadata: bookMetadata,
             providerID: providerID,
         )
+    }
+
+    public static func hasHTTPClassificationMetadata(
+        mimeType: String?,
+        contentDisposition: String?,
+        suggestedFilename: String?,
+    ) -> Bool {
+        if let mimeType, !mimeType.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        if let contentDisposition, !contentDisposition.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        if let suggestedFilename, !suggestedFilename.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        return false
     }
 
     public static func candidate(

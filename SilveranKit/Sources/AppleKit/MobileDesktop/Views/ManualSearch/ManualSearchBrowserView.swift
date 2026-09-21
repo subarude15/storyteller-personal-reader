@@ -385,27 +385,16 @@ final class ManualSearchBrowserCoordinator: NSObject, WKNavigationDelegate, WKUI
     private func policy(for navigationAction: WKNavigationAction) -> WKNavigationActionPolicy {
         guard let url = navigationAction.request.url else { return .cancel }
 
-        if url.scheme?.lowercased() == "magnet" {
-            if let candidate = ManualAcquisitionDetection.candidate(
-                url: url,
-                bookMetadata: controller.book,
-                providerID: controller.providerID,
-            ) {
-                controller.handleCandidate(candidate)
-            }
-            return .cancel
-        }
-
-        if ManualAcquisitionDetection.isIgnoredScheme(url) {
-            return .cancel
-        }
-
-        if let candidate = ManualAcquisitionDetection.candidate(
+        if let candidate = ManualAcquisitionDetection.actionStageCandidate(
             url: url,
             bookMetadata: controller.book,
             providerID: controller.providerID,
         ) {
             controller.handleCandidate(candidate)
+            return .cancel
+        }
+
+        if ManualAcquisitionDetection.isIgnoredScheme(url) {
             return .cancel
         }
 

@@ -216,6 +216,7 @@ public enum SettingsSyncMerge {
 
     public static func merge(local: SyncedAppSettings, remote: SyncedAppSettings) -> SyncedAppSettings {
         SyncedAppSettings(
+            schemaVersion: resolvedSchemaVersion(local: local, remote: remote),
             integrations: SyncedAppSettings.Integrations(
                 lazyLibrarian: SyncedAppSettings.LazyLibrarian(
                     enabled: latest(
@@ -285,7 +286,30 @@ public enum SettingsSyncMerge {
                 modifiedAt: stamped,
             )
         }
+        return promoteSchemaIfNeeded(updated)
+    }
+
+    /// Schema-2 fields (Manual Search) must not be written under schema 1.
+    /// Never lowers an already-newer version.
+    public static func promoteSchemaIfNeeded(_ document: SyncedAppSettings) -> SyncedAppSettings {
+        guard hasSchema2Fields(document) else { return document }
+        guard document.schemaVersion < SyncedAppSettings.schemaVersion else { return document }
+        var updated = document
+        updated.schemaVersion = SyncedAppSettings.schemaVersion
         return updated
+    }
+
+    public static func resolvedSchemaVersion(local: SyncedAppSettings, remote: SyncedAppSettings) -> Int {
+        let highest = max(local.schemaVersion, remote.schemaVersion)
+        if hasSchema2Fields(local) || hasSchema2Fields(remote) {
+            return max(highest, SyncedAppSettings.schemaVersion)
+        }
+        return highest
+    }
+
+    public static func hasSchema2Fields(_ document: SyncedAppSettings) -> Bool {
+        document.integrations.manualSearch.providers != nil
+            || document.integrations.manualSearch.openInAppBrowser != nil
     }
 
     private static func canonical<Value: Encodable>(_ value: Value) -> String {
