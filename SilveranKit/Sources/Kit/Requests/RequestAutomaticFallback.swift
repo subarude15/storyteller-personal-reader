@@ -36,6 +36,13 @@ public enum AutomaticFallbackPolicy {
         let formats = retryable.filter { format in
             guard let status = item.status(for: format) else { return false }
             if status.status == .availableInLibrary { return false }
+            if RequestDownloadObservability.suppressesAutomaticFallback(
+                item: item,
+                format: format,
+                now: now,
+            ) {
+                return false
+            }
             if hasAttempted(item: item, format: format, target: target) { return false }
             if !delayElapsed(status: status, delay: settings.delay, now: now) { return false }
             return true

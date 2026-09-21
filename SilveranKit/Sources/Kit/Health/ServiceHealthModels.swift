@@ -59,6 +59,7 @@ public enum ServiceHealthID: String, Codable, Equatable, Sendable, CaseIterable 
     case storyteller
     case prowlarr
     case jackett
+    case deluge
     case bookSearchLAN
 
     public var displayName: String {
@@ -69,6 +70,7 @@ public enum ServiceHealthID: String, Codable, Equatable, Sendable, CaseIterable 
             case .storyteller: "Storyteller"
             case .prowlarr: "Prowlarr"
             case .jackett: "Jackett"
+            case .deluge: "Deluge"
             case .bookSearchLAN: "Book Search (LAN-only)"
         }
     }

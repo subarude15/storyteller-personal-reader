@@ -20,6 +20,9 @@ public struct ServiceHealthSettingsSnapshot: Sendable {
     public var jackettEnabled: Bool
     public var jackettBaseURL: String
     public var jackettAPIKey: String
+    public var delugeEnabled: Bool
+    public var delugeBaseURL: String
+    public var delugePassword: String
 
     public init(
         lazyLibrarianEnabled: Bool = false,
@@ -35,6 +38,9 @@ public struct ServiceHealthSettingsSnapshot: Sendable {
         jackettEnabled: Bool = false,
         jackettBaseURL: String = "",
         jackettAPIKey: String = "",
+        delugeEnabled: Bool = false,
+        delugeBaseURL: String = "",
+        delugePassword: String = "",
     ) {
         self.lazyLibrarianEnabled = lazyLibrarianEnabled
         self.lazyLibrarianBaseURL = lazyLibrarianBaseURL
@@ -49,6 +55,9 @@ public struct ServiceHealthSettingsSnapshot: Sendable {
         self.jackettEnabled = jackettEnabled
         self.jackettBaseURL = jackettBaseURL
         self.jackettAPIKey = jackettAPIKey
+        self.delugeEnabled = delugeEnabled
+        self.delugeBaseURL = delugeBaseURL
+        self.delugePassword = delugePassword
     }
 }
 
@@ -84,6 +93,7 @@ public struct ServiceHealthDiagnostics: Sendable {
         storytellerProbe: any StorytellerHealthProbing = LiveStorytellerHealthProbe(),
         prowlarrTransport: any DiagnosticHTTPTransport = LiveDiagnosticHTTPTransport(),
         jackettTransport: any DiagnosticHTTPTransport = LiveDiagnosticHTTPTransport(),
+        delugeTransport: any DelugeTransport = LiveDelugeTransport(),
     ) -> [any ServiceHealthChecking] {
         [
             LazyLibrarianHealthChecker(transport: lazyLibrarianTransport),
@@ -92,6 +102,7 @@ public struct ServiceHealthDiagnostics: Sendable {
             StorytellerHealthChecker(probe: storytellerProbe),
             ProwlarrHealthChecker(transport: prowlarrTransport),
             JackettHealthChecker(transport: jackettTransport),
+            DelugeHealthChecker(transport: delugeTransport),
             BookSearchLANHealthChecker(transport: bookSearchTransport),
         ]
     }
@@ -101,6 +112,7 @@ public struct ServiceHealthDiagnostics: Sendable {
         let apiKey = (try? await AuthenticationActor.shared.loadLazyLibrarianAPIKey()) ?? ""
         let prowlarrKey = (try? await AuthenticationActor.shared.loadProwlarrAPIKey()) ?? ""
         let jackettKey = (try? await AuthenticationActor.shared.loadJackettAPIKey()) ?? ""
+        let delugePassword = (try? await AuthenticationActor.shared.loadDelugePassword()) ?? ""
         return ServiceHealthSettingsSnapshot(
             lazyLibrarianEnabled: config.lazyLibrarianEnabled,
             lazyLibrarianBaseURL: config.lazyLibrarianBaseURL,
@@ -115,6 +127,9 @@ public struct ServiceHealthDiagnostics: Sendable {
             jackettEnabled: config.jackettEnabled,
             jackettBaseURL: config.jackettBaseURL,
             jackettAPIKey: jackettKey,
+            delugeEnabled: config.delugeEnabled,
+            delugeBaseURL: config.delugeBaseURL,
+            delugePassword: delugePassword,
         )
     }
 

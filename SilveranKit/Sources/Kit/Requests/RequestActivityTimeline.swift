@@ -10,6 +10,8 @@ public struct RequestActivityEvent: Codable, Equatable, Sendable, Identifiable {
     public var title: String?
     public var detail: String?
     public var relatedRequestID: String?
+    /// Presentation source when not a request provider (e.g. "Deluge"). Absent on legacy events.
+    public var sourceLabel: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -20,6 +22,7 @@ public struct RequestActivityEvent: Codable, Equatable, Sendable, Identifiable {
         title: String? = nil,
         detail: String? = nil,
         relatedRequestID: String? = nil,
+        sourceLabel: String? = nil,
     ) {
         self.id = id
         self.date = date
@@ -29,6 +32,7 @@ public struct RequestActivityEvent: Codable, Equatable, Sendable, Identifiable {
         self.title = title
         self.detail = detail
         self.relatedRequestID = relatedRequestID
+        self.sourceLabel = sourceLabel
     }
 }
 
@@ -46,6 +50,11 @@ public enum RequestActivityEventKind: String, Codable, Equatable, Sendable {
     case automaticFallback
     case alreadyRequested
     case alreadyAvailable
+    case downloadQueued
+    case downloadStarted
+    case downloadCompleted
+    case downloadError
+    case waitingForImport
 }
 
 /// Records and presents Request Activity history. Pure helpers — no network.
@@ -178,6 +187,16 @@ public enum RequestActivityTimeline {
                 return "Already requested"
             case .alreadyAvailable:
                 return "Already available"
+            case .downloadQueued:
+                return "Download queued"
+            case .downloadStarted:
+                return "Download started"
+            case .downloadCompleted:
+                return "Download completed"
+            case .downloadError:
+                return "Download needs attention"
+            case .waitingForImport:
+                return "Waiting for Storyteller import"
         }
     }
 
@@ -195,7 +214,7 @@ public enum RequestActivityTimeline {
                 return "checkmark.circle"
             case .availableInLibrary:
                 return "books.vertical"
-            case .needsAttention, .failed:
+            case .needsAttention, .failed, .downloadError:
                 return "exclamationmark.triangle"
             case .retryStarted:
                 return "arrow.triangle.2.circlepath"
@@ -205,10 +224,23 @@ public enum RequestActivityTimeline {
                 return "arrow.triangle.branch"
             case .alreadyRequested:
                 return "arrow.triangle.2.circlepath"
+            case .downloadQueued:
+                return "clock"
+            case .downloadStarted:
+                return "arrow.down.circle"
+            case .downloadCompleted:
+                return "checkmark.circle"
+            case .waitingForImport:
+                return "hourglass"
         }
     }
 
     public static func providerLabel(for event: RequestActivityEvent) -> String? {
+        if let sourceLabel = event.sourceLabel?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !sourceLabel.isEmpty
+        {
+            return sourceLabel
+        }
         if event.kind == .availableInLibrary {
             return "Storyteller"
         }

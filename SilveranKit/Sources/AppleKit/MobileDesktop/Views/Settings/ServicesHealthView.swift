@@ -196,7 +196,7 @@ public struct ServicesHealthView: View {
         switch result.serviceID {
             case .prowlarr, .jackett:
                 result.status == .warning || result.status == .unavailable
-            case .lazyLibrarian, .shelfarr, .librivox, .storyteller, .bookSearchLAN:
+            case .lazyLibrarian, .shelfarr, .librivox, .storyteller, .bookSearchLAN, .deluge:
                 false
         }
     }

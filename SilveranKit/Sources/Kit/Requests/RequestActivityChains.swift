@@ -22,6 +22,7 @@ public struct RequestActivityChainFormatState: Equatable, Sendable {
     public var sourceRequestID: String
     public var providerLabel: String
     public var detail: String?
+    public var download: RequestFormatDownloadState?
 
     public init(
         format: BookRequestFormat,
@@ -29,12 +30,36 @@ public struct RequestActivityChainFormatState: Equatable, Sendable {
         sourceRequestID: String,
         providerLabel: String,
         detail: String? = nil,
+        download: RequestFormatDownloadState? = nil,
     ) {
         self.format = format
         self.status = status
         self.sourceRequestID = sourceRequestID
         self.providerLabel = providerLabel
         self.detail = detail
+        self.download = download
+    }
+
+    /// Human label preferring active downloader state over provider status.
+    public var displayStatusLabel: String {
+        if status == .availableInLibrary { return status.label }
+        if let download {
+            switch download.status {
+                case .downloading, .queued, .stalled, .checking, .waitingForImport, .error:
+                    return download.status.label
+                case .completed, .unknown, .notFound:
+                    break
+            }
+        }
+        return status.label
+    }
+
+    public var displayProviderLabel: String {
+        if status == .availableInLibrary { return "Storyteller" }
+        if let download, download.status.isActivelyDownloading || download.status == .error {
+            return "Deluge"
+        }
+        return providerLabel
     }
 }
 
@@ -50,6 +75,8 @@ public struct RequestActivityChain: Equatable, Sendable, Identifiable {
     public var requestedFormats: [BookRequestFormat]
     public var formatStates: [RequestActivityChainFormatState]
     public var currentStatus: RequestActivityStatus
+    /// Prefer downloader wording when an active Deluge state owns the chain.
+    public var currentStatusLabel: String
     public var effectiveProviderLabel: String?
     public var createdAt: Date
     public var updatedAt: Date
@@ -68,6 +95,7 @@ public struct RequestActivityChain: Equatable, Sendable, Identifiable {
         requestedFormats: [BookRequestFormat],
         formatStates: [RequestActivityChainFormatState],
         currentStatus: RequestActivityStatus,
+        currentStatusLabel: String,
         effectiveProviderLabel: String?,
         createdAt: Date,
         updatedAt: Date,
@@ -85,6 +113,7 @@ public struct RequestActivityChain: Equatable, Sendable, Identifiable {
         self.requestedFormats = requestedFormats
         self.formatStates = formatStates
         self.currentStatus = currentStatus
+        self.currentStatusLabel = currentStatusLabel
         self.effectiveProviderLabel = effectiveProviderLabel
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -103,7 +132,14 @@ public struct RequestActivityChain: Equatable, Sendable, Identifiable {
     }
 
     public var needsAttention: Bool {
-        currentStatus.needsAttentionBucket
+        if formatStates.contains(where: {
+            $0.download?.status == .error
+                || ($0.download?.status == .waitingForImport
+                    && $0.status.needsAttentionBucket)
+        }) {
+            return true
+        }
+        return currentStatus.needsAttentionBucket
     }
 
     public var availableInLibrary: Bool {
@@ -124,11 +160,11 @@ public struct RequestActivityChain: Equatable, Sendable, Identifiable {
         let incomplete = formatStates.filter { !$0.status.isCompleted }
         let focus = incomplete.first ?? formatStates.first
         if let focus {
-            if incomplete.count <= 1, requestedFormats.count <= 1 {
-                return "\(focus.format.label) · \(focus.providerLabel)"
+            if incomplete.count <= 1 || requestedFormats.count <= 1 {
+                return "\(focus.format.label) · \(focus.displayProviderLabel)"
             }
             if incomplete.count == 1 {
-                return "\(focus.format.label) · \(focus.providerLabel)"
+                return "\(focus.format.label) · \(focus.displayProviderLabel)"
             }
             if let provider = effectiveProviderLabel {
                 return "\(formatsLabel) · \(provider)"
@@ -143,10 +179,10 @@ public struct RequestActivityChain: Equatable, Sendable, Identifiable {
 
     public var libraryDetailStatusLine: String {
         let parts = formatStates.map { state in
-            "\(state.format.label) · \(Self.displayLabel(for: state.status))"
+            "\(state.format.label) · \(state.displayStatusLabel)"
         }
         if parts.isEmpty {
-            return "\(formatsLabel) · \(Self.displayLabel(for: currentStatus))"
+            return "\(formatsLabel) · \(currentStatusLabel)"
         }
         if parts.count == 1 { return parts[0] }
         if formatStates.allSatisfy({ $0.status == .availableInLibrary }) {
@@ -157,25 +193,6 @@ public struct RequestActivityChain: Equatable, Sendable, Identifiable {
 
     public func formatState(for format: BookRequestFormat) -> RequestActivityChainFormatState? {
         formatStates.first { $0.format == format }
-    }
-
-    private static func displayLabel(for status: RequestActivityStatus) -> String {
-        switch status {
-            case .availableInLibrary:
-                "Available in Library"
-            case .available, .alreadyAvailable:
-                "Available"
-            case .wanted, .searching:
-                "Searching"
-            case .requested, .alreadyRequested, .unknown:
-                "In progress"
-            case .snatched:
-                "Snatched"
-            case .downloaded:
-                "Downloaded"
-            case .failed, .needsAttention:
-                "Needs attention"
-        }
     }
 }
 
@@ -274,8 +291,20 @@ public enum RequestActivityChains {
         now: Date = Date(),
     ) -> RequestActivitySection {
         _ = now
-        if chain.formatStates.contains(where: { $0.status.needsAttentionBucket }) {
+        // Active Deluge downloads keep the chain In Progress even if an older
+        // provider attempt still says Needs Attention.
+        let downloads = chain.formatStates.compactMap(\.download)
+        if downloads.contains(where: { $0.status == .error }) {
             return .needsAttention
+        }
+        if chain.formatStates.contains(where: {
+            $0.status.needsAttentionBucket
+                && !($0.download?.status.isActivelyDownloading == true)
+        }) {
+            return .needsAttention
+        }
+        if downloads.contains(where: \.status.isActivelyDownloading) {
+            return .inProgress
         }
         if chain.formatStates.contains(where: \.status.isInProgress) {
             return .inProgress
@@ -470,13 +499,19 @@ public enum RequestActivityChains {
             formatState(for: format, items: sortedMembers)
         }
         let currentStatus = summarizeStatus(formatStates: formatStates, requestedFormats: requestedFormats)
+        let currentStatusLabel = summarizeStatusLabel(
+            formatStates: formatStates,
+            requestedFormats: requestedFormats,
+            fallback: currentStatus.label,
+        )
         let latest = sortedMembers.max { lhs, rhs in
             if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt < rhs.updatedAt }
             return lhs.createdAt < rhs.createdAt
         } ?? root
         let lastChecked = sortedMembers.compactMap(\.lastCheckedAt).max()
-        let effectiveProvider = formatStates.first(where: { !$0.status.isCompleted })?.providerLabel
-            ?? formatStates.first?.providerLabel
+        let effectiveProvider =
+            formatStates.first(where: { !$0.status.isCompleted })?.displayProviderLabel
+            ?? formatStates.first?.displayProviderLabel
         let hasFallback = sortedMembers.contains {
             $0.fallbackFromRequestID != nil || $0.fallbackKind != nil
         }
@@ -491,6 +526,7 @@ public enum RequestActivityChains {
             requestedFormats: requestedFormats,
             formatStates: formatStates,
             currentStatus: currentStatus,
+            currentStatusLabel: currentStatusLabel,
             effectiveProviderLabel: effectiveProvider,
             createdAt: sortedMembers.map(\.createdAt).min() ?? root.createdAt,
             updatedAt: latest.updatedAt,
@@ -518,12 +554,21 @@ public enum RequestActivityChains {
             providerLabel = active.provider.shortName
         }
 
+        // Prefer download state from whichever item owns the format, including siblings.
+        let download = items.compactMap { $0.downloadState(for: format) }
+            .sorted { lhs, rhs in
+                if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt > rhs.updatedAt }
+                return (lhs.torrentID ?? "") > (rhs.torrentID ?? "")
+            }
+            .first
+
         return RequestActivityChainFormatState(
             format: format,
             status: status.status,
             sourceRequestID: active.id,
             providerLabel: providerLabel,
             detail: status.detail,
+            download: download,
         )
     }
 
@@ -541,13 +586,42 @@ public enum RequestActivityChains {
         if !states.isEmpty, states.allSatisfy({ $0.status.isCompleted }) {
             return .availableInLibrary
         }
-        if let attention = states.first(where: { $0.status.needsAttentionBucket }) {
+        // Active downloads suppress historical attention for summary status.
+        if let downloading = states.first(where: {
+            $0.download?.status.isActivelyDownloading == true && !$0.status.isCompleted
+        }) {
+            return downloading.status.isInProgress ? downloading.status : .snatched
+        }
+        if let attention = states.first(where: {
+            $0.status.needsAttentionBucket
+                && !($0.download?.status.isActivelyDownloading == true)
+        }) {
             return attention.status
         }
         if let progress = states.first(where: \.status.isInProgress) {
             return progress.status
         }
         return states.first?.status ?? .unknown
+    }
+
+    private static func summarizeStatusLabel(
+        formatStates: [RequestActivityChainFormatState],
+        requestedFormats: [BookRequestFormat],
+        fallback: String,
+    ) -> String {
+        let relevant = requestedFormats.isEmpty
+            ? formatStates
+            : requestedFormats.compactMap { format in formatStates.first { $0.format == format } }
+        let states = relevant.isEmpty ? formatStates : relevant
+        if states.allSatisfy({ $0.status.isCompleted }) {
+            return RequestActivityStatus.availableInLibrary.label
+        }
+        if let download = states.first(where: {
+            $0.download?.status.isActivelyDownloading == true || $0.download?.status == .error
+        })?.download {
+            return download.status.label
+        }
+        return states.first(where: { !$0.status.isCompleted })?.displayStatusLabel ?? fallback
     }
 
     private static func tracks(_ item: RequestActivityItem, format: BookRequestFormat) -> Bool {
