@@ -142,6 +142,101 @@ struct DelugeDownloadObservabilityTests {
         #expect(hash == "hashabc")
     }
 
+    @Test func addTorrentURLUsesDownloadLocation() async throws {
+        let transport = DelugeScript()
+        transport.handler = { method, body, cookie in
+            switch method {
+                case "auth.login":
+                    return DelugeHTTP(
+                        status: 200,
+                        body: Data(#"{"result":true,"error":null,"id":1}"#.utf8),
+                        setCookie: "_session_id=abc; Path=/",
+                    )
+                case "web.connected":
+                    return DelugeHTTP(
+                        status: 200,
+                        body: Data(#"{"result":true,"error":null,"id":2}"#.utf8),
+                        setCookie: cookie,
+                    )
+                case "core.add_torrent_url":
+                    #expect(cookie?.contains("_session_id=abc") == true)
+                    let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+                    let params = json?["params"] as? [Any]
+                    #expect(params?[0] as? String == "https://files.example/hobbit.torrent")
+                    let options = params?[1] as? [String: Any]
+                    #expect(options?["download_location"] as? String == "/volume1/media/books/books")
+                    return DelugeHTTP(
+                        status: 200,
+                        body: Data(#"{"result":"hashdef","error":null,"id":10}"#.utf8),
+                    )
+                default:
+                    return DelugeHTTP(status: 200, body: Data(#"{"result":null,"error":null,"id":0}"#.utf8))
+            }
+        }
+        let client = DelugeWebClient(transport: transport)
+        let hash = try await client.addTorrentURL(
+            baseURL: "http://deluge.example:8112",
+            password: "secret",
+            url: "https://files.example/hobbit.torrent",
+            downloadLocation: "/volume1/media/books/books",
+            start: true,
+        )
+        #expect(hash == "hashdef")
+    }
+
+    @Test func jsonNullErrorIsNotAFailure() {
+        let null = try? JSONSerialization.jsonObject(with: Data(#"{"error":null}"#.utf8)) as? [String: Any]
+        #expect(DelugeWebClient.jsonValue(null?["error"]) == nil)
+        #expect(DelugeWebClient.jsonValue(NSNull()) == nil)
+        #expect(DelugeWebClient.jsonValue("ok") as? String == "ok")
+    }
+
+    @Test func realErrorObjectRejectsAdd() async {
+        let transport = DelugeScript()
+        transport.handler = { method, _, cookie in
+            switch method {
+                case "auth.login":
+                    return DelugeHTTP(
+                        status: 200,
+                        body: Data(#"{"result":true,"error":null,"id":1}"#.utf8),
+                        setCookie: "_session_id=abc; Path=/",
+                    )
+                case "web.connected":
+                    return DelugeHTTP(
+                        status: 200,
+                        body: Data(#"{"result":true,"error":null,"id":2}"#.utf8),
+                        setCookie: cookie,
+                    )
+                case "core.add_torrent_magnet":
+                    return DelugeHTTP(
+                        status: 200,
+                        body: Data(
+                            #"{"result":null,"error":{"message":"Unable to add torrent","code":1},"id":10}"#
+                                .utf8
+                        ),
+                    )
+                default:
+                    return DelugeHTTP(status: 200, body: Data(#"{"result":null,"error":null,"id":0}"#.utf8))
+            }
+        }
+        let client = DelugeWebClient(transport: transport)
+        do {
+            _ = try await client.addMagnet(
+                baseURL: "http://deluge.example:8112",
+                password: "secret",
+                uri: "magnet:?xt=urn:btih:abc",
+                downloadLocation: "/volume1/media/books/audiobooks",
+                start: true,
+            )
+            Issue.record("real Deluge error should reject")
+        } catch let error as DelugeClientError {
+            #expect(error == .rejected)
+            #expect(error.handoff == .rejected(.deluge))
+        } catch {
+            Issue.record("unexpected \(error)")
+        }
+    }
+
     @Test func addMagnetAuthFailure() async {
         let transport = DelugeScript()
         transport.handler = { method, _, _ in

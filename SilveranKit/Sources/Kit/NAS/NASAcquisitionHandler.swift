@@ -60,9 +60,7 @@ public struct LiveNASHandoffEnvironment: NASHandoffEnvironment {
     public func load() async -> NASHandoffContext {
         var settings = await MainActor.run { NASDownloadSettingsStore.shared.snapshot }
         let configURL = await SettingsActor.shared.config.delugeBaseURL
-        if settings.trimmedDelugeBaseURL.isEmpty {
-            settings.delugeBaseURL = configURL
-        }
+        settings.delugeBaseURL = settings.resolvedDelugeBaseURL(configURL: configURL)
         return NASHandoffContext(
             settings: settings,
             credentials: NASBackendCredentials(

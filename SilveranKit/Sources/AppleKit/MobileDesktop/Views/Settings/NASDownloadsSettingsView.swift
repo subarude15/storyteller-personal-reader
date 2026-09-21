@@ -225,10 +225,9 @@ struct NASDownloadsSettingsView: View {
             qbPasswordSaved = await AuthenticationActor.shared.hasQBittorrentPassword()
             synologyPasswordSaved = await AuthenticationActor.shared.hasSynologyPassword()
             let configURL = await SettingsActor.shared.config.delugeBaseURL
-            if snapshot.delugeBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                !configURL.isEmpty
-            {
-                snapshot.delugeBaseURL = configURL
+            let resolved = snapshot.resolvedDelugeBaseURL(configURL: configURL)
+            if snapshot.trimmedDelugeBaseURL.isEmpty, !resolved.isEmpty {
+                snapshot.delugeBaseURL = resolved
                 persist()
             }
         }

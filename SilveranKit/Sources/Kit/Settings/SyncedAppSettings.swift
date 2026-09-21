@@ -53,7 +53,10 @@ public struct LazyLibrarianLocalSettings: Equatable, Sendable {
 
 /// Versioned account settings blob. Credentials are not fields on this type.
 public struct SyncedAppSettings: Codable, Equatable, Sendable {
+    /// Highest schema this build understands. Used to refuse newer remotes.
     public static let schemaVersion = 3
+    /// Fresh / empty documents start here. Promotion is field-sensitive.
+    public static let baselineSchemaVersion = 1
     /// Hidden private collection, same prefix as `.inkamp.podcastSync.v1`.
     public static let collectionName = ".inkamp.settings.v1"
 
@@ -61,7 +64,7 @@ public struct SyncedAppSettings: Codable, Equatable, Sendable {
     public var integrations: Integrations
 
     public init(
-        schemaVersion: Int = SyncedAppSettings.schemaVersion,
+        schemaVersion: Int = SyncedAppSettings.baselineSchemaVersion,
         integrations: Integrations = Integrations(),
     ) {
         self.schemaVersion = schemaVersion
@@ -568,6 +571,13 @@ public enum SettingsSyncApply {
             createTitleAuthorSubfolders:
                 section.createTitleAuthorSubfolders?.value ?? current.createTitleAuthorSubfolders,
         )
+    }
+
+    /// `nil` means the field was missing (leave config alone). `""` means cleared.
+    public static func delugeBaseURLToApply(document: SyncedAppSettings) -> String? {
+        document.integrations.nasDownloads.delugeBaseURL.map {
+            $0.value.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
     }
 }
 

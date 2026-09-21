@@ -280,9 +280,9 @@ public final class SettingsSyncCoordinator {
             current: NASDownloadSettingsStore.shared.snapshot,
         )
         NASDownloadSettingsStore.shared.applySynced(applied)
-        if !applied.trimmedDelugeBaseURL.isEmpty {
+        if let url = SettingsSyncApply.delugeBaseURLToApply(document: document) {
             do {
-                try await SettingsActor.shared.applySyncedDelugeBaseURL(applied.trimmedDelugeBaseURL)
+                try await SettingsActor.shared.applySyncedDelugeBaseURL(url)
             } catch {
                 debugLog("[SettingsSync] failure apply deluge URL")
             }

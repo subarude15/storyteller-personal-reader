@@ -266,6 +266,34 @@ struct NASAcquisitionHandoffTests {
         #expect(jobs.jobs[0].status == .submitted)
     }
 
+    @Test func torrentURLRoutesToDelugeAsSubmitted() async {
+        let deluge = DelugeCapture()
+        let jobs = RecordingManualDownloadJobStore()
+        var settings = synologySettings()
+        settings.torrentClient = .deluge
+        settings.delugeBaseURL = "http://deluge.example:8112"
+        let handler = NASAcquisitionHandler(
+            environment: StaticNASHandoffEnvironment(
+                context: NASHandoffContext(
+                    settings: settings,
+                    credentials: NASBackendCredentials(delugePassword: "secret"),
+                )
+            ),
+            deluge: DelugeWebClient(transport: deluge),
+            jobs: jobs,
+        )
+        let result = await handler.handle(
+            ManualAcquisitionCandidate(
+                sourceURL: URL(string: "https://files.example/hobbit.torrent")!,
+                detectedType: .torrent,
+                bookMetadata: audiobook,
+            )
+        )
+        #expect(result.isSubmitted)
+        #expect(jobs.jobs[0].status == .submitted)
+        #expect(jobs.jobs[0].destination == "/volume1/media/books/audiobooks")
+    }
+
     @Test func unverifiedUploadIsNotMarkedComplete() async {
         let download = FileDownloadCapture(contents: Data("epub-bytes".utf8))
         let upload = UploadCapture(verified: false, omitByteCount: true)
@@ -433,7 +461,7 @@ private final class DelugeCapture: DelugeTransport, @unchecked Sendable {
                 )
             case "web.connected":
                 return DelugeHTTP(status: 200, body: Data(#"{"result":true,"error":null,"id":2}"#.utf8))
-            case "core.add_torrent_magnet":
+            case "core.add_torrent_magnet", "core.add_torrent_url":
                 let params = payload?["params"] as? [Any]
                 if let magnet = params?[0] as? String { magnets.append(magnet) }
                 if let options = params?[1] as? [String: Any],

@@ -253,9 +253,7 @@ struct ManualAcquisitionConfirmSheet: View {
     private func loadSettings() async {
         var snapshot = NASDownloadSettingsStore.shared.snapshot
         let configURL = await SettingsActor.shared.config.delugeBaseURL
-        if snapshot.trimmedDelugeBaseURL.isEmpty {
-            snapshot.delugeBaseURL = configURL
-        }
+        snapshot.delugeBaseURL = snapshot.resolvedDelugeBaseURL(configURL: configURL)
         settings = snapshot
     }
 

@@ -92,6 +92,14 @@ public struct NASDownloadSettingsSnapshot: Equatable, Sendable {
         delugeBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Legacy Deluge URL lives on `SettingsActor.config`. Use it only when this
+    /// snapshot has no URL. An explicit synced empty string clears config first,
+    /// so this does not resurrect a stale value.
+    public func resolvedDelugeBaseURL(configURL: String) -> String {
+        if !trimmedDelugeBaseURL.isEmpty { return trimmedDelugeBaseURL }
+        return configURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     public var trimmedSynologyBaseURL: String {
         synologyBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
     }

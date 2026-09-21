@@ -323,11 +323,18 @@ public struct DelugeWebClient: Sendable {
             throw DelugeClientError.invalidResponse
         }
         return RPCResponse(
-            result: json["result"],
-            error: json["error"],
+            result: Self.jsonValue(json["result"]),
+            error: Self.jsonValue(json["error"]),
             status: http.status,
             setCookie: http.setCookie,
         )
+    }
+
+    /// `JSONSerialization` turns JSON `null` into `NSNull`. Treat that as Swift `nil`
+    /// so `"error": null` is success, not a rejected RPC.
+    public static func jsonValue(_ raw: Any?) -> Any? {
+        if raw is NSNull { return nil }
+        return raw
     }
 
     // MARK: - Decode

@@ -361,7 +361,8 @@ struct SettingsSyncTests {
             return
         }
         #expect(decoded == document)
-        #expect(decoded.schemaVersion == SyncedAppSettings.schemaVersion)
+        #expect(decoded.schemaVersion == document.schemaVersion)
+        #expect(decoded.schemaVersion == SyncedAppSettings.baselineSchemaVersion)
     }
 
     @Test func credentialsAreNotSerialized() throws {
@@ -466,6 +467,133 @@ struct SettingsSyncTests {
         #expect(applied.audiobookFolder == "/media/audiobooks")
         #expect(applied.ebookFolder == "/media/books")
         #expect(applied.createTitleAuthorSubfolders == true)
+    }
+
+    @Test func explicitEmptyDelugeURLClearsLocalAndStopsFallback() {
+        var remote = SyncedAppSettings(schemaVersion: 3)
+        remote.integrations.nasDownloads.delugeBaseURL = TimestampedSetting(
+            value: "",
+            modifiedAt: date(40),
+        )
+        var local = SyncedAppSettings(schemaVersion: 3)
+        local.integrations.nasDownloads.delugeBaseURL = TimestampedSetting(
+            value: "http://deluge.example:8112",
+            modifiedAt: date(10),
+        )
+        let merged = SettingsSyncMerge.merge(local: local, remote: remote)
+        #expect(merged.integrations.nasDownloads.delugeBaseURL?.value == "")
+        let applied = SettingsSyncApply.nasDownloads(
+            document: merged,
+            current: NASDownloadSettingsSnapshot(delugeBaseURL: "http://deluge.example:8112"),
+        )
+        #expect(applied.delugeBaseURL == "")
+        #expect(SettingsSyncApply.delugeBaseURLToApply(document: merged) == "")
+        #expect(applied.resolvedDelugeBaseURL(configURL: "") == "")
+        #expect(applied.resolvedDelugeBaseURL(configURL: "   ") == "")
+        var reopened = applied
+        let resurrected = reopened.resolvedDelugeBaseURL(configURL: "")
+        if reopened.trimmedDelugeBaseURL.isEmpty, !resurrected.isEmpty {
+            reopened.delugeBaseURL = resurrected
+        }
+        #expect(reopened.delugeBaseURL == "")
+    }
+
+    @Test func missingDelugeURLLeavesLocalConfig() {
+        var document = SyncedAppSettings(schemaVersion: 3)
+        document.integrations.nasDownloads.torrentClient = TimestampedSetting(
+            value: .qbittorrent,
+            modifiedAt: date(20),
+        )
+        let current = NASDownloadSettingsSnapshot(delugeBaseURL: "http://keep.example:8112")
+        let applied = SettingsSyncApply.nasDownloads(document: document, current: current)
+        #expect(applied.delugeBaseURL == "http://keep.example:8112")
+        #expect(SettingsSyncApply.delugeBaseURLToApply(document: document) == nil)
+        #expect(
+            NASDownloadSettingsSnapshot(delugeBaseURL: "").resolvedDelugeBaseURL(
+                configURL: "http://keep.example:8112"
+            ) == "http://keep.example:8112"
+        )
+    }
+
+    @Test func nonEmptyDelugeURLStillSyncs() {
+        var remote = SyncedAppSettings(schemaVersion: 3)
+        remote.integrations.nasDownloads.delugeBaseURL = TimestampedSetting(
+            value: "http://new.example:8112",
+            modifiedAt: date(20),
+        )
+        let applied = SettingsSyncApply.nasDownloads(
+            document: remote,
+            current: NASDownloadSettingsSnapshot(delugeBaseURL: "http://old.example:8112"),
+        )
+        #expect(applied.delugeBaseURL == "http://new.example:8112")
+        #expect(SettingsSyncApply.delugeBaseURLToApply(document: remote) == "http://new.example:8112")
+    }
+
+    @Test func freshDocumentStaysOnBaselineSchema() {
+        let empty = SyncedAppSettings()
+        #expect(empty.schemaVersion == SyncedAppSettings.baselineSchemaVersion)
+        #expect(empty.schemaVersion != 3)
+        #expect(SettingsSyncMerge.hasSchema2Fields(empty) == false)
+        #expect(SettingsSyncMerge.hasSchema3Fields(empty) == false)
+        #expect(SettingsSyncMerge.requiredSchemaVersion(for: empty) == 1)
+    }
+
+    @Test func emptyDocumentPlusManualSearchEditIsSchema2() throws {
+        let store = try journal()
+        store.migrationCompleted = true
+        let edited = try store.recordManualSearchChange(
+            providers: [],
+            openInAppBrowser: true,
+            at: date(10),
+        )
+        #expect(edited.schemaVersion == 2)
+        #expect(SettingsSyncMerge.hasSchema3Fields(edited) == false)
+    }
+
+    @Test func emptyDocumentPlusNASEditIsSchema3() throws {
+        let store = try journal()
+        store.migrationCompleted = true
+        let edited = try store.recordNASDownloadsChange(
+            NASDownloadSettingsSnapshot(delugeBaseURL: "http://deluge.example:8112"),
+            at: date(10),
+        )
+        #expect(edited.schemaVersion == 3)
+        #expect(edited.integrations.nasDownloads.delugeBaseURL?.value == "http://deluge.example:8112")
+    }
+
+    @Test func emptyLocalPlusSchema2RemoteStaysSchema2() {
+        var remote = SyncedAppSettings(schemaVersion: 2)
+        remote.integrations.manualSearch.openInAppBrowser = TimestampedSetting(
+            value: true,
+            modifiedAt: date(10),
+        )
+        let merged = SettingsSyncMerge.merge(local: SyncedAppSettings(), remote: remote)
+        #expect(merged.schemaVersion == 2)
+        #expect(SettingsSyncMerge.hasSchema3Fields(merged) == false)
+    }
+
+    @Test func schema2RemotePlusLocalNASFieldsIsSchema3() {
+        var local = SyncedAppSettings(schemaVersion: 2)
+        local.integrations.nasDownloads.audiobookFolder = TimestampedSetting(
+            value: "/volume1/media/books/audiobooks",
+            modifiedAt: date(20),
+        )
+        var remote = SyncedAppSettings(schemaVersion: 2)
+        remote.integrations.manualSearch.openInAppBrowser = TimestampedSetting(
+            value: true,
+            modifiedAt: date(10),
+        )
+        let merged = SettingsSyncMerge.merge(local: local, remote: remote)
+        #expect(merged.schemaVersion == 3)
+        #expect(merged.integrations.nasDownloads.audiobookFolder?.value == "/volume1/media/books/audiobooks")
+        #expect(merged.integrations.manualSearch.openInAppBrowser?.value == true)
+    }
+
+    @Test func lazyLibrarianOnlyRemainsSchema1() {
+        let document = ll(enabled: true, enabledAt: 10, baseURL: "https://ll", baseURLAt: 10)
+        #expect(document.schemaVersion == 1)
+        #expect(SettingsSyncMerge.requiredSchemaVersion(for: document) == 1)
+        #expect(SettingsSyncMerge.promoteSchemaIfNeeded(document).schemaVersion == 1)
     }
 
     @Test func schema2ManualSearchMergeDoesNotInventNASFields() {
