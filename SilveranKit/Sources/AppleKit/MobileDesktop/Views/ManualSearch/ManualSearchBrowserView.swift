@@ -354,52 +354,18 @@ final class ManualSearchBrowserCoordinator: NSObject, WKNavigationDelegate, WKUI
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
-        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void,
-    ) {
-        guard let url = navigationAction.request.url else {
-            decisionHandler(.cancel)
-            return
-        }
-
-        if url.scheme?.lowercased() == "magnet" {
-            if let candidate = ManualAcquisitionDetection.candidate(
-                url: url,
-                bookMetadata: controller.book,
-                providerID: controller.providerID,
-            ) {
-                controller.handleCandidate(candidate)
-            }
-            decisionHandler(.cancel)
-            return
-        }
-
-        if ManualAcquisitionDetection.isIgnoredScheme(url) {
-            decisionHandler(.cancel)
-            return
-        }
-
-        if let candidate = ManualAcquisitionDetection.candidate(
-            url: url,
-            bookMetadata: controller.book,
-            providerID: controller.providerID,
-        ) {
-            controller.handleCandidate(candidate)
-            decisionHandler(.cancel)
-            return
-        }
-
-        decisionHandler(.allow)
+        preferences: WKWebpagePreferences,
+    ) async -> (WKNavigationActionPolicy, WKWebpagePreferences) {
+        (policy(for: navigationAction), preferences)
     }
 
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationResponse: WKNavigationResponse,
-        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void,
-    ) {
+    ) async -> WKNavigationResponsePolicy {
         let response = navigationResponse.response
         guard let url = response.url ?? webView.url else {
-            decisionHandler(.allow)
-            return
+            return .allow
         }
 
         if let candidate = ManualAcquisitionDetection.candidate(
@@ -410,11 +376,40 @@ final class ManualSearchBrowserCoordinator: NSObject, WKNavigationDelegate, WKUI
             providerID: controller.providerID,
         ) {
             controller.handleCandidate(candidate)
-            decisionHandler(.download)
-            return
+            return .download
         }
 
-        decisionHandler(.allow)
+        return .allow
+    }
+
+    private func policy(for navigationAction: WKNavigationAction) -> WKNavigationActionPolicy {
+        guard let url = navigationAction.request.url else { return .cancel }
+
+        if url.scheme?.lowercased() == "magnet" {
+            if let candidate = ManualAcquisitionDetection.candidate(
+                url: url,
+                bookMetadata: controller.book,
+                providerID: controller.providerID,
+            ) {
+                controller.handleCandidate(candidate)
+            }
+            return .cancel
+        }
+
+        if ManualAcquisitionDetection.isIgnoredScheme(url) {
+            return .cancel
+        }
+
+        if let candidate = ManualAcquisitionDetection.candidate(
+            url: url,
+            bookMetadata: controller.book,
+            providerID: controller.providerID,
+        ) {
+            controller.handleCandidate(candidate)
+            return .cancel
+        }
+
+        return .allow
     }
 
     func webView(
@@ -461,7 +456,7 @@ final class ManualSearchBrowserCoordinator: NSObject, WKNavigationDelegate, WKUI
         {
             controller.handleCandidate(candidate)
         }
-        download.cancel()
+        _ = await download.cancel()
         return FileManager.default.temporaryDirectory
             .appendingPathComponent("inkamp-unused-\(UUID().uuidString)")
     }
