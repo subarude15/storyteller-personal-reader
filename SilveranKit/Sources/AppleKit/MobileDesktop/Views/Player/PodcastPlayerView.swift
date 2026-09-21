@@ -14,6 +14,7 @@ import UIKit
 public struct PodcastPlayerView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     private let episode: PodcastPlayerPresenter.Episode
     private let onClose: () -> Void
 
@@ -109,7 +110,15 @@ public struct PodcastPlayerView: View {
             syncInterfaceOrientation(size: nil)
         }
         .onDisappear {
+            // Backgrounding can call onDisappear while the card is still up.
+            // Only a real dismissal ends the video wake session.
+            guard scenePhase == .active else { return }
             videoPresentation.updatePlayerVisibility(expanded: false, isInternalVideo: false)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                syncVideoPresentationContext()
+            }
         }
         .onReceive(
             NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)

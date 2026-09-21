@@ -9,18 +9,24 @@ import UIKit
 final class ScreenWakeLock {
     static let shared = ScreenWakeLock()
 
+    #if os(iOS)
+    /// Read-aloud and internal video share one system flag. Each reason is
+    /// tracked so releasing one cannot clear the other or leave video stuck on.
+    private var holds = DisplaySleepHolds()
+    private var lastAppliedIdleTimerDisabled: Bool?
+    #endif
+
     #if os(macOS)
     private var displaySleepActivity: NSObjectProtocol?
     #endif
 
     private init() {}
 
+    /// Read-aloud / media-overlay narration. Not used for audiobooks or podcast audio.
     func set(_ enabled: Bool) {
         #if os(iOS)
-        UIApplication.shared.isIdleTimerDisabled = enabled
-        debugLog(
-            "[ScreenWakeLock] iOS idle timer \(enabled ? "disabled" : "enabled")"
-        )
+        holds.setNarration(enabled)
+        applyIdleTimer()
         #elseif os(macOS)
         if enabled {
             guard displaySleepActivity == nil else { return }
@@ -36,5 +42,23 @@ final class ScreenWakeLock {
         }
         #endif
     }
+
+    #if os(iOS)
+    /// Internal video playback only. Audio-only sessions must not call this.
+    func setVideoPlaybackPreventsSleep(_ enabled: Bool) {
+        holds.setVideoPlayback(enabled)
+        applyIdleTimer()
+    }
+
+    private func applyIdleTimer() {
+        let disabled = holds.disablesIdleTimer
+        guard disabled != lastAppliedIdleTimerDisabled else { return }
+        lastAppliedIdleTimerDisabled = disabled
+        UIApplication.shared.isIdleTimerDisabled = disabled
+        debugLog(
+            "[ScreenWakeLock] iOS idle timer \(disabled ? "disabled" : "enabled") narration=\(holds.narration) video=\(holds.videoPlayback)"
+        )
+    }
+    #endif
 }
 #endif
