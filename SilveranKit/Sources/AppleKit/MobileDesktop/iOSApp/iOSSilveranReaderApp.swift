@@ -107,6 +107,21 @@ class SilveranAppDelegate: NSObject, UIApplicationDelegate {
     func applicationProtectedDataWillBecomeUnavailable(_ application: UIApplication) {
         debugLog("[SilveranAppDelegate] Protected data will become unavailable (device locking)")
     }
+
+    /// iPhone: portrait by default; allow landscape only while the expanded
+    /// internal podcast video player is visible. iPad keeps free rotation.
+    func application(
+        _ application: UIApplication,
+        supportedInterfaceOrientationsFor window: UIWindow?
+    ) -> UIInterfaceOrientationMask {
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            return .all
+        }
+        if PodcastVideoPresentationCoordinator.shared.allowsLandscapeOrientation {
+            return .allButUpsideDown
+        }
+        return .portrait
+    }
 }
 
 struct SilveranReaderApp: App {
