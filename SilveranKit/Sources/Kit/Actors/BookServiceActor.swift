@@ -1529,6 +1529,22 @@ public actor BookServiceActor {
         return await storyteller.pushInkampPodcastSyncDocument(document)
     }
 
+    public func fetchInkampSettingsDocument() async -> StorytellerActor.InkampSettingsFetchResult {
+        guard let storyteller = await primaryStorytellerActor() else {
+            return .unavailable(reason: "no Storyteller source")
+        }
+        return await storyteller.fetchInkampSettingsDocument()
+    }
+
+    public func pushInkampSettingsDocument(_ document: SyncedAppSettings) async
+        -> StorytellerActor.InkampSettingsPushResult
+    {
+        guard let storyteller = await primaryStorytellerActor() else {
+            return .failure(reason: "no Storyteller source")
+        }
+        return await storyteller.pushInkampSettingsDocument(document)
+    }
+
     public func fetchInkampBookFormatLinksDocument(sourceID: BookSourceID) async
         -> BookFormatLinkFetchResult
     {

@@ -983,18 +983,73 @@ public actor SettingsActor {
         updated.readingBar.showPlayerControls = true
         #endif
 
+        let lazyLibrarianChanged =
+            updated.lazyLibrarianEnabled != config.lazyLibrarianEnabled
+            || updated.lazyLibrarianBaseURL != config.lazyLibrarianBaseURL
+        let lazyLibrarianEnabled = updated.lazyLibrarianEnabled
+        let lazyLibrarianBaseURL = updated.lazyLibrarianBaseURL
+
         config = updated
         try persistCurrentConfig()
         debugLog(
             "[SettingsActor] Config updated and persisted - Progress: \(config.sync.progressSyncIntervalSeconds)s, Metadata: \(config.sync.metadataRefreshIntervalSeconds)s"
         )
 
+        if lazyLibrarianChanged {
+            let editedAt = SettingsSyncClock.stamp()
+            Task { @MainActor in
+                SettingsSyncCoordinator.shared.noteLocalLazyLibrarianChange(
+                    enabled: lazyLibrarianEnabled,
+                    baseURL: lazyLibrarianBaseURL,
+                    at: editedAt,
+                )
+            }
+        }
+
+        notifySettingsObservers()
+    }
+
+    /// Remote settings sync writes LazyLibrarian fields without stamping a new local edit.
+    public func applySyncedLazyLibrarian(enabled: Bool, baseURL: String) throws {
+        guard config.lazyLibrarianEnabled != enabled || config.lazyLibrarianBaseURL != baseURL else {
+            return
+        }
+        var updated = config
+        updated.lazyLibrarianEnabled = enabled
+        updated.lazyLibrarianBaseURL = baseURL
+        config = updated
+        try persistCurrentConfig()
+        notifySettingsObservers()
+    }
+
+    public func lazyLibrarianSyncSnapshot() -> LazyLibrarianSyncSnapshot {
+        let modified = (try? fileManager.attributesOfItem(atPath: storageURL.path)[.modificationDate]) as? Date
+        return LazyLibrarianSyncSnapshot(
+            enabled: config.lazyLibrarianEnabled,
+            baseURL: config.lazyLibrarianBaseURL,
+            configModifiedAt: modified,
+        )
+    }
+
+    private func notifySettingsObservers() {
         let observersList = Array(observers.values)
         Task { @SilveranUIActor in
             for observer in observersList {
                 observer()
             }
         }
+    }
+}
+
+public struct LazyLibrarianSyncSnapshot: Sendable, Equatable {
+    public var enabled: Bool
+    public var baseURL: String
+    public var configModifiedAt: Date?
+
+    public init(enabled: Bool, baseURL: String, configModifiedAt: Date?) {
+        self.enabled = enabled
+        self.baseURL = baseURL
+        self.configModifiedAt = configModifiedAt
     }
 }
 

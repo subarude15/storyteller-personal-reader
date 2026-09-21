@@ -177,6 +177,7 @@ public struct PunkRallyTabView: View {
                     Task { await StatsSyncCoordinator.shared.syncNow(reason: "appActive") }
                     Task { await YouTubePlayheadSyncCoordinator.shared.syncNow(reason: "appActive") }
                     Task { await PodcastSyncCoordinator.shared.syncNow(reason: "appActive") }
+                    Task { await SettingsSyncCoordinator.shared.syncNow(reason: "appActive") }
                 } else if phase == .background {
                     Task {
                         await AudioSessionActor.shared.refreshNowPlaying()
@@ -196,6 +197,7 @@ public struct PunkRallyTabView: View {
                         }
                         YouTubePlayheadSyncCoordinator.shared.scheduleSyncAfterLocalChange()
                         PodcastSyncCoordinator.shared.scheduleSyncAfterLocalChange()
+                        await SettingsSyncCoordinator.shared.syncPendingOnBackground()
                     }
                 }
             }

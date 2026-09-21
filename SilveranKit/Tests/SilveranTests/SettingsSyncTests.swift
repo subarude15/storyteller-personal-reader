@@ -1,0 +1,258 @@
+//
+//  SettingsSyncTests.swift
+//  SilveranTests
+//
+//  SPDX-License-Identifier: AGPL-3.0-only
+
+import Foundation
+import SilveranKit
+import Testing
+
+@Suite("Settings sync")
+struct SettingsSyncTests {
+    private func date(_ seconds: TimeInterval) -> Date {
+        Date(timeIntervalSince1970: seconds)
+    }
+
+    private func ll(
+        enabled: Bool? = nil,
+        enabledAt: TimeInterval? = nil,
+        baseURL: String? = nil,
+        baseURLAt: TimeInterval? = nil,
+    ) -> SyncedAppSettings {
+        var document = SyncedAppSettings()
+        if let enabled, let enabledAt {
+            document.integrations.lazyLibrarian.enabled = TimestampedSetting(
+                value: enabled,
+                modifiedAt: date(enabledAt),
+            )
+        }
+        if let baseURL, let baseURLAt {
+            document.integrations.lazyLibrarian.baseURL = TimestampedSetting(
+                value: baseURL,
+                modifiedAt: date(baseURLAt),
+            )
+        }
+        return document
+    }
+
+    private func journal() throws -> SettingsSyncJournal {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("inkamp-settings-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let defaults = try #require(
+            UserDefaults(suiteName: "inkamp.settings.tests.\(UUID().uuidString)")
+        )
+        return SettingsSyncJournal(
+            fileURL: directory.appendingPathComponent("inkamp.settings.v1.json"),
+            defaults: defaults,
+        )
+    }
+
+    @Test func migrationKeepsExistingLazyLibrarianSettings() {
+        let document = SettingsSyncMigration.initialDocument(
+            settings: LazyLibrarianLocalSettings(enabled: true, baseURL: " https://ll.home:5299 "),
+            modifiedAt: date(1_700_000_000),
+        )
+        #expect(document.integrations.lazyLibrarian.enabled?.value == true)
+        #expect(document.integrations.lazyLibrarian.baseURL?.value == "https://ll.home:5299")
+        #expect(document.integrations.lazyLibrarian.enabled?.modifiedAt == date(1_700_000_000))
+    }
+
+    @Test func migrationOmitsUntouchedDefaults() {
+        let document = SettingsSyncMigration.initialDocument(
+            settings: .unset,
+            modifiedAt: date(1_700_000_000),
+        )
+        #expect(document.hasAnySetting == false)
+    }
+
+    @Test func migrationKeepsDisabledIntegrationWhenURLWasSaved() {
+        let document = SettingsSyncMigration.initialDocument(
+            settings: LazyLibrarianLocalSettings(enabled: false, baseURL: "https://ll.home"),
+            modifiedAt: date(50),
+        )
+        #expect(document.integrations.lazyLibrarian.enabled?.value == false)
+        #expect(document.integrations.lazyLibrarian.baseURL?.value == "https://ll.home")
+    }
+
+    @Test func migrationIsIdempotent() throws {
+        let store = try journal()
+        let first = try store.migrateIfNeeded(
+            settings: LazyLibrarianLocalSettings(enabled: true, baseURL: "https://phone"),
+            modifiedAt: date(10),
+        )
+        let second = try store.migrateIfNeeded(
+            settings: LazyLibrarianLocalSettings(enabled: false, baseURL: "https://should-not-replace"),
+            modifiedAt: date(99),
+        )
+        #expect(second == first)
+        #expect(second.integrations.lazyLibrarian.baseURL?.value == "https://phone")
+        #expect(store.migrationCompleted)
+    }
+
+    @Test func firstDeviceCreatesRemoteFromLocalSettings() {
+        let local = ll(enabled: true, enabledAt: 10, baseURL: "https://ll", baseURLAt: 10)
+        let plan = SettingsSyncEngine.resolve(local: local, remote: .empty)
+        #expect(plan.push)
+        #expect(plan.document == local)
+        #expect(plan.status == .synced)
+    }
+
+    @Test func missingSyncedFieldDoesNotClearLocalConfig() {
+        let document = ll(enabled: true, enabledAt: 10)
+        let applied = SettingsSyncApply.lazyLibrarian(
+            document: document,
+            config: LazyLibrarianLocalSettings(enabled: false, baseURL: "https://keep"),
+        )
+        #expect(applied.enabled == true)
+        #expect(applied.baseURL == "https://keep")
+    }
+
+    @Test func secondDeviceAppliesRemoteSettings() {
+        let remote = ll(enabled: true, enabledAt: 10, baseURL: "https://ll", baseURLAt: 10)
+        let plan = SettingsSyncEngine.resolve(local: SyncedAppSettings(), remote: .document(remote))
+        #expect(plan.push == false)
+        #expect(plan.document == remote)
+        let applied = SettingsSyncApply.lazyLibrarian(document: plan.document, config: .unset)
+        #expect(applied == LazyLibrarianLocalSettings(enabled: true, baseURL: "https://ll"))
+    }
+
+    @Test func newerLocalValueBeatsOlderRemote() {
+        let local = ll(baseURL: "https://new", baseURLAt: 20)
+        let remote = ll(baseURL: "https://old", baseURLAt: 10)
+        let merged = SettingsSyncMerge.merge(local: local, remote: remote)
+        #expect(merged.integrations.lazyLibrarian.baseURL?.value == "https://new")
+    }
+
+    @Test func newerRemoteValueBeatsOlderLocal() {
+        let local = ll(baseURL: "https://old", baseURLAt: 10)
+        let remote = ll(baseURL: "https://new", baseURLAt: 20)
+        let merged = SettingsSyncMerge.merge(local: local, remote: remote)
+        #expect(merged.integrations.lazyLibrarian.baseURL?.value == "https://new")
+    }
+
+    @Test func independentChangesBothSurvive() {
+        let phone = ll(baseURL: "https://from-phone", baseURLAt: 10)
+        let pad = ll(enabled: true, enabledAt: 12)
+        let merged = SettingsSyncMerge.merge(local: phone, remote: pad)
+        let reversed = SettingsSyncMerge.merge(local: pad, remote: phone)
+        #expect(merged == reversed)
+        #expect(merged.integrations.lazyLibrarian.baseURL?.value == "https://from-phone")
+        #expect(merged.integrations.lazyLibrarian.enabled?.value == true)
+    }
+
+    @Test func equalTimestampsPickTheSameValueOnBothDevices() {
+        let left = ll(baseURL: "https://a", baseURLAt: 10)
+        let right = ll(baseURL: "https://b", baseURLAt: 10)
+        #expect(
+            SettingsSyncMerge.merge(local: left, remote: right)
+                == SettingsSyncMerge.merge(local: right, remote: left)
+        )
+    }
+
+    @Test func editingOneSettingDoesNotRefreshTheOtherTimestamp() {
+        let existing = ll(enabled: true, enabledAt: 10, baseURL: "https://ll", baseURLAt: 10)
+        let edited = SettingsSyncMerge.applyLocalEdit(
+            existing,
+            enabled: true,
+            baseURL: "https://ll-2",
+            at: date(40),
+        )
+        #expect(edited.integrations.lazyLibrarian.enabled?.modifiedAt == date(10))
+        #expect(edited.integrations.lazyLibrarian.baseURL?.value == "https://ll-2")
+        #expect(edited.integrations.lazyLibrarian.baseURL?.modifiedAt == date(40))
+    }
+
+    @Test func offlineEditPersistsAndSyncsLater() throws {
+        let store = try journal()
+        let edited = try store.recordLazyLibrarianChange(
+            enabled: true,
+            baseURL: "https://offline",
+            at: date(30),
+            migrationModifiedAt: date(30),
+        )
+        #expect(store.needsSync)
+        let parked = SettingsSyncEngine.resolve(local: edited, remote: .unreachable)
+        #expect(parked.push == false)
+        #expect(parked.status == .offlineWillSyncLater)
+        #expect(parked.document.integrations.lazyLibrarian.baseURL?.value == "https://offline")
+
+        let later = SettingsSyncEngine.resolve(local: parked.document, remote: .empty)
+        #expect(later.push)
+        #expect(later.document.integrations.lazyLibrarian.baseURL?.value == "https://offline")
+        #expect(later.document.integrations.lazyLibrarian.enabled?.value == true)
+    }
+
+    @Test func malformedRemoteDoesNotWipeLocalSettings() {
+        let local = ll(enabled: true, enabledAt: 10, baseURL: "https://kept", baseURLAt: 10)
+        let plan = SettingsSyncEngine.resolve(local: local, remote: .malformed)
+        #expect(plan.document == local)
+        #expect(plan.push == false)
+        #expect(plan.status == .syncError)
+        let applied = SettingsSyncApply.lazyLibrarian(
+            document: plan.document,
+            config: LazyLibrarianLocalSettings(enabled: true, baseURL: "https://kept"),
+        )
+        #expect(applied.baseURL == "https://kept")
+        #expect(applied.enabled == true)
+    }
+
+    @Test func unsupportedSchemaDoesNotPushOverRemote() {
+        let local = ll(baseURL: "https://local", baseURLAt: 5)
+        let plan = SettingsSyncEngine.resolve(local: local, remote: .unsupportedSchema(9))
+        #expect(plan.document == local)
+        #expect(plan.push == false)
+        #expect(plan.status == .schemaMismatch(9))
+    }
+
+    @Test func corruptPayloadDoesNotDecodeAsEmpty() {
+        #expect(SettingsSyncCodec.inspect("{") == .malformed("json"))
+        #expect(SettingsSyncCodec.inspect("{\"schemaVersion\":9}") == .unsupportedSchema(9))
+        #expect(SettingsSyncCodec.inspect("") == .empty)
+    }
+
+    @Test func roundTripPreservesValuesAndDropsNothing() throws {
+        let document = ll(enabled: false, enabledAt: 15, baseURL: "https://ll", baseURLAt: 15)
+        let raw = try SettingsSyncCodec.encode(document)
+        guard case .document(let decoded) = SettingsSyncCodec.inspect(raw) else {
+            Issue.record("decode failed")
+            return
+        }
+        #expect(decoded == document)
+    }
+
+    @Test func credentialsAreNotSerialized() throws {
+        let apiKey = "ll-secret-api-key-should-not-appear"
+        let document = SettingsSyncMigration.initialDocument(
+            settings: LazyLibrarianLocalSettings(enabled: true, baseURL: "https://ll.example:5299"),
+            modifiedAt: date(10),
+        )
+        let raw = try SettingsSyncCodec.encode(document)
+        #expect(!raw.contains(apiKey))
+        let json = try JSONSerialization.jsonObject(with: Data(raw.utf8))
+        let keys = keyNames(in: json)
+        let forbidden = ["apiKey", "api_key", "password", "token", "secret", "authorization", "shelfarrAPIToken"]
+        for key in forbidden {
+            #expect(!keys.contains(key))
+        }
+        #expect(keys.contains("enabled"))
+        #expect(keys.contains("baseURL"))
+        #expect(!keys.contains("lazyLibrarianAPIKey"))
+    }
+
+    private func keyNames(in json: Any) -> Set<String> {
+        var names = Set<String>()
+        if let object = json as? [String: Any] {
+            for (key, value) in object {
+                names.insert(key)
+                names.formUnion(keyNames(in: value))
+            }
+        } else if let list = json as? [Any] {
+            for value in list {
+                names.formUnion(keyNames(in: value))
+            }
+        }
+        return names
+    }
+}

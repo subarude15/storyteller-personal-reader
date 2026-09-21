@@ -747,6 +747,7 @@ struct BookSourceEditorView: View {
 
         if success {
             await onSaved()
+            Task { await SettingsSyncCoordinator.shared.syncNow(reason: "storytellerConnected") }
             let route: StorytellerNetworkRoute? =
                 if let sourceID {
                     await BookServiceActor.shared.storytellerNetworkRoute(sourceID: sourceID)
