@@ -416,7 +416,8 @@ struct NASAcquisitionHandoffTests {
         #expect(deluge.torrentFilenames == ["deluge.torrent"])
         #expect(deluge.torrentFiledumps == [bytes.base64EncodedString()])
         #expect(deluge.torrentURLs.isEmpty)
-        #expect(deluge.locations == ["/volume1/media/books/audiobooks"])
+        #expect(deluge.locations == ["/volume1/data/torrents/incoming"])
+        #expect(jobs.jobs[0].destination == "/volume1/media/books/audiobooks")
         #expect(!ManualDownloadStaging.exists(staged))
     }
 
@@ -445,9 +446,48 @@ struct NASAcquisitionHandoffTests {
         )
         #expect(result.isSubmitted)
         #expect(deluge.magnets == ["magnet:?xt=urn:btih:abc"])
-        #expect(deluge.locations == ["/volume1/media/books/books"])
+        #expect(deluge.locations == ["/volume1/data/torrents/incoming"])
         #expect(jobs.jobs[0].backend == .deluge)
+        #expect(jobs.jobs[0].destination == "/volume1/media/books/books")
         #expect(jobs.jobs[0].status == .submitted)
+        #expect(jobs.jobs[0].delugeReachedFinalRouting != true)
+    }
+
+    @Test func failedDelugeMagnetSubmitWithBTIHUsesTorrentRetryNotMove() async {
+        let deluge = DelugeAuthFailCapture()
+        let jobs = RecordingManualDownloadJobStore()
+        var settings = synologySettings()
+        settings.torrentClient = .deluge
+        settings.delugeBaseURL = "http://deluge.example:8112"
+        let handler = NASAcquisitionHandler(
+            environment: StaticNASHandoffEnvironment(
+                context: NASHandoffContext(
+                    settings: settings,
+                    credentials: NASBackendCredentials(delugePassword: "wrong"),
+                )
+            ),
+            deluge: DelugeWebClient(transport: deluge),
+            jobs: jobs,
+        )
+        let magnet =
+            "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=The%20Hobbit"
+        let result = await handler.handle(
+            ManualAcquisitionCandidate(
+                sourceURL: URL(string: magnet)!,
+                detectedType: .magnet,
+                bookMetadata: ebook,
+            )
+        )
+        #expect(!result.isSuccess)
+        #expect(jobs.jobs.count == 1)
+        let job = jobs.jobs[0]
+        #expect(job.status == .failed)
+        #expect(job.backend == .deluge)
+        #expect(job.backendJobID == "0123456789abcdef0123456789abcdef01234567")
+        #expect(job.delugeReachedFinalRouting != true)
+        #expect(!job.canRetryRoutingNow)
+        #expect(job.canRetryTorrentNow)
+        #expect(job.retryAction == .retryTorrent)
     }
 
     @Test func torrentURLRoutesToDelugeAsSubmitted() async {
@@ -826,5 +866,26 @@ private final class DelugeCapture: DelugeTransport, @unchecked Sendable {
             default:
                 return DelugeHTTP(status: 200, body: Data(#"{"result":null,"error":null,"id":0}"#.utf8))
         }
+    }
+}
+
+/// Auth failure before any torrent is added — still leaves a magnet-derived backendJobID.
+private final class DelugeAuthFailCapture: DelugeTransport, @unchecked Sendable {
+    func send(
+        url _: URL,
+        method _: String,
+        body: Data,
+        cookie _: String?,
+        timeout _: TimeInterval,
+    ) async throws -> DelugeHTTP {
+        let payload = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+        let rpc = payload?["method"] as? String ?? ""
+        if rpc == "auth.login" {
+            return DelugeHTTP(
+                status: 200,
+                body: Data(#"{"result":false,"error":null,"id":1}"#.utf8),
+            )
+        }
+        return DelugeHTTP(status: 200, body: Data(#"{"result":null,"error":null,"id":0}"#.utf8))
     }
 }

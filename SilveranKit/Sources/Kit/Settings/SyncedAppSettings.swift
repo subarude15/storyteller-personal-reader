@@ -159,6 +159,8 @@ public struct SyncedAppSettings: Codable, Equatable, Sendable {
         public var synologyUsername: TimestampedSetting<String>?
         public var audiobookFolder: TimestampedSetting<String>?
         public var ebookFolder: TimestampedSetting<String>?
+        public var delugeIncomingFolder: TimestampedSetting<String>?
+        public var delugeCompletedFolder: TimestampedSetting<String>?
         public var startAutomatically: TimestampedSetting<Bool>?
         public var createTitleAuthorSubfolders: TimestampedSetting<Bool>?
 
@@ -171,6 +173,8 @@ public struct SyncedAppSettings: Codable, Equatable, Sendable {
             synologyUsername: TimestampedSetting<String>? = nil,
             audiobookFolder: TimestampedSetting<String>? = nil,
             ebookFolder: TimestampedSetting<String>? = nil,
+            delugeIncomingFolder: TimestampedSetting<String>? = nil,
+            delugeCompletedFolder: TimestampedSetting<String>? = nil,
             startAutomatically: TimestampedSetting<Bool>? = nil,
             createTitleAuthorSubfolders: TimestampedSetting<Bool>? = nil,
         ) {
@@ -182,6 +186,8 @@ public struct SyncedAppSettings: Codable, Equatable, Sendable {
             self.synologyUsername = synologyUsername
             self.audiobookFolder = audiobookFolder
             self.ebookFolder = ebookFolder
+            self.delugeIncomingFolder = delugeIncomingFolder
+            self.delugeCompletedFolder = delugeCompletedFolder
             self.startAutomatically = startAutomatically
             self.createTitleAuthorSubfolders = createTitleAuthorSubfolders
         }
@@ -310,6 +316,8 @@ public enum SettingsSyncMerge {
             synologyUsername: latest(local.synologyUsername, remote.synologyUsername),
             audiobookFolder: latest(local.audiobookFolder, remote.audiobookFolder),
             ebookFolder: latest(local.ebookFolder, remote.ebookFolder),
+            delugeIncomingFolder: latest(local.delugeIncomingFolder, remote.delugeIncomingFolder),
+            delugeCompletedFolder: latest(local.delugeCompletedFolder, remote.delugeCompletedFolder),
             startAutomatically: latest(local.startAutomatically, remote.startAutomatically),
             createTitleAuthorSubfolders: latest(
                 local.createTitleAuthorSubfolders,
@@ -381,6 +389,8 @@ public enum SettingsSyncMerge {
         stamp(&section.synologyUsername, settings.synologyUsername, at: stamped)
         stamp(&section.audiobookFolder, settings.audiobookFolder, at: stamped)
         stamp(&section.ebookFolder, settings.ebookFolder, at: stamped)
+        stamp(&section.delugeIncomingFolder, settings.delugeIncomingFolder, at: stamped)
+        stamp(&section.delugeCompletedFolder, settings.delugeCompletedFolder, at: stamped)
         stamp(&section.startAutomatically, settings.startAutomatically, at: stamped)
         stamp(&section.createTitleAuthorSubfolders, settings.createTitleAuthorSubfolders, at: stamped)
         updated.integrations.nasDownloads = section
@@ -429,6 +439,8 @@ public enum SettingsSyncMerge {
             || nas.synologyUsername != nil
             || nas.audiobookFolder != nil
             || nas.ebookFolder != nil
+            || nas.delugeIncomingFolder != nil
+            || nas.delugeCompletedFolder != nil
             || nas.startAutomatically != nil
             || nas.createTitleAuthorSubfolders != nil
     }
@@ -567,6 +579,8 @@ public enum SettingsSyncApply {
             synologyUsername: section.synologyUsername?.value ?? current.synologyUsername,
             audiobookFolder: section.audiobookFolder?.value ?? current.audiobookFolder,
             ebookFolder: section.ebookFolder?.value ?? current.ebookFolder,
+            delugeIncomingFolder: section.delugeIncomingFolder?.value ?? current.delugeIncomingFolder,
+            delugeCompletedFolder: section.delugeCompletedFolder?.value ?? current.delugeCompletedFolder,
             startAutomatically: section.startAutomatically?.value ?? current.startAutomatically,
             createTitleAuthorSubfolders:
                 section.createTitleAuthorSubfolders?.value ?? current.createTitleAuthorSubfolders,

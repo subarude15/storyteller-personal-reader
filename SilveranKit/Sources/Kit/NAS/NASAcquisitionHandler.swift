@@ -223,12 +223,13 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
 
     private func outcome(for job: ManualDownloadJob) -> ManualAcquisitionHandoffResult {
         switch job.status {
+            case .submitted, .queued, .downloading, .delugeFinishing, .readyToRoute, .routing,
+                .downloaded, .uploading, .unknown:
+                return .submitted(message: NASHandoffMessages.submitted(backend: job.backend))
             case .complete:
                 return .completed(message: NASHandoffMessages.uploaded())
             case .failed:
                 return .failed(message: job.lastError ?? NASHandoffError.downloadFailed.message)
-            case .submitted, .queued, .downloading, .downloaded, .uploading, .unknown:
-                return .submitted(message: NASHandoffMessages.submitted(backend: job.backend))
         }
     }
 
@@ -441,13 +442,15 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
                         throw NASHandoffError.unsupportedAcquisition
                 }
             case .deluge:
+                let staging = plan.context.settings.trimmedDelugeIncomingFolder
+                guard !staging.isEmpty else { throw NASHandoffError.emptyDestination }
                 switch candidate.transportKind {
                     case .magnet:
                         return try await deluge.addMagnet(
                             baseURL: settings.trimmedDelugeBaseURL,
                             password: credentials.delugePassword,
                             uri: candidate.sourceURL.absoluteString,
-                            downloadLocation: plan.destination,
+                            downloadLocation: staging,
                             start: start,
                         )
                     case .torrent:
@@ -457,7 +460,7 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
                                 password: credentials.delugePassword,
                                 fileURL: local,
                                 filename: candidate.filename ?? local.lastPathComponent,
-                                downloadLocation: plan.destination,
+                                downloadLocation: staging,
                                 start: start,
                             )
                         }
@@ -465,7 +468,7 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
                             baseURL: settings.trimmedDelugeBaseURL,
                             password: credentials.delugePassword,
                             url: candidate.sourceURL.absoluteString,
-                            downloadLocation: plan.destination,
+                            downloadLocation: staging,
                             start: start,
                         )
                     case .directHTTP:

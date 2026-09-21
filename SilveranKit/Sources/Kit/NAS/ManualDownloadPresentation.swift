@@ -37,7 +37,8 @@ public struct ManualDownloadBuckets: Equatable, Sendable {
                     failed.append(job)
                 case .complete:
                     recent.append(job)
-                case .submitted, .queued, .downloading, .downloaded, .uploading, .unknown:
+                case .submitted, .queued, .downloading, .delugeFinishing, .readyToRoute, .routing,
+                    .downloaded, .uploading, .unknown:
                     active.append(job)
             }
         }

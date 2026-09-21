@@ -34,7 +34,8 @@ public struct LiveDelugeTransport: DelugeTransport {
     }
 }
 
-/// Read-only Deluge WebUI JSON-RPC client (`/json`). Never mutates torrents.
+/// Deluge WebUI JSON-RPC client (`/json`). Adds magnets/torrents and moves storage;
+/// status listing stays read-only for request observability.
 public struct DelugeWebClient: Sendable {
     public var transport: any DelugeTransport
     public var timeout: TimeInterval
@@ -160,6 +161,42 @@ public struct DelugeWebClient: Sendable {
             throw DelugeClientError.rejected
         }
         return nil
+    }
+
+    /// Ask Deluge to relocate torrent storage. Prefer this over File Station moves
+    /// so Deluge keeps a consistent internal path.
+    public func moveStorage(
+        baseURL: String,
+        password: String,
+        torrentIDs: [String],
+        destination: String,
+    ) async throws {
+        let ids = torrentIDs.compactMap { TorrentHash.normalized($0) }.filter { !$0.isEmpty }
+        guard !ids.isEmpty else { throw DelugeClientError.rejected }
+        let path = destination.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else { throw DelugeClientError.rejected }
+        let session = try await authenticate(baseURL: baseURL, password: password)
+        let response = try await rpc(
+            endpoint: session.endpoint,
+            method: "core.move_storage",
+            params: [ids, path] as [Any],
+            cookie: session.cookie,
+            id: 12,
+        )
+        if response.error != nil {
+            throw DelugeClientError.rejected
+        }
+        if let ok = response.result as? Bool, !ok {
+            throw DelugeClientError.rejected
+        }
+        // Some Deluge builds return null on success.
+        if response.result == nil, response.error == nil {
+            return
+        }
+        if response.result is Bool || response.result == nil {
+            return
+        }
+        // Unexpected payload — treat as success if no error object.
     }
 
     // MARK: - Session

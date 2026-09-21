@@ -52,13 +52,36 @@ struct ManualDownloadStatusMappingTests {
             ManualDownloadStatusMapping.deluge(state: "Downloading", progress: 0.3, isFinished: false)
                 == .downloading
         )
+        // Finished with no save_path yet — wait for Deluge completed staging, never Complete.
         #expect(
             ManualDownloadStatusMapping.deluge(state: "Seeding", progress: 1, isFinished: true)
-                == .complete
+                == .delugeFinishing
         )
         #expect(
             ManualDownloadStatusMapping.deluge(state: "Queued", progress: 0, isFinished: false)
                 == .queued
+        )
+        #expect(
+            ManualDownloadStatusMapping.deluge(
+                state: "Seeding",
+                progress: 1,
+                isFinished: true,
+                savePath: NASDownloadSettingsSnapshot.defaultDelugeCompletedFolder,
+                incomingFolder: NASDownloadSettingsSnapshot.defaultDelugeIncomingFolder,
+                completedFolder: NASDownloadSettingsSnapshot.defaultDelugeCompletedFolder,
+                finalDestination: "/volume1/media/books/books",
+            ) == .readyToRoute
+        )
+        #expect(
+            ManualDownloadStatusMapping.deluge(
+                state: "Seeding",
+                progress: 1,
+                isFinished: true,
+                savePath: "/volume1/media/books/books",
+                incomingFolder: NASDownloadSettingsSnapshot.defaultDelugeIncomingFolder,
+                completedFolder: NASDownloadSettingsSnapshot.defaultDelugeCompletedFolder,
+                finalDestination: "/volume1/media/books/books",
+            ) == .complete
         )
     }
 
@@ -186,6 +209,39 @@ struct ManualDownloadHistoryTests {
         let job = sampleJob(backend: .qbittorrent, status: .failed)
         #expect(job.canRetryTorrentNow)
         #expect(!job.canRetryDownloadNow)
+        #expect(job.retryAction == .retryTorrent)
+    }
+
+    @Test func failedDelugeRoutingExposesRetryMove() {
+        var job = sampleJob(backend: .deluge, status: .failed, hash: "hashabc")
+        job.delugeReachedFinalRouting = true
+        #expect(job.canRetryRoutingNow)
+        #expect(!job.canRetryTorrentNow)
+        #expect(job.retryAction == .retryRouting)
+    }
+
+    @Test func failedDelugeSubmitWithMagnetHashUsesTorrentRetryNotMove() {
+        // makeJob derives backendJobID from magnet BTIH even when addMagnet fails.
+        let magnet =
+            "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Example"
+        let hash = TorrentHash.fromMagnet(magnet)
+        #expect(hash == "0123456789abcdef0123456789abcdef01234567")
+        let job = ManualDownloadJob(
+            title: "Example",
+            author: "",
+            sourceURL: magnet,
+            sourceHost: "magnet",
+            backend: .deluge,
+            mediaType: .ebook,
+            destination: "/volume1/media/books/books",
+            backendJobID: hash,
+            status: .failed,
+            lastError: "Deluge rejected the credentials.\nCheck the Deluge connection in Settings.",
+            delugeReachedFinalRouting: nil,
+        )
+        #expect(!job.hasReachedDelugeFinalRouting)
+        #expect(!job.canRetryRoutingNow)
+        #expect(job.canRetryTorrentNow)
         #expect(job.retryAction == .retryTorrent)
     }
 }
