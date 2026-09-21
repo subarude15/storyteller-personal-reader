@@ -252,6 +252,8 @@ struct NASBackendRoutingTests {
         let defaults = NASDownloadSettingsSnapshot()
         #expect(defaults.audiobookFolder == "/volume1/media/books/audiobooks")
         #expect(defaults.ebookFolder == "/volume1/media/books/books")
+        #expect(defaults.delugeIncomingFolder == "/volume1/data/torrents/incoming")
+        #expect(defaults.delugeCompletedFolder == "/volume1/data/torrents/completed")
         let epub = ManualAcquisitionCandidate(
             sourceURL: URL(string: "https://files.example/hobbit.epub")!,
             detectedType: .epub,

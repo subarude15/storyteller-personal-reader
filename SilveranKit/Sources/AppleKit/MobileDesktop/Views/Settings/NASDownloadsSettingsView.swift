@@ -147,8 +147,41 @@ struct NASDownloadsSettingsView: View {
                 Text("Deluge")
             } footer: {
                 Text(
-                    "Reuses the existing Deluge WebUI password from Settings. Used for magnet links and .torrent URLs when Deluge is selected."
+                    "Reuses the existing Deluge WebUI password from Settings. Magnets start in Incoming; after Deluge moves them to Completed, ink+amp routes to the eBook or Audiobook folder."
                 )
+            }
+
+            if snapshot.torrentClient == .deluge {
+                Section {
+                    TextField(
+                        "Incoming",
+                        text: delugeIncomingBinding,
+                        prompt: Text(NASDownloadSettingsSnapshot.defaultDelugeIncomingFolder),
+                    )
+                    .textContentType(.none)
+                    .autocorrectionDisabled()
+                    #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    #endif
+                    .onSubmit { persist() }
+                    TextField(
+                        "Completed",
+                        text: delugeCompletedBinding,
+                        prompt: Text(NASDownloadSettingsSnapshot.defaultDelugeCompletedFolder),
+                    )
+                    .textContentType(.none)
+                    .autocorrectionDisabled()
+                    #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    #endif
+                    .onSubmit { persist() }
+                } header: {
+                    Text("Deluge staging folders")
+                } footer: {
+                    Text(
+                        "ink+amp waits until Deluge reports a torrent in Completed before calling move_storage to the final library folder."
+                    )
+                }
             }
 
             Section {
@@ -290,6 +323,14 @@ struct NASDownloadsSettingsView: View {
                 Task { try? await SettingsActor.shared.updateConfig(delugeBaseURL: newValue) }
             },
         )
+    }
+
+    private var delugeIncomingBinding: Binding<String> {
+        Binding(get: { snapshot.delugeIncomingFolder }, set: { snapshot.delugeIncomingFolder = $0 })
+    }
+
+    private var delugeCompletedBinding: Binding<String> {
+        Binding(get: { snapshot.delugeCompletedFolder }, set: { snapshot.delugeCompletedFolder = $0 })
     }
 
     private var synologyURLBinding: Binding<String> {

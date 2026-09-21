@@ -52,13 +52,36 @@ struct ManualDownloadStatusMappingTests {
             ManualDownloadStatusMapping.deluge(state: "Downloading", progress: 0.3, isFinished: false)
                 == .downloading
         )
+        // Finished with no save_path yet — wait for Deluge completed staging, never Complete.
         #expect(
             ManualDownloadStatusMapping.deluge(state: "Seeding", progress: 1, isFinished: true)
-                == .complete
+                == .delugeFinishing
         )
         #expect(
             ManualDownloadStatusMapping.deluge(state: "Queued", progress: 0, isFinished: false)
                 == .queued
+        )
+        #expect(
+            ManualDownloadStatusMapping.deluge(
+                state: "Seeding",
+                progress: 1,
+                isFinished: true,
+                savePath: NASDownloadSettingsSnapshot.defaultDelugeCompletedFolder,
+                incomingFolder: NASDownloadSettingsSnapshot.defaultDelugeIncomingFolder,
+                completedFolder: NASDownloadSettingsSnapshot.defaultDelugeCompletedFolder,
+                finalDestination: "/volume1/media/books/books",
+            ) == .readyToRoute
+        )
+        #expect(
+            ManualDownloadStatusMapping.deluge(
+                state: "Seeding",
+                progress: 1,
+                isFinished: true,
+                savePath: "/volume1/media/books/books",
+                incomingFolder: NASDownloadSettingsSnapshot.defaultDelugeIncomingFolder,
+                completedFolder: NASDownloadSettingsSnapshot.defaultDelugeCompletedFolder,
+                finalDestination: "/volume1/media/books/books",
+            ) == .complete
         )
     }
 
@@ -187,6 +210,13 @@ struct ManualDownloadHistoryTests {
         #expect(job.canRetryTorrentNow)
         #expect(!job.canRetryDownloadNow)
         #expect(job.retryAction == .retryTorrent)
+    }
+
+    @Test func failedDelugeRoutingExposesRetryMove() {
+        let job = sampleJob(backend: .deluge, status: .failed, hash: "hashabc")
+        #expect(job.canRetryRoutingNow)
+        #expect(!job.canRetryTorrentNow)
+        #expect(job.retryAction == .retryRouting)
     }
 }
 

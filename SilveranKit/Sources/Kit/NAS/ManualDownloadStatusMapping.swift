@@ -52,26 +52,52 @@ public enum ManualDownloadStatusMapping {
     }
 
     public static func deluge(state: String, progress: Double, isFinished: Bool) -> ManualDownloadJobStatus {
-        let value = state.lowercased()
-        if value.contains("error") {
-            return .unknown
+        deluge(
+            state: state,
+            progress: progress,
+            isFinished: isFinished,
+            savePath: nil,
+            incomingFolder: NASDownloadSettingsSnapshot.defaultDelugeIncomingFolder,
+            completedFolder: NASDownloadSettingsSnapshot.defaultDelugeCompletedFolder,
+            finalDestination: "",
+        )
+    }
+
+    /// Path-aware Deluge mapping for the manual staging → library workflow.
+    public static func deluge(
+        state: String,
+        progress: Double,
+        isFinished: Bool,
+        savePath: String?,
+        incomingFolder: String,
+        completedFolder: String,
+        finalDestination: String,
+    ) -> ManualDownloadJobStatus {
+        let snapshot = DelugeTorrentSnapshot(
+            id: "map",
+            name: "map",
+            state: state,
+            progress: progress,
+            savePath: savePath,
+            isFinished: isFinished,
+        )
+        switch DelugeManualRouting.evaluate(
+            snapshot: snapshot,
+            finalDestination: finalDestination,
+            incomingFolder: incomingFolder,
+            completedFolder: completedFolder,
+        ) {
+            case .alreadyAtDestination:
+                return .complete
+            case .requestMove:
+                return .readyToRoute
+            case .waitForDelugeCompleted(let status):
+                return status
+            case .observe(let status):
+                return status
+            case .torrentMissing:
+                return .unknown
         }
-        if isFinished || value.contains("seeding") {
-            return progress >= 0.999 || isFinished ? .complete : .downloading
-        }
-        if value.contains("queued") {
-            return .queued
-        }
-        if value.contains("downloading") || value.contains("checking") || value.contains("moving") {
-            return .downloading
-        }
-        if value.contains("paused") {
-            return progress >= 0.999 ? .complete : .downloading
-        }
-        if progress > 0, progress < 0.999 {
-            return .downloading
-        }
-        return .unknown
     }
 
     public static func apply(
@@ -89,7 +115,9 @@ public enum ManualDownloadStatusMapping {
             updated.byteCount = completed
         }
         updated.lastStatusAt = date
-        updated.lastError = nil
+        if live.status != .failed {
+            updated.lastError = nil
+        }
         return updated
     }
 
@@ -97,6 +125,30 @@ public enum ManualDownloadStatusMapping {
         if job.status == .failed || job.status == .complete { return job }
         var updated = job
         updated.status = .unknown
+        updated.lastStatusAt = date
+        return updated
+    }
+
+    public static func markFailed(
+        _ job: ManualDownloadJob,
+        message: String,
+        at date: Date = Date(),
+    ) -> ManualDownloadJob {
+        var updated = job
+        updated.status = .failed
+        updated.lastError = message
+        updated.lastStatusAt = date
+        return updated
+    }
+
+    public static func markComplete(
+        _ job: ManualDownloadJob,
+        at date: Date = Date(),
+    ) -> ManualDownloadJob {
+        var updated = job
+        updated.status = .complete
+        updated.progress = 1
+        updated.lastError = nil
         updated.lastStatusAt = date
         return updated
     }

@@ -416,7 +416,8 @@ struct NASAcquisitionHandoffTests {
         #expect(deluge.torrentFilenames == ["deluge.torrent"])
         #expect(deluge.torrentFiledumps == [bytes.base64EncodedString()])
         #expect(deluge.torrentURLs.isEmpty)
-        #expect(deluge.locations == ["/volume1/media/books/audiobooks"])
+        #expect(deluge.locations == ["/volume1/data/torrents/incoming"])
+        #expect(jobs.jobs[0].destination == "/volume1/media/books/audiobooks")
         #expect(!ManualDownloadStaging.exists(staged))
     }
 
@@ -445,8 +446,9 @@ struct NASAcquisitionHandoffTests {
         )
         #expect(result.isSubmitted)
         #expect(deluge.magnets == ["magnet:?xt=urn:btih:abc"])
-        #expect(deluge.locations == ["/volume1/media/books/books"])
+        #expect(deluge.locations == ["/volume1/data/torrents/incoming"])
         #expect(jobs.jobs[0].backend == .deluge)
+        #expect(jobs.jobs[0].destination == "/volume1/media/books/books")
         #expect(jobs.jobs[0].status == .submitted)
     }
 

@@ -46,6 +46,10 @@ public enum NASDownloadBackend: String, Codable, Sendable {
 public struct NASDownloadSettingsSnapshot: Equatable, Sendable {
     public static let defaultAudiobookFolder = "/volume1/media/books/audiobooks"
     public static let defaultEbookFolder = "/volume1/media/books/books"
+    /// Where Deluge starts downloading before it relocates completed torrents.
+    public static let defaultDelugeIncomingFolder = "/volume1/data/torrents/incoming"
+    /// Deluge’s completed/staging folder. ink+amp only routes after this path.
+    public static let defaultDelugeCompletedFolder = "/volume1/data/torrents/completed"
 
     public var torrentClient: NASTorrentClient
     public var qbittorrentBaseURL: String
@@ -55,6 +59,8 @@ public struct NASDownloadSettingsSnapshot: Equatable, Sendable {
     public var synologyUsername: String
     public var audiobookFolder: String
     public var ebookFolder: String
+    public var delugeIncomingFolder: String
+    public var delugeCompletedFolder: String
     public var startAutomatically: Bool
     public var createTitleAuthorSubfolders: Bool
 
@@ -67,6 +73,8 @@ public struct NASDownloadSettingsSnapshot: Equatable, Sendable {
         synologyUsername: String = "",
         audiobookFolder: String = NASDownloadSettingsSnapshot.defaultAudiobookFolder,
         ebookFolder: String = NASDownloadSettingsSnapshot.defaultEbookFolder,
+        delugeIncomingFolder: String = NASDownloadSettingsSnapshot.defaultDelugeIncomingFolder,
+        delugeCompletedFolder: String = NASDownloadSettingsSnapshot.defaultDelugeCompletedFolder,
         startAutomatically: Bool = true,
         createTitleAuthorSubfolders: Bool = false,
     ) {
@@ -78,6 +86,8 @@ public struct NASDownloadSettingsSnapshot: Equatable, Sendable {
         self.synologyUsername = synologyUsername
         self.audiobookFolder = audiobookFolder
         self.ebookFolder = ebookFolder
+        self.delugeIncomingFolder = delugeIncomingFolder
+        self.delugeCompletedFolder = delugeCompletedFolder
         self.startAutomatically = startAutomatically
         self.createTitleAuthorSubfolders = createTitleAuthorSubfolders
     }
@@ -114,6 +124,16 @@ public struct NASDownloadSettingsSnapshot: Equatable, Sendable {
 
     public var trimmedEbookFolder: String {
         ebookFolder.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public var trimmedDelugeIncomingFolder: String {
+        let trimmed = delugeIncomingFolder.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? Self.defaultDelugeIncomingFolder : trimmed
+    }
+
+    public var trimmedDelugeCompletedFolder: String {
+        let trimmed = delugeCompletedFolder.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? Self.defaultDelugeCompletedFolder : trimmed
     }
 
     public var isSynologyConfigured: Bool {

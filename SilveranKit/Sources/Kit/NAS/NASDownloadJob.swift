@@ -14,12 +14,19 @@ public enum ManualDownloadRetryAction: String, Sendable, Equatable {
     case retryUpload
     case retryDownload
     case retryTorrent
+    case retryRouting
 }
 
 public enum ManualDownloadJobStatus: String, Codable, Sendable, CaseIterable {
     case submitted
     case queued
     case downloading
+    /// Deluge finished downloading but is still relocating incoming → completed.
+    case delugeFinishing
+    /// At Deluge completed staging; ink+amp may call move_storage.
+    case readyToRoute
+    /// ink+amp asked Deluge to move storage into the final library folder.
+    case routing
     case downloaded
     case uploading
     case complete
@@ -31,6 +38,9 @@ public enum ManualDownloadJobStatus: String, Codable, Sendable, CaseIterable {
             case .submitted: "Submitted"
             case .queued: "Queued"
             case .downloading: "Downloading"
+            case .delugeFinishing: "Deluge finishing"
+            case .readyToRoute: "Ready to route"
+            case .routing: "Moving to library"
             case .downloaded: "Downloaded"
             case .uploading: "Uploading"
             case .complete: "Complete"
@@ -42,14 +52,19 @@ public enum ManualDownloadJobStatus: String, Codable, Sendable, CaseIterable {
     public var canRetryUpload: Bool {
         switch self {
             case .downloaded, .failed: true
-            case .submitted, .queued, .downloading, .uploading, .complete, .unknown: false
+            case .submitted, .queued, .downloading, .delugeFinishing, .readyToRoute, .routing,
+                .uploading, .complete, .unknown:
+                false
         }
     }
 
     public var isActive: Bool {
         switch self {
-            case .queued, .submitted, .downloading, .downloaded, .uploading, .unknown: true
-            case .complete, .failed: false
+            case .queued, .submitted, .downloading, .delugeFinishing, .readyToRoute, .routing,
+                .downloaded, .uploading, .unknown:
+                true
+            case .complete, .failed:
+                false
         }
     }
 }
@@ -128,11 +143,21 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
     public var canRetryTorrentNow: Bool {
         (backend == .qbittorrent || backend == .deluge)
             && status == .failed
+            && !canRetryRoutingNow
             && (sourceURL != nil || hasStagedFile)
+    }
+
+    /// Failed after Deluge accepted the torrent — retry `move_storage`, do not re-add.
+    public var canRetryRoutingNow: Bool {
+        backend == .deluge
+            && status == .failed
+            && !(backendJobID ?? "").isEmpty
+            && !destination.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     public var retryAction: ManualDownloadRetryAction {
         if canRetryUploadNow { return .retryUpload }
+        if canRetryRoutingNow { return .retryRouting }
         if canRetryTorrentNow { return .retryTorrent }
         if canRetryDownloadNow { return .retryDownload }
         return .none
