@@ -2894,6 +2894,170 @@ public actor StorytellerActor {
         UserDefaults.standard.string(forKey: Self.inkampPodcastSyncCollectionUUIDKey)
     }
 
+    // MARK: - ink+amp settings sync (private collection blob)
+
+    public enum InkampSettingsFetchResult: Sendable {
+        case unavailable(reason: String)
+        case empty
+        case malformed(detail: String)
+        case unsupportedSchema(Int)
+        case document(SyncedAppSettings)
+    }
+
+    public enum InkampSettingsPushResult: Sendable, Equatable {
+        case success
+        case failure(reason: String)
+    }
+
+    private static let inkampSettingsCollectionUUIDKey = "punkRally.settingsSync.collectionUUID.v1"
+
+    /// Account settings from a private Storyteller collection (same auth as podcast sync).
+    public func fetchInkampSettingsDocument() async -> InkampSettingsFetchResult {
+        switch await readInkampPrivateBlob(
+            name: SyncedAppSettings.collectionName,
+            uuidDefaultsKey: Self.inkampSettingsCollectionUUIDKey,
+        ) {
+            case .unavailable(let reason):
+                return .unavailable(reason: reason)
+            case .absent:
+                return .empty
+            case .payload(let raw):
+                switch SettingsSyncCodec.inspect(raw) {
+                    case .empty:
+                        return .empty
+                    case .document(let document):
+                        return .document(document)
+                    case .malformed(let detail):
+                        debugLog("[SettingsSync] failure remote malformed \(detail)")
+                        return .malformed(detail: detail)
+                    case .unsupportedSchema(let version):
+                        debugLog(
+                            "[SettingsSync] schema mismatch remote=\(version) supported=\(SyncedAppSettings.schemaVersion)"
+                        )
+                        return .unsupportedSchema(version)
+                }
+        }
+    }
+
+    public func pushInkampSettingsDocument(_ document: SyncedAppSettings) async -> InkampSettingsPushResult {
+        let encoded: String
+        do {
+            encoded = try SettingsSyncCodec.encode(document)
+        } catch {
+            debugLog("[SettingsSync] failure encode")
+            return .failure(reason: "encode failed")
+        }
+        return await pushInkampPrivateBlob(
+            name: SyncedAppSettings.collectionName,
+            uuidDefaultsKey: Self.inkampSettingsCollectionUUIDKey,
+            description: encoded,
+        )
+    }
+
+    private enum InkampPrivateBlobRead: Sendable {
+        case unavailable(reason: String)
+        case absent
+        case payload(String)
+    }
+
+    /// Shared read path for private description blobs. Settings is the first caller;
+    /// podcast/stats keep their existing methods.
+    private func readInkampPrivateBlob(name: String, uuidDefaultsKey: String) async -> InkampPrivateBlobRead {
+        guard await ensureAuthentication() != nil else {
+            return .unavailable(reason: "auth failed")
+        }
+
+        let collections = await fetchCollections()
+        if let collections {
+            if let collection = collections.first(where: { $0.name == name }) {
+                rememberPrivateBlobUUID(collection.uuid, key: uuidDefaultsKey)
+                return Self.privateBlobPayload(from: collection)
+            }
+        } else {
+            if let remembered = UserDefaults.standard.string(forKey: uuidDefaultsKey),
+                let collection = await fetchCollection(uuid: remembered)
+            {
+                return Self.privateBlobPayload(from: collection)
+            }
+            return .unavailable(reason: "fetchCollections failed")
+        }
+
+        if let remembered = UserDefaults.standard.string(forKey: uuidDefaultsKey),
+            let collection = await fetchCollection(uuid: remembered)
+        {
+            return Self.privateBlobPayload(from: collection)
+        }
+        return .absent
+    }
+
+    private static func privateBlobPayload(from collection: StorytellerCollection) -> InkampPrivateBlobRead {
+        guard let description = collection.description?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !description.isEmpty
+        else {
+            return .absent
+        }
+        return .payload(description)
+    }
+
+    private func pushInkampPrivateBlob(
+        name: String,
+        uuidDefaultsKey: String,
+        description: String,
+    ) async -> InkampSettingsPushResult {
+        guard await ensureAuthentication() != nil else {
+            return .failure(reason: "auth failed")
+        }
+
+        if let existing = await privateBlobCollection(name: name, uuidDefaultsKey: uuidDefaultsKey) {
+            rememberPrivateBlobUUID(existing.uuid, key: uuidDefaultsKey)
+            let updated = await updateCollection(
+                uuid: existing.uuid,
+                payload: StorytellerCollectionUpdatePayload(
+                    description: description,
+                    isPublic: false,
+                ),
+            )
+            if updated != nil {
+                return .success
+            }
+            return .failure(reason: "updateCollection failed uuid=\(existing.uuid)")
+        }
+
+        let created = await createCollection(
+            StorytellerCollectionCreatePayload(
+                name: name,
+                description: description,
+                isPublic: false,
+                users: nil,
+            ),
+        )
+        if let created {
+            rememberPrivateBlobUUID(created.uuid, key: uuidDefaultsKey)
+            return .success
+        }
+        return .failure(reason: "createCollection failed name=\(name)")
+    }
+
+    private func privateBlobCollection(name: String, uuidDefaultsKey: String) async -> StorytellerCollection? {
+        if let collections = await fetchCollections(),
+            let found = collections.first(where: { $0.name == name })
+        {
+            rememberPrivateBlobUUID(found.uuid, key: uuidDefaultsKey)
+            return found
+        }
+        if let uuid = UserDefaults.standard.string(forKey: uuidDefaultsKey),
+            let collection = await fetchCollection(uuid: uuid)
+        {
+            return collection
+        }
+        return nil
+    }
+
+    private func rememberPrivateBlobUUID(_ uuid: String, key: String) {
+        guard uuid != "pending", !uuid.isEmpty else { return }
+        UserDefaults.standard.set(uuid, forKey: key)
+    }
+
     // MARK: - ink+amp book format links (private collection blob)
     //
     // Storyteller's POST /api/v2/books/merge deletes the other book record and relocates

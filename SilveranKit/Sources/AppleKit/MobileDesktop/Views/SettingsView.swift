@@ -86,6 +86,12 @@ public struct SettingsView: View {
             }
         }
         .task(loadConfig)
+        .onAppear {
+            Task { await SettingsSyncCoordinator.shared.syncNow(reason: "settings") }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .inkampSettingsSyncStatusDidChange)) { _ in
+            Task { await reloadConfig(force: true) }
+        }
         .onChange(of: config) { _, newValue in persistConfig(newValue: newValue) }
         .onChange(of: reloader.trigger) { _, _ in
             Task { await reloadConfig() }
@@ -153,10 +159,12 @@ public struct SettingsView: View {
         }
     }
 
-    private func reloadConfig() async {
+    private func reloadConfig(force: Bool = false) async {
         guard persistTask == nil else { return }
-        let timeSinceLastPersist = Date().timeIntervalSince(lastPersistTime)
-        guard timeSinceLastPersist > 1.0 else { return }
+        if !force {
+            let timeSinceLastPersist = Date().timeIntervalSince(lastPersistTime)
+            guard timeSinceLastPersist > 1.0 else { return }
+        }
         let loaded = await SettingsActor.shared.config
         await MainActor.run {
             isReloadingFromActor = true
@@ -282,6 +290,18 @@ private struct LazyLibrarianSettingsSection: View {
     @State private var status: LazyLibrarianConnection?
     @State private var keyError: String?
     @State private var checking = false
+    @State private var syncStatus: SettingsSyncStatus = .offlineWillSyncLater
+
+    private var integrationConfigured: Bool {
+        enabled || !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var credentialNote: String {
+        if syncStatus == .synced {
+            return "Integration settings synced. API credential is stored securely on this device."
+        }
+        return "API credential is stored securely on this device."
+    }
 
     var body: some View {
         Section {
@@ -333,15 +353,39 @@ private struct LazyLibrarianSettingsSection: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            Button {
+                guard syncStatus != .syncing else { return }
+                Task { await SettingsSyncCoordinator.shared.syncNow(reason: "settingsRetry") }
+            } label: {
+                Text(syncStatus.label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .disabled(syncStatus == .syncing)
+            .accessibilityHint("Retries settings sync")
         } header: {
             Text("LazyLibrarian")
         } footer: {
-            Text(
-                "The API key is stored in the keychain and is not shown again after it is saved. Test Connection does not change the LazyLibrarian library."
-            )
+            VStack(alignment: .leading, spacing: 6) {
+                Text(
+                    "The API key is stored in the keychain and is not shown again after it is saved. Test Connection does not change the LazyLibrarian library."
+                )
+                if integrationConfigured {
+                    Text(credentialNote)
+                }
+            }
         }
         .task {
             keySaved = await AuthenticationActor.shared.hasLazyLibrarianAPIKey()
+            let current = await MainActor.run { SettingsSyncCoordinator.shared.status }
+            syncStatus = current
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .inkampSettingsSyncStatusDidChange)) { _ in
+            Task { @MainActor in
+                syncStatus = SettingsSyncCoordinator.shared.status
+            }
         }
         .onDisappear {
             let draft = keyDraft
