@@ -117,9 +117,9 @@ enum PodcastVideoInterfaceOrientationMapping {
     }
 
     /// Prefer the key window scene’s interface orientation over raw device orientation.
-    static func current(from scenes: Set<UIScene> = UIApplication.shared.connectedScenes)
-        -> PodcastVideoInterfaceOrientation
-    {
+    @MainActor
+    static func current() -> PodcastVideoInterfaceOrientation {
+        let scenes = UIApplication.shared.connectedScenes
         let windowScene = scenes
             .compactMap { $0 as? UIWindowScene }
             .first { $0.activationState == .foregroundActive }
