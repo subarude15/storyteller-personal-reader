@@ -20,7 +20,7 @@ class EntryPointStub {
             )
         )
         #elseif os(iOS)
-        // ink+amp: inject the five-tab shell (Home · Library · Shelf · Podcasts · Stats)
+        // ink+amp: inject the five-tab shell (Home · Library · Shelf · Podcasts · More)
         // as the iOS root. Silveran's app shell (background sync, keychain, reader,
         // now-playing) runs normally underneath; AppLaunchContext.iosRootView replaces
         // just the root library view.

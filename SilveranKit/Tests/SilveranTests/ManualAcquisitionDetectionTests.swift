@@ -126,6 +126,37 @@ struct ManualAcquisitionDetectionTests {
         #expect(candidate.transportKind == .torrent)
     }
 
+    @Test func torrentMIMEWithoutExtensionIsStillTorrent() throws {
+        let url = try #require(URL(string: "https://cdn.example.com/download?id=12"))
+        let candidate = try #require(
+            ManualAcquisitionDetection.candidate(
+                url: url,
+                mimeType: "application/x-bittorrent",
+                bookMetadata: book,
+            )
+        )
+        #expect(candidate.detectedType == .torrent)
+        #expect(candidate.transportKind == .torrent)
+    }
+
+    @Test func contentDispositionTorrentFilenameIsDetected() throws {
+        let url = try #require(URL(string: "https://cdn.example.com/get"))
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: 200,
+            httpVersion: "HTTP/1.1",
+            headerFields: [
+                "Content-Type": "application/octet-stream",
+                "Content-Disposition": "attachment; filename=\"The.Hobbit.Audiobook.torrent\"",
+            ],
+        )!
+        let candidate = try #require(
+            ManualAcquisitionDetection.candidate(url: url, response: response, bookMetadata: book)
+        )
+        #expect(candidate.detectedType == .torrent)
+        #expect(candidate.filename == "The.Hobbit.Audiobook.torrent")
+    }
+
     @Test func downloadSuggestedFilenameIsUsed() throws {
         let url = try #require(URL(string: "https://cdn.example.com/dl"))
         let response = HTTPURLResponse(

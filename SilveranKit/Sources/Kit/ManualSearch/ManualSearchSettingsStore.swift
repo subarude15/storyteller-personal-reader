@@ -75,7 +75,7 @@ public final class ManualSearchSettingsStore {
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
             searchURLTemplate: searchURLTemplate.trimmingCharacters(in: .whitespacesAndNewlines),
             supportedMediaTypes: supportedMediaTypes.isEmpty ? ManualSearchMediaType.allCases : supportedMediaTypes,
-            symbolName: symbolName,
+            symbolName: ManualSearchSymbolName.normalize(symbolName),
             sortOrder: snapshot.providers.count,
             isBuiltIn: false,
         )
@@ -95,6 +95,7 @@ public final class ManualSearchSettingsStore {
         var providers = snapshot.providers
         guard let index = providers.firstIndex(where: { $0.id == provider.id }) else { return .malformedTemplate }
         var updated = provider
+        updated.symbolName = ManualSearchSymbolName.normalize(provider.symbolName)
         if providers[index].isBuiltIn {
             updated.isBuiltIn = true
             updated.id = providers[index].id

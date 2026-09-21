@@ -2,9 +2,9 @@
 //  PunkRallyApp.swift
 //  ink+amp
 //
-//  Five-tab root (Home · Library · Shelf · Podcasts · Stats) per UX-SHELL.md.
+//  Five-tab root (Home · Library · Shelf · Podcasts · More) per UX-SHELL.md.
 //  Wraps Silveran's existing library/player content where available; keeps
-//  podcasts and stats as independent local rails.
+//  podcasts local and surfaces Stats/Downloads/Settings from More.
 //
 //  Library/Shelf surfaces are hosted by SilveranAppleKit's public ink+amp
 //  facade (PunkRallyShellSupport.swift): Shelf is downloads-only; Library is a
@@ -24,17 +24,15 @@ import SilveranKit
 public struct PunkRallyTabView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
-    @State private var selectedTab: Tab = .home
-    @State private var showDownloads = false
+    @State private var selectedTab: InkAmpPrimaryTab = .home
+    @State private var morePath = NavigationPath()
+    @State private var showSettings = false
     @State private var shellToastMessage: String?
     @State private var shellToastTask: Task<Void, Never>?
     @State private var podcastPresenter = PodcastPlayerPresenter.shared
+    @State private var moreTabBadge = 0
 
     public init() {}
-
-    enum Tab: Hashable {
-        case home, library, shelf, podcasts, stats
-    }
 
     private var chrome: PunkRallyTheme.Chrome {
         PunkRallyTheme.Chrome(scheme: colorScheme)
@@ -90,53 +88,47 @@ public struct PunkRallyTabView: View {
                 HomeTabView()
                     .punkRallyMiniPlayerInset()
                     .tabItem {
-                        Label("Home", systemImage: "house.fill")
+                        Label(InkAmpPrimaryTab.home.title, systemImage: InkAmpPrimaryTab.home.systemImage)
                     }
-                    .tag(Tab.home)
+                    .tag(InkAmpPrimaryTab.home)
 
                 LibraryTabView()
                     .punkRallyMiniPlayerInset()
                     .tabItem {
-                        Label("Library", systemImage: "books.vertical.fill")
+                        Label(InkAmpPrimaryTab.library.title, systemImage: InkAmpPrimaryTab.library.systemImage)
                     }
-                    .tag(Tab.library)
+                    .tag(InkAmpPrimaryTab.library)
 
                 ShelfTabView()
                     .punkRallyMiniPlayerInset()
                     .tabItem {
-                        Label("Shelf", systemImage: "arrow.down.circle.fill")
+                        Label(InkAmpPrimaryTab.shelf.title, systemImage: InkAmpPrimaryTab.shelf.systemImage)
                     }
-                    .tag(Tab.shelf)
+                    .tag(InkAmpPrimaryTab.shelf)
 
                 PodcastsHomeView()
                     .punkRallyMiniPlayerInset()
                     .tabItem {
-                        Label("Podcasts", systemImage: "mic.fill")
+                        Label(InkAmpPrimaryTab.podcasts.title, systemImage: InkAmpPrimaryTab.podcasts.systemImage)
                     }
-                    .tag(Tab.podcasts)
+                    .tag(InkAmpPrimaryTab.podcasts)
 
-                StatsView()
+                MoreTabView(path: $morePath, showSettings: $showSettings)
                     .punkRallyMiniPlayerInset()
                     .tabItem {
-                        Label("Stats", systemImage: "chart.bar.fill")
+                        Label(InkAmpPrimaryTab.more.title, systemImage: InkAmpPrimaryTab.more.systemImage)
                     }
-                    .tag(Tab.stats)
+                    .tag(InkAmpPrimaryTab.more)
+                    .badge(moreTabBadge > 0 ? moreTabBadge : 0)
             }
             .tint(PunkRallyTheme.Accent.primary)
             .preferredColorScheme(nil) // follow system appearance
-            .sheet(isPresented: $showDownloads) {
-                NavigationStack {
-                    DownloadsView()
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Button("Done") { showDownloads = false }
-                            }
-                        }
-                }
-                .punkRallyMiniPlayerInset()
-            }
+            .punkRallySheets(showSettings: $showSettings)
             .onReceive(NotificationCenter.default.publisher(for: .inkampShowManualDownloads)) { _ in
-                showDownloads = true
+                openMoreDestination(.downloads)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .inkampManualDownloadJobsDidChange)) { _ in
+                Task { await reloadMoreBadge() }
             }
             .onAppear {
                 SessionTrackerWiring.install()
@@ -145,6 +137,8 @@ public struct PunkRallyTabView: View {
                 #if os(iOS) || os(macOS)
                 RequestNotificationTapHandler.install()
                 #endif
+                Task { await reloadMoreBadge() }
+                openPendingRequestActivityIfNeeded()
             }
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowShelf)) { _ in
                 selectedTab = .shelf
@@ -153,10 +147,12 @@ public struct PunkRallyTabView: View {
                 selectedTab = .library
             }
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowStats)) { _ in
-                selectedTab = .stats
+                openMoreDestination(.stats)
             }
-            .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowRequestActivity)) { _ in
-                selectedTab = .home
+            .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowRequestActivity)) { note in
+                InkAmpMoreRequestActivityDeepLink.ensurePending(from: note.userInfo)
+                selectedTab = .more
+                openPendingRequestActivityIfNeeded()
             }
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyOpenContinue)) { note in
                 selectedTab = .home
@@ -225,6 +221,26 @@ public struct PunkRallyTabView: View {
                 }
             }
         }
+    }
+
+    private func openMoreDestination(_ destination: InkAmpMoreDestination) {
+        selectedTab = .more
+        morePath = NavigationPath()
+        morePath.append(InkAmpMoreNavRoute.from(destination))
+    }
+
+    /// Consume a pending Request Activity deep link into More → Requests & Activity.
+    /// Safe to call repeatedly: consume() returns nil after the first take.
+    private func openPendingRequestActivityIfNeeded() {
+        guard let route = InkAmpMoreRequestActivityDeepLink.consumePendingRoute() else { return }
+        selectedTab = .more
+        morePath = NavigationPath()
+        morePath.append(route)
+    }
+
+    private func reloadMoreBadge() async {
+        let jobs = await ManualDownloadJobStore.shared.allJobs()
+        moreTabBadge = ManualDownloadBuckets.partition(jobs).attentionCount
     }
 
     /// Builds an episode from the `punkRallyPlayPodcastEpisode` userInfo posted
@@ -444,24 +460,15 @@ private struct HomeTabView: View {
             .background(chrome.bg)
             .navigationTitle("ink+amp")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 12) {
-                        if mediaViewModel?.hasServerConnectionIssue == true {
-                            Button {
-                                showOfflineSheet = true
-                            } label: {
-                                Image(systemName: mediaViewModel?.connectionIssueIcon ?? "exclamationmark.triangle")
-                                    .foregroundStyle(.red)
-                            }
-                            .accessibilityLabel("Server connection issue")
-                        }
-                        DownloadsToolbarButton()
+                if mediaViewModel?.hasServerConnectionIssue == true {
+                    ToolbarItem(placement: .topBarTrailing) {
                         Button {
-                            showSettings = true
+                            showOfflineSheet = true
                         } label: {
-                            Label("Settings", systemImage: "gearshape")
+                            Image(systemName: mediaViewModel?.connectionIssueIcon ?? "exclamationmark.triangle")
+                                .foregroundStyle(.red)
                         }
-                        .accessibilityLabel("Settings")
+                        .accessibilityLabel("Server connection issue")
                     }
                 }
             }

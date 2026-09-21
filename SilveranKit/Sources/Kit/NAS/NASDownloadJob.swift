@@ -128,7 +128,7 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
     public var canRetryTorrentNow: Bool {
         (backend == .qbittorrent || backend == .deluge)
             && status == .failed
-            && sourceURL != nil
+            && (sourceURL != nil || hasStagedFile)
     }
 
     public var retryAction: ManualDownloadRetryAction {

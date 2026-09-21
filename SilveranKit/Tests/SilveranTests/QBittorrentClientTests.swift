@@ -12,7 +12,7 @@ import Testing
 struct QBittorrentClientTests {
     @Test func loginSuccessThenAddsMagnetWithSavePath() async throws {
         let transport = QBittorrentScript()
-        transport.handler = { url, _, body, cookie in
+        transport.handler = { url, _, body, _, cookie in
             if url.path.hasSuffix("/auth/login") {
                 let form = String(data: body ?? Data(), encoding: .utf8) ?? ""
                 #expect(form.contains("username=admin"))
@@ -52,7 +52,7 @@ struct QBittorrentClientTests {
 
     @Test func torrentURLIsSubmittedWithoutDownloadingBytes() async throws {
         let transport = QBittorrentScript()
-        transport.handler = { url, _, body, _ in
+        transport.handler = { url, _, body, _, _ in
             if url.path.hasSuffix("/auth/login") {
                 return QBittorrentHTTP(
                     status: 200,
@@ -76,9 +76,45 @@ struct QBittorrentClientTests {
         )
     }
 
+    @Test func torrentFileIsSubmittedAsMultipart() async throws {
+        let torrentURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("inkamp-qb-test-\(UUID().uuidString).torrent")
+        let payload = Data("d8:announce13:http://a.come")
+        try payload.write(to: torrentURL)
+        defer { try? FileManager.default.removeItem(at: torrentURL) }
+
+        let transport = QBittorrentScript()
+        transport.handler = { url, _, body, contentType, _ in
+            if url.path.hasSuffix("/auth/login") {
+                return QBittorrentHTTP(status: 200, body: Data("Ok.".utf8), setCookie: "SID=x")
+            }
+            #expect(url.path.hasSuffix("/torrents/add"))
+            #expect(contentType?.contains("multipart/form-data") == true)
+            let text = String(data: body ?? Data(), encoding: .utf8) ?? ""
+            #expect(text.contains("name=\"torrents\""))
+            #expect(text.contains("filename=\"book.torrent\""))
+            #expect(text.contains("name=\"savepath\""))
+            #expect(text.contains("/media/audiobooks"))
+            #expect(text.contains("name=\"paused\""))
+            #expect(text.contains("false"))
+            #expect(text.contains("d8:announce13:http://a.come"))
+            return QBittorrentHTTP(status: 200, body: Data("Ok.".utf8))
+        }
+        let client = QBittorrentClient(transport: transport)
+        _ = try await client.addTorrentFile(
+            baseURL: "http://qb.example:8080",
+            username: "admin",
+            password: "secret",
+            fileURL: torrentURL,
+            filename: "book.torrent",
+            savePath: "/media/audiobooks",
+            start: true,
+        )
+    }
+
     @Test func badPasswordMapsToAuthenticationFailed() async {
         let transport = QBittorrentScript()
-        transport.handler = { _, _, _, _ in
+        transport.handler = { _, _, _, _, _ in
             QBittorrentHTTP(status: 200, body: Data("Fails.".utf8))
         }
         let client = QBittorrentClient(transport: transport)
@@ -114,7 +150,7 @@ struct QBittorrentClientTests {
 
     @Test func torrentInfoReturnsProgressAndState() async throws {
         let transport = QBittorrentScript()
-        transport.handler = { url, method, _, _ in
+        transport.handler = { url, method, _, _, _ in
             if url.path.hasSuffix("/auth/login") {
                 return QBittorrentHTTP(status: 200, body: Data("Ok.".utf8), setCookie: "SID=x")
             }
@@ -144,7 +180,7 @@ struct QBittorrentClientTests {
 
     @Test func rejectedAddSurfacesHandoffError() async {
         let transport = QBittorrentScript()
-        transport.handler = { url, _, _, _ in
+        transport.handler = { url, _, _, _, _ in
             if url.path.hasSuffix("/auth/login") {
                 return QBittorrentHTTP(status: 200, body: Data("Ok.".utf8), setCookie: "SID=x")
             }
@@ -172,18 +208,18 @@ struct QBittorrentClientTests {
 
 private final class QBittorrentScript: QBittorrentTransport, @unchecked Sendable {
     var throwError: URLError?
-    var handler: ((URL, String, Data?, String?) -> QBittorrentHTTP)?
+    var handler: ((URL, String, Data?, String?, String?) -> QBittorrentHTTP)?
 
     func send(
         url: URL,
         method: String,
         body: Data?,
-        contentType _: String?,
+        contentType: String?,
         cookie: String?,
         timeout _: TimeInterval,
     ) async throws -> QBittorrentHTTP {
         if let throwError { throw throwError }
-        return handler?(url, method, body, cookie)
+        return handler?(url, method, body, contentType, cookie)
             ?? QBittorrentHTTP(status: 200, body: Data("Ok.".utf8), setCookie: "SID=x")
     }
 }

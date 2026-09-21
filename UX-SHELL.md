@@ -26,7 +26,7 @@ A **private, phone-first reading app** that feels like Silveran’s sync brain (
 | **Library** | Browse full catalogue, filter by kind / series | Storyteller `GET /api/v2/books` (or `/api/books`) |
 | **Shelf** | Downloaded / offline bookshelf | Local + Silveran download model |
 | **Podcasts** | Shows + episodes | **Enve-only** (not Storyteller) |
-| **Stats** | Reading/listening time, streaks, finished | Local aggregates (Enve-inspired); Storyteller may not expose rich stats |
+| **More** | Downloads, Settings, Stats, Requests & Activity, Services | Hub for secondary destinations |
 
 **Overlays / stacks (not tabs):**
 - Auth stack: No server → Login → (optional) device pairing  
@@ -63,7 +63,7 @@ A **private, phone-first reading app** that feels like Silveran’s sync brain (
 1. Greeting + sync chip (`Synced` / `Syncing…` / `Offline · N on shelf`)  
 2. **Continue** hero card (cover, title, kind badge, progress ring, mode toggle if readaloud)  
 3. Horizontal **Up next** (3–5)  
-4. Compact stats strip: Today · This week · Streak (taps → Stats tab)  
+4. Compact stats strip: Today · This week · Streak (taps → More → Stats)  
 5. Mini-bar if audio/readaloud active (pinned above tab bar)
 
 **D. Library (Browse)**  

@@ -479,7 +479,8 @@ public struct PunkRallyShelfView: View {
                 }
                 .iOSLibraryToolbar(
                     showSettings: $showSettings,
-                    showOfflineSheet: $showOfflineSheet
+                    showOfflineSheet: $showOfflineSheet,
+                    includeDownloadsAndSettingsShortcuts: false
                 )
                 .searchable(
                     text: $searchText,
@@ -727,7 +728,8 @@ public struct PunkRallyLibraryView: View {
             }
             .iOSLibraryToolbar(
                 showSettings: $showSettings,
-                showOfflineSheet: $showOfflineSheet
+                showOfflineSheet: $showOfflineSheet,
+                includeDownloadsAndSettingsShortcuts: false
             )
             .toolbar {
                 if segment == .library {

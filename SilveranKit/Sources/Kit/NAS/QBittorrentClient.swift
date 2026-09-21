@@ -2,8 +2,9 @@
 //  QBittorrentClient.swift
 //  SilveranKit
 //
-//  Minimal qBittorrent WebAPI v2 client. The phone never downloads the
-//  torrent body; magnets and torrent URLs are handed to the NAS.
+//  Minimal qBittorrent WebAPI v2 client. Magnets and torrent URLs are handed
+//  to the NAS. When WebKit already captured a `.torrent` file, that tiny
+//  metadata file is submitted as multipart instead of re-fetching the URL.
 //
 //  SPDX-License-Identifier: AGPL-3.0-only
 
@@ -306,6 +307,66 @@ public struct QBittorrentClient: Sendable {
         )
     }
 
+    public func addTorrentFile(
+        baseURL: String,
+        username: String,
+        password: String,
+        fileURL: URL,
+        filename: String? = nil,
+        savePath: String,
+        start: Bool,
+    ) async throws -> QBittorrentAddResult {
+        let cookie = try await login(baseURL: baseURL, username: username, password: password)
+        guard let endpoint = Self.apiURL(from: baseURL, path: "torrents/add") else {
+            throw QBittorrentClientError.invalidURL
+        }
+        let name = ManualDownloadStaging.safeFilename(
+            filename ?? fileURL.lastPathComponent,
+            fallback: "download.torrent",
+        )
+        let multipart: (fileURL: URL, contentType: String)
+        do {
+            multipart = try Self.multipartTorrent(
+                localFile: fileURL,
+                filename: name,
+                savePath: savePath,
+                paused: !start,
+            )
+        } catch {
+            throw QBittorrentClientError.invalidResponse
+        }
+        defer { try? FileManager.default.removeItem(at: multipart.fileURL) }
+        let body: Data
+        do {
+            body = try Data(contentsOf: multipart.fileURL)
+        } catch {
+            throw QBittorrentClientError.invalidResponse
+        }
+        let http: QBittorrentHTTP
+        do {
+            http = try await transport.send(
+                url: endpoint,
+                method: "POST",
+                body: body,
+                contentType: multipart.contentType,
+                cookie: cookie,
+                timeout: timeout,
+            )
+        } catch let error as URLError {
+            throw Self.clientError(from: error)
+        }
+        try Self.throwIfHTTPFailed(http)
+        let text = String(data: http.body, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if text.caseInsensitiveCompare("Fails.") == .orderedSame {
+            throw QBittorrentClientError.rejected
+        }
+        if !text.isEmpty, !Self.isOK(text) {
+            throw QBittorrentClientError.rejected
+        }
+        return QBittorrentAddResult()
+    }
+
     private func addURLs(
         baseURL: String,
         username: String,
@@ -415,6 +476,45 @@ public struct QBittorrentClient: Sendable {
             "\(encode(key))=\(encode(value))"
         }
         return Data(pairs.joined(separator: "&").utf8)
+    }
+
+    /// Builds a file-backed multipart body for `torrents/add` (field name `torrents`).
+    public static func multipartTorrent(
+        localFile: URL,
+        filename: String,
+        savePath: String,
+        paused: Bool,
+    ) throws -> (fileURL: URL, contentType: String) {
+        let boundary = "InkampBoundary\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+        let temp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("inkamp-qbittorrent-\(UUID().uuidString).multipart")
+        FileManager.default.createFile(atPath: temp.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: temp)
+        func write(_ text: String) throws {
+            try handle.write(contentsOf: Data(text.utf8))
+        }
+        func field(_ name: String, _ value: String) throws {
+            try write("--\(boundary)\r\n")
+            try write("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n")
+            try write("\(value)\r\n")
+        }
+        try field("savepath", savePath)
+        try field("paused", paused ? "true" : "false")
+        try write("--\(boundary)\r\n")
+        try write(
+            "Content-Disposition: form-data; name=\"torrents\"; filename=\"\(filename)\"\r\n"
+        )
+        try write("Content-Type: application/x-bittorrent\r\n\r\n")
+        let input = try FileHandle(forReadingFrom: localFile)
+        while true {
+            let chunk = try input.read(upToCount: 64 * 1024) ?? Data()
+            if chunk.isEmpty { break }
+            try handle.write(contentsOf: chunk)
+        }
+        try input.close()
+        try write("\r\n--\(boundary)--\r\n")
+        try handle.close()
+        return (temp, "multipart/form-data; boundary=\(boundary)")
     }
 
     private static func isOK(_ body: String) -> Bool {

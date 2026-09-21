@@ -126,12 +126,16 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
         if let current = await jobs.job(id: job.id), current.status != .failed {
             return outcome(for: current)
         }
-        guard let source = job.sourceURL, let url = URL(string: source) else {
-            return .failed(message: NASHandoffError.downloadFailed.message)
-        }
-        let candidate = ManualAcquisitionCandidate(
-            sourceURL: url,
-            detectedType: TorrentHash.retryDetectedType(sourceURL: source, mediaType: job.mediaType),
+        let sourceString = job.sourceURL
+        let sourceURL = sourceString.flatMap(URL.init(string:))
+            ?? job.stagedFileURL
+            ?? URL(string: "https://invalid.local/missing")!
+        var candidate = ManualAcquisitionCandidate(
+            sourceURL: sourceURL,
+            detectedType: TorrentHash.retryDetectedType(
+                sourceURL: sourceString ?? job.stagedFileURL?.absoluteString ?? "",
+                mediaType: job.mediaType,
+            ),
             filename: job.filename,
             sourceHost: job.sourceHost,
             bookMetadata: ManualSearchBookContext(
@@ -140,6 +144,18 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
                 requestedMediaType: job.mediaType == .audiobook ? .audiobook : .ebook,
             ),
         )
+        if let staged = job.stagedFileURL,
+            ManualDownloadStaging.exists(staged),
+            job.backend == .qbittorrent || job.backend == .deluge
+        {
+            candidate.detectedType = .torrent
+            candidate.localTorrentFileURL = staged
+            if candidate.filename == nil || candidate.filename?.isEmpty == true {
+                candidate.filename = staged.lastPathComponent
+            }
+        } else if sourceString == nil {
+            return .failed(message: NASHandoffError.downloadFailed.message)
+        }
         return await acquire(candidate, replacing: job)
     }
 
@@ -223,6 +239,9 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
     ) async -> ManualAcquisitionHandoffResult {
         do {
             let jobID = try await submitToTorrentClient(candidate, plan: plan)
+            if let staged = candidate.localTorrentFileURL {
+                ManualDownloadStaging.remove(staged)
+            }
             await jobs.record(
                 makeJob(
                     candidate,
@@ -230,6 +249,7 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
                     status: .submitted,
                     backendJobID: jobID,
                     replacing: replacing,
+                    keepStagedTorrent: false,
                 )
             )
             return .submitted(message: NASHandoffMessages.submitted(backend: plan.backend))
@@ -335,6 +355,7 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
                 status: .failed,
                 lastError: error.message,
                 replacing: replacing,
+                keepStagedTorrent: true,
             )
         )
         return .failed(message: error.message)
@@ -347,17 +368,25 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
         backendJobID: String? = nil,
         lastError: String? = nil,
         replacing: ManualDownloadJob? = nil,
+        keepStagedTorrent: Bool = false,
     ) -> ManualDownloadJob {
-        ManualDownloadJob(
+        let stagedPath: String?
+        if keepStagedTorrent, let url = candidate.localTorrentFileURL, ManualDownloadStaging.exists(url) {
+            stagedPath = url.path
+        } else {
+            stagedPath = nil
+        }
+        return ManualDownloadJob(
             id: replacing?.id ?? UUID().uuidString,
             title: candidate.bookMetadata.title,
             author: candidate.bookMetadata.authorDisplay,
             sourceURL: candidate.sourceURL.absoluteString,
             sourceHost: candidate.displayHost,
-            filename: candidate.filename,
+            filename: candidate.filename ?? candidate.localTorrentFileURL?.lastPathComponent,
             backend: plan.backend,
             mediaType: plan.media,
             destination: plan.destination,
+            stagedFilePath: stagedPath,
             submittedAt: replacing?.submittedAt ?? Date(),
             backendJobID: TorrentHash.normalized(backendJobID)
                 ?? TorrentHash.fromMagnet(candidate.sourceURL.absoluteString),
@@ -389,6 +418,17 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
                         return TorrentHash.normalized(added.jobID)
                             ?? TorrentHash.fromMagnet(candidate.sourceURL.absoluteString)
                     case .torrent:
+                        if let local = candidate.localTorrentFileURL, ManualDownloadStaging.exists(local) {
+                            return try await qbittorrent.addTorrentFile(
+                                baseURL: settings.trimmedQBittorrentBaseURL,
+                                username: settings.qbittorrentUsername,
+                                password: credentials.qbittorrentPassword,
+                                fileURL: local,
+                                filename: candidate.filename ?? local.lastPathComponent,
+                                savePath: plan.destination,
+                                start: start,
+                            ).jobID
+                        }
                         return try await qbittorrent.addTorrentURL(
                             baseURL: settings.trimmedQBittorrentBaseURL,
                             username: settings.qbittorrentUsername,
@@ -411,6 +451,16 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
                             start: start,
                         )
                     case .torrent:
+                        if let local = candidate.localTorrentFileURL, ManualDownloadStaging.exists(local) {
+                            return try await deluge.addTorrentFile(
+                                baseURL: settings.trimmedDelugeBaseURL,
+                                password: credentials.delugePassword,
+                                fileURL: local,
+                                filename: candidate.filename ?? local.lastPathComponent,
+                                downloadLocation: plan.destination,
+                                start: start,
+                            )
+                        }
                         return try await deluge.addTorrentURL(
                             baseURL: settings.trimmedDelugeBaseURL,
                             password: credentials.delugePassword,

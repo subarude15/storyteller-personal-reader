@@ -112,6 +112,27 @@ struct ManualSearchProviderTests {
             isBuiltIn: false,
         )
         #expect(ManualSearchProviderValidation.validateForSave(bad) == .unsupportedScheme)
+        let nameless = ManualSearchProvider(
+            id: "x",
+            name: "",
+            searchURLTemplate: "https://example.com/{query}",
+            sortOrder: 0,
+            isBuiltIn: false,
+        )
+        #expect(ManualSearchProviderValidation.validateForSave(nameless) == .emptyName)
+    }
+
+    @Test func builtInResetRestoresCatalogTemplate() {
+        var providers = ManualSearchCatalog.builtIn
+        providers[0].searchURLTemplate = "https://example.com/custom?q={query}"
+        providers[0].enabled = false
+        providers[0].name = "Renamed"
+        let resolved = ManualSearchCatalog.resolve(synced: providers)
+        // resolve overlays user edits onto catalog base fields for built-ins
+        #expect(resolved.first { $0.id == "open-library" }?.searchURLTemplate.contains("example.com") == true)
+        let catalog = ManualSearchCatalog.builtIn(id: "open-library")
+        #expect(catalog?.searchURLTemplate == "https://openlibrary.org/search?q={query}")
+        #expect(catalog?.symbolName == "books.vertical")
     }
 
     @Test func newerProviderListWinsPerField() {

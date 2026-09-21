@@ -257,7 +257,167 @@ struct NASAcquisitionHandoffTests {
         #expect(download.callCount == 0)
         #expect(upload.destinations.isEmpty)
         #expect(qb.addedURLs == ["https://files.example/hobbit.torrent"])
+        #expect(qb.addedTorrentFilenames.isEmpty)
         #expect(qb.savePaths == ["/volume1/media/books/books"])
+    }
+
+    @Test func stagedAudiobookTorrentSubmitsFileNotURLAndDeletesOnSuccess() async throws {
+        let qb = QBittorrentCapture()
+        let download = FileDownloadCapture(contents: Data("nope".utf8))
+        let upload = UploadCapture()
+        let jobs = RecordingManualDownloadJobStore()
+        let staged = try ManualDownloadStaging.prepareTorrent(
+            suggestedFilename: "some-book.torrent",
+            jobID: "staged-audio",
+        )
+        try Data("d8:announce").write(to: staged)
+        #expect(ManualDownloadStaging.exists(staged))
+        let handler = NASAcquisitionHandler(
+            environment: StaticNASHandoffEnvironment(
+                context: NASHandoffContext(
+                    settings: synologySettings(),
+                    credentials: NASBackendCredentials(qbittorrentPassword: "secret"),
+                )
+            ),
+            qbittorrent: QBittorrentClient(transport: qb),
+            downloader: ManualFileDownloader(transport: download),
+            uploaderFactory: { _ in upload },
+            jobs: jobs,
+        )
+        let result = await handler.handle(
+            ManualAcquisitionCandidate(
+                sourceURL: URL(string: "https://tracker.example/one-time/dl")!,
+                detectedType: .torrent,
+                filename: "some-book.torrent",
+                bookMetadata: audiobook,
+                localTorrentFileURL: staged,
+            )
+        )
+        #expect(result.isSubmitted)
+        #expect(download.callCount == 0)
+        #expect(upload.destinations.isEmpty)
+        #expect(qb.addedURLs.isEmpty)
+        #expect(qb.addedTorrentFilenames == ["some-book.torrent"])
+        #expect(qb.savePaths == ["/volume1/media/books/audiobooks"])
+        #expect(qb.lastContentType?.contains("multipart/form-data") == true)
+        #expect(!ManualDownloadStaging.exists(staged))
+        #expect(jobs.jobs[0].status == .submitted)
+        #expect(jobs.jobs[0].hasStagedFile == false)
+        #expect(jobs.jobs[0].destination == "/volume1/media/books/audiobooks")
+    }
+
+    @Test func stagedEbookTorrentRoutesToEbookFolder() async throws {
+        let qb = QBittorrentCapture()
+        let staged = try ManualDownloadStaging.prepareTorrent(
+            suggestedFilename: "ebook.torrent",
+            jobID: "staged-ebook",
+        )
+        try Data("d8:announce").write(to: staged)
+        let handler = NASAcquisitionHandler(
+            environment: StaticNASHandoffEnvironment(
+                context: NASHandoffContext(
+                    settings: synologySettings(),
+                    credentials: NASBackendCredentials(qbittorrentPassword: "secret"),
+                )
+            ),
+            qbittorrent: QBittorrentClient(transport: qb),
+        )
+        _ = await handler.handle(
+            ManualAcquisitionCandidate(
+                sourceURL: URL(string: "https://tracker.example/ebook")!,
+                detectedType: .torrent,
+                bookMetadata: ebook,
+                localTorrentFileURL: staged,
+            )
+        )
+        #expect(qb.savePaths == ["/volume1/media/books/books"])
+        #expect(qb.addedTorrentFilenames == ["ebook.torrent"])
+    }
+
+    @Test func failedStagedTorrentKeepsFileForRetryWithoutRedownload() async throws {
+        let qb = QBittorrentCapture()
+        qb.rejectAdds = true
+        let jobs = RecordingManualDownloadJobStore()
+        let staged = try ManualDownloadStaging.prepareTorrent(
+            suggestedFilename: "retry-me.torrent",
+            jobID: "staged-retry",
+        )
+        let payload = Data("d8:announce13:http://a.com")
+        try payload.write(to: staged)
+        let handler = NASAcquisitionHandler(
+            environment: StaticNASHandoffEnvironment(
+                context: NASHandoffContext(
+                    settings: synologySettings(),
+                    credentials: NASBackendCredentials(qbittorrentPassword: "secret"),
+                )
+            ),
+            qbittorrent: QBittorrentClient(transport: qb),
+            jobs: jobs,
+        )
+        let failed = await handler.handle(
+            ManualAcquisitionCandidate(
+                sourceURL: URL(string: "https://tracker.example/once")!,
+                detectedType: .torrent,
+                filename: "retry-me.torrent",
+                bookMetadata: audiobook,
+                localTorrentFileURL: staged,
+            )
+        )
+        #expect(failed.isFailed)
+        #expect(ManualDownloadStaging.exists(staged))
+        #expect(jobs.jobs[0].hasStagedFile)
+        #expect(jobs.jobs[0].retryAction == .retryTorrent)
+
+        qb.rejectAdds = false
+        qb.addedTorrentFilenames = []
+        let retried = await handler.retryDownload(job: jobs.jobs[0])
+        #expect(retried.isSubmitted)
+        #expect(qb.addedTorrentFilenames == ["retry-me.torrent"])
+        #expect(qb.addedURLs.isEmpty)
+        #expect(!ManualDownloadStaging.exists(staged))
+        #expect(jobs.jobs[0].status == .submitted)
+        #expect(!jobs.jobs[0].hasStagedFile)
+    }
+
+    @Test func stagedTorrentNeverRoutesThroughSynologyUpload() async throws {
+        let download = FileDownloadCapture(contents: Data("nope".utf8))
+        let upload = UploadCapture()
+        let deluge = DelugeCapture()
+        var settings = synologySettings()
+        settings.torrentClient = .deluge
+        settings.delugeBaseURL = "http://deluge.example:8112"
+        let staged = try ManualDownloadStaging.prepareTorrent(
+            suggestedFilename: "deluge.torrent",
+            jobID: "staged-deluge",
+        )
+        let bytes = Data("d8:announce")
+        try bytes.write(to: staged)
+        let handler = NASAcquisitionHandler(
+            environment: StaticNASHandoffEnvironment(
+                context: NASHandoffContext(
+                    settings: settings,
+                    credentials: NASBackendCredentials(delugePassword: "secret"),
+                )
+            ),
+            deluge: DelugeWebClient(transport: deluge),
+            downloader: ManualFileDownloader(transport: download),
+            uploaderFactory: { _ in upload },
+        )
+        _ = await handler.handle(
+            ManualAcquisitionCandidate(
+                sourceURL: URL(string: "https://tracker.example/deluge")!,
+                detectedType: .torrent,
+                bookMetadata: audiobook,
+                localTorrentFileURL: staged,
+            )
+        )
+        #expect(download.callCount == 0)
+        #expect(upload.destinations.isEmpty)
+        #expect(deluge.torrentFilenames == ["deluge.torrent"])
+        #expect(deluge.torrentFiledumps == [bytes.base64EncodedString()])
+        #expect(deluge.torrentURLs.isEmpty)
+        #expect(deluge.locations == ["/volume1/media/books/audiobooks"])
+        #expect(!ManualDownloadStaging.exists(staged))
     }
 
     @Test func magnetRoutesToDelugeWithEbookDestination() async {
@@ -490,26 +650,39 @@ struct NASAcquisitionHandoffTests {
 
 private final class QBittorrentCapture: QBittorrentTransport, @unchecked Sendable {
     var addedURLs: [String] = []
+    var addedTorrentFilenames: [String] = []
     var savePaths: [String] = []
     var rejectAdds = false
+    var lastContentType: String?
 
     func send(
         url: URL,
         method _: String,
         body: Data?,
-        contentType _: String?,
+        contentType: String?,
         cookie _: String?,
         timeout _: TimeInterval,
     ) async throws -> QBittorrentHTTP {
         if url.path.hasSuffix("/auth/login") {
             return QBittorrentHTTP(status: 200, body: Data("Ok.".utf8), setCookie: "SID=x")
         }
-        let form = String(data: body ?? Data(), encoding: .utf8) ?? ""
-        if let urls = value(named: "urls", in: form) {
-            addedURLs.append(urls.removingPercentEncoding ?? urls)
-        }
-        if let path = value(named: "savepath", in: form) {
-            savePaths.append(path.removingPercentEncoding ?? path)
+        lastContentType = contentType
+        if let contentType, contentType.lowercased().hasPrefix("multipart/form-data") {
+            let text = String(data: body ?? Data(), encoding: .utf8) ?? ""
+            if let name = multipartFilename(in: text) {
+                addedTorrentFilenames.append(name)
+            }
+            if let path = multipartField("savepath", in: text) {
+                savePaths.append(path)
+            }
+        } else {
+            let form = String(data: body ?? Data(), encoding: .utf8) ?? ""
+            if let urls = value(named: "urls", in: form) {
+                addedURLs.append(urls.removingPercentEncoding ?? urls)
+            }
+            if let path = value(named: "savepath", in: form) {
+                savePaths.append(path.removingPercentEncoding ?? path)
+            }
         }
         if rejectAdds, url.path.hasSuffix("/torrents/add") {
             return QBittorrentHTTP(status: 200, body: Data("Fails.".utf8))
@@ -523,6 +696,31 @@ private final class QBittorrentCapture: QBittorrentTransport, @unchecked Sendabl
             if parts.first == key { return parts.count > 1 ? parts[1] : "" }
         }
         return nil
+    }
+
+    private func multipartFilename(in body: String) -> String? {
+        guard let range = body.range(of: "filename=\"") else { return nil }
+        let rest = body[range.upperBound...]
+        guard let end = rest.firstIndex(of: "\"") else { return nil }
+        return String(rest[..<end])
+    }
+
+    private func multipartField(_ name: String, in body: String) -> String? {
+        let marker = "name=\"\(name)\""
+        guard let range = body.range(of: marker) else { return nil }
+        var rest = body[range.upperBound...]
+        if let headerEnd = rest.range(of: "\r\n\r\n") {
+            rest = rest[headerEnd.upperBound...]
+        } else if let headerEnd = rest.range(of: "\n\n") {
+            rest = rest[headerEnd.upperBound...]
+        }
+        if let boundary = rest.range(of: "\r\n--") {
+            return String(rest[..<boundary.lowerBound])
+        }
+        if let boundary = rest.range(of: "\n--") {
+            return String(rest[..<boundary.lowerBound])
+        }
+        return String(rest)
     }
 }
 
@@ -580,6 +778,9 @@ private final class UploadCapture: NASFileUploading, @unchecked Sendable {
 
 private final class DelugeCapture: DelugeTransport, @unchecked Sendable {
     var magnets: [String] = []
+    var torrentURLs: [String] = []
+    var torrentFilenames: [String] = []
+    var torrentFiledumps: [String] = []
     var locations: [String] = []
 
     func send(
@@ -600,10 +801,20 @@ private final class DelugeCapture: DelugeTransport, @unchecked Sendable {
                 )
             case "web.connected":
                 return DelugeHTTP(status: 200, body: Data(#"{"result":true,"error":null,"id":2}"#.utf8))
-            case "core.add_torrent_magnet", "core.add_torrent_url":
+            case "core.add_torrent_magnet", "core.add_torrent_url", "core.add_torrent_file":
                 let params = payload?["params"] as? [Any]
-                if let magnet = params?[0] as? String { magnets.append(magnet) }
-                if let options = params?[1] as? [String: Any],
+                if rpc == "core.add_torrent_magnet", let magnet = params?[0] as? String {
+                    magnets.append(magnet)
+                }
+                if rpc == "core.add_torrent_url", let torrentURL = params?[0] as? String {
+                    torrentURLs.append(torrentURL)
+                }
+                if rpc == "core.add_torrent_file" {
+                    if let name = params?[0] as? String { torrentFilenames.append(name) }
+                    if let dump = params?[1] as? String { torrentFiledumps.append(dump) }
+                }
+                let optionsIndex = rpc == "core.add_torrent_file" ? 2 : 1
+                if let options = params?[optionsIndex] as? [String: Any],
                     let location = options["download_location"] as? String
                 {
                     locations.append(location)

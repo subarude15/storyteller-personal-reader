@@ -184,6 +184,11 @@ struct ManualAcquisitionConfirmSheet: View {
                 }
                 Section {
                     LabeledContent("Type", value: preview.mediaKind?.label ?? "Unknown")
+                    if candidate.detectedType == .torrent || candidate.detectedType == .magnet {
+                        LabeledContent("Torrent", value: candidate.displayFilename)
+                    } else {
+                        LabeledContent("File", value: candidate.displayFilename)
+                    }
                     if preview.backend == .synology {
                         LabeledContent("Method", value: preview.backendLabel)
                     } else {
@@ -191,7 +196,6 @@ struct ManualAcquisitionConfirmSheet: View {
                     }
                     LabeledContent("Destination", value: preview.destination.isEmpty ? "—" : preview.destination)
                     LabeledContent("Source", value: candidate.displayHost)
-                    LabeledContent("File", value: candidate.displayFilename)
                 } footer: {
                     if let note = preview.methodNote {
                         Text(note)
@@ -234,9 +238,24 @@ struct ManualAcquisitionConfirmSheet: View {
                     }
                     .disabled(sending || !preview.canSubmit)
                     .accessibilityIdentifier("manual-search-send-to-nas")
-                    Button("Continue in Browser", action: onContinue)
-                    Button("Open Externally", action: onOpenExternally)
-                    Button("Cancel", role: .cancel, action: onCancel)
+                    Button("Continue in Browser") {
+                        if sendError == nil {
+                            candidate.discardStagedTorrentFile()
+                        }
+                        onContinue()
+                    }
+                    Button("Open Externally") {
+                        if sendError == nil {
+                            candidate.discardStagedTorrentFile()
+                        }
+                        onOpenExternally()
+                    }
+                    Button("Cancel", role: .cancel) {
+                        if sendError == nil {
+                            candidate.discardStagedTorrentFile()
+                        }
+                        onCancel()
+                    }
                 }
             }
             .navigationTitle("Send to NAS")
@@ -280,7 +299,7 @@ struct ManualAcquisitionConfirmSheet: View {
 
 extension ManualAcquisitionCandidate: Identifiable {
     public var id: String {
-        "\(sourceURL.absoluteString)|\(detectedType.rawValue)|\(filename ?? "")"
+        "\(sourceURL.absoluteString)|\(detectedType.rawValue)|\(filename ?? "")|\(localTorrentFileURL?.path ?? "")"
     }
 }
 
@@ -459,6 +478,13 @@ private struct ManualSearchWebViewRepresentable: ManualSearchPlatformViewReprese
 final class ManualSearchBrowserCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
     let controller: ManualSearchBrowserController
 
+    private struct PendingTorrentDownload {
+        var candidate: ManualAcquisitionCandidate
+        var destination: URL
+    }
+
+    private var pendingTorrent: PendingTorrentDownload?
+
     init(controller: ManualSearchBrowserController) {
         self.controller = controller
     }
@@ -487,6 +513,11 @@ final class ManualSearchBrowserCoordinator: NSObject, WKNavigationDelegate, WKUI
             bookMetadata: controller.book,
             providerID: controller.providerID,
         ) {
+            // Torrents: let WKDownload finish so we capture the real file bytes.
+            // Magnets never reach here. Other media still cancel after metadata.
+            if candidate.detectedType == .torrent {
+                return .download
+            }
             controller.handleCandidate(candidate)
             return .download
         }
@@ -555,6 +586,9 @@ final class ManualSearchBrowserCoordinator: NSObject, WKNavigationDelegate, WKUI
                 providerID: controller.providerID,
             )
         {
+            if candidate.detectedType == .torrent {
+                return stageTorrentDownload(candidate: candidate, suggestedFilename: suggestedFilename)
+            }
             controller.handleCandidate(candidate)
         }
         _ = await download.cancel()
@@ -562,8 +596,39 @@ final class ManualSearchBrowserCoordinator: NSObject, WKNavigationDelegate, WKUI
             .appendingPathComponent("inkamp-unused-\(UUID().uuidString)")
     }
 
-    func downloadDidFinish(_ download: WKDownload) {}
+    func downloadDidFinish(_ download: WKDownload) {
+        guard let pending = pendingTorrent else { return }
+        pendingTorrent = nil
+        var candidate = pending.candidate
+        candidate.localTorrentFileURL = pending.destination
+        candidate.filename = pending.destination.lastPathComponent
+        controller.handleCandidate(candidate)
+    }
 
-    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {}
+    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        discardPendingTorrent()
+    }
+
+    private func stageTorrentDownload(
+        candidate: ManualAcquisitionCandidate,
+        suggestedFilename: String,
+    ) -> URL? {
+        discardPendingTorrent()
+        let name = suggestedFilename.isEmpty ? candidate.displayFilename : suggestedFilename
+        do {
+            let destination = try ManualDownloadStaging.prepareTorrent(suggestedFilename: name)
+            pendingTorrent = PendingTorrentDownload(candidate: candidate, destination: destination)
+            return destination
+        } catch {
+            return nil
+        }
+    }
+
+    private func discardPendingTorrent() {
+        if let pending = pendingTorrent {
+            ManualDownloadStaging.remove(pending.destination)
+            pendingTorrent = nil
+        }
+    }
 }
 #endif

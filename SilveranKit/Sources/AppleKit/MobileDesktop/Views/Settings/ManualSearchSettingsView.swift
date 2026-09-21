@@ -1,6 +1,12 @@
 #if os(iOS) || os(macOS)
 import SilveranKit
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
+#if canImport(AppKit)
+import AppKit
+#endif
 
 struct ManualSearchSettingsSection: View {
     var body: some View {
@@ -25,7 +31,7 @@ struct ManualSearchSettingsSection: View {
 struct ManualSearchSettingsView: View {
     @State private var snapshot = ManualSearchSettingsStore.shared.snapshot
     @State private var editor: ProviderEditorState?
-    @State private var testResult: String?
+    @State private var saveError: String?
 
     var body: some View {
         List {
@@ -86,7 +92,7 @@ struct ManualSearchSettingsView: View {
                         )
                     }
                     if let error {
-                        testResult = label(error)
+                        saveError = ManualSearchProviderValidation.failureReason(error)
                     } else {
                         editor = nil
                         snapshot = ManualSearchSettingsStore.shared.snapshot
@@ -105,12 +111,12 @@ struct ManualSearchSettingsView: View {
             )
         }
         .alert("Provider", isPresented: Binding(
-            get: { testResult != nil },
-            set: { if !$0 { testResult = nil } },
+            get: { saveError != nil },
+            set: { if !$0 { saveError = nil } },
         )) {
-            Button("OK", role: .cancel) { testResult = nil }
+            Button("OK", role: .cancel) { saveError = nil }
         } message: {
-            Text(testResult ?? "")
+            Text(saveError ?? "")
         }
     }
 
@@ -125,15 +131,6 @@ struct ManualSearchSettingsView: View {
             ManualSearchSettingsStore.shared.deleteCustom(id: provider.id)
         }
         snapshot = ManualSearchSettingsStore.shared.snapshot
-    }
-
-    private func label(_ error: ManualSearchTemplateError) -> String {
-        switch error {
-            case .emptyTemplate: "Enter a search URL template."
-            case .malformedTemplate: "That template is not a valid URL."
-            case .invalidURL: "The template does not produce a valid URL."
-            case .unsupportedScheme: "Use an http or https URL. Do not put credentials in the template."
-        }
     }
 }
 
@@ -170,7 +167,9 @@ private struct ManualSearchProviderEditor: View {
     let onDelete: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var testMessage: String?
+    @Environment(\.openURL) private var openURL
+    @State private var testResult: ManualSearchTemplateTestResult?
+    @State private var saveFieldError: String?
     @State private var ebook = true
     @State private var audiobook = true
 
@@ -189,52 +188,36 @@ private struct ManualSearchProviderEditor: View {
         _audiobook = State(initialValue: state.provider.supportedMediaTypes.contains(.audiobook))
     }
 
+    private var resolvedSymbol: (name: String, usedFallback: Bool) {
+        ManualSearchSymbolName.resolve(provider.symbolName, isValidSymbol: Self.isValidSFSymbol)
+    }
+
+    private var canSave: Bool {
+        !provider.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (ebook || audiobook)
+    }
+
+    private var showTestAlert: Binding<Bool> {
+        Binding(
+            get: { testResult != nil },
+            set: { if !$0 { testResult = nil } },
+        )
+    }
+
+    private var showSaveAlert: Binding<Bool> {
+        Binding(
+            get: { saveFieldError != nil },
+            set: { if !$0 { saveFieldError = nil } },
+        )
+    }
+
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    Toggle("Enabled", isOn: $provider.enabled)
-                    TextField("Name", text: $provider.name)
-                    TextField("URL template", text: $provider.searchURLTemplate, axis: .vertical)
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        #endif
-                        .autocorrectionDisabled()
-                    TextField("Symbol", text: $provider.symbolName)
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        #endif
-                        .autocorrectionDisabled()
-                } footer: {
-                    Text(
-                        "Placeholders: {title} {author} {isbn} {workId} {query}. {query} is title plus author. Do not put passwords or API keys in the URL."
-                    )
-                }
-
-                Section("Formats") {
-                    Toggle("Ebook", isOn: $ebook)
-                    Toggle("Audiobook", isOn: $audiobook)
-                }
-
-                Section {
-                    Button("Test Template") {
-                        testMessage = testLabel()
-                    }
-                    Button("Save") {
-                        provider.supportedMediaTypes = selectedTypes()
-                        onSave(provider)
-                    }
-                    .disabled(provider.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    if provider.isBuiltIn {
-                        Button("Reset Built-in") {
-                            onReset(provider.id)
-                        }
-                    } else if !isNew {
-                        Button("Delete", role: .destructive) {
-                            onDelete(provider.id)
-                        }
-                    }
-                }
+                providerBasicsSection
+                iconSection
+                formatsSection
+                actionsSection
             }
             .navigationTitle(isNew ? "Add Provider" : "Edit Provider")
             #if os(iOS)
@@ -245,35 +228,254 @@ private struct ManualSearchProviderEditor: View {
                     Button("Cancel") { dismiss() }
                 }
             }
-            .alert("Template", isPresented: Binding(
-                get: { testMessage != nil },
-                set: { if !$0 { testMessage = nil } },
-            )) {
-                Button("OK", role: .cancel) { testMessage = nil }
+            .alert(
+                testResult?.title ?? "Test Search",
+                isPresented: showTestAlert,
+            ) {
+                testAlertActions
             } message: {
-                Text(testMessage ?? "")
+                Text(testResult?.detail ?? "")
+            }
+            .alert("Couldn't Save", isPresented: showSaveAlert) {
+                Button("OK", role: .cancel) { saveFieldError = nil }
+            } message: {
+                Text(saveFieldError ?? "")
             }
         }
+    }
+
+    @ViewBuilder
+    private var testAlertActions: some View {
+        if let url = testResult?.exampleURL {
+            Button("Open Test Search") {
+                openURL(url)
+                testResult = nil
+            }
+        }
+        Button("OK", role: .cancel) { testResult = nil }
+    }
+
+    private var providerBasicsSection: some View {
+        Section {
+            Toggle("Enabled", isOn: $provider.enabled)
+            LabeledContent("Provider Name") {
+                TextField("Audiobook Provider", text: $provider.name)
+            }
+            ProviderTemplateFields(template: $provider.searchURLTemplate)
+        } header: {
+            Text("Provider")
+        } footer: {
+            Text("Do not put passwords or API keys in the URL.")
+        }
+    }
+
+    private var iconSection: some View {
+        Section {
+            ProviderIconPicker(
+                symbolName: $provider.symbolName,
+                resolvedName: resolvedSymbol.name,
+                usedFallback: resolvedSymbol.usedFallback,
+            )
+        } header: {
+            Text("Icon")
+        } footer: {
+            Text("Uses an Apple SF Symbol. Pick a suggestion or type a symbol name.")
+        }
+    }
+
+    private var formatsSection: some View {
+        Section {
+            Toggle("eBooks", isOn: $ebook)
+            Toggle("Audiobooks", isOn: $audiobook)
+            if !ebook && !audiobook {
+                Text("Select at least one format.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        } header: {
+            Text("Formats")
+        } footer: {
+            Text("Choose which searches this provider should appear for.")
+        }
+    }
+
+    private var actionsSection: some View {
+        Section {
+            Button("Test Search") {
+                testResult = ManualSearchProviderValidation.testSearch(provider.searchURLTemplate)
+            }
+            Button("Save") {
+                attemptSave()
+            }
+            .disabled(!canSave)
+            if provider.isBuiltIn {
+                Button("Reset Built-in") {
+                    onReset(provider.id)
+                }
+            } else if !isNew {
+                Button("Delete", role: .destructive) {
+                    onDelete(provider.id)
+                }
+            }
+        }
+    }
+
+    private func attemptSave() {
+        guard ebook || audiobook else {
+            saveFieldError = "Select at least one format (eBooks or Audiobooks)."
+            return
+        }
+        let symbol = resolvedSymbol.name
+        var draft = provider
+        draft.name = provider.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft.searchURLTemplate = provider.searchURLTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft.symbolName = symbol
+        draft.supportedMediaTypes = selectedTypes()
+        if let error = ManualSearchProviderValidation.validateForSave(draft) {
+            saveFieldError = ManualSearchProviderValidation.failureReason(error)
+            return
+        }
+        provider = draft
+        onSave(draft)
     }
 
     private func selectedTypes() -> [ManualSearchMediaType] {
         var types: [ManualSearchMediaType] = []
         if ebook { types.append(.ebook) }
         if audiobook { types.append(.audiobook) }
-        return types.isEmpty ? ManualSearchMediaType.allCases : types
+        return types
     }
 
-    private func testLabel() -> String {
-        switch ManualSearchProviderValidation.validateTemplate(provider.searchURLTemplate) {
-            case .success(let url):
-                return url.absoluteString
-            case .failure(let error):
-                switch error {
-                    case .emptyTemplate: return "Enter a search URL template."
-                    case .malformedTemplate: return "That template is not a valid URL."
-                    case .invalidURL: return "The template does not produce a valid URL."
-                    case .unsupportedScheme: return "Use an http or https URL."
+    private static func isValidSFSymbol(_ name: String) -> Bool {
+        #if canImport(UIKit)
+        return UIImage(systemName: name) != nil
+        #elseif canImport(AppKit)
+        return NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil
+        #else
+        return !name.isEmpty
+        #endif
+    }
+}
+
+private struct ProviderTemplateFields: View {
+    @Binding var template: String
+
+    private var inlineFeedback: String? {
+        ManualSearchProviderValidation.inlineTemplateFeedback(template)
+    }
+
+    private var hasPlaceholder: Bool {
+        ManualSearchProviderValidation.containsSupportedPlaceholder(template)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Search URL Template")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            TextField(
+                "https://example.com/search?q={query}",
+                text: $template,
+                axis: .vertical,
+            )
+            #if os(iOS)
+            .textInputAutocapitalization(.never)
+            .keyboardType(.URL)
+            #endif
+            .autocorrectionDisabled()
+            .textContentType(.URL)
+
+            placeholderHelp
+            inlineFeedbackLabel
+        }
+    }
+
+    private var placeholderHelp: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Use placeholders to insert book information into the search.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ForEach(ManualSearchProviderValidation.placeholderHelpLines, id: \.token) { line in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(line.token)
+                        .font(.caption.monospaced())
+                    Text(line.meaning)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
+            }
+            Text("Example: \(ManualSearchProviderValidation.exampleTemplate)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 2)
+        }
+    }
+
+    @ViewBuilder
+    private var inlineFeedbackLabel: some View {
+        if let inlineFeedback {
+            Label(
+                inlineFeedback,
+                systemImage: hasPlaceholder ? "checkmark.circle" : "exclamationmark.triangle",
+            )
+            .font(.caption)
+            .foregroundStyle(hasPlaceholder ? Color.secondary : Color.orange)
+        }
+    }
+}
+
+private struct ProviderIconPicker: View {
+    @Binding var symbolName: String
+    let resolvedName: String
+    let usedFallback: Bool
+
+    private var showFallbackWarning: Bool {
+        usedFallback && !symbolName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: resolvedName)
+                .font(.title2)
+                .frame(width: 36, height: 36)
+                .accessibilityHidden(true)
+            TextField("SF Symbol name", text: $symbolName)
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                #endif
+                .autocorrectionDisabled()
+        }
+        if showFallbackWarning {
+            Text("Unknown symbol — using globe.")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        }
+        suggestionChips
+    }
+
+    private var suggestionChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(ManualSearchSymbolName.suggestions, id: \.self) { name in
+                    Button {
+                        symbolName = name
+                    } label: {
+                        Label(name, systemImage: name)
+                            .labelStyle(.iconOnly)
+                            .padding(8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(
+                                        resolvedName == name
+                                            ? Color.accentColor.opacity(0.15)
+                                            : Color.secondary.opacity(0.12)
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(name)
+                }
+            }
         }
     }
 }
