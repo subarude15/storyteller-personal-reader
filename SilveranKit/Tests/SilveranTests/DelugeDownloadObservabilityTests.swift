@@ -354,6 +354,114 @@ struct DelugeDownloadObservabilityTests {
         #expect(updated.status(for: .ebook)?.status != .needsAttention)
     }
 
+    @Test func audiobookWithPDFBookletMatchesAudiobookOnly() {
+        let item = request(
+            title: "The Reddening",
+            author: "Adam Nevill",
+            formats: [.ebook, .audiobook],
+        )
+        let index = DelugeTorrentIndex(torrents: [
+            torrent(
+                id: "audio-pdf",
+                name: "The Reddening Adam Nevill Audiobook M4B + booklet.pdf",
+                state: "Downloading",
+                progress: 0.5,
+            )
+        ])
+        #expect(
+            DelugeRequestMatcher.formatEvidence(
+                name: "The Reddening Adam Nevill Audiobook M4B + booklet.pdf",
+                savePath: nil,
+            ) == .audiobook
+        )
+        let updated = RequestDownloadObservability.applying(item, index: index, now: Date())
+        #expect(updated.downloadState(for: .audiobook)?.torrentID == "audio-pdf")
+        #expect(updated.downloadState(for: .ebook)?.torrentID == nil)
+    }
+
+    @Test func mp3AudiobookWithPDFMatchesAudiobookOnly() {
+        let item = request(
+            title: "The Reddening",
+            author: "Adam Nevill",
+            formats: [.ebook, .audiobook],
+        )
+        let index = DelugeTorrentIndex(torrents: [
+            torrent(
+                id: "mp3-pdf",
+                name: "The Reddening Audiobook MP3 PDF",
+                state: "Downloading",
+                progress: 0.3,
+            )
+        ])
+        #expect(
+            DelugeRequestMatcher.formatEvidence(
+                name: "The Reddening Audiobook MP3 PDF",
+                savePath: nil,
+            ) == .audiobook
+        )
+        let updated = RequestDownloadObservability.applying(item, index: index, now: Date())
+        #expect(updated.downloadState(for: .audiobook)?.torrentID == "mp3-pdf")
+        #expect(updated.downloadState(for: .ebook)?.torrentID == nil)
+    }
+
+    @Test func ebookEPUBMatchesEbookOnly() {
+        let item = request(
+            title: "The Reddening",
+            author: "Adam Nevill",
+            formats: [.ebook, .audiobook],
+        )
+        let index = DelugeTorrentIndex(torrents: [
+            torrent(
+                id: "ebook-1",
+                name: "The Reddening Ebook EPUB",
+                state: "Downloading",
+                progress: 0.2,
+            )
+        ])
+        let updated = RequestDownloadObservability.applying(item, index: index, now: Date())
+        #expect(updated.downloadState(for: .ebook)?.torrentID == "ebook-1")
+        #expect(updated.downloadState(for: .audiobook)?.torrentID == nil)
+    }
+
+    @Test func genuinelyMixedStrongSignalsStayUnresolvedForBothRequest() {
+        let item = request(
+            title: "The Reddening",
+            author: "Adam Nevill",
+            formats: [.ebook, .audiobook],
+        )
+        let name = "The Reddening Ebook EPUB Audiobook M4B"
+        #expect(DelugeRequestMatcher.formatEvidence(name: name, savePath: nil) == .mixed)
+        let index = DelugeTorrentIndex(torrents: [
+            torrent(id: "mixed-1", name: name, state: "Downloading", progress: 0.4)
+        ])
+        #expect(DelugeRequestMatcher.match(item: item, format: .ebook, index: index) == .noMatch)
+        #expect(DelugeRequestMatcher.match(item: item, format: .audiobook, index: index) == .noMatch)
+
+        let updated = RequestDownloadObservability.applying(item, index: index, now: Date())
+        #expect(updated.downloadState(for: .ebook)?.torrentID == nil)
+        #expect(updated.downloadState(for: .audiobook)?.torrentID == nil)
+    }
+
+    @Test func singleFormatAudiobookWithPDFBookletStillMatches() {
+        let item = request(
+            title: "The Reddening",
+            author: "Adam Nevill",
+            formats: [.audiobook],
+        )
+        let index = DelugeTorrentIndex(torrents: [
+            torrent(
+                id: "1",
+                name: "The Reddening Audiobook M4B PDF",
+                state: "Downloading",
+                progress: 0.6,
+            )
+        ])
+        switch DelugeRequestMatcher.match(item: item, format: .audiobook, index: index) {
+            case .matched(let snap): #expect(snap.id == "1")
+            default: Issue.record("expected audiobook-only match")
+        }
+    }
+
     // MARK: - Events
 
     @Test func downloadStartedEmitsOnce() {

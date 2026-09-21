@@ -1,6 +1,7 @@
 import Foundation
 
 /// Detectable format hints in a Deluge torrent name/path.
+/// `.mixed` means conflicting *strong* signals on both sides — unresolved for BOTH requests.
 public enum DelugeTorrentFormatEvidence: Equatable, Sendable {
     case audiobook
     case ebook
@@ -79,16 +80,17 @@ public enum DelugeRequestMatcher {
         torrent: DelugeTorrentSnapshot,
         requestedFormats: [BookRequestFormat],
     ) -> Bool {
+        let unique = Set(requestedFormats)
         switch formatEvidence(name: torrent.name, savePath: torrent.savePath) {
             case .audiobook:
                 return format == .audiobook
             case .ebook:
                 return format == .ebook
             case .mixed:
-                // Explicit dual signals: eligible for either; claim tracking prevents double-attach.
-                return true
+                // Genuinely conflicting strong signals — never let enum order decide.
+                // Single-format requests may still attach; BOTH requests stay unresolved.
+                return unique.count <= 1 && unique.contains(format)
             case .none:
-                let unique = Set(requestedFormats)
                 // Single-format requests may attach a format-unknown torrent.
                 // Both-format requests must not guess.
                 return unique.count <= 1 && unique.contains(format)
@@ -96,35 +98,51 @@ public enum DelugeRequestMatcher {
     }
 
     /// Conservative format signals from torrent name/path. Tokenized — no loose substrings.
+    ///
+    /// Strength rules (not raw token counts):
+    /// - Strong audiobook (`audiobook` / `m4b`) wins over incidental PDF booklets.
+    /// - Strong ebook (`ebook` / `epub` / `azw*` / `mobi`) wins over incidental audio file tokens.
+    /// - Strong evidence on both sides → `.mixed` (unresolved for BOTH requests).
+    /// - PDF alone is ebook evidence; PDF with only secondary audio → audiobook.
     public static func formatEvidence(name: String, savePath: String?) -> DelugeTorrentFormatEvidence {
         let haystack = normalize("\(name) \(savePath ?? "")")
         guard !haystack.isEmpty else { return .none }
         let tokens = Set(haystack.split(separator: " ").map(String.init))
 
-        let hasAudiobook =
+        let strongAudiobook =
             tokens.contains("audiobook")
             || tokens.contains("m4b")
-            || tokens.contains("mp3")
+            || containsPhrase(haystack, phrase: "audio book")
+        let secondaryAudiobook =
+            tokens.contains("mp3")
             || tokens.contains("m4a")
             || tokens.contains("opus")
             || tokens.contains("flac")
-            || containsPhrase(haystack, phrase: "audio book")
-
-        let hasEbook =
+        let strongEbook =
             tokens.contains("ebook")
             || tokens.contains("epub")
             || tokens.contains("azw")
             || tokens.contains("azw3")
             || tokens.contains("mobi")
-            || tokens.contains("pdf")
             || containsPhrase(haystack, phrase: "e book")
+        let hasPDF = tokens.contains("pdf")
 
-        switch (hasAudiobook, hasEbook) {
-            case (true, true): return .mixed
-            case (true, false): return .audiobook
-            case (false, true): return .ebook
-            case (false, false): return .none
-        }
+        // Conflicting strong labels — do not pick a side.
+        if strongAudiobook && strongEbook { return .mixed }
+
+        // Explicit audiobook / m4b beats booklet PDF and weak ebook noise.
+        if strongAudiobook { return .audiobook }
+
+        // Explicit ebook formats beat incidental secondary audio tokens (e.g. sample mp3).
+        if strongEbook { return .ebook }
+
+        // No strong labels: secondary audio (+ optional PDF booklet) → audiobook.
+        if secondaryAudiobook { return .audiobook }
+
+        // PDF alone is conservative ebook evidence.
+        if hasPDF { return .ebook }
+
+        return .none
     }
 
     // MARK: - Normalization
