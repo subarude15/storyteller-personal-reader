@@ -168,6 +168,17 @@ struct TorBoxClientTests {
         )
         #expect(TorBoxStatusMapping.jobStatus(for: downloading) == .downloading)
 
+        let stalled = TorBoxTorrentInfo(
+            id: 3,
+            name: "Stalled",
+            hash: "h",
+            downloadState: "stalled (no seeds)",
+            downloadFinished: false,
+            downloadPresent: false,
+            progress: 0.1,
+        )
+        #expect(TorBoxStatusMapping.jobStatus(for: stalled) == .downloading)
+
         let failed = TorBoxTorrentInfo(
             id: 2,
             name: "B",
@@ -178,6 +189,120 @@ struct TorBoxClientTests {
             progress: 0,
         )
         #expect(TorBoxStatusMapping.jobStatus(for: failed) == .failed)
+
+        let incomplete = TorBoxTorrentInfo(
+            id: 4,
+            name: "C",
+            hash: "h",
+            downloadState: "incomplete",
+            downloadFinished: false,
+            downloadPresent: false,
+            progress: 0.5,
+        )
+        #expect(TorBoxStatusMapping.jobStatus(for: incomplete) == .failed)
+    }
+
+    @Test func readyRequiresDownloadPresentNotMerelyFinished() {
+        // 1. finished but not present → NOT Ready
+        let finishedOnly = TorBoxTorrentInfo(
+            id: 1,
+            name: "Finished only",
+            hash: "h",
+            downloadState: "completed",
+            downloadFinished: true,
+            downloadPresent: false,
+            progress: 1,
+        )
+        #expect(finishedOnly.isDownloadReady == false)
+        #expect(TorBoxStatusMapping.jobStatus(for: finishedOnly) == .processing)
+
+        // 2. finished + not present + processing state → Processing
+        let processing = TorBoxTorrentInfo(
+            id: 2,
+            name: "Processing",
+            hash: "h",
+            downloadState: "checkingResumeData",
+            downloadFinished: true,
+            downloadPresent: false,
+            progress: 1,
+        )
+        #expect(TorBoxStatusMapping.jobStatus(for: processing) == .processing)
+
+        // 3. download_present → Ready (even mid-upload/seed label)
+        let presentWhileUploading = TorBoxTorrentInfo(
+            id: 3,
+            name: "Present",
+            hash: "h",
+            downloadState: "uploading",
+            downloadFinished: true,
+            downloadPresent: true,
+            progress: 1,
+        )
+        #expect(presentWhileUploading.isDownloadReady)
+        #expect(TorBoxStatusMapping.jobStatus(for: presentWhileUploading) == .ready)
+
+        // uploading without present is NOT Ready
+        let uploadingNotPresent = TorBoxTorrentInfo(
+            id: 4,
+            name: "Uploading only",
+            hash: "h",
+            downloadState: "uploading",
+            downloadFinished: true,
+            downloadPresent: false,
+            progress: 1,
+        )
+        #expect(uploadingNotPresent.isDownloadReady == false)
+        #expect(TorBoxStatusMapping.jobStatus(for: uploadingNotPresent) == .processing)
+
+        // 4. cached + present → Ready
+        let cachedPresent = TorBoxTorrentInfo(
+            id: 5,
+            name: "Cached present",
+            hash: "h",
+            downloadState: "cached",
+            downloadFinished: true,
+            downloadPresent: true,
+            progress: 1,
+            files: [TorBoxTorrentFile(id: 1, name: "book.epub", size: 10)],
+        )
+        #expect(TorBoxStatusMapping.jobStatus(for: cachedPresent) == .ready)
+
+        // cached without present → NOT Ready
+        let cachedNotPresent = TorBoxTorrentInfo(
+            id: 6,
+            name: "Cached unavailable",
+            hash: "h",
+            downloadState: "cached",
+            downloadFinished: true,
+            downloadPresent: false,
+            progress: 1,
+        )
+        #expect(cachedNotPresent.isDownloadReady == false)
+        #expect(TorBoxStatusMapping.jobStatus(for: cachedNotPresent) == .processing)
+
+        // 5. downloading → Downloading
+        let downloading = TorBoxTorrentInfo(
+            id: 7,
+            name: "DL",
+            hash: "h",
+            downloadState: "downloading",
+            downloadFinished: false,
+            downloadPresent: false,
+            progress: 0.5,
+        )
+        #expect(TorBoxStatusMapping.jobStatus(for: downloading) == .downloading)
+
+        // queued / metaDL
+        let queued = TorBoxTorrentInfo(
+            id: 8,
+            name: "Q",
+            hash: "h",
+            downloadState: "metaDL",
+            downloadFinished: false,
+            downloadPresent: false,
+            progress: 0,
+        )
+        #expect(TorBoxStatusMapping.jobStatus(for: queued) == .queued)
     }
 
     @Test func instantReadyAfterCreateDoesNotStickOnSubmitted() {
@@ -191,6 +316,7 @@ struct TorBoxClientTests {
             backendJobID: "7",
             status: .submitted,
         )
+        // Realistic instant-cache response: cached + finished + present.
         let info = TorBoxTorrentInfo(
             id: 7,
             name: "The Hobbit",
@@ -209,6 +335,32 @@ struct TorBoxClientTests {
         #expect(job.providerFiles?.count == 1)
         #expect(job.providerAuthID == "a1")
         #expect(job.providerInfoHash == "deadbeef")
+    }
+
+    @Test func finishedButNotPresentDoesNotApplyReadyToJob() {
+        var job = ManualDownloadJob(
+            title: "Almost",
+            author: "",
+            sourceHost: "torbox",
+            backend: .torbox,
+            mediaType: .ebook,
+            destination: "/e",
+            backendJobID: "8",
+            status: .downloading,
+            progress: 0.9,
+        )
+        let info = TorBoxTorrentInfo(
+            id: 8,
+            name: "Almost",
+            hash: "h",
+            downloadState: "completed",
+            downloadFinished: true,
+            downloadPresent: false,
+            progress: 1,
+        )
+        job = TorBoxStatusMapping.apply(info, to: job)
+        #expect(job.status == .processing)
+        #expect(job.status != .ready)
     }
 
     @Test func deleteTorrentPostsControlOperation() async throws {

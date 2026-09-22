@@ -136,34 +136,66 @@ public protocol TorrentDownloadProviding: Sendable {
 }
 
 /// Maps TorBox download states into app-friendly statuses.
+///
+/// TorBox API semantics (mylist):
+/// - `download_present` — files are available to serve / requestdl (authoritative Ready)
+/// - `download_finished` — torrent transfer finished; may still be processing
+/// - `download_state` — informational (downloading, uploading/seeding, stalled,
+///   paused, completed, cached, metaDL, checkingResumeData, …). Docs warn that
+///   `"completed"` alone must not be used for completion status.
 public enum TorBoxStatusMapping {
     public static func jobStatus(for info: TorBoxTorrentInfo) -> TorrentJobStatus {
-        if info.isDownloadReady {
+        // Ready only when TorBox reports files are actually present/available.
+        if info.downloadPresent {
             return .ready
         }
+
         let state = info.downloadState.lowercased()
-        if state.contains("error") || state.contains("failed") || state == "missingfiles" {
+        if isFailedState(state) {
             return .failed
         }
-        if state.contains("queued") || state == "metadl" || state == "allocating"
-            || state == "checkingresumedata"
-        {
+        // Transfer finished but files not yet present → still processing toward availability.
+        if info.downloadFinished {
+            return .processing
+        }
+        if isQueuedState(state) {
             return .queued
         }
-        if state.contains("download") || state.contains("stalled") || state.contains("forceddl")
-            || state.contains("pauseddl") || state.contains("stoppeddl")
-        {
+        if isDownloadingState(state) {
             return .downloading
         }
-        if state.contains("check") || state.contains("moving") || state.contains("processing")
-            || state == "paused"
-        {
+        // Cached / seeding / completed labels without present (and without finished)
+        // are unavailable for retrieval — treat as processing, not Ready.
+        if isProcessingWhileUnavailable(state) {
             return .processing
         }
         if info.progress > 0, info.progress < 1 {
             return .downloading
         }
         return .queued
+    }
+
+    private static func isFailedState(_ state: String) -> Bool {
+        state.contains("error") || state.contains("failed") || state == "missingfiles"
+            || state.contains("incomplete")
+    }
+
+    private static func isQueuedState(_ state: String) -> Bool {
+        state.contains("queued") || state == "metadl" || state == "allocating"
+            || state == "checkingresumedata"
+    }
+
+    /// Active transfer / stalled: keep as downloading-ish unless TorBox reports failure.
+    private static func isDownloadingState(_ state: String) -> Bool {
+        state.contains("download") || state.contains("stalled") || state.contains("forceddl")
+            || state.contains("pauseddl") || state.contains("stoppeddl")
+    }
+
+    /// Labels that look “done” or transitional but must not imply Ready without
+    /// `download_present`.
+    private static func isProcessingWhileUnavailable(_ state: String) -> Bool {
+        state == "cached" || state == "uploading" || state == "completed"
+            || state.contains("moving") || state.contains("processing") || state == "paused"
     }
 
     public static func manualStatus(for info: TorBoxTorrentInfo) -> ManualDownloadJobStatus {

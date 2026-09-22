@@ -177,9 +177,14 @@ public struct TorBoxTorrentInfo: Equatable, Sendable {
     public var size: Int64?
     public var files: [TorBoxTorrentFile]
 
+    /// Authoritative TorBox availability: files can be requested (Phase 2 / requestdl).
+    ///
+    /// TorBox separates torrent transfer finish (`downloadFinished`) from file
+    /// availability (`downloadPresent`). Do not treat finished, cached, or
+    /// uploading alone as ready — only `downloadPresent` confirms content can
+    /// actually be retrieved.
     public var isDownloadReady: Bool {
-        downloadPresent || downloadFinished || downloadState.lowercased() == "cached"
-            || downloadState.lowercased() == "uploading"
+        downloadPresent
     }
 
     public init(
