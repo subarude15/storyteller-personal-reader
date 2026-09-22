@@ -202,6 +202,12 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
     public var events: [RequestActivityEvent]?
     /// Per-format Deluge observability. Absent on legacy rows.
     public var downloadStates: [RequestFormatDownloadState]?
+    /// LazyLibrarian candidates kept so Review matches does not create a new request.
+    public var matchCandidates: [LazyLibrarianCandidate]?
+    /// Human-readable reason after an automatic or chosen match.
+    public var matchReason: String?
+    /// Distinguishes ambiguous matches, no candidates, and provider failures.
+    public var matchAttention: LazyLibrarianMatchAttention?
 
     public init(
         id: String = UUID().uuidString,
@@ -226,6 +232,9 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
         automaticFallbackAttempts: [AutomaticFallbackAttempt]? = nil,
         events: [RequestActivityEvent]? = nil,
         downloadStates: [RequestFormatDownloadState]? = nil,
+        matchCandidates: [LazyLibrarianCandidate]? = nil,
+        matchReason: String? = nil,
+        matchAttention: LazyLibrarianMatchAttention? = nil,
     ) {
         self.id = id
         self.canonicalWorkID = canonicalWorkID
@@ -249,6 +258,9 @@ public struct RequestActivityItem: Codable, Equatable, Sendable, Identifiable {
         self.automaticFallbackAttempts = automaticFallbackAttempts
         self.events = events
         self.downloadStates = downloadStates
+        self.matchCandidates = matchCandidates
+        self.matchReason = matchReason
+        self.matchAttention = matchAttention
     }
 
     public var overallStatus: RequestActivityStatus {
@@ -349,6 +361,7 @@ extension BookRequestPhase {
             case .alreadyRequested: .alreadyRequested
             case .alreadyAvailable: .alreadyAvailable
             case .failed: .failed
+            case .needsAttention: .needsAttention
         }
     }
 }

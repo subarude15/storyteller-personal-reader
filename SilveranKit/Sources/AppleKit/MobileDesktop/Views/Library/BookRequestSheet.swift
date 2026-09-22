@@ -12,6 +12,8 @@ struct BookRequestSheet: View {
     @State private var providerName: String?
     @State private var tracked: RequestActivityItem?
     @State private var showingManualSearch = false
+    @State private var showingMatches = false
+    @State private var resolving = false
 
     var body: some View {
         NavigationStack {
@@ -45,6 +47,18 @@ struct BookRequestSheet: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+                        if let reason = tracked.matchReason, tracked.matchAttention == nil {
+                            Text(reason)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        LazyLibrarianMatchActionButtons(
+                            item: tracked,
+                            isBusy: sending || resolving,
+                            resolving: resolving,
+                            onReview: { showingMatches = true },
+                            onUseBest: { useBest(tracked) },
+                        )
                     }
                 }
 
@@ -93,6 +107,11 @@ struct BookRequestSheet: View {
                                 Text(outcome.detail)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                if let reason = outcome.matchReason {
+                                    Text(reason)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
@@ -114,6 +133,17 @@ struct BookRequestSheet: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
             #endif
+        }
+        .sheet(isPresented: $showingMatches) {
+            if let tracked {
+                LazyLibrarianMatchReviewSheet(candidates: tracked.matchCandidates ?? []) { candidate in
+                    resolve(tracked, candidate: candidate)
+                }
+                #if os(iOS)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                #endif
+            }
         }
         .task {
             await loadProvider()
@@ -181,6 +211,26 @@ struct BookRequestSheet: View {
         }
     }
 
+    private func useBest(_ item: RequestActivityItem) {
+        guard let candidate = LazyLibrarianMatcher.bestResolvable(
+            work: item.canonicalWorkForRetry(),
+            candidates: item.matchCandidates ?? [],
+        ) else { return }
+        resolve(item, candidate: candidate)
+    }
+
+    private func resolve(_ item: RequestActivityItem, candidate: LazyLibrarianCandidate) {
+        guard !resolving else { return }
+        resolving = true
+        Task {
+            let result = await BookRequests.resolveLazyLibrarianMatch(item: item, candidate: candidate)
+            submission = result
+            tracked = RequestActivityStore.shared.item(id: item.id)
+                ?? RequestActivityStore.shared.item(forWorkID: work.openLibraryWorkID ?? work.workID)
+            resolving = false
+        }
+    }
+
     private func loadProvider() async {
         let settings = await SettingsActor.shared.config
         let keySaved = await AuthenticationActor.shared.hasLazyLibrarianAPIKey()
@@ -206,6 +256,7 @@ struct BookRequestSheet: View {
             case .alreadyRequested: "Already requested"
             case .alreadyAvailable: "Already available"
             case .failed: "Failed"
+            case .needsAttention: "Needs attention"
         }
     }
 }

@@ -159,19 +159,28 @@ public enum LazyLibrarianEndpoint {
     }
 }
 
-public struct LazyLibrarianCandidate: Equatable, Sendable {
+public struct LazyLibrarianCandidate: Equatable, Sendable, Codable {
     public var bookID: String
     public var title: String
     public var author: String
     public var isbn: String?
     public var year: String?
+    public var openLibraryWorkID: String?
 
-    public init(bookID: String, title: String, author: String, isbn: String?, year: String?) {
+    public init(
+        bookID: String,
+        title: String,
+        author: String,
+        isbn: String?,
+        year: String?,
+        openLibraryWorkID: String? = nil,
+    ) {
         self.bookID = bookID
         self.title = title
         self.author = author
         self.isbn = isbn
         self.year = year
+        self.openLibraryWorkID = openLibraryWorkID
     }
 }
 
@@ -200,42 +209,135 @@ public enum LazyLibrarianMatcher {
         work: CanonicalBookWork,
         candidates: [LazyLibrarianCandidate],
     ) -> Result<LazyLibrarianCandidate, LazyLibrarianMatchFailure> {
-        let strong = candidates.filter { isHighConfidence(work, $0) }
-        let isbnHits = strong.filter { isbnMatch(work.isbn, $0.isbn) }
-        var pool = isbnHits.isEmpty ? strong : isbnHits
-        if let year = publicationYear(work.publicationYear) {
-            let dated = pool.filter { $0.year == year }
-            if Set(dated.map(\.bookID)).count == 1, let only = dated.first {
-                return .success(only)
-            }
-            if Set(dated.map(\.bookID)).count > 1 {
-                pool = dated
-            }
+        switch resolve(work: work, candidates: candidates, preference: .askWhenUncertain) {
+            case .matched(let candidate, _, _):
+                return .success(candidate)
+            case .ambiguous:
+                return .failure(.ambiguous)
+            case .noMatch:
+                return .failure(.noMatch)
         }
-        let ids = Set(pool.map(\.bookID))
-        if ids.count == 1, let chosen = pool.first(where: { $0.bookID == ids.first }) {
-            return .success(chosen)
-        }
-        if ids.isEmpty { return .failure(.noMatch) }
-        return .failure(.ambiguous)
     }
 
-    private static func isHighConfidence(
+    static func ranked(
+        work: CanonicalBookWork,
+        candidates: [LazyLibrarianCandidate],
+    ) -> [(candidate: LazyLibrarianCandidate, tier: LazyLibrarianMatchTier)] {
+        let year = publicationYear(work.publicationYear)
+        var rows: [(candidate: LazyLibrarianCandidate, tier: LazyLibrarianMatchTier)] = []
+        var seen = Set<String>()
+        for candidate in candidates {
+            guard seen.insert(candidate.bookID).inserted else { continue }
+            guard let tier = tier(work: work, candidate: candidate) else { continue }
+            rows.append((candidate, tier))
+        }
+        rows.sort { lhs, rhs in
+            if lhs.tier != rhs.tier { return lhs.tier > rhs.tier }
+            let leftYear = year != nil && lhs.candidate.year == year
+            let rightYear = year != nil && rhs.candidate.year == year
+            if leftYear != rightYear { return leftYear }
+            // Stable review-list order only. Matching must not treat this as evidence.
+            return lhs.candidate.bookID < rhs.candidate.bookID
+        }
+        return rows
+    }
+
+    static func lookupISBNs(_ work: CanonicalBookWork) -> [String] {
+        var queries: [String] = []
+        for raw in [work.isbn13, work.isbn10, work.isbn] {
+            guard let digits = isbnDigits(raw), !queries.contains(digits) else { continue }
+            queries.append(digits)
+        }
+        return queries
+    }
+
+    static func openLibraryWorkKey(_ raw: String?) -> String? {
+        identifierKey(raw, pattern: "OL\\d+W")
+    }
+
+    static func openLibraryEditionKey(_ raw: String?) -> String? {
+        identifierKey(raw, pattern: "OL\\d+M")
+    }
+
+    /// Token passed to findBook. Bare OpenLibrary ids, not a URL.
+    static func openLibrarySearchToken(_ raw: String?) -> String? {
+        openLibraryWorkKey(raw) ?? openLibraryEditionKey(raw)
+    }
+
+    private static func identifierKey(_ raw: String?, pattern: String) -> String? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let upper = raw.uppercased()
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(upper.startIndex..., in: upper)
+        guard let match = regex.firstMatch(in: upper, range: range),
+            let swiftRange = Range(match.range, in: upper)
+        else { return nil }
+        return String(upper[swiftRange])
+    }
+
+    private static func tier(
+        work: CanonicalBookWork,
+        candidate: LazyLibrarianCandidate,
+    ) -> LazyLibrarianMatchTier? {
+        guard !candidate.bookID.isEmpty else { return nil }
+        if openLibraryWorkMatch(work, candidate) { return .openLibraryWork }
+        if openLibraryEditionMatch(work, candidate) { return .openLibraryEdition }
+        let author = authorRelation(work.authors, candidate.author)
+        if author == .conflict { return nil }
+        if lookupISBNs(work).contains(where: { isbnMatch($0, candidate.isbn) }) {
+            return .isbn
+        }
+        let title = titleRelation(work, candidate)
+        let exactAuthor = author == .compatible && authorsEqual(work.authors, candidate.author)
+        if title == .exact, exactAuthor { return .exactTitleAuthor }
+        if (title == .exact || title == .strong), author == .compatible { return .strongTitleAuthor }
+        if (title == .exact || title == .strong), author == .missing { return .titleOnly }
+        return nil
+    }
+
+    private static func openLibraryWorkMatch(
         _ work: CanonicalBookWork,
         _ candidate: LazyLibrarianCandidate,
     ) -> Bool {
-        guard !candidate.bookID.isEmpty else { return false }
-        let author = authorRelation(work.authors, candidate.author)
-        if isbnMatch(work.isbn, candidate.isbn) {
-            return author != .conflict
-        }
-        return titlesMatch(work, candidate) && author == .compatible
+        guard let wanted = openLibraryWorkKey(work.openLibraryWorkID) else { return false }
+        let found = openLibraryWorkKey(candidate.openLibraryWorkID) ?? openLibraryWorkKey(candidate.bookID)
+        return found == wanted
     }
 
-    private static func titlesMatch(_ work: CanonicalBookWork, _ candidate: LazyLibrarianCandidate) -> Bool {
+    private static func openLibraryEditionMatch(
+        _ work: CanonicalBookWork,
+        _ candidate: LazyLibrarianCandidate,
+    ) -> Bool {
+        guard let wanted = openLibraryEditionKey(work.openLibraryEditionID) else { return false }
+        return openLibraryEditionKey(candidate.bookID) == wanted
+    }
+
+    private enum TitleRelation {
+        case exact
+        case strong
+        case none
+    }
+
+    private static func titleRelation(
+        _ work: CanonicalBookWork,
+        _ candidate: LazyLibrarianCandidate,
+    ) -> TitleRelation {
         let left = AudiobookText.normalizedTitle(work.title, subtitle: work.subtitle)
         let right = AudiobookText.normalizedTitle(candidate.title)
-        return !left.isEmpty && left == right
+        if left.isEmpty || right.isEmpty { return .none }
+        if left == right { return .exact }
+        let leftTokens = left.split(separator: " ").map(String.init)
+        let rightTokens = right.split(separator: " ").map(String.init)
+        // Two-word titles only. "Dune" must not swallow "Dune Messiah".
+        if leftTokens.count >= 2, rightTokens.starts(with: leftTokens) { return .strong }
+        if rightTokens.count >= 2, leftTokens.starts(with: rightTokens) { return .strong }
+        return .none
+    }
+
+    private static func authorsEqual(_ authors: [String], _ candidate: String) -> Bool {
+        let right = AudiobookText.normalizedAuthor(candidate)
+        guard !right.isEmpty else { return false }
+        return authors.map(AudiobookText.normalizedAuthor).contains(right)
     }
 
     private enum AuthorRelation {
@@ -258,7 +360,7 @@ public enum LazyLibrarianMatcher {
         return .conflict
     }
 
-    private static func publicationYear(_ raw: String?) -> String? {
+    static func publicationYear(_ raw: String?) -> String? {
         guard let raw else { return nil }
         let digits = raw.filter(\.isNumber)
         guard digits.count >= 4 else { return nil }
@@ -372,6 +474,7 @@ public struct LazyLibrarianClient: Sendable {
         formats: [BookRequestFormat],
         baseURL: String,
         apiKey: String,
+        matching: LazyLibrarianAutomaticMatching = .askWhenUncertain,
     ) async -> [BookRequestOutcome] {
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !formats.isEmpty else { return [] }
@@ -384,23 +487,27 @@ public struct LazyLibrarianClient: Sendable {
         }
 
         let bookID: String
-        switch await resolveBookID(work: work, baseURL: baseURL, apiKey: key) {
+        let matchReason: String
+        switch await resolveMatch(work: work, baseURL: baseURL, apiKey: key, matching: matching) {
             case .failure(.noMatch):
-                return failed(
+                return unmatched(
                     formats,
-                    "No confident match in LazyLibrarian. Nothing was queued.",
-                    apiKey: key,
+                    detail: LazyLibrarianMatchCopy.noCandidates,
+                    attention: .noMatch,
+                    candidates: [],
                 )
-            case .failure(.ambiguous):
-                return failed(
+            case .failure(.ambiguous(let candidates)):
+                return unmatched(
                     formats,
-                    "Several books matched. Nothing was queued.",
-                    apiKey: key,
+                    detail: LazyLibrarianMatchCopy.ambiguous,
+                    attention: .ambiguous,
+                    candidates: candidates,
                 )
             case .failure(.message(let text)):
                 return failed(formats, text, apiKey: key)
             case .success(let resolved):
-                bookID = resolved
+                bookID = resolved.bookID
+                matchReason = resolved.reason
         }
 
         let record: OwnedBook
@@ -413,17 +520,98 @@ public struct LazyLibrarianClient: Sendable {
 
         var outcomes: [BookRequestOutcome] = []
         for format in formats {
-            outcomes.append(
-                await queue(
-                    format: format,
-                    bookID: bookID,
-                    record: record,
-                    baseURL: baseURL,
-                    apiKey: key,
-                )
+            var outcome = await queue(
+                format: format,
+                bookID: bookID,
+                record: record,
+                baseURL: baseURL,
+                apiKey: key,
             )
+            if outcome.phase != .failed {
+                outcome.matchReason = matchReason
+            }
+            outcomes.append(outcome)
         }
         return outcomes
+    }
+
+    /// Queue a candidate the user (or automatic matching) already chose.
+    /// Does not search again, so a second request row is not implied by a new lookup.
+    public func queueResolved(
+        bookID: String,
+        formats: [BookRequestFormat],
+        baseURL: String,
+        apiKey: String,
+        matchReason: String,
+    ) async -> [BookRequestOutcome] {
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !formats.isEmpty else { return [] }
+        guard !bookID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return failed(formats, "LazyLibrarian did not return a book id.", apiKey: key)
+        }
+        guard !key.isEmpty else {
+            return failed(formats, "Unauthorized. Check the API key.", apiKey: key)
+        }
+        guard LazyLibrarianEndpoint.url(base: baseURL, apiKey: key, command: "getVersion") != nil
+        else {
+            return failed(formats, "The server URL is not valid.", apiKey: key)
+        }
+        let record: OwnedBook
+        switch await ensureBook(id: bookID, baseURL: baseURL, apiKey: key) {
+            case .failure(let message):
+                return failed(formats, message.text, apiKey: key)
+            case .success(let owned):
+                record = owned
+        }
+        var outcomes: [BookRequestOutcome] = []
+        for format in formats {
+            var outcome = await queue(
+                format: format,
+                bookID: bookID,
+                record: record,
+                baseURL: baseURL,
+                apiKey: key,
+            )
+            if outcome.phase != .failed {
+                outcome.matchReason = matchReason
+            }
+            outcomes.append(outcome)
+        }
+        return outcomes
+    }
+
+    private struct ChosenMatch: Sendable {
+        var bookID: String
+        var reason: String
+    }
+
+    private enum MatchLookupFailure: Error, Sendable {
+        case noMatch
+        case ambiguous([LazyLibrarianCandidate])
+        case message(String)
+    }
+
+    private func resolveMatch(
+        work: CanonicalBookWork,
+        baseURL: String,
+        apiKey: String,
+        matching: LazyLibrarianAutomaticMatching,
+    ) async -> Result<ChosenMatch, MatchLookupFailure> {
+        let found: [LazyLibrarianCandidate]
+        switch await candidates(work: work, baseURL: baseURL, apiKey: apiKey) {
+            case .failure(let message):
+                return .failure(.message(message.text))
+            case .success(let rows):
+                found = rows
+        }
+        switch LazyLibrarianMatcher.resolve(work: work, candidates: found, preference: matching) {
+            case .matched(let candidate, let reason, _):
+                return .success(ChosenMatch(bookID: candidate.bookID, reason: reason))
+            case .ambiguous(_, let candidates):
+                return .failure(.ambiguous(candidates))
+            case .noMatch:
+                return .failure(.noMatch)
+        }
     }
 
     /// Resolve a LazyLibrarian BookID with the same high-confidence matcher as submission.
@@ -506,19 +694,45 @@ public struct LazyLibrarianClient: Sendable {
                 rows.append(hit)
             }
         }
-        if let isbn = LazyLibrarianMatcher.isbnDigits(work.isbn) {
-            switch await findBook(name: isbn, baseURL: baseURL, apiKey: apiKey) {
-                case .failure(let message): return .failure(message)
-                case .success(let hits): absorb(hits)
-            }
+        var queries: [String] = []
+        if let workID = LazyLibrarianMatcher.openLibrarySearchToken(work.openLibraryWorkID) {
+            queries.append(workID)
+        }
+        if let edition = LazyLibrarianMatcher.openLibrarySearchToken(work.openLibraryEditionID),
+            !queries.contains(edition)
+        {
+            queries.append(edition)
+        }
+        for isbn in LazyLibrarianMatcher.lookupISBNs(work) where !queries.contains(isbn) {
+            queries.append(isbn)
         }
         let author = work.authors.first(where: { !$0.isEmpty }) ?? ""
-        let name = [work.title, author].filter { !$0.isEmpty }.joined(separator: " ")
-        if !name.isEmpty, name != LazyLibrarianMatcher.isbnDigits(work.isbn) {
-            switch await findBook(name: name, baseURL: baseURL, apiKey: apiKey) {
-                case .failure(let message): return .failure(message)
-                case .success(let hits): absorb(hits)
+        let titled = [work.title, author].filter { !$0.isEmpty }.joined(separator: " ")
+        if !titled.isEmpty, !queries.contains(titled) {
+            queries.append(titled)
+        }
+        var lookupFailure: Note?
+        var anySuccess = false
+        func run(_ query: String) async {
+            switch await findBook(name: query, baseURL: baseURL, apiKey: apiKey) {
+                case .failure(let message):
+                    lookupFailure = message
+                case .success(let hits):
+                    anySuccess = true
+                    absorb(hits)
             }
+        }
+        for query in queries {
+            await run(query)
+        }
+        let titleOnly = work.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if rows.isEmpty, !titleOnly.isEmpty, titleOnly != titled {
+            await run(titleOnly)
+        }
+        // A dead identifier query must not hide a later title hit, and a total
+        // outage must stay a provider failure rather than "no candidates".
+        if rows.isEmpty, !anySuccess, let lookupFailure {
+            return .failure(lookupFailure)
         }
         return .success(rows)
     }
@@ -605,6 +819,7 @@ public struct LazyLibrarianClient: Sendable {
                     phase: .failed,
                     detail: message.text,
                     providerBookID: bookID,
+                    matchAttention: .providerFailure,
                 )
             case .success(let body):
                 if !accepted(body) {
@@ -613,6 +828,7 @@ public struct LazyLibrarianClient: Sendable {
                         phase: .failed,
                         detail: textDetail(body, apiKey: apiKey, fallback: "LazyLibrarian did not queue this book."),
                         providerBookID: bookID,
+                        matchAttention: .providerFailure,
                     )
                 }
         }
@@ -787,7 +1003,30 @@ public struct LazyLibrarianClient: Sendable {
     ) -> [BookRequestOutcome] {
         let safe = LazyLibrarianEndpoint.redact(detail, apiKey: apiKey)
         return formats.map {
-            BookRequestOutcome(format: $0, phase: .failed, detail: safe)
+            BookRequestOutcome(
+                format: $0,
+                phase: .failed,
+                detail: safe,
+                matchAttention: .providerFailure,
+            )
+        }
+    }
+
+    private func unmatched(
+        _ formats: [BookRequestFormat],
+        detail: String,
+        attention: LazyLibrarianMatchAttention,
+        candidates: [LazyLibrarianCandidate],
+    ) -> [BookRequestOutcome] {
+        let phase: BookRequestPhase = attention == .ambiguous ? .needsAttention : .failed
+        return formats.map {
+            BookRequestOutcome(
+                format: $0,
+                phase: phase,
+                detail: detail,
+                matchCandidates: candidates,
+                matchAttention: attention,
+            )
         }
     }
 
@@ -880,15 +1119,19 @@ public struct LazyLibrarianClient: Sendable {
             let id = string(row, ["bookid", "BookID"])
         else { return nil }
         let year = string(row, ["bookpub", "bookdate", "BookDate"])
+        let workID =
+            LazyLibrarianMatcher.openLibraryWorkKey(id)
+            ?? LazyLibrarianMatcher.openLibraryWorkKey(string(row, ["workid", "ol_work", "openlibrary_work"]))
         return LazyLibrarianCandidate(
             bookID: id,
             title: string(row, ["bookname", "BookName"]) ?? "",
-            author: string(row, ["authorname", "AuthorName"]) ?? "",
+            author: string(row, ["authorname", "AuthorName", "author", "Author"]) ?? "",
             isbn: string(row, ["bookisbn", "BookIsbn"]),
             year: year.flatMap { token in
                 let digits = token.filter(\.isNumber)
                 return digits.count >= 4 ? String(digits.prefix(4)) : nil
             },
+            openLibraryWorkID: workID.map { "/works/\($0)" },
         )
     }
 
