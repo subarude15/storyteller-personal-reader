@@ -345,6 +345,12 @@ private struct iOSRootView: View {
             }
             return
         }
+        if url.scheme?.lowercased() == "magnet", NASMagnetValidation.isValid(url) {
+            ManualDownloadMagnetDeepLinkStore.save(url)
+            NotificationCenter.default.post(name: .inkampOpenManualMagnet, object: url)
+            NotificationCenter.default.post(name: .inkampShowManualDownloads, object: nil)
+            return
+        }
         if ManualDownloadIntakeDeepLink.isAddDownloadURL(url) {
             NotificationCenter.default.post(name: .inkampProcessManualDownloadIntake, object: nil)
             NotificationCenter.default.post(name: .inkampShowManualDownloads, object: nil)
