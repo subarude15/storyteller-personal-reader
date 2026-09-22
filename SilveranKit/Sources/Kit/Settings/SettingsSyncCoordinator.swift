@@ -37,7 +37,17 @@ public final class SettingsSyncCoordinator {
 
     public init(journal: SettingsSyncJournal = .live()) {
         self.journal = journal
-        document = journal.load() ?? SyncedAppSettings()
+        let loaded = journal.load() ?? SyncedAppSettings()
+        let migrated = SettingsSyncMerge.migrateLegacyNASLibraryFolders(loaded)
+        if migrated != loaded {
+            do {
+                try journal.save(migrated)
+                journal.needsSync = true
+            } catch {
+                debugLog("[SettingsSync] failure journal save")
+            }
+        }
+        document = migrated
         if let stored = journal.defaults.object(forKey: SettingsSyncKeys.lastSuccessfulSyncAt) as? Date {
             lastSuccessfulSyncAt = stored
             status = .synced
@@ -199,6 +209,11 @@ public final class SettingsSyncCoordinator {
         }
 
         document = resolution.document
+        let migratedFolders = SettingsSyncMerge.migrateLegacyNASLibraryFolders(document)
+        if migratedFolders != document {
+            document = migratedFolders
+            // Push the corrected defaults once so devices converge.
+        }
         do {
             try journal.save(document)
         } catch {
@@ -209,7 +224,8 @@ public final class SettingsSyncCoordinator {
         }
         await applyToConfig(document)
 
-        guard resolution.push else {
+        let shouldPush = resolution.push || migratedFolders != resolution.document
+        guard shouldPush else {
             journal.needsSync = false
             markSynced()
             return
