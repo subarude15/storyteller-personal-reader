@@ -35,10 +35,10 @@ public struct ManualDownloadBuckets: Equatable, Sendable {
             switch job.status {
                 case .failed:
                     failed.append(job)
-                case .complete:
+                case .complete, .ready:
                     recent.append(job)
-                case .submitted, .queued, .downloading, .delugeFinishing, .readyToRoute, .routing,
-                    .downloaded, .uploading, .unknown:
+                case .submitted, .queued, .downloading, .processing, .delugeFinishing, .readyToRoute,
+                    .routing, .downloaded, .uploading, .unknown:
                     active.append(job)
             }
         }

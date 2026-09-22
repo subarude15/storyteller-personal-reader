@@ -37,7 +37,7 @@ public struct DownloadsView: View {
                 Section {
                     Text("No manual downloads yet")
                         .foregroundStyle(.secondary)
-                    Text("Paste a magnet or send a Manual Search result to the NAS.")
+                    Text("Paste a magnet or send a Manual Search result to TorBox / your NAS torrent client.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -127,9 +127,13 @@ public struct DownloadsView: View {
         openPendingMagnetIfNeeded()
         await refresh(forceBackend: true)
         while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(8))
+            let hasActive = jobs.contains { $0.status.isActive }
+            // Poll aggressively only while something is in flight.
+            try? await Task.sleep(for: .seconds(hasActive ? 8 : 45))
             guard !Task.isCancelled else { return }
-            await refresh(forceBackend: true)
+            if scenePhase == .active {
+                await refresh(forceBackend: hasActive)
+            }
         }
     }
 
@@ -138,8 +142,11 @@ public struct DownloadsView: View {
         guard forceBackend, !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
-        _ = await ManualDownloadStatusRefresh.live().refresh()
-        await reload()
+        let hasActive = jobs.contains { $0.status.isActive }
+        if hasActive || forceBackend {
+            _ = await ManualDownloadStatusRefresh.live().refresh()
+            await reload()
+        }
     }
 
     private func reload() async {
@@ -186,6 +193,7 @@ public struct DownloadsView: View {
     private func deleteAttempt(_ job: ManualDownloadJob) async {
         busyID = job.id
         defer { busyID = nil }
+        await ManualDownloadStatusRefresh.live().deleteRemoteIfNeeded(job: job)
         await ManualDownloadJobStore.shared.delete(id: job.id)
         await reload()
     }
@@ -222,14 +230,17 @@ private struct DownloadsJobRow: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-            Text("\(job.mediaType.label) • \(job.backend.label)")
+            Text("\(job.backend.label) · \(statusLabel)")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             HStack {
-                Text(statusLabel)
-                    .font(.subheadline.weight(.medium))
                 if let progress = job.progress, job.status.isActive, job.status != .submitted {
                     Text(progressText(progress))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                if let size = displaySize {
+                    Text(size)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -245,9 +256,15 @@ private struct DownloadsJobRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Text(job.destination)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if job.backend != .torbox {
+                Text(job.destination)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(job.mediaType.label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Text(job.submittedAt.formatted(date: .abbreviated, time: .shortened))
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
@@ -266,18 +283,25 @@ private struct DownloadsJobRow: View {
         switch job.status {
             case .routing:
                 DelugeManualRouting.statusLabel(for: job.mediaType, routing: true)
-            case .submitted, .queued, .downloading, .delugeFinishing, .readyToRoute,
-                .downloaded, .uploading, .complete, .failed, .unknown:
+            case .submitted, .queued, .downloading, .processing, .delugeFinishing, .readyToRoute,
+                .downloaded, .uploading, .ready, .complete, .failed, .unknown:
                 job.status.label
         }
     }
 
     private var shouldShowBar: Bool {
         switch job.status {
-            case .downloading, .queued, .delugeFinishing, .unknown: job.progress != nil
-            case .submitted, .readyToRoute, .routing, .downloaded, .uploading, .complete, .failed:
+            case .downloading, .queued, .processing, .delugeFinishing, .unknown: job.progress != nil
+            case .submitted, .readyToRoute, .routing, .downloaded, .uploading, .ready, .complete,
+                .failed:
                 false
         }
+    }
+
+    private var displaySize: String? {
+        let bytes = job.totalSize ?? job.byteCount
+        guard let bytes, bytes > 0 else { return nil }
+        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
     @ViewBuilder
@@ -301,8 +325,8 @@ private struct DownloadsJobRow: View {
                 case .none:
                     EmptyView()
             }
-            if job.status == .failed {
-                Button("Delete Attempt", role: .destructive) {
+            if job.status == .failed || job.status == .ready {
+                Button(job.backend == .torbox ? "Remove" : "Delete Attempt", role: .destructive) {
                     Task { await onDeleteAttempt() }
                 }
                 .disabled(busyID != nil)
@@ -370,11 +394,13 @@ struct ManualAddDownloadView: View {
                     Text(backendPreview)
                         .foregroundStyle(.secondary)
                 }
-                LabeledContent("Deluge starts in") {
-                    Text(settings.trimmedDelugeIncomingFolder)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.trailing)
+                if settings.torrentClient == .deluge {
+                    LabeledContent("Deluge starts in") {
+                        Text(settings.trimmedDelugeIncomingFolder)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                    }
                 }
             }
 
@@ -422,7 +448,16 @@ struct ManualAddDownloadView: View {
     private var canSubmit: Bool {
         let trimmed = magnetText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed), NASMagnetValidation.isValid(url) else { return false }
-        return settings.torrentClient == .deluge && !settings.trimmedDelugeBaseURL.isEmpty
+        switch settings.torrentClient {
+            case .torbox:
+                return settings.torboxEnabled
+            case .deluge:
+                return !settings.trimmedDelugeBaseURL.isEmpty
+            case .qbittorrent:
+                return !settings.trimmedQBittorrentBaseURL.isEmpty
+            case .none:
+                return false
+        }
     }
 
     private var finalDestinationPreview: String {
@@ -432,9 +467,10 @@ struct ManualAddDownloadView: View {
 
     private var backendPreview: String {
         switch settings.torrentClient {
+            case .torbox: settings.torboxEnabled ? "TorBox" : "TorBox (enable in Settings)"
             case .deluge: "Deluge"
-            case .qbittorrent: "qBittorrent (select Deluge for this workflow)"
-            case .none: "No torrent client selected"
+            case .qbittorrent: "qBittorrent"
+            case .none: "No torrent provider selected"
         }
     }
 
@@ -457,8 +493,12 @@ struct ManualAddDownloadView: View {
             errorMessage = NASHandoffError.malformedMagnet.message
             return
         }
-        guard settings.torrentClient == .deluge else {
-            errorMessage = "Select Deluge as the torrent client in NAS Downloads settings."
+        guard settings.torrentClient != .none else {
+            errorMessage = "Select a torrent provider in NAS Downloads settings."
+            return
+        }
+        if settings.torrentClient == .torbox, !settings.torboxEnabled {
+            errorMessage = "Enable TorBox in NAS Downloads settings."
             return
         }
         isSubmitting = true

@@ -17,11 +17,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-_(none queued — pick the next Later item. Explicit reject below still applies.)_
-
-**Explicit reject:** Playtorio, TorBox, magnets, LibGen, Audible scrape, DRM strip, and free-catalog Explore browse (Standard Ebooks / public OPDS shelves / Download / Import). Do not start second player, CarPlay, or DSM/SMB unless Josh reorders.
+- [ ] **TorBox → NAS automatic transfer (Phase 2)** — when a TorBox job is Ready: inspect files, generate TorBox download URLs, have the NAS/server worker fetch them, route by media type into audiobook/ebook destinations, then Storyteller/library import. Depends on Phase 1 (TorBox provider in-app). Do **not** start until Phase 1 is merged.
 
 ## Shipped
+
+- [x] **TorBox torrent provider (Phase 1)** — TorBox as first-class torrent provider beside Deluge/qBittorrent: Keychain API key, Test Connection, provider picker, magnet + `.torrent` submit, Downloads status (Queued / Downloading / Processing / Ready / Failed), retry/remove, polling. Automatic TorBox → NAS transfer intentionally deferred to Phase 2.
 
 - [x] **Book-first audiobook resolution** — workflow is select/request book → Find audiobook options → match provider results to that work → choose an audiobook. LibriVox/public-domain only, queried after the tap, not when opening a book, scrolling search, or refreshing the library. Matched versions stay formats of the selected work (no extra library rows, no second player). Resume is device-local. Does **not** complete streaming, torrent, or debrid phases.
 - [x] **Resolved audiobook offline downloads** — merged in #46 (`a35f347`). From the same audiobook options sheet: Download, progress, Cancel, Retry, Play Offline, Remove Download. Files live under app storage keyed by work + provider + provider item, with a local manifest. Complete copies play through the existing audiobook player and keep the same resume identity. Does **not** complete torrent or debrid phases.
@@ -152,7 +152,8 @@ Strict order (Smokey / Nas-ty):
 
 - Keep `SilveranKit`; do not merge Enve tree (modules + AGPL only)
 - Storyteller = ebook / audiobook / readaloud; podcasts = RSS rail
-- **Explicit reject:** Playtorio, TorBox, magnets, LibGen, Audible scrape, DRM strip, and free-catalog Explore browse (Standard Ebooks, public OPDS shelves, Download / Import from remote catalogs). Ideas are metadata and a local save list only — no download, no full-book fetch, no unpaid source links.
+- **Explicit reject:** Playtorio, LibGen, Audible scrape, DRM strip, and free-catalog Explore browse (Standard Ebooks, public OPDS shelves, Download / Import from remote catalogs). Ideas are metadata and a local save list only — no download, no full-book fetch, no unpaid source links.
+- **TorBox:** Phase 1 (in-app provider + Downloads) is in progress / shipping. Phase 2 (TorBox Ready → NAS transfer/import) stays deferred until Phase 1 lands. Deluge remains available as a fallback provider.
 - EPUB files the user already has still open in the existing reader. Imported titles become normal Storyteller books via the existing local / phone import.
 - **Ideas for later** must not enter Library, Shelf, or sync. **More like this** remains Storyteller-library-only (series → author → tags) on owned book detail.
 - Reuse the existing ebook reader and shared audio session/player. Preserve Storyteller Read ↔ Listen

@@ -15,6 +15,7 @@ public actor AuthenticationActor {
     private let delugePassword = "delugePassword"
     private let qbittorrentPassword = "qbittorrentPassword"
     private let synologyPassword = "synologyPassword"
+    private let torboxAPIKey = "torboxAPIKey"
 
     private init() {}
 
@@ -243,6 +244,28 @@ public actor AuthenticationActor {
     public func hasSynologyPassword() async -> Bool {
         guard let password = try? await loadSynologyPassword() else { return false }
         return !password.isEmpty
+    }
+
+    public func saveTorBoxAPIKey(_ apiKey: String) async throws {
+        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            try await deleteTorBoxAPIKey()
+            return
+        }
+        try await saveString(trimmed, for: torboxAPIKey)
+    }
+
+    public func loadTorBoxAPIKey() async throws -> String? {
+        try await loadString(for: torboxAPIKey)
+    }
+
+    public func deleteTorBoxAPIKey() async throws {
+        try await keychain.removeItem(account: torboxAPIKey)
+    }
+
+    public func hasTorBoxAPIKey() async -> Bool {
+        guard let key = try? await loadTorBoxAPIKey() else { return false }
+        return !key.isEmpty
     }
 
     private func saveString(_ value: String, for account: String) async throws {

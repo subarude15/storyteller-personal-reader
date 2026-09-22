@@ -49,7 +49,7 @@ public enum NASHandoffError: Error, Equatable, Sendable {
             case .backendNotConfigured(let backend):
                 "\(backend.label) is not configured.\nCheck the \(backend.label) connection in Settings."
             case .torrentClientNotSelected:
-                "No torrent client is selected.\nChoose qBittorrent or Deluge in Settings."
+                "No torrent client is selected.\nChoose TorBox, Deluge, or qBittorrent in Settings."
             case .mediaTypeUnresolved:
                 "Choose eBook or Audiobook so the file can be saved in the right folder."
             case .emptyDestination:

@@ -9,26 +9,32 @@
 import Foundation
 
 public enum NASTorrentClient: String, Codable, Sendable, CaseIterable {
-    case none
-    case qbittorrent
+    /// Preferred default for newly configured installs. Existing synced
+    /// selections are preserved as-is.
+    case torbox
     case deluge
+    case qbittorrent
+    case none
 
     public var label: String {
         switch self {
-            case .none: "None"
-            case .qbittorrent: "qBittorrent"
+            case .torbox: "TorBox"
             case .deluge: "Deluge"
+            case .qbittorrent: "qBittorrent"
+            case .none: "None"
         }
     }
 }
 
 public enum NASDownloadBackend: String, Codable, Sendable {
+    case torbox
     case qbittorrent
     case deluge
     case synology
 
     public var label: String {
         switch self {
+            case .torbox: "TorBox"
             case .qbittorrent: "qBittorrent"
             case .deluge: "Deluge"
             case .synology: "Synology"
@@ -37,6 +43,7 @@ public enum NASDownloadBackend: String, Codable, Sendable {
 
     public var methodLabel: String {
         switch self {
+            case .torbox: "TorBox cloud download"
             case .qbittorrent, .deluge: label
             case .synology: "Download on this device, then upload to NAS"
         }
@@ -52,6 +59,8 @@ public struct NASDownloadSettingsSnapshot: Equatable, Sendable {
     public static let defaultDelugeCompletedFolder = "/volume1/data/torrents/completed"
 
     public var torrentClient: NASTorrentClient
+    /// When false, TorBox cannot be selected as the active provider.
+    public var torboxEnabled: Bool
     public var qbittorrentBaseURL: String
     public var qbittorrentUsername: String
     public var delugeBaseURL: String
@@ -66,6 +75,7 @@ public struct NASDownloadSettingsSnapshot: Equatable, Sendable {
 
     public init(
         torrentClient: NASTorrentClient = .none,
+        torboxEnabled: Bool = false,
         qbittorrentBaseURL: String = "",
         qbittorrentUsername: String = "",
         delugeBaseURL: String = "",
@@ -79,6 +89,7 @@ public struct NASDownloadSettingsSnapshot: Equatable, Sendable {
         createTitleAuthorSubfolders: Bool = false,
     ) {
         self.torrentClient = torrentClient
+        self.torboxEnabled = torboxEnabled
         self.qbittorrentBaseURL = qbittorrentBaseURL
         self.qbittorrentUsername = qbittorrentUsername
         self.delugeBaseURL = delugeBaseURL
