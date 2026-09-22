@@ -2,8 +2,9 @@
 //  ManualDownloadStatusRefresh.swift
 //  SilveranKit
 //
-//  Lightweight qBittorrent / Deluge status refresh. Poll failures become
-//  Unknown, never Failed — except Deluge final-route move_storage errors.
+//  Lightweight qBittorrent / Deluge / TorBoxarr status refresh. Poll failures
+//  become Unknown, never Failed — except a torrent that is actually gone, and
+//  except a final-route move that File Station or Deluge rejects.
 //
 //  SPDX-License-Identifier: AGPL-3.0-only
 
@@ -14,6 +15,7 @@ public struct ManualDownloadStatusRefresh: Sendable {
     public var qbittorrent: QBittorrentClient
     public var deluge: DelugeWebClient
     public var torbox: TorBoxClient
+    public var fileStation: SynologyFileStationClient
     public var jobs: any ManualDownloadJobStoring
 
     public init(
@@ -21,12 +23,14 @@ public struct ManualDownloadStatusRefresh: Sendable {
         qbittorrent: QBittorrentClient = QBittorrentClient(),
         deluge: DelugeWebClient = DelugeWebClient(),
         torbox: TorBoxClient = TorBoxClient(),
+        fileStation: SynologyFileStationClient = SynologyFileStationClient(),
         jobs: any ManualDownloadJobStoring = ManualDownloadJobStore.shared,
     ) {
         self.environment = environment
         self.qbittorrent = qbittorrent
         self.deluge = deluge
         self.torbox = torbox
+        self.fileStation = fileStation
         self.jobs = jobs
     }
 
@@ -41,6 +45,7 @@ public struct ManualDownloadStatusRefresh: Sendable {
         var updated: [ManualDownloadJob] = []
         updated.append(contentsOf: await refreshQBittorrent(current, context: context))
         updated.append(contentsOf: await refreshDeluge(current, context: context))
+        updated.append(contentsOf: await refreshTorBoxarr(current, context: context))
         updated.append(contentsOf: await refreshTorBox(current, context: context))
         // Phase 2: poll NAS Download Station + auto-start Ready TorBox jobs.
         let transfer = TorBoxNASTransferService(
@@ -239,12 +244,222 @@ public struct ManualDownloadStatusRefresh: Sendable {
         }
     }
 
+    /// TorBoxarr jobs use the qBittorrent bridge, then File Station for the library move.
+    /// The TorBox cloud API and `TorBoxNASTransferService` do not see these jobs.
+    private func refreshTorBoxarr(
+        _ current: [ManualDownloadJob],
+        context: NASHandoffContext,
+    ) async -> [ManualDownloadJob] {
+        let targets = current.filter {
+            $0.backend == .torbox
+                && $0.viaTorBoxarr == true
+                && $0.status.isActive
+                && !($0.backendJobID ?? "").isEmpty
+        }
+        guard !targets.isEmpty else { return [] }
+        guard let baseURL = context.torboxarr.baseURL else { return await markUnknown(targets) }
+        let hashes = targets.compactMap { TorrentHash.normalized($0.backendJobID) }
+        let snapshots: [String: QBittorrentTorrentSnapshot]
+        do {
+            snapshots = try await qbittorrent.torrentStatuses(
+                baseURL: baseURL,
+                username: context.torboxarr.username,
+                password: context.credentials.torboxarrPassword,
+                hashes: hashes,
+            )
+        } catch {
+            return await markUnknown(targets)
+        }
+        var changed: [ManualDownloadJob] = []
+        for job in targets {
+            guard let hash = TorrentHash.normalized(job.backendJobID)?.lowercased(),
+                let snapshot = snapshots[hash]
+            else {
+                let next = ManualDownloadStatusMapping.markFailed(
+                    job,
+                    message: "That torrent is no longer in TorBox.",
+                )
+                changed.append(await store(next))
+                continue
+            }
+            changed.append(await reconcileTorBoxarr(job, hash: hash, snapshot: snapshot, context: context))
+        }
+        return changed
+    }
+
+    private func reconcileTorBoxarr(
+        _ job: ManualDownloadJob,
+        hash: String,
+        snapshot: QBittorrentTorrentSnapshot,
+        context: NASHandoffContext,
+    ) async -> ManualDownloadJob {
+        let live = snapshot.liveStatus
+        let completed = TorBoxarrConnectionSettings.completedFolder
+        var payloads = TorBoxarrPayloadLocator.items(
+            contentPath: snapshot.contentPath,
+            savePath: snapshot.savePath,
+            torrentName: snapshot.name,
+            fileNames: [],
+            completedFolder: completed,
+        )
+        let awaitingRoute = job.status == .routing || job.status == .readyToRoute
+        if payloads.isEmpty, live.status == .complete || awaitingRoute {
+            guard let baseURL = context.torboxarr.baseURL else {
+                return await store(ManualDownloadStatusMapping.markUnknown(job))
+            }
+            do {
+                let files = try await qbittorrent.torrentFiles(
+                    baseURL: baseURL,
+                    username: context.torboxarr.username,
+                    password: context.credentials.torboxarrPassword,
+                    hash: hash,
+                )
+                payloads = TorBoxarrPayloadLocator.items(
+                    contentPath: snapshot.contentPath,
+                    savePath: snapshot.savePath,
+                    torrentName: snapshot.name,
+                    fileNames: files,
+                    completedFolder: completed,
+                )
+            } catch {
+                return await store(ManualDownloadStatusMapping.markUnknown(job))
+            }
+        }
+        payloads = payloads.filter { Self.isScopedPayload($0, completedFolder: completed) }
+        if live.status != .complete, !awaitingRoute {
+            return await store(ManualDownloadStatusMapping.apply(live, to: job))
+        }
+        return await routeTorBoxarr(job, live: live, payloads: payloads, context: context)
+    }
+
+    /// qBittorrent setLocation is not used. TorBoxarr is only assumed to write the
+    /// completed folder; File Station moves that one payload onto the library share.
+    private func routeTorBoxarr(
+        _ job: ManualDownloadJob,
+        live: ManualTorrentLiveStatus,
+        payloads: [TorBoxarrPayloadLocator.Item],
+        context: NASHandoffContext,
+    ) async -> ManualDownloadJob {
+        guard !payloads.isEmpty else {
+            var pending = routed(live, job: job, status: .readyToRoute)
+            pending.lastError =
+                "Couldn’t tell which completed files belong to this download.\nNothing was moved."
+            return await store(pending)
+        }
+        guard context.settings.isSynologyConfigured, !context.credentials.synologyPassword.isEmpty else {
+            var pending = routed(live, job: job, status: .routing)
+            pending.lastError =
+                "Synology isn’t configured, so this download can’t be moved into the library yet."
+            return await store(pending)
+        }
+        let baseURL = context.settings.trimmedSynologyBaseURL
+        let username = context.settings.trimmedSynologyUsername
+        let password = context.credentials.synologyPassword
+        var routing = routed(live, job: job, status: .routing)
+        routing = await store(routing)
+        do {
+            let present = try await fileStation.listFilenames(
+                baseURL: baseURL,
+                username: username,
+                password: password,
+                volumeDirectory: job.destination,
+            )
+            if Self.destinationHas(payloads, names: present) {
+                return await store(ManualDownloadStatusMapping.markComplete(routing))
+            }
+            for item in payloads where !present.contains(item.name) {
+                try await fileStation.moveItem(
+                    baseURL: baseURL,
+                    username: username,
+                    password: password,
+                    sourceVolumePath: item.sourceVolumePath,
+                    destinationVolumeDirectory: job.destination,
+                )
+            }
+            let arrived = try await fileStation.listFilenames(
+                baseURL: baseURL,
+                username: username,
+                password: password,
+                volumeDirectory: job.destination,
+            )
+            if Self.destinationHas(payloads, names: arrived) {
+                return await store(ManualDownloadStatusMapping.markComplete(routing))
+            }
+            routing.lastError =
+                "The download finished, but the files are not in the library folder yet."
+            routing.lastStatusAt = Date()
+            return await store(routing)
+        } catch {
+            routing.lastError = Self.torboxarrRouteFailure(error)
+            routing.lastStatusAt = Date()
+            return await store(routing)
+        }
+    }
+
+    private func routed(
+        _ live: ManualTorrentLiveStatus,
+        job: ManualDownloadJob,
+        status: ManualDownloadJobStatus,
+    ) -> ManualDownloadJob {
+        ManualDownloadStatusMapping.apply(
+            ManualTorrentLiveStatus(
+                status: status,
+                progress: live.progress,
+                downloadRate: live.downloadRate,
+                totalSize: live.totalSize,
+                completedSize: live.completedSize,
+            ),
+            to: job,
+        )
+    }
+
+    private static func destinationHas(
+        _ payloads: [TorBoxarrPayloadLocator.Item],
+        names: [String],
+    ) -> Bool {
+        guard !payloads.isEmpty else { return false }
+        return payloads.allSatisfy { names.contains($0.name) }
+    }
+
+    private static func isScopedPayload(
+        _ item: TorBoxarrPayloadLocator.Item,
+        completedFolder: String,
+    ) -> Bool {
+        guard let source = NASPathSafety.normalizeBase(item.sourceVolumePath),
+            let root = NASPathSafety.normalizeBase(completedFolder),
+            source != root,
+            NASPathSafety.staysWithin(root: root, path: source),
+            !item.name.isEmpty,
+            !item.name.contains("/"),
+            item.name != ".",
+            item.name != "..",
+            (source as NSString).lastPathComponent == item.name
+        else { return false }
+        return true
+    }
+
+    private static func torboxarrRouteFailure(_ error: Error) -> String {
+        let left = "Files were left in the TorBox completed folder."
+        guard let synology = error as? SynologyClientError else {
+            return "The NAS rejected the move into the library folder.\n\(left)"
+        }
+        switch synology {
+            case .authenticationFailed:
+                return "The NAS rejected the credentials while moving the download.\n\(left)"
+            case .cannotReachServer, .timeout:
+                return "Couldn’t reach the NAS to move the download.\n\(left)"
+            case .invalidURL, .invalidResponse, .rejected, .verificationFailed:
+                return "The NAS rejected the move into the library folder.\n\(left)"
+        }
+    }
+
     private func refreshTorBox(
         _ current: [ManualDownloadJob],
         context: NASHandoffContext,
     ) async -> [ManualDownloadJob] {
         let targets = current.filter {
             $0.backend == .torbox
+                && $0.viaTorBoxarr != true
                 && $0.status.isActive
                 && $0.status != .transferring
                 && !($0.backendJobID ?? "").isEmpty
@@ -292,7 +507,9 @@ public struct ManualDownloadStatusRefresh: Sendable {
 
     /// Remove a TorBox cloud torrent when the user deletes a Downloads row.
     public func deleteRemoteIfNeeded(job: ManualDownloadJob) async {
-        guard job.backend == .torbox, let id = job.backendJobID, !id.isEmpty else { return }
+        guard job.backend == .torbox, job.viaTorBoxarr != true, let id = job.backendJobID, !id.isEmpty else {
+            return
+        }
         let context = await environment.load()
         let key = context.credentials.torboxAPIKey
         guard !key.isEmpty else { return }
@@ -301,6 +518,11 @@ public struct ManualDownloadStatusRefresh: Sendable {
         } catch {
             debugLog("[TorBox] delete remote failed id=\(id)")
         }
+    }
+
+    private func store(_ job: ManualDownloadJob) async -> ManualDownloadJob {
+        await jobs.record(job)
+        return job
     }
 
     private func markUnknown(_ jobs: [ManualDownloadJob]) async -> [ManualDownloadJob] {

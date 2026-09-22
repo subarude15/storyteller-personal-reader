@@ -190,7 +190,10 @@ public struct DownloadsView: View {
     private func retry(_ job: ManualDownloadJob) async {
         busyID = job.id
         defer { busyID = nil }
-        _ = await NASAcquisitionHandler.live().retryDownload(job: job)
+        _ = await NASAcquisitionHandler.live().retryDownload(
+            job: job,
+            manualBackend: ManualMagnetBackendSettings.backend(),
+        )
         await reload()
     }
 
@@ -414,7 +417,7 @@ private struct DownloadsJobRow: View {
                     EmptyView()
             }
             if job.status == .failed || job.status == .ready || job.status == .complete {
-                if job.backend == .torbox {
+                if job.backend == .torbox, job.viaTorBoxarr != true {
                     Button("Remove", role: .destructive) {
                         showTorBoxDeleteConfirm = true
                     }
@@ -442,8 +445,11 @@ struct ManualAddDownloadView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var magnetText: String
     @State private var mediaType: NASMediaKind = .ebook
+    @State private var backend = ManualMagnetBackendSettings.backend()
     @State private var settings = NASDownloadSettingsStore.shared.snapshot
     @State private var isSubmitting = false
+    @State private var accepted = false
+    @State private var statusNote: String?
     @State private var errorMessage: String?
 
     init(initialMagnet: String = "", onFinished: @escaping () -> Void) {
@@ -485,17 +491,38 @@ struct ManualAddDownloadView: View {
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.trailing)
                 }
-                LabeledContent("Backend") {
-                    Text(backendPreview)
-                        .foregroundStyle(.secondary)
-                }
-                if settings.torrentClient == .deluge {
-                    LabeledContent("Deluge starts in") {
-                        Text(settings.trimmedDelugeIncomingFolder)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.trailing)
+                Picker("Backend", selection: $backend) {
+                    ForEach(ManualDownloadBackend.allCases) { item in
+                        Text(item.label).tag(item)
                     }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: backend) { _, newValue in
+                    ManualMagnetBackendSettings.setBackend(newValue)
+                }
+                switch backend {
+                    case .torBox:
+                        LabeledContent("Downloads to") {
+                            Text(TorBoxarrConnectionSettings.completedFolder)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.trailing)
+                        }
+                    case .deluge:
+                        LabeledContent("Deluge starts in") {
+                            Text(settings.trimmedDelugeIncomingFolder)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.trailing)
+                        }
+                }
+            }
+
+            if let statusNote {
+                Section {
+                    Text(statusNote)
+                        .foregroundStyle(accepted ? Color.green : Color.secondary)
+                        .font(.caption)
                 }
             }
 
@@ -508,19 +535,32 @@ struct ManualAddDownloadView: View {
             }
 
             Section {
-                Button {
-                    Task { await submit() }
-                } label: {
-                    if isSubmitting {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                    } else {
-                        Text("Submit")
-                            .frame(maxWidth: .infinity)
+                if accepted {
+                    Button("Done") {
+                        dismiss()
+                        onFinished()
                     }
+                    .frame(maxWidth: .infinity)
+                    .buttonStyle(.borderedProminent)
+                } else {
+                    Button {
+                        Task { await submit() }
+                    } label: {
+                        if isSubmitting {
+                            VStack(spacing: 6) {
+                                ProgressView()
+                                Text(ManualMagnetCopy.submitting(backend))
+                                    .font(.caption)
+                            }
+                            .frame(maxWidth: .infinity)
+                        } else {
+                            Text("Submit")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .disabled(isSubmitting || !canSubmit)
+                    .buttonStyle(.borderedProminent)
                 }
-                .disabled(isSubmitting || !canSubmit)
-                .buttonStyle(.borderedProminent)
             }
         }
         .navigationTitle("Add Download")
@@ -537,36 +577,19 @@ struct ManualAddDownloadView: View {
         }
         .onAppear {
             settings = NASDownloadSettingsStore.shared.snapshot
+            backend = ManualMagnetBackendSettings.backend()
         }
     }
 
     private var canSubmit: Bool {
         let trimmed = magnetText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed), NASMagnetValidation.isValid(url) else { return false }
-        switch settings.torrentClient {
-            case .torbox:
-                return settings.torboxEnabled
-            case .deluge:
-                return !settings.trimmedDelugeBaseURL.isEmpty
-            case .qbittorrent:
-                return !settings.trimmedQBittorrentBaseURL.isEmpty
-            case .none:
-                return false
-        }
+        return true
     }
 
     private var finalDestinationPreview: String {
         let folder = settings.folder(for: mediaType)
         return folder.isEmpty ? "Set destination folders in NAS Downloads settings" : folder
-    }
-
-    private var backendPreview: String {
-        switch settings.torrentClient {
-            case .torbox: settings.torboxEnabled ? "TorBox" : "TorBox (enable in Settings)"
-            case .deluge: "Deluge"
-            case .qbittorrent: "qBittorrent"
-            case .none: "No torrent provider selected"
-        }
     }
 
     private func pasteMagnetFromClipboard() {
@@ -583,17 +606,11 @@ struct ManualAddDownloadView: View {
 
     private func submit() async {
         errorMessage = nil
+        statusNote = ManualMagnetCopy.submitting(backend)
         let trimmed = magnetText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed), NASMagnetValidation.isValid(url) else {
+            statusNote = nil
             errorMessage = NASHandoffError.malformedMagnet.message
-            return
-        }
-        guard settings.torrentClient != .none else {
-            errorMessage = "Select a torrent provider in NAS Downloads settings."
-            return
-        }
-        if settings.torrentClient == .torbox, !settings.torboxEnabled {
-            errorMessage = "Enable TorBox in NAS Downloads settings."
             return
         }
         isSubmitting = true
@@ -608,13 +625,17 @@ struct ManualAddDownloadView: View {
                 requestedMediaType: mediaType == .audiobook ? .audiobook : .ebook,
             ),
         )
-        let result = await NASAcquisitionHandler.live().handle(candidate)
+        let result = await NASAcquisitionHandler.live().handle(candidate, manualBackend: backend)
         switch result {
-            case .submitted, .completed, .placeholder:
-                dismiss()
-                onFinished()
+            case .submitted(let message), .completed(let message):
+                statusNote = message
+                accepted = true
+            case .placeholder(let message):
+                statusNote = message
+                accepted = true
             case .failed(let message):
-                errorMessage = message
+                statusNote = nil
+                errorMessage = message.isEmpty ? ManualMagnetCopy.failed(backend) : message
         }
     }
 

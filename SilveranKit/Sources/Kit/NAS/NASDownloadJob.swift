@@ -112,6 +112,8 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
     public var providerFiles: [TorrentJobFile]?
     /// Per-file NAS transfer state (TorBox Phase 2). Never stores signed URLs.
     public var transferFiles: [RemoteTransferFileState]?
+    /// Manual TorBox submission went through TorBoxarr, not the TorBox cloud API.
+    public var viaTorBoxarr: Bool?
 
     public init(
         id: String = UUID().uuidString,
@@ -139,6 +141,7 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
         providerAuthID: String? = nil,
         providerFiles: [TorrentJobFile]? = nil,
         transferFiles: [RemoteTransferFileState]? = nil,
+        viaTorBoxarr: Bool? = nil,
     ) {
         self.id = id
         self.title = title
@@ -165,6 +168,7 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
         self.providerAuthID = providerAuthID
         self.providerFiles = providerFiles
         self.transferFiles = transferFiles
+        self.viaTorBoxarr = viaTorBoxarr
     }
 
     public var hasReachedDelugeFinalRouting: Bool {
@@ -198,6 +202,7 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
 
     public var canTransferToNASNow: Bool {
         backend == .torbox
+            && viaTorBoxarr != true
             && status == .ready
             && !(backendJobID ?? "").isEmpty
     }
@@ -205,6 +210,7 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
     /// Failed NAS transfer for a still-Ready TorBox cloud job — retry transfer only.
     public var canRetryTransferNow: Bool {
         backend == .torbox
+            && viaTorBoxarr != true
             && status == .failed
             && !(backendJobID ?? "").isEmpty
             && ((transferFiles?.isEmpty == false) || (providerFiles?.isEmpty == false))

@@ -32,6 +32,12 @@ struct NASDownloadsSettingsView: View {
     @State private var synologyStatus: SynologyConnection?
     @State private var delugeStatus: DelugeConnection?
     @State private var torboxStatus: TorBoxConnection?
+    @State private var torboxarrHost = ""
+    @State private var torboxarrPort = ""
+    @State private var torboxarrUsername = ""
+    @State private var torboxarrPasswordDraft = ""
+    @State private var torboxarrPasswordSaved = false
+    @State private var torboxarrStatus: QBittorrentConnection?
     @State private var checking: String?
     @State private var secretError: String?
 
@@ -86,10 +92,75 @@ struct NASDownloadsSettingsView: View {
                 }
                 statusRow(ok: torboxStatus?.isOK == true, message: torboxStatus?.message)
             } header: {
-                Text("TorBox")
+                Text("TorBox API")
             } footer: {
                 Text(
                     "API key is stored in the device Keychain and never shown in full after save. Create one at torbox.app → Settings → API. When Ready, the NAS pulls TorBox files via Download Station — the phone never pipes multi-GB media."
+                )
+            }
+
+            Section {
+                TextField(
+                    "Host",
+                    text: $torboxarrHost,
+                    prompt: Text(TorBoxarrConnectionSettings.defaultHost),
+                )
+                .textContentType(.URL)
+                .autocorrectionDisabled()
+                #if os(iOS)
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                #endif
+                .onSubmit { persistTorBoxarr() }
+                TextField(
+                    "Port",
+                    text: $torboxarrPort,
+                    prompt: Text(String(TorBoxarrConnectionSettings.defaultPort)),
+                )
+                .autocorrectionDisabled()
+                #if os(iOS)
+                .keyboardType(.numberPad)
+                #endif
+                .onSubmit { persistTorBoxarr() }
+                TextField(
+                    "Username",
+                    text: $torboxarrUsername,
+                    prompt: Text(TorBoxarrConnectionSettings.defaultUsername),
+                )
+                .textContentType(.username)
+                .autocorrectionDisabled()
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                #endif
+                .onSubmit { persistTorBoxarr() }
+                SecureField(
+                    "Password",
+                    text: $torboxarrPasswordDraft,
+                    prompt: Text(
+                        torboxarrPasswordSaved
+                            ? "Saved — enter a new password to replace"
+                            : "TorBoxarr password"
+                    ),
+                )
+                .textContentType(.password)
+                .onSubmit { Task { await saveTorBoxarrPassword() } }
+                if torboxarrPasswordSaved, torboxarrPasswordDraft.isEmpty {
+                    Text("Password saved")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Remove Password", role: .destructive) {
+                        Task { await removeTorBoxarrPassword() }
+                    }
+                }
+                testButton(id: "torboxarr", title: "Test TorBox connection") {
+                    await testTorBoxarr()
+                }
+                statusRow(ok: torboxarrStatus == .ok, message: torboxarrStatus?.message)
+            } header: {
+                Text("TorBox")
+            } footer: {
+                Text(
+                    "TorBox uses your TorBoxarr qBittorrent bridge. The password stays in the device Keychain."
                 )
             }
 
@@ -298,6 +369,10 @@ struct NASDownloadsSettingsView: View {
             qbPasswordSaved = await AuthenticationActor.shared.hasQBittorrentPassword()
             synologyPasswordSaved = await AuthenticationActor.shared.hasSynologyPassword()
             torboxAPIKeySaved = await AuthenticationActor.shared.hasTorBoxAPIKey()
+            torboxarrHost = ManualMagnetBackendSettings.host()
+            torboxarrPort = String(ManualMagnetBackendSettings.port())
+            torboxarrUsername = ManualMagnetBackendSettings.username()
+            torboxarrPasswordSaved = await AuthenticationActor.shared.hasTorBoxarrPassword()
             let configURL = await SettingsActor.shared.config.delugeBaseURL
             let resolved = snapshot.resolvedDelugeBaseURL(configURL: configURL)
             if snapshot.trimmedDelugeBaseURL.isEmpty, !resolved.isEmpty {
@@ -310,7 +385,9 @@ struct NASDownloadsSettingsView: View {
         }
         .onDisappear {
             persist()
+            persistTorBoxarr()
             let qbDraft = qbPasswordDraft
+            let torboxarrDraft = torboxarrPasswordDraft
             let synologyDraft = synologyPasswordDraft
             let torboxDraft = torboxAPIKeyDraft
             Task {
@@ -322,6 +399,9 @@ struct NASDownloadsSettingsView: View {
                 }
                 if !torboxDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     try? await AuthenticationActor.shared.saveTorBoxAPIKey(torboxDraft)
+                }
+                if !torboxarrDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    try? await AuthenticationActor.shared.saveTorBoxarrPassword(torboxarrDraft)
                 }
             }
         }
@@ -407,6 +487,14 @@ struct NASDownloadsSettingsView: View {
 
     private func persist() {
         NASDownloadSettingsStore.shared.replace(snapshot)
+    }
+
+    private func persistTorBoxarr() {
+        ManualMagnetBackendSettings.setHost(torboxarrHost)
+        if let port = Int(torboxarrPort.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            ManualMagnetBackendSettings.setPort(port)
+        }
+        ManualMagnetBackendSettings.setUsername(torboxarrUsername)
     }
 
     @ViewBuilder
@@ -507,6 +595,47 @@ struct NASDownloadsSettingsView: View {
         } catch {
             secretError = "Could not remove the Synology password."
         }
+    }
+
+    private func saveTorBoxarrPassword() async {
+        let draft = torboxarrPasswordDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !draft.isEmpty else { return }
+        do {
+            try await AuthenticationActor.shared.saveTorBoxarrPassword(draft)
+            torboxarrPasswordDraft = ""
+            torboxarrPasswordSaved = true
+            secretError = nil
+        } catch {
+            secretError = "Could not save the TorBox password."
+        }
+    }
+
+    private func removeTorBoxarrPassword() async {
+        do {
+            try await AuthenticationActor.shared.deleteTorBoxarrPassword()
+            torboxarrPasswordDraft = ""
+            torboxarrPasswordSaved = false
+            torboxarrStatus = nil
+            secretError = nil
+        } catch {
+            secretError = "Could not remove the TorBox password."
+        }
+    }
+
+    private func testTorBoxarr() async {
+        checking = "torboxarr"
+        torboxarrStatus = nil
+        defer { checking = nil }
+        persistTorBoxarr()
+        await saveTorBoxarrPassword()
+        let password = (try? await AuthenticationActor.shared.loadTorBoxarrPassword()) ?? ""
+        guard !password.isEmpty else {
+            secretError = NASHandoffError.backendNotConfigured(.torbox).message
+            return
+        }
+        secretError = nil
+        let settings = TorBoxarrConnectionSettings.current()
+        torboxarrStatus = await TorBoxarrProbe.testConnection(settings: settings, password: password)
     }
 
     private func testTorBox() async {

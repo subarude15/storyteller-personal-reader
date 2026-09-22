@@ -16,6 +16,7 @@ public actor AuthenticationActor {
     private let qbittorrentPassword = "qbittorrentPassword"
     private let synologyPassword = "synologyPassword"
     private let torboxAPIKey = "torboxAPIKey"
+    private let torboxarrPassword = "torboxarrPassword"
 
     private init() {}
 
@@ -266,6 +267,28 @@ public actor AuthenticationActor {
     public func hasTorBoxAPIKey() async -> Bool {
         guard let key = try? await loadTorBoxAPIKey() else { return false }
         return !key.isEmpty
+    }
+
+    public func saveTorBoxarrPassword(_ password: String) async throws {
+        let trimmed = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            try await deleteTorBoxarrPassword()
+            return
+        }
+        try await saveString(trimmed, for: torboxarrPassword)
+    }
+
+    public func loadTorBoxarrPassword() async throws -> String? {
+        try await loadString(for: torboxarrPassword)
+    }
+
+    public func deleteTorBoxarrPassword() async throws {
+        try await keychain.removeItem(account: torboxarrPassword)
+    }
+
+    public func hasTorBoxarrPassword() async -> Bool {
+        guard let password = try? await loadTorBoxarrPassword() else { return false }
+        return !password.isEmpty
     }
 
     private func saveString(_ value: String, for account: String) async throws {

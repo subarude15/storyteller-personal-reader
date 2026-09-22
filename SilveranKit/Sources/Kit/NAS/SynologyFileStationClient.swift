@@ -494,6 +494,114 @@ public struct SynologyFileStationClient: Sendable {
         return files.compactMap { $0["name"] as? String }
     }
 
+    /// Move one file or folder into `destinationVolumeDirectory` and wait until File Station finishes.
+    /// Source and destination are DSM volume paths (`/volume1/...`). This does not delete siblings.
+    public func moveItem(
+        baseURL: String,
+        username: String,
+        password: String,
+        sourceVolumePath: String,
+        destinationVolumeDirectory: String,
+    ) async throws {
+        let source: SynologyFileStationPath
+        let destination: SynologyFileStationPath
+        switch SynologyPathMapping.resolve(sourceVolumePath) {
+            case .success(let value): source = value
+            case .failure(.emptyDestination): throw NASHandoffError.emptyDestination
+            case .failure: throw NASHandoffError.invalidDestination
+        }
+        switch SynologyPathMapping.resolve(destinationVolumeDirectory) {
+            case .success(let value): destination = value
+            case .failure(.emptyDestination): throw NASHandoffError.emptyDestination
+            case .failure: throw NASHandoffError.invalidDestination
+        }
+        // ponytail: refuse share roots and the completed folder itself; a payload is at least
+        // share/torrents/completed/<name>. Upgrade path is an explicit caller-supplied root.
+        let depth = source.fileStationPath.split(separator: "/", omittingEmptySubsequences: true).count
+        guard depth >= 4, source.fileStationPath != destination.fileStationPath else {
+            throw NASHandoffError.invalidDestination
+        }
+        let sid = try await login(baseURL: baseURL, username: username, password: password)
+        defer { Task { try? await logout(baseURL: baseURL, sid: sid) } }
+        let taskID = try await startMove(
+            baseURL: baseURL,
+            sid: sid,
+            source: source.fileStationPath,
+            destination: destination.fileStationPath,
+        )
+        guard !taskID.isEmpty else { return }
+        // ponytail: eight status polls. A stuck task throws and the caller leaves the job Routing.
+        for _ in 0..<8 {
+            if try await moveFinished(baseURL: baseURL, sid: sid, taskID: taskID) { return }
+        }
+        throw SynologyClientError.timeout
+    }
+
+    private func startMove(
+        baseURL: String,
+        sid: String,
+        source: String,
+        destination: String,
+    ) async throws -> String {
+        let pathJSON = String(
+            data: try JSONSerialization.data(withJSONObject: [source]),
+            encoding: .utf8,
+        ) ?? ""
+        guard !pathJSON.isEmpty else { throw NASHandoffError.invalidDestination }
+        let http = try await entry(
+            baseURL: baseURL,
+            sid: sid,
+            items: [
+                URLQueryItem(name: "api", value: "SYNO.FileStation.CopyMove"),
+                URLQueryItem(name: "version", value: "3"),
+                URLQueryItem(name: "method", value: "start"),
+                URLQueryItem(name: "path", value: pathJSON),
+                URLQueryItem(name: "dest_folder_path", value: destination),
+                URLQueryItem(name: "remove_src", value: "true"),
+                URLQueryItem(name: "overwrite", value: "false"),
+                URLQueryItem(name: "accurate_progress", value: "true"),
+            ],
+        )
+        guard Self.isSuccess(http.body) else { throw SynologyClientError.rejected }
+        let data = Self.json(http.body)?["data"] as? [String: Any]
+        return data?["taskid"] as? String ?? ""
+    }
+
+    private func moveFinished(baseURL: String, sid: String, taskID: String) async throws -> Bool {
+        let http = try await entry(
+            baseURL: baseURL,
+            sid: sid,
+            items: [
+                URLQueryItem(name: "api", value: "SYNO.FileStation.CopyMove"),
+                URLQueryItem(name: "version", value: "3"),
+                URLQueryItem(name: "method", value: "status"),
+                URLQueryItem(name: "taskid", value: taskID),
+            ],
+        )
+        guard let json = Self.json(http.body), json["success"] as? Bool == true else {
+            throw SynologyClientError.rejected
+        }
+        let data = json["data"] as? [String: Any] ?? [:]
+        if data["error"] != nil { throw SynologyClientError.rejected }
+        return data["finished"] as? Bool == true
+    }
+
+    private func entry(
+        baseURL: String,
+        sid: String,
+        items: [URLQueryItem],
+    ) async throws -> SynologyHTTP {
+        guard let endpoint = Self.entryURL(from: baseURL) else { throw SynologyClientError.invalidURL }
+        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+        components?.queryItems = items + [URLQueryItem(name: "_sid", value: sid)]
+        guard let url = components?.url else { throw SynologyClientError.invalidURL }
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.httpMethod = "GET"
+        let http = try await send(request)
+        try Self.throwIfFailed(http)
+        return http
+    }
+
     private func createFolderTree(
         baseURL: String,
         sid: String,
