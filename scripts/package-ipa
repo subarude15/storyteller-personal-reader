@@ -95,6 +95,8 @@ STAGED_APP="${PAYLOAD_DIR}/$(basename "${APP_PATH}")"
 # signature is only a vehicle for the entitlements.
 # ---------------------------------------------------------------------------
 APP_ENTITLEMENTS="${SCRIPT_DIR}/../XCodeApps/SilveranReaderSideload.entitlements"
+# Widgets + Share Extension both declare the same App Group. Sign every PlugIns
+# appex with the widgets entitlements blob (group.com.punkrally.reader).
 APPEX_ENTITLEMENTS="${SCRIPT_DIR}/../XCodeApps/SilveranReaderWidgets.entitlements"
 
 if [[ "${SKIP_ADHOC_ENTITLEMENTS:-0}" != "1" ]]; then
@@ -130,18 +132,23 @@ if [[ "${SKIP_ADHOC_ENTITLEMENTS:-0}" != "1" ]]; then
     APP_GROUP_ID="group.com.punkrally.reader"
 
     APP_ENTITLEMENTS_DUMP="$(codesign -d --entitlements :- "${STAGED_APP}" 2>/dev/null || true)"
-    APPEX_ENTITLEMENTS_DUMP="$(codesign -d --entitlements :- "$(find "${STAGED_APP}/PlugIns" -maxdepth 1 -name '*.appex' -type d | head -n 1)" 2>/dev/null || true)"
+    if [[ "${APP_ENTITLEMENTS_DUMP}" != *"${APP_GROUP_ENTITLEMENT}"* || "${APP_ENTITLEMENTS_DUMP}" != *"${APP_GROUP_ID}"* ]]; then
+        echo "ERROR: app is missing ${APP_GROUP_ENTITLEMENT} = ${APP_GROUP_ID} in its signature."
+        echo "       AltStore will not provision the App Group without it."
+        exit 1
+    fi
 
-    for pair in "app:${APP_ENTITLEMENTS_DUMP}" "appex:${APPEX_ENTITLEMENTS_DUMP}"; do
-        name="${pair%%:*}"
-        dump="${pair#*:}"
-        if [[ "${dump}" != *"${APP_GROUP_ENTITLEMENT}"* || "${dump}" != *"${APP_GROUP_ID}"* ]]; then
-            echo "ERROR: ${name} is missing ${APP_GROUP_ENTITLEMENT} = ${APP_GROUP_ID} in its signature."
+    while IFS= read -r APPEX; do
+        [[ -n "${APPEX}" ]] || continue
+        APPEX_NAME="$(basename "${APPEX}")"
+        APPEX_ENTITLEMENTS_DUMP="$(codesign -d --entitlements :- "${APPEX}" 2>/dev/null || true)"
+        if [[ "${APPEX_ENTITLEMENTS_DUMP}" != *"${APP_GROUP_ENTITLEMENT}"* || "${APPEX_ENTITLEMENTS_DUMP}" != *"${APP_GROUP_ID}"* ]]; then
+            echo "ERROR: ${APPEX_NAME} is missing ${APP_GROUP_ENTITLEMENT} = ${APP_GROUP_ID} in its signature."
             echo "       AltStore will not provision the App Group without it."
             exit 1
         fi
-    done
-    echo "==> App Group entitlement present on app + appex"
+    done < <(find "${STAGED_APP}/PlugIns" -maxdepth 1 -name "*.appex" -type d 2>/dev/null || true)
+    echo "==> App Group entitlement present on app + all appexes"
 fi
 
 IPA_OUTPUT_PATH="${OUTPUT_DIR}/${IPA_NAME}"

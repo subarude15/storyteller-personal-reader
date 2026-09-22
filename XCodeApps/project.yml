@@ -69,6 +69,8 @@ targets:
       - path: XCodeApps
         includes:
           - "**/*.swift"
+        excludes:
+          - "ShareExtension/**"
       - path: XCodeApps/Assets.xcassets
         type: assetcatalog
       - path: XCodeApps/PrivacyInfo.xcprivacy
@@ -145,6 +147,8 @@ targets:
       - path: XCodeApps
         includes:
           - "**/*.swift"
+        excludes:
+          - "ShareExtension/**"
       - path: XCodeApps/Assets.xcassets
         type: assetcatalog
       - path: XCodeApps/PrivacyInfo.xcprivacy
@@ -155,6 +159,8 @@ targets:
       - package: Silveran
         product: SilveranReadaloud
       - target: "Silveran Reader Widgets (iOS)"
+        embed: true
+      - target: "Silveran Reader Share (iOS)"
         embed: true
 
   Silveran Reader Sideload (iOS):
@@ -215,6 +221,8 @@ targets:
       - path: XCodeApps
         includes:
           - "**/*.swift"
+        excludes:
+          - "ShareExtension/**"
       - path: XCodeApps/Assets.xcassets
         type: assetcatalog
       - path: XCodeApps/PrivacyInfo.xcprivacy
@@ -232,6 +240,55 @@ targets:
       # one extra App ID (and one App Group) of the free-team weekly budget.
       - target: "Silveran Reader Widgets (iOS)"
         embed: true
+      # Share Extension: magnet / .torrent intake into the PR71 Deluge pipeline.
+      # Same App Group as widgets. Costs one additional free-team App ID.
+      - target: "Silveran Reader Share (iOS)"
+        embed: true
+  Silveran Reader Share (iOS):
+    type: app-extension
+    platform: iOS
+    configFiles:
+      Debug: XCodeApps/Configs/Debug.xcconfig
+      Release: XCodeApps/Configs/Release.xcconfig
+    settings:
+      base:
+        IPHONEOS_DEPLOYMENT_TARGET: 18.0
+        APPLICATION_EXTENSION_API_ONLY: YES
+        CODE_SIGN_ENTITLEMENTS: XCodeApps/SilveranReaderShare.entitlements
+        CODE_SIGN_STYLE: Automatic
+        CURRENT_PROJECT_VERSION: 1
+        DEVELOPMENT_TEAM: "$(DEVELOPMENT_TEAM)"
+        INFOPLIST_FILE: XCodeApps/Info-Share-iOS.plist
+        MARKETING_VERSION: 0.1
+        PRODUCT_BUNDLE_IDENTIFIER: "$(APP_BUNDLE_ID).share"
+        PRODUCT_NAME: Silveran Reader Share
+        SWIFT_VERSION: 5.10
+    info:
+      path: XCodeApps/Info-Share-iOS.plist
+      properties:
+        CFBundleName: "ink+amp Share"
+        CFBundleDisplayName: "ink+amp"
+        CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundlePackageType: "$(PRODUCT_BUNDLE_PACKAGE_TYPE)"
+        CFBundleExecutable: "$(EXECUTABLE_NAME)"
+        SILVERAN_WIDGET_APP_GROUP: group.com.punkrally.reader
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).ShareViewController"
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsText: true
+              NSExtensionActivationSupportsFileWithMaxCount: 1
+    sources:
+      - path: XCodeApps/ShareExtension
+        includes:
+          - "**/*.swift"
+    dependencies:
+      - package: Silveran
+        product: SilveranKit
   Silveran Reader Widgets (iOS):
     type: app-extension
     platform: iOS
@@ -412,6 +469,7 @@ schemes:
       targets:
         "Silveran Reader (iOS)": all
         "Silveran Reader Widgets (iOS)": all
+        "Silveran Reader Share (iOS)": all
     run:
       config: Debug
       executable: "Silveran Reader (iOS)"
@@ -430,6 +488,7 @@ schemes:
       targets:
         "Silveran Reader Sideload (iOS)": all
         "Silveran Reader Widgets (iOS)": all
+        "Silveran Reader Share (iOS)": all
     run:
       config: Debug
       executable: "Silveran Reader Sideload (iOS)"

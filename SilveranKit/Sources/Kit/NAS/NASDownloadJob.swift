@@ -266,6 +266,19 @@ extension Notification.Name {
     public static let inkampShowManualDownloads = Notification.Name(
         "inkampShowManualDownloads"
     )
+    public static let inkampProcessManualDownloadIntake = Notification.Name(
+        "inkampProcessManualDownloadIntake"
+    )
+}
+
+public enum ManualDownloadIntakeDeepLink {
+    public static func isAddDownloadURL(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "punkrally" else { return false }
+        let host = (url.host ?? "").lowercased()
+        if host == "add-download" { return true }
+        // punkrally:///add-download style
+        return url.path.lowercased().contains("add-download")
+    }
 }
 
 public final class RecordingManualDownloadJobStore: ManualDownloadJobStoring, @unchecked Sendable {
