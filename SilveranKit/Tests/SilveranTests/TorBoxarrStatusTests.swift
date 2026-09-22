@@ -96,6 +96,8 @@ struct TorBoxarrStatusTests {
         #expect(jobs.jobs[0].status != .complete)
         #expect(jobs.jobs[0].destination == ebook)
         #expect(movedVolumePaths(nas.movedPaths) == ["/data/torrents/completed/Selected Title"])
+        #expect(nas.movedPaths.allSatisfy { $0.hasPrefix(TorBoxarrConnectionSettings.completedFolder) })
+        #expect(nas.movedPaths.allSatisfy { !$0.hasPrefix(TorBoxarrConnectionSettings.apiDefaultSavePath) })
         #expect(nas.destinations == ["/media/books/books"])
         #expect(nas.removeSrc == ["true"])
         #expect(nas.movedPaths.allSatisfy { !$0.contains("Other Book") && !$0.contains("API Name") && !$0.contains("Magnet Display") })

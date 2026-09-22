@@ -54,8 +54,9 @@ struct ManualMagnetBackendTests {
         #expect(login.contains("password=\(password)"))
     }
 
-    @Test func torBoxSubmissionUsesQBittorrentAdd() async {
+    @Test func torBoxSubmissionUsesMultipartAddWithContainerSavePath() async {
         let script = BridgeScript()
+        script.defaultSavePath = "/data/completed"
         let (handler, jobs) = makeHandler(script: script)
         let result = await handler.handle(candidate(magnet, media: .ebook), manualBackend: .torBox)
         #expect(result.message == "Accepted by TorBox")
@@ -63,10 +64,16 @@ struct ManualMagnetBackendTests {
         #expect(!result.message.contains(password))
         let paths = script.paths
         #expect(paths.contains { $0 == "/api/v2/auth/login" })
+        #expect(paths.contains { $0 == "/api/v2/app/defaultSavePath" })
         #expect(paths.contains { $0 == "/api/v2/torrents/add" })
-        let add = script.bodies.first { $0.contains("urls=") } ?? ""
-        #expect(add.removingPercentEncoding?.contains(magnet) == true)
-        #expect(script.savePaths == [TorBoxarrConnectionSettings.completedFolder])
+        #expect(script.addContentTypes.allSatisfy { $0.contains("multipart/form-data") })
+        #expect(script.addContentTypes.allSatisfy { !$0.contains("application/x-www-form-urlencoded") })
+        let add = script.bodies.first { $0.contains("name=\"urls\"") } ?? ""
+        #expect(add.contains(magnet))
+        #expect(add.contains("name=\"savepath\""))
+        #expect(add.contains("/data/completed"))
+        #expect(!add.contains("/volume1/data/torrents/completed"))
+        #expect(script.savePaths == ["/data/completed"])
         #expect(jobs.jobs.count == 1)
         #expect(jobs.jobs[0].backend == .torbox)
         #expect(jobs.jobs[0].viaTorBoxarr == true)
@@ -75,12 +82,57 @@ struct ManualMagnetBackendTests {
         #expect(jobs.jobs[0].destination != TorBoxarrConnectionSettings.completedFolder)
     }
 
-    @Test func authFailureDoesNotExposeThePassword() async {
+    @Test func torBoxSubmissionFallsBackToContainerSavePathWhenDefaultIsMissing() async {
+        let script = BridgeScript()
+        script.defaultSavePath = ""
+        let (handler, _) = makeHandler(script: script)
+        let result = await handler.handle(candidate(magnet, media: .ebook), manualBackend: .torBox)
+        #expect(result.isSubmitted)
+        #expect(script.savePaths == [TorBoxarrConnectionSettings.apiDefaultSavePath])
+        #expect(script.savePaths != [TorBoxarrConnectionSettings.completedFolder])
+        let add = script.bodies.first { $0.contains("name=\"urls\"") } ?? ""
+        #expect(add.contains("/data/completed"))
+        #expect(!add.contains("/volume1/data/torrents/completed"))
+    }
+
+    @Test func torBoxSubmissionFallsBackWhenDefaultSavePathRequestFails() async {
+        let script = BridgeScript()
+        script.failDefaultSavePath = true
+        let (handler, _) = makeHandler(script: script)
+        let result = await handler.handle(candidate(magnet, media: .ebook), manualBackend: .torBox)
+        #expect(result.isSubmitted)
+        #expect(script.savePaths == [TorBoxarrConnectionSettings.apiDefaultSavePath])
+        #expect(!script.savePaths.contains(TorBoxarrConnectionSettings.completedFolder))
+    }
+
+    @Test func synologyCompletedFolderStaysHostNamespaced() {
+        #expect(TorBoxarrConnectionSettings.completedFolder == "/volume1/data/torrents/completed")
+        #expect(TorBoxarrConnectionSettings.apiDefaultSavePath == "/data/completed")
+        #expect(
+            TorBoxarrConnectionSettings.completedFolder
+                != TorBoxarrConnectionSettings.apiDefaultSavePath
+        )
+    }
+
+    @Test func rejectedMagnetDoesNotTellUserToCheckConnection() async {
+        let script = BridgeScript()
+        script.addBody = "Fails. \(password)"
+        let (handler, _) = makeHandler(script: script)
+        let result = await handler.handle(candidate(magnet, media: .ebook), manualBackend: .torBox)
+        #expect(result.message.contains("rejected"))
+        #expect(result.message.contains("TorBoxarr") || result.message.contains("download request"))
+        #expect(!result.message.lowercased().contains("check the"))
+        #expect(!result.message.contains("connection in Settings"))
+        #expect(!result.message.contains(password))
+    }
+
+    @Test func authFailureStillPointsAtSettingsWithoutLeakingSecrets() async {
         let script = BridgeScript()
         script.loginBody = "Fails."
         let (handler, _) = makeHandler(script: script)
         let result = await handler.handle(candidate(magnet, media: .ebook), manualBackend: .torBox)
         #expect(result.message.contains("credential"))
+        #expect(result.message.contains("Settings"))
         #expect(!result.message.contains(password))
         #expect(!result.message.contains("Fails."))
     }
@@ -91,15 +143,6 @@ struct ManualMagnetBackendTests {
         let (handler, _) = makeHandler(script: script)
         let result = await handler.handle(candidate(magnet, media: .ebook), manualBackend: .torBox)
         #expect(result.message.contains("reach"))
-        #expect(!result.message.contains(password))
-    }
-
-    @Test func rejectedMagnetDoesNotEchoTheServerBody() async {
-        let script = BridgeScript()
-        script.addBody = "Fails. \(password)"
-        let (handler, _) = makeHandler(script: script)
-        let result = await handler.handle(candidate(magnet, media: .ebook), manualBackend: .torBox)
-        #expect(result.message.contains("rejected"))
         #expect(!result.message.contains(password))
     }
 
@@ -148,7 +191,7 @@ struct ManualMagnetBackendTests {
 
         #expect(torboxJobs.jobs[0].destination == "/volume1/media/books/audiobooks")
         #expect(delugeJobs.jobs[0].destination == torboxJobs.jobs[0].destination)
-        #expect(torboxScript.savePaths == [TorBoxarrConnectionSettings.completedFolder])
+        #expect(torboxScript.savePaths == [TorBoxarrConnectionSettings.apiDefaultSavePath])
         #expect(deluge.locations == ["/volume1/data/torrents/incoming"])
     }
 
@@ -244,17 +287,20 @@ private final class BridgeScript: QBittorrentTransport, @unchecked Sendable {
     var paths: [String] = []
     var bodies: [String] = []
     var savePaths: [String] = []
+    var addContentTypes: [String] = []
     var error: URLError?
     var loginBody = "Ok."
     var addBody = "Ok."
     var version = "v5.0.0"
+    var defaultSavePath = "/data/completed"
+    var failDefaultSavePath = false
     private let lock = NSLock()
 
     func send(
         url: URL,
         method _: String,
         body: Data?,
-        contentType _: String?,
+        contentType: String?,
         cookie _: String?,
         timeout _: TimeInterval,
     ) async throws -> QBittorrentHTTP {
@@ -263,8 +309,13 @@ private final class BridgeScript: QBittorrentTransport, @unchecked Sendable {
         lock.lock()
         paths.append(url.path)
         bodies.append(text)
-        if let path = formValue("savepath", in: text) {
-            savePaths.append(path.removingPercentEncoding ?? path)
+        if url.path.hasSuffix("/torrents/add") {
+            addContentTypes.append(contentType ?? "")
+            if let path = multipartField("savepath", in: text)
+                ?? formValue("savepath", in: text)
+            {
+                savePaths.append(path.removingPercentEncoding ?? path)
+            }
         }
         lock.unlock()
         if url.path.hasSuffix("/auth/login") {
@@ -272,6 +323,12 @@ private final class BridgeScript: QBittorrentTransport, @unchecked Sendable {
         }
         if url.path.hasSuffix("/app/version") {
             return QBittorrentHTTP(status: 200, body: Data(version.utf8))
+        }
+        if url.path.hasSuffix("/app/defaultSavePath") {
+            if failDefaultSavePath {
+                return QBittorrentHTTP(status: 500, body: Data("error".utf8))
+            }
+            return QBittorrentHTTP(status: 200, body: Data(defaultSavePath.utf8))
         }
         return QBittorrentHTTP(status: 200, body: Data(addBody.utf8))
     }
@@ -282,6 +339,18 @@ private final class BridgeScript: QBittorrentTransport, @unchecked Sendable {
             if parts.count == 2, parts[0] == name { return parts[1] }
         }
         return nil
+    }
+
+    private func multipartField(_ name: String, in body: String) -> String? {
+        let marker = "name=\"\(name)\""
+        guard let markerRange = body.range(of: marker) else { return nil }
+        let after = body[markerRange.upperBound...]
+        guard let blank = after.range(of: "\r\n\r\n") else { return nil }
+        let valueStart = blank.upperBound
+        if let end = body[valueStart...].range(of: "\r\n") {
+            return String(body[valueStart..<end.lowerBound])
+        }
+        return String(body[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
