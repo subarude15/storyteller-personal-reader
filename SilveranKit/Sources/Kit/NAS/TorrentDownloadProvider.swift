@@ -237,6 +237,8 @@ public enum TorBoxStatusMapping {
         at date: Date = Date(),
     ) -> ManualDownloadJob {
         if job.status == .failed { return job }
+        // Phase 2 owns these — do not clobber NAS transfer progress with TorBox Ready.
+        if job.status == .transferring || job.status == .complete { return job }
         var updated = job
         let previous = job.status
         let next = manualStatus(for: info)
@@ -268,7 +270,8 @@ public enum TorBoxStatusMapping {
                 case .failed:
                     debugLog("[TorBox] torrent failed id=\(info.id)")
                 case .submitted, .queued, .downloading, .processing, .delugeFinishing,
-                    .readyToRoute, .routing, .downloaded, .uploading, .complete, .unknown:
+                    .readyToRoute, .routing, .downloaded, .uploading, .transferring, .complete,
+                    .unknown:
                     debugLog(
                         "[TorBox] status changed id=\(info.id) \(previous.rawValue)->\(next.rawValue)"
                     )

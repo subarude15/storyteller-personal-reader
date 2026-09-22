@@ -153,6 +153,7 @@ public struct SyncedAppSettings: Codable, Equatable, Sendable {
     public struct NASDownloads: Codable, Equatable, Sendable {
         public var torrentClient: TimestampedSetting<NASTorrentClient>?
         public var torboxEnabled: TimestampedSetting<Bool>?
+        public var torboxAutoTransferToNAS: TimestampedSetting<Bool>?
         public var qbittorrentBaseURL: TimestampedSetting<String>?
         public var qbittorrentUsername: TimestampedSetting<String>?
         public var delugeBaseURL: TimestampedSetting<String>?
@@ -168,6 +169,7 @@ public struct SyncedAppSettings: Codable, Equatable, Sendable {
         public init(
             torrentClient: TimestampedSetting<NASTorrentClient>? = nil,
             torboxEnabled: TimestampedSetting<Bool>? = nil,
+            torboxAutoTransferToNAS: TimestampedSetting<Bool>? = nil,
             qbittorrentBaseURL: TimestampedSetting<String>? = nil,
             qbittorrentUsername: TimestampedSetting<String>? = nil,
             delugeBaseURL: TimestampedSetting<String>? = nil,
@@ -182,6 +184,7 @@ public struct SyncedAppSettings: Codable, Equatable, Sendable {
         ) {
             self.torrentClient = torrentClient
             self.torboxEnabled = torboxEnabled
+            self.torboxAutoTransferToNAS = torboxAutoTransferToNAS
             self.qbittorrentBaseURL = qbittorrentBaseURL
             self.qbittorrentUsername = qbittorrentUsername
             self.delugeBaseURL = delugeBaseURL
@@ -313,6 +316,10 @@ public enum SettingsSyncMerge {
         SyncedAppSettings.NASDownloads(
             torrentClient: latest(local.torrentClient, remote.torrentClient),
             torboxEnabled: latest(local.torboxEnabled, remote.torboxEnabled),
+            torboxAutoTransferToNAS: latest(
+                local.torboxAutoTransferToNAS,
+                remote.torboxAutoTransferToNAS,
+            ),
             qbittorrentBaseURL: latest(local.qbittorrentBaseURL, remote.qbittorrentBaseURL),
             qbittorrentUsername: latest(local.qbittorrentUsername, remote.qbittorrentUsername),
             delugeBaseURL: latest(local.delugeBaseURL, remote.delugeBaseURL),
@@ -387,6 +394,7 @@ public enum SettingsSyncMerge {
         var section = updated.integrations.nasDownloads
         stamp(&section.torrentClient, settings.torrentClient, at: stamped)
         stamp(&section.torboxEnabled, settings.torboxEnabled, at: stamped)
+        stamp(&section.torboxAutoTransferToNAS, settings.torboxAutoTransferToNAS, at: stamped)
         stamp(&section.qbittorrentBaseURL, settings.qbittorrentBaseURL, at: stamped)
         stamp(&section.qbittorrentUsername, settings.qbittorrentUsername, at: stamped)
         stamp(&section.delugeBaseURL, settings.delugeBaseURL, at: stamped)
@@ -438,6 +446,7 @@ public enum SettingsSyncMerge {
         let nas = document.integrations.nasDownloads
         return nas.torrentClient != nil
             || nas.torboxEnabled != nil
+            || nas.torboxAutoTransferToNAS != nil
             || nas.qbittorrentBaseURL != nil
             || nas.qbittorrentUsername != nil
             || nas.delugeBaseURL != nil
@@ -579,6 +588,8 @@ public enum SettingsSyncApply {
         return NASDownloadSettingsSnapshot(
             torrentClient: section.torrentClient?.value ?? current.torrentClient,
             torboxEnabled: section.torboxEnabled?.value ?? current.torboxEnabled,
+            torboxAutoTransferToNAS:
+                section.torboxAutoTransferToNAS?.value ?? current.torboxAutoTransferToNAS,
             qbittorrentBaseURL: section.qbittorrentBaseURL?.value ?? current.qbittorrentBaseURL,
             qbittorrentUsername: section.qbittorrentUsername?.value ?? current.qbittorrentUsername,
             delugeBaseURL: section.delugeBaseURL?.value ?? current.delugeBaseURL,

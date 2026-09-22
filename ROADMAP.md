@@ -17,9 +17,11 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
-- [ ] **TorBox → NAS automatic transfer (Phase 2)** — when a TorBox job is Ready: inspect files, generate TorBox download URLs, have the NAS/server worker fetch them, route by media type into audiobook/ebook destinations, then Storyteller/library import. Depends on Phase 1 (TorBox provider in-app). Do **not** start until Phase 1 is merged.
+- [ ] **TorBox post-transfer cleanup / retention policy** — optional auto-delete or retention window for TorBox cloud torrents after NAS transfer completes. Do **not** start until Phase 2 is merged and proven.
 
 ## Shipped
+
+- [x] **TorBox → NAS automatic transfer (Phase 2)** — when a TorBox job is Ready: select ebook/audiobook media files, request short-lived TorBox download URLs, have Synology Download Station pull them into the configured NAS destination (phone is not the data pipe), reconcile/idempotent resume, auto or manual Transfer to NAS, Downloads shows Transferring → Complete. Archives not auto-extracted.
 
 - [x] **TorBox torrent provider (Phase 1)** — TorBox as first-class torrent provider beside Deluge/qBittorrent: Keychain API key, Test Connection, provider picker, magnet + `.torrent` submit, Downloads status (Queued / Downloading / Processing / Ready / Failed), retry/remove, polling. Automatic TorBox → NAS transfer intentionally deferred to Phase 2.
 
@@ -153,7 +155,7 @@ Strict order (Smokey / Nas-ty):
 - Keep `SilveranKit`; do not merge Enve tree (modules + AGPL only)
 - Storyteller = ebook / audiobook / readaloud; podcasts = RSS rail
 - **Explicit reject:** Playtorio, LibGen, Audible scrape, DRM strip, and free-catalog Explore browse (Standard Ebooks, public OPDS shelves, Download / Import from remote catalogs). Ideas are metadata and a local save list only — no download, no full-book fetch, no unpaid source links.
-- **TorBox:** Phase 1 (in-app provider + Downloads) is in progress / shipping. Phase 2 (TorBox Ready → NAS transfer/import) stays deferred until Phase 1 lands. Deluge remains available as a fallback provider.
+- **TorBox:** Phase 1 (in-app provider + Downloads) and Phase 2 (Ready → Synology Download Station NAS transfer) are shipped. Post-transfer TorBox cleanup/retention is deferred. Deluge and qBittorrent remain available as fallback providers.
 - EPUB files the user already has still open in the existing reader. Imported titles become normal Storyteller books via the existing local / phone import.
 - **Ideas for later** must not enter Library, Shelf, or sync. **More like this** remains Storyteller-library-only (series → author → tags) on owned book detail.
 - Reuse the existing ebook reader and shared audio session/player. Preserve Storyteller Read ↔ Listen

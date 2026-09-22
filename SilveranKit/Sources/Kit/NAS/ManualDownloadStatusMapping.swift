@@ -123,7 +123,9 @@ public enum ManualDownloadStatusMapping {
     }
 
     public static func markUnknown(_ job: ManualDownloadJob, at date: Date = Date()) -> ManualDownloadJob {
-        if job.status == .failed || job.status == .complete { return job }
+        if job.status == .failed || job.status == .complete || job.status == .transferring {
+            return job
+        }
         var updated = job
         updated.status = .unknown
         updated.lastStatusAt = date
@@ -186,7 +188,7 @@ extension ManualDownloadJob {
             case .readyToRoute, .routing, .complete:
                 delugeReachedFinalRouting = true
             case .submitted, .queued, .downloading, .processing, .delugeFinishing, .downloaded,
-                .uploading, .ready, .failed, .unknown:
+                .uploading, .ready, .transferring, .failed, .unknown:
                 break
         }
     }

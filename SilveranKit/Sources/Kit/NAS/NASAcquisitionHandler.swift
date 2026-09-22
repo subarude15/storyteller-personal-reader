@@ -235,7 +235,7 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
     private func outcome(for job: ManualDownloadJob) -> ManualAcquisitionHandoffResult {
         switch job.status {
             case .submitted, .queued, .downloading, .processing, .delugeFinishing, .readyToRoute,
-                .routing, .downloaded, .uploading, .ready, .unknown:
+                .routing, .downloaded, .uploading, .ready, .transferring, .unknown:
                 return .submitted(message: NASHandoffMessages.submitted(backend: job.backend))
             case .complete:
                 return .completed(message: NASHandoffMessages.uploaded())

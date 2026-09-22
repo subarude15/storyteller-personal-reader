@@ -42,6 +42,13 @@ public struct ManualDownloadStatusRefresh: Sendable {
         updated.append(contentsOf: await refreshQBittorrent(current, context: context))
         updated.append(contentsOf: await refreshDeluge(current, context: context))
         updated.append(contentsOf: await refreshTorBox(current, context: context))
+        // Phase 2: poll NAS Download Station + auto-start Ready TorBox jobs.
+        let transfer = TorBoxNASTransferService(
+            environment: environment,
+            torbox: torbox,
+            jobs: jobs,
+        )
+        updated.append(contentsOf: await transfer.reconcile(autoStartReady: true))
         return updated
     }
 
@@ -237,7 +244,10 @@ public struct ManualDownloadStatusRefresh: Sendable {
         context: NASHandoffContext,
     ) async -> [ManualDownloadJob] {
         let targets = current.filter {
-            $0.backend == .torbox && $0.status.isActive && !($0.backendJobID ?? "").isEmpty
+            $0.backend == .torbox
+                && $0.status.isActive
+                && $0.status != .transferring
+                && !($0.backendJobID ?? "").isEmpty
         }
         guard !targets.isEmpty else { return [] }
         let key = context.credentials.torboxAPIKey

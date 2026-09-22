@@ -15,6 +15,7 @@ public enum ManualDownloadRetryAction: String, Sendable, Equatable {
     case retryDownload
     case retryTorrent
     case retryRouting
+    case retryTransfer
 }
 
 public enum ManualDownloadJobStatus: String, Codable, Sendable, CaseIterable {
@@ -31,8 +32,10 @@ public enum ManualDownloadJobStatus: String, Codable, Sendable, CaseIterable {
     case routing
     case downloaded
     case uploading
-    /// TorBox (and similar) content is fully available. Phase 2 will transfer to NAS.
+    /// TorBox (and similar) content is fully available in the cloud.
     case ready
+    /// NAS is pulling TorBox files into the library destination.
+    case transferring
     case complete
     case failed
     case unknown
@@ -49,6 +52,7 @@ public enum ManualDownloadJobStatus: String, Codable, Sendable, CaseIterable {
             case .downloaded: "Downloaded"
             case .uploading: "Uploading"
             case .ready: "Ready"
+            case .transferring: "Transferring to NAS"
             case .complete: "Complete"
             case .failed: "Failed"
             case .unknown: "Unknown"
@@ -59,7 +63,7 @@ public enum ManualDownloadJobStatus: String, Codable, Sendable, CaseIterable {
         switch self {
             case .downloaded, .failed: true
             case .submitted, .queued, .downloading, .processing, .delugeFinishing, .readyToRoute,
-                .routing, .uploading, .ready, .complete, .unknown:
+                .routing, .uploading, .ready, .transferring, .complete, .unknown:
                 false
         }
     }
@@ -67,7 +71,7 @@ public enum ManualDownloadJobStatus: String, Codable, Sendable, CaseIterable {
     public var isActive: Bool {
         switch self {
             case .queued, .submitted, .downloading, .processing, .delugeFinishing, .readyToRoute,
-                .routing, .downloaded, .uploading, .unknown:
+                .routing, .downloaded, .uploading, .transferring, .unknown:
                 true
             case .ready, .complete, .failed:
                 false
@@ -106,6 +110,8 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
     public var providerAuthID: String?
     /// Provider file stubs for Phase 2 NAS transfer / file selection.
     public var providerFiles: [TorrentJobFile]?
+    /// Per-file NAS transfer state (TorBox Phase 2). Never stores signed URLs.
+    public var transferFiles: [RemoteTransferFileState]?
 
     public init(
         id: String = UUID().uuidString,
@@ -132,6 +138,7 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
         providerInfoHash: String? = nil,
         providerAuthID: String? = nil,
         providerFiles: [TorrentJobFile]? = nil,
+        transferFiles: [RemoteTransferFileState]? = nil,
     ) {
         self.id = id
         self.title = title
@@ -157,6 +164,7 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
         self.providerInfoHash = providerInfoHash
         self.providerAuthID = providerAuthID
         self.providerFiles = providerFiles
+        self.transferFiles = transferFiles
     }
 
     public var hasReachedDelugeFinalRouting: Bool {
@@ -175,6 +183,7 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
         (backend == .qbittorrent || backend == .deluge || backend == .torbox)
             && status == .failed
             && !canRetryRoutingNow
+            && !canRetryTransferNow
             && (sourceURL != nil || hasStagedFile)
     }
 
@@ -187,9 +196,25 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
             && !destination.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    public var canTransferToNASNow: Bool {
+        backend == .torbox
+            && status == .ready
+            && !(backendJobID ?? "").isEmpty
+    }
+
+    /// Failed NAS transfer for a still-Ready TorBox cloud job — retry transfer only.
+    public var canRetryTransferNow: Bool {
+        backend == .torbox
+            && status == .failed
+            && !(backendJobID ?? "").isEmpty
+            && ((transferFiles?.isEmpty == false) || (providerFiles?.isEmpty == false))
+            && !canRetryRoutingNow
+    }
+
     public var retryAction: ManualDownloadRetryAction {
         if canRetryUploadNow { return .retryUpload }
         if canRetryRoutingNow { return .retryRouting }
+        if canRetryTransferNow { return .retryTransfer }
         if canRetryTorrentNow { return .retryTorrent }
         if canRetryDownloadNow { return .retryDownload }
         return .none

@@ -55,6 +55,11 @@ struct NASDownloadsSettingsView: View {
 
             Section {
                 Toggle("Enabled", isOn: torboxEnabledBinding)
+                Toggle(
+                    "Automatically transfer Ready downloads to NAS",
+                    isOn: torboxAutoTransferBinding,
+                )
+                .disabled(!snapshot.torboxEnabled || !snapshot.isSynologyConfigured)
                 SecureField(
                     "API Key",
                     text: $torboxAPIKeyDraft,
@@ -84,7 +89,7 @@ struct NASDownloadsSettingsView: View {
                 Text("TorBox")
             } footer: {
                 Text(
-                    "API key is stored in the device Keychain and never shown in full after save. Create one at torbox.app → Settings → API. Phase 1 tracks TorBox jobs in Downloads; automatic NAS transfer is Phase 2."
+                    "API key is stored in the device Keychain and never shown in full after save. Create one at torbox.app → Settings → API. When Ready, the NAS pulls TorBox files via Download Station — the phone never pipes multi-GB media."
                 )
             }
 
@@ -115,7 +120,7 @@ struct NASDownloadsSettingsView: View {
                 Text("Destination folders")
             } footer: {
                 Text(
-                    "Used now for Deluge/qBittorrent/Synology routing, and retained for TorBox → NAS transfer in Phase 2."
+                    "Provider-independent library folders. TorBox, Deluge, qBittorrent, and Synology all route into these destinations."
                 )
             }
 
@@ -333,6 +338,13 @@ struct NASDownloadsSettingsView: View {
         Binding(
             get: { snapshot.torboxEnabled },
             set: { snapshot.torboxEnabled = $0; persist() },
+        )
+    }
+
+    private var torboxAutoTransferBinding: Binding<Bool> {
+        Binding(
+            get: { snapshot.torboxAutoTransferToNAS },
+            set: { snapshot.torboxAutoTransferToNAS = $0; persist() },
         )
     }
 
