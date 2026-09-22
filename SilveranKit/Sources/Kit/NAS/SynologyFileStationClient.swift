@@ -291,6 +291,11 @@ public struct SynologyFileStationClient: Sendable {
         apiURL(from: raw, path: "/webapi/auth.cgi")
     }
 
+    /// Shared URL builder for Synology CGI paths (Download Station, etc.).
+    public static func apiPathURL(from raw: String, path: String) -> URL? {
+        apiURL(from: raw, path: path)
+    }
+
     private static func apiURL(from raw: String, path: String) -> URL? {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
@@ -380,4 +385,155 @@ public struct SynologyFileStationClient: Sendable {
             default: .cannotReachServer
         }
     }
+
+    // MARK: - Folder / verify helpers (Phase 2)
+
+    public func ensureFolder(
+        baseURL: String,
+        username: String,
+        password: String,
+        volumePath: String,
+    ) async throws {
+        let mapped: SynologyFileStationPath
+        switch SynologyPathMapping.resolve(volumePath) {
+            case .success(let value): mapped = value
+            case .failure(.emptyDestination): throw NASHandoffError.emptyDestination
+            case .failure: throw NASHandoffError.invalidDestination
+        }
+        let sid = try await login(baseURL: baseURL, username: username, password: password)
+        defer { Task { try? await logout(baseURL: baseURL, sid: sid) } }
+        try await createFolderTree(baseURL: baseURL, sid: sid, fileStationPath: mapped.fileStationPath)
+    }
+
+    public func remoteFileSize(
+        baseURL: String,
+        username: String,
+        password: String,
+        volumeDirectory: String,
+        filename: String,
+    ) async throws -> Int64? {
+        let remote: String
+        switch SynologyPathMapping.filePath(directory: volumeDirectory, filename: filename) {
+            case .success(let path): remote = path
+            case .failure(.emptyDestination): throw NASHandoffError.emptyDestination
+            case .failure: throw NASHandoffError.invalidDestination
+        }
+        let sid = try await login(baseURL: baseURL, username: username, password: password)
+        defer { Task { try? await logout(baseURL: baseURL, sid: sid) } }
+        return try await fileSize(baseURL: baseURL, sid: sid, path: remote)
+    }
+
+    public func renameFile(
+        baseURL: String,
+        username: String,
+        password: String,
+        volumeDirectory: String,
+        fromFilename: String,
+        toFilename: String,
+    ) async throws {
+        let fromPath: String
+        let toName = NASPathSafety.sanitizeComponent(toFilename)
+        guard !toName.isEmpty else { throw NASHandoffError.invalidDestination }
+        switch SynologyPathMapping.filePath(directory: volumeDirectory, filename: fromFilename) {
+            case .success(let path): fromPath = path
+            case .failure(.emptyDestination): throw NASHandoffError.emptyDestination
+            case .failure: throw NASHandoffError.invalidDestination
+        }
+        let sid = try await login(baseURL: baseURL, username: username, password: password)
+        defer { Task { try? await logout(baseURL: baseURL, sid: sid) } }
+        guard let endpoint = Self.entryURL(from: baseURL) else { throw SynologyClientError.invalidURL }
+        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "api", value: "SYNO.FileStation.Rename"),
+            URLQueryItem(name: "version", value: "2"),
+            URLQueryItem(name: "method", value: "rename"),
+            URLQueryItem(name: "path", value: fromPath),
+            URLQueryItem(name: "name", value: toName),
+            URLQueryItem(name: "_sid", value: sid),
+        ]
+        guard let url = components?.url else { throw SynologyClientError.invalidURL }
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.httpMethod = "GET"
+        let http = try await send(request)
+        try Self.throwIfFailed(http)
+        guard Self.isSuccess(http.body) else { throw SynologyClientError.rejected }
+    }
+
+    public func listFilenames(
+        baseURL: String,
+        username: String,
+        password: String,
+        volumeDirectory: String,
+    ) async throws -> [String] {
+        let mapped: SynologyFileStationPath
+        switch SynologyPathMapping.resolve(volumeDirectory) {
+            case .success(let value): mapped = value
+            case .failure(.emptyDestination): throw NASHandoffError.emptyDestination
+            case .failure: throw NASHandoffError.invalidDestination
+        }
+        let sid = try await login(baseURL: baseURL, username: username, password: password)
+        defer { Task { try? await logout(baseURL: baseURL, sid: sid) } }
+        guard let endpoint = Self.entryURL(from: baseURL) else { throw SynologyClientError.invalidURL }
+        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "api", value: "SYNO.FileStation.List"),
+            URLQueryItem(name: "version", value: "2"),
+            URLQueryItem(name: "method", value: "list"),
+            URLQueryItem(name: "folder_path", value: mapped.fileStationPath),
+            URLQueryItem(name: "_sid", value: sid),
+        ]
+        guard let url = components?.url else { throw SynologyClientError.invalidURL }
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.httpMethod = "GET"
+        let http = try await send(request)
+        try Self.throwIfFailed(http)
+        guard let json = Self.json(http.body), json["success"] as? Bool == true else {
+            throw SynologyClientError.invalidResponse
+        }
+        let files = (json["data"] as? [String: Any])?["files"] as? [[String: Any]] ?? []
+        return files.compactMap { $0["name"] as? String }
+    }
+
+    private func createFolderTree(
+        baseURL: String,
+        sid: String,
+        fileStationPath: String,
+    ) async throws {
+        let parts = fileStationPath.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        guard parts.count >= 1 else { throw NASHandoffError.invalidDestination }
+        // Share root already exists; create nested folders under it.
+        var built = "/" + parts[0]
+        for part in parts.dropFirst() {
+            let parent = built
+            built = built + "/" + part
+            // Ignore "folder already exists" style failures by checking list after create.
+            try? await createFolder(baseURL: baseURL, sid: sid, parent: parent, name: part)
+        }
+    }
+
+    private func createFolder(
+        baseURL: String,
+        sid: String,
+        parent: String,
+        name: String,
+    ) async throws {
+        guard let endpoint = Self.entryURL(from: baseURL) else { throw SynologyClientError.invalidURL }
+        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "api", value: "SYNO.FileStation.CreateFolder"),
+            URLQueryItem(name: "version", value: "2"),
+            URLQueryItem(name: "method", value: "create"),
+            URLQueryItem(name: "folder_path", value: parent),
+            URLQueryItem(name: "name", value: name),
+            URLQueryItem(name: "force_parent", value: "true"),
+            URLQueryItem(name: "_sid", value: sid),
+        ]
+        guard let url = components?.url else { throw SynologyClientError.invalidURL }
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.httpMethod = "GET"
+        let http = try await send(request)
+        try Self.throwIfFailed(http)
+        // success=false with "already exists" is fine — caller continues.
+    }
 }
+

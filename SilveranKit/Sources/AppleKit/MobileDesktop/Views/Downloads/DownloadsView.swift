@@ -113,10 +113,12 @@ public struct DownloadsView: View {
                         await retryDownload(job)
                     } onRetryRouting: {
                         await retryRouting(job)
+                    } onTransferToNAS: {
+                        await transferToNAS(job)
                     } onDeleteLocal: {
                         await deleteLocal(job)
-                    } onDeleteAttempt: {
-                        await deleteAttempt(job)
+                    } onDeleteAttempt: { deleteFromTorBox in
+                        await deleteAttempt(job, deleteFromTorBox: deleteFromTorBox)
                     }
                 }
             }
@@ -183,6 +185,13 @@ public struct DownloadsView: View {
         await reload()
     }
 
+    private func transferToNAS(_ job: ManualDownloadJob) async {
+        busyID = job.id
+        defer { busyID = nil }
+        _ = await TorBoxNASTransferService.live().transfer(job: job)
+        await reload()
+    }
+
     private func deleteLocal(_ job: ManualDownloadJob) async {
         busyID = job.id
         defer { busyID = nil }
@@ -190,10 +199,12 @@ public struct DownloadsView: View {
         await reload()
     }
 
-    private func deleteAttempt(_ job: ManualDownloadJob) async {
+    private func deleteAttempt(_ job: ManualDownloadJob, deleteFromTorBox: Bool) async {
         busyID = job.id
         defer { busyID = nil }
-        await ManualDownloadStatusRefresh.live().deleteRemoteIfNeeded(job: job)
+        if deleteFromTorBox {
+            await ManualDownloadStatusRefresh.live().deleteRemoteIfNeeded(job: job)
+        }
         await ManualDownloadJobStore.shared.delete(id: job.id)
         await reload()
     }
@@ -218,8 +229,11 @@ private struct DownloadsJobRow: View {
     var onRetryUpload: () async -> Void
     var onRetryDownload: () async -> Void
     var onRetryRouting: () async -> Void
+    var onTransferToNAS: () async -> Void
     var onDeleteLocal: () async -> Void
-    var onDeleteAttempt: () async -> Void
+    var onDeleteAttempt: (_ deleteFromTorBox: Bool) async -> Void
+
+    @State private var showTorBoxDeleteConfirm = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -234,7 +248,7 @@ private struct DownloadsJobRow: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             HStack {
-                if let progress = job.progress, job.status.isActive, job.status != .submitted {
+                if let progress = job.progress, shouldShowProgressText {
                     Text(progressText(progress))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -247,6 +261,8 @@ private struct DownloadsJobRow: View {
             }
             if let progress = job.progress, shouldShowBar {
                 ProgressView(value: min(max(progress, 0), 1))
+            } else if job.status == .transferring {
+                ProgressView()
             } else if job.status == .uploading {
                 Text("Uploading…")
                     .font(.caption)
@@ -256,8 +272,16 @@ private struct DownloadsJobRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            if job.backend != .torbox {
+            if job.status == .complete, !job.destination.isEmpty {
+                Text("Saved to:\n\(job.destination)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if job.backend != .torbox {
                 Text(job.destination)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if job.status == .ready || job.status == .transferring {
+                Text(job.destination.isEmpty ? job.mediaType.label : job.destination)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -277,6 +301,23 @@ private struct DownloadsJobRow: View {
         }
         .padding(.vertical, 4)
         .accessibilityIdentifier("downloads-job-\(job.id)")
+        .confirmationDialog(
+            "Remove download?",
+            isPresented: $showTorBoxDeleteConfirm,
+            titleVisibility: .visible,
+        ) {
+            Button("Remove from Downloads") {
+                Task { await onDeleteAttempt(false) }
+            }
+            Button("Delete from TorBox too", role: .destructive) {
+                Task { await onDeleteAttempt(true) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "Delete from TorBox removes the cloud torrent. Files already transferred to your NAS will not be deleted."
+            )
+        }
     }
 
     private var statusLabel: String {
@@ -284,14 +325,25 @@ private struct DownloadsJobRow: View {
             case .routing:
                 DelugeManualRouting.statusLabel(for: job.mediaType, routing: true)
             case .submitted, .queued, .downloading, .processing, .delugeFinishing, .readyToRoute,
-                .downloaded, .uploading, .ready, .complete, .failed, .unknown:
+                .downloaded, .uploading, .ready, .transferring, .complete, .failed, .unknown:
                 job.status.label
         }
     }
 
     private var shouldShowBar: Bool {
         switch job.status {
-            case .downloading, .queued, .processing, .delugeFinishing, .unknown: job.progress != nil
+            case .downloading, .queued, .processing, .delugeFinishing, .transferring, .unknown:
+                job.progress != nil
+            case .submitted, .readyToRoute, .routing, .downloaded, .uploading, .ready, .complete,
+                .failed:
+                false
+        }
+    }
+
+    private var shouldShowProgressText: Bool {
+        switch job.status {
+            case .downloading, .queued, .processing, .delugeFinishing, .transferring, .unknown:
+                job.status != .submitted
             case .submitted, .readyToRoute, .routing, .downloaded, .uploading, .ready, .complete,
                 .failed:
                 false
@@ -307,6 +359,10 @@ private struct DownloadsJobRow: View {
     @ViewBuilder
     private var actions: some View {
         HStack {
+            if job.canTransferToNASNow {
+                Button("Transfer to NAS") { Task { await onTransferToNAS() } }
+                    .disabled(busyID != nil)
+            }
             switch job.retryAction {
                 case .retryUpload:
                     Button("Retry Upload") { Task { await onRetryUpload() } }
@@ -322,14 +378,24 @@ private struct DownloadsJobRow: View {
                 case .retryRouting:
                     Button("Retry Move") { Task { await onRetryRouting() } }
                         .disabled(busyID != nil)
+                case .retryTransfer:
+                    Button("Retry Transfer") { Task { await onTransferToNAS() } }
+                        .disabled(busyID != nil)
                 case .none:
                     EmptyView()
             }
-            if job.status == .failed || job.status == .ready {
-                Button(job.backend == .torbox ? "Remove" : "Delete Attempt", role: .destructive) {
-                    Task { await onDeleteAttempt() }
+            if job.status == .failed || job.status == .ready || job.status == .complete {
+                if job.backend == .torbox {
+                    Button("Remove", role: .destructive) {
+                        showTorBoxDeleteConfirm = true
+                    }
+                    .disabled(busyID != nil)
+                } else if job.status == .failed || job.status == .ready {
+                    Button("Delete Attempt", role: .destructive) {
+                        Task { await onDeleteAttempt(false) }
+                    }
+                    .disabled(busyID != nil)
                 }
-                .disabled(busyID != nil)
             }
         }
         .font(.subheadline)

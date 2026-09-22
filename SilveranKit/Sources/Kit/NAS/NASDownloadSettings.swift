@@ -61,6 +61,8 @@ public struct NASDownloadSettingsSnapshot: Equatable, Sendable {
     public var torrentClient: NASTorrentClient
     /// When false, TorBox cannot be selected as the active provider.
     public var torboxEnabled: Bool
+    /// When true, Ready TorBox jobs automatically begin NAS transfer (requires Synology).
+    public var torboxAutoTransferToNAS: Bool
     public var qbittorrentBaseURL: String
     public var qbittorrentUsername: String
     public var delugeBaseURL: String
@@ -76,6 +78,7 @@ public struct NASDownloadSettingsSnapshot: Equatable, Sendable {
     public init(
         torrentClient: NASTorrentClient = .none,
         torboxEnabled: Bool = false,
+        torboxAutoTransferToNAS: Bool = true,
         qbittorrentBaseURL: String = "",
         qbittorrentUsername: String = "",
         delugeBaseURL: String = "",
@@ -90,6 +93,7 @@ public struct NASDownloadSettingsSnapshot: Equatable, Sendable {
     ) {
         self.torrentClient = torrentClient
         self.torboxEnabled = torboxEnabled
+        self.torboxAutoTransferToNAS = torboxAutoTransferToNAS
         self.qbittorrentBaseURL = qbittorrentBaseURL
         self.qbittorrentUsername = qbittorrentUsername
         self.delugeBaseURL = delugeBaseURL

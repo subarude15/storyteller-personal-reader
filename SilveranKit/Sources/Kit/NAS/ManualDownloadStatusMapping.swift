@@ -186,7 +186,7 @@ extension ManualDownloadJob {
             case .readyToRoute, .routing, .complete:
                 delugeReachedFinalRouting = true
             case .submitted, .queued, .downloading, .processing, .delugeFinishing, .downloaded,
-                .uploading, .ready, .failed, .unknown:
+                .uploading, .ready, .transferring, .failed, .unknown:
                 break
         }
     }
