@@ -30,9 +30,11 @@ struct BookFormatLinkRoot: View {
     @State private var query = ""
     @State private var startAlignment = false
     @State private var isSubmitting = false
+    @State private var submittingMerge = false
     @State private var errorMessage: String?
     @State private var showUnlinkConfirm = false
     @State private var resultAlignment: ReadaloudAlignment?
+    @State private var mergeStatus: StorytellerBookMergeStatus?
 
     private var currentItem: BookMetadata {
         mediaViewModel.library.bookMetaData.first { $0.id == item.id } ?? item
@@ -61,7 +63,9 @@ struct BookFormatLinkRoot: View {
 
     var body: some View {
         Group {
-            if let resultAlignment {
+            if let mergeStatus {
+                mergeResultView(mergeStatus)
+            } else if let resultAlignment {
                 resultView(resultAlignment)
             } else if isLinked {
                 manageView
@@ -104,8 +108,11 @@ struct BookFormatLinkRoot: View {
                                 other: candidate.book,
                                 startAlignment: $startAlignment,
                                 isSubmitting: $isSubmitting,
+                                submittingMerge: $submittingMerge,
                                 errorMessage: $errorMessage,
+                                canMerge: canMerge(candidate.book),
                                 onConfirm: { confirm(candidate.book) },
+                                onMerge: { merge(candidate.book) },
                             )
                         } label: {
                             BookFormatCandidateRow(candidate: candidate)
@@ -204,9 +211,36 @@ struct BookFormatLinkRoot: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    private func canMerge(_ other: BookMetadata) -> Bool {
+        StorytellerBookMergeEligibility.isEligible(currentItem, other)
+            && mediaViewModel.uploadPermittedSourceIDs.contains(currentItem.sourceID)
+    }
+
+    private func mergeResultView(_ status: StorytellerBookMergeStatus) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(status.headline)
+                .font(.title2.weight(.semibold))
+                .accessibilityAddTraits(.isHeader)
+            Text(status.detail)
+                .font(.body)
+                .fixedSize(horizontal: false, vertical: true)
+            if let warning = status.migrationWarning {
+                Text(warning)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Done") { dismiss() }
+                .buttonStyle(.borderedProminent)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
     private func confirm(_ other: BookMetadata) {
         guard !isSubmitting else { return }
         isSubmitting = true
+        submittingMerge = false
         errorMessage = nil
         Task {
             let outcome = await mediaViewModel.linkBookFormat(
@@ -221,8 +255,29 @@ struct BookFormatLinkRoot: View {
                     errorMessage = nil
                 case .failed(let failure):
                     errorMessage = failure.message(action: .link)
-                case .unlinked, .alignment:
+                case .unlinked, .alignment, .merged:
                     errorMessage = BookFormatLinkFailure.serverRejected.message(action: .link)
+            }
+        }
+    }
+
+    private func merge(_ other: BookMetadata) {
+        guard !isSubmitting else { return }
+        isSubmitting = true
+        submittingMerge = true
+        errorMessage = nil
+        Task {
+            let outcome = await mediaViewModel.mergeBookFormats(other, into: currentItem)
+            isSubmitting = false
+            submittingMerge = false
+            switch outcome {
+                case .merged(_, let status):
+                    mergeStatus = status
+                    errorMessage = nil
+                case .failed(let failure):
+                    errorMessage = failure.message(action: .merge)
+                case .linked, .unlinked, .alignment:
+                    errorMessage = BookFormatLinkFailure.serverRejected.message(action: .merge)
             }
         }
     }
@@ -240,7 +295,7 @@ struct BookFormatLinkRoot: View {
                     dismiss()
                 case .failed(let failure):
                     errorMessage = failure.message(action: .unlink)
-                case .linked, .alignment:
+                case .linked, .alignment, .merged:
                     errorMessage = BookFormatLinkFailure.serverRejected.message(action: .unlink)
             }
         }
@@ -258,7 +313,7 @@ struct BookFormatLinkRoot: View {
                     resultAlignment = alignment
                 case .failed(let failure):
                     errorMessage = failure.message(action: .retry)
-                case .linked, .unlinked:
+                case .linked, .unlinked, .merged:
                     errorMessage = BookFormatLinkFailure.serverRejected.message(action: .retry)
             }
         }
@@ -310,8 +365,13 @@ private struct BookFormatLinkConfirmationView: View {
     let other: BookMetadata
     @Binding var startAlignment: Bool
     @Binding var isSubmitting: Bool
+    @Binding var submittingMerge: Bool
     @Binding var errorMessage: String?
+    let canMerge: Bool
     let onConfirm: () -> Void
+    let onMerge: () -> Void
+
+    @State private var showMergeConfirm = false
 
     private var confirmation: BookFormatLinkConfirmation {
         BookFormatAlignment.confirmation(current: current, other: other)
@@ -338,12 +398,37 @@ private struct BookFormatLinkConfirmationView: View {
                         .font(.body)
                         .accessibilityLabel(errorMessage)
                 }
-                Button(isSubmitting ? "Linking…" : "Link formats") {
+                Button(isSubmitting && !submittingMerge ? "Linking…" : "Link formats") {
                     onConfirm()
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(isSubmitting)
                 .accessibilityHint("Saves the association on Storyteller. Does not delete either book.")
+                if canMerge {
+                    Button {
+                        showMergeConfirm = true
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(
+                                submittingMerge
+                                    ? "Starting Read & Listen…"
+                                    : StorytellerBookMergeTexts.mergeTitle
+                            )
+                            if !submittingMerge {
+                                Text(StorytellerBookMergeTexts.mergeSubtitle)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.leading)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isSubmitting)
+                    .accessibilityHint(
+                        "Shows a warning. Storyteller will combine both records if you confirm."
+                    )
+                }
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -352,6 +437,18 @@ private struct BookFormatLinkConfirmationView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .confirmationDialog(
+            StorytellerBookMergeTexts.destructiveTitle,
+            isPresented: $showMergeConfirm,
+            titleVisibility: .visible,
+        ) {
+            Button(StorytellerBookMergeTexts.confirmAction, role: .destructive) {
+                onMerge()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(StorytellerBookMergeTexts.destructiveBody)
+        }
     }
 }
 #endif

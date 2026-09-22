@@ -1017,7 +1017,7 @@ struct MediaGridInfoSidebar: View {
                 formatActionError = nil
             case .failed(let failure):
                 formatActionError = failure.message(action: .retry)
-            case .linked, .unlinked:
+            case .linked, .unlinked, .merged:
                 formatActionError = nil
         }
     }

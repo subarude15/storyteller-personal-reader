@@ -724,6 +724,32 @@ public actor FilesystemActor {
         try write(data: try encoder.encode(highlights), to: fileURL)
     }
 
+    public func applyMergeHighlights(
+        _ highlightsByBook: [BookID: [Highlight]],
+        surviving: BookID,
+    ) throws {
+        var combined = (try? loadHighlights(bookID: surviving)) ?? []
+        var seen = Set(combined.map(\.id))
+        for highlights in highlightsByBook.values {
+            for highlight in highlights {
+                guard seen.insert(highlight.id).inserted else { continue }
+                combined.append(
+                    Highlight(
+                        id: highlight.id,
+                        bookID: surviving,
+                        locator: highlight.locator,
+                        text: highlight.text,
+                        color: highlight.color,
+                        note: highlight.note,
+                        createdAt: highlight.createdAt,
+                    )
+                )
+            }
+        }
+        guard !combined.isEmpty else { return }
+        try saveHighlights(bookID: surviving, highlights: combined)
+    }
+
     public func deleteHighlights(bookID: BookID) throws {
         let fileURL = highlightsFileURL(bookID: bookID)
         let fm = FileManager.default

@@ -187,7 +187,7 @@ public struct StorytellerCoverUpload: Sendable {
     }
 }
 
-public struct StorytellerCreatorRelationUpdate: Codable, Sendable {
+public struct StorytellerCreatorRelationUpdate: Codable, Equatable, Sendable {
     public let uuid: String?
     public let id: Int?
     public let name: String
@@ -203,7 +203,7 @@ public struct StorytellerCreatorRelationUpdate: Codable, Sendable {
     }
 }
 
-public struct StorytellerSeriesRelationUpdate: Codable, Sendable {
+public struct StorytellerSeriesRelationUpdate: Codable, Equatable, Sendable {
     public let uuid: String?
     public let name: String
     public let featured: Bool?
@@ -249,13 +249,101 @@ struct StorytellerBookRelationsUpdatePayload: Codable {
     var status: StorytellerStatusRelationUpdate?
 }
 
-struct StorytellerBookMergeUpdate: Codable {
-    var title: String?
-    var subtitle: String?
-    var language: String?
-    var publicationDate: String?
-    var description: String?
-    var rating: Double?
+public struct StorytellerBookMergeUpdate: Codable, Equatable, Sendable {
+    public var title: String?
+    public var subtitle: String?
+    public var language: String?
+    public var publicationDate: String?
+    public var description: String?
+    public var rating: Double?
+
+    public init(
+        title: String? = nil,
+        subtitle: String? = nil,
+        language: String? = nil,
+        publicationDate: String? = nil,
+        description: String? = nil,
+        rating: Double? = nil,
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.language = language
+        self.publicationDate = publicationDate
+        self.description = description
+        self.rating = rating
+    }
+}
+
+public struct StorytellerBookMergeRelations: Equatable, Sendable {
+    public var creators: [StorytellerCreatorRelationUpdate]?
+    public var series: [StorytellerSeriesRelationUpdate]?
+    public var collections: [String]?
+    public var tags: [String]?
+
+    public init(
+        creators: [StorytellerCreatorRelationUpdate]? = nil,
+        series: [StorytellerSeriesRelationUpdate]? = nil,
+        collections: [String]? = nil,
+        tags: [String]? = nil,
+    ) {
+        self.creators = creators
+        self.series = series
+        self.collections = collections
+        self.tags = tags
+    }
+}
+
+public struct StorytellerBookMergeRequest: Equatable, Sendable {
+    public var update: StorytellerBookMergeUpdate
+    public var relations: StorytellerBookMergeRelations
+    public var from: [String]
+
+    public init(
+        update: StorytellerBookMergeUpdate,
+        relations: StorytellerBookMergeRelations,
+        from: [String],
+    ) {
+        self.update = update
+        self.relations = relations
+        self.from = from
+    }
+}
+
+extension StorytellerBookMergeRequest: Encodable {
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(update, forKey: .update)
+        try container.encode(relations, forKey: .relations)
+        try container.encode(from, forKey: .from)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case update
+        case relations
+        case from
+    }
+}
+
+extension StorytellerBookMergeRelations: Encodable {
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(creators, forKey: .creators)
+        try container.encodeIfPresent(series, forKey: .series)
+        try container.encodeIfPresent(collections, forKey: .collections)
+        try container.encodeIfPresent(tags, forKey: .tags)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case creators
+        case series
+        case collections
+        case tags
+    }
+}
+
+public enum StorytellerBookMergeHTTPResult: Equatable, Sendable {
+    case success(BookMetadata)
+    case failure(BookFormatLinkFailure)
 }
 
 public struct StorytellerBookUpdatePayload: Sendable {
