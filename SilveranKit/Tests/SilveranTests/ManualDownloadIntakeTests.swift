@@ -199,7 +199,7 @@ struct ManualDownloadIntakeTests {
         #expect(ManualDownloadIntakeHandoff.listPending(root: root).count == 2)
     }
 
-    @Test func magnetHandoffFailureLeavesPayloadForRetry() async throws {
+    @Test func magnetHandoffFailureConsumesQueueSoLifecycleCannotResubmit() async throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("intake-magnet-fail-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -220,22 +220,20 @@ struct ManualDownloadIntakeTests {
         )
         #expect(failPass == 0)
         #expect(failing.handled.count == 1)
-        #expect(!ManualDownloadIntakeHandoff.isProcessed(payload.id, root: root))
-        #expect(!ManualDownloadIntakeHandoff.isFingerprintProcessed(payload.fingerprint, root: root))
-        #expect(ManualDownloadIntakeHandoff.listPending(root: root).count == 1)
-
-        let succeeding = SequenceIntakeHandler(results: [.submitted(message: "ok")])
-        let okPass = await ManualDownloadIntakeProcessor.processPending(
-            handler: succeeding,
-            root: root,
-        )
-        #expect(okPass == 1)
-        #expect(succeeding.handled.count == 1)
         #expect(ManualDownloadIntakeHandoff.isProcessed(payload.id, root: root))
         #expect(ManualDownloadIntakeHandoff.listPending(root: root).isEmpty)
+
+        // A later lifecycle drain must not call the handler again (payload UUID consumed).
+        let second = SequenceIntakeHandler(results: [.submitted(message: "should not run")])
+        let okPass = await ManualDownloadIntakeProcessor.processPending(
+            handler: second,
+            root: root,
+        )
+        #expect(okPass == 0)
+        #expect(second.handled.isEmpty)
     }
 
-    @Test func torrentHandoffFailurePreservesStagedCopyForRetry() async throws {
+    @Test func torrentHandoffFailureConsumesQueueAndRemovesAppGroupCopy() async throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("intake-torrent-fail-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -250,34 +248,17 @@ struct ManualDownloadIntakeTests {
             source: .shareExtension,
             root: root,
         )
-        guard let stagedBefore = ManualDownloadIntakeHandoff.stagedTorrentURL(payload, root: root) else {
-            Issue.record("missing staged torrent")
-            return
-        }
+        #expect(ManualDownloadIntakeHandoff.stagedTorrentURL(payload, root: root) != nil)
 
         let failing = SequenceIntakeHandler(results: [.failed(message: "network")])
         _ = await ManualDownloadIntakeProcessor.processPending(handler: failing, root: root)
         #expect(failing.handled.count == 1)
-        #expect(!ManualDownloadIntakeHandoff.isProcessed(payload.id, root: root))
-        #expect(ManualDownloadIntakeHandoff.listPending(root: root).count == 1)
-        guard let stagedAfterFail = ManualDownloadIntakeHandoff.stagedTorrentURL(payload, root: root) else {
-            Issue.record("staged torrent removed after failed handoff")
-            return
-        }
-        #expect(try Data(contentsOf: stagedAfterFail) == bytes)
-        #expect(stagedAfterFail == stagedBefore)
-
-        let succeeding = SequenceIntakeHandler(results: [.submitted(message: "ok")])
-        let okPass = await ManualDownloadIntakeProcessor.processPending(
-            handler: succeeding,
-            root: root,
-        )
-        #expect(okPass == 1)
         #expect(ManualDownloadIntakeHandoff.isProcessed(payload.id, root: root))
+        #expect(ManualDownloadIntakeHandoff.listPending(root: root).isEmpty)
         #expect(ManualDownloadIntakeHandoff.stagedTorrentURL(payload, root: root) == nil)
     }
 
-    @Test func duplicateHandoffDoesNotSubmitTwice() async throws {
+    @Test func duplicateQueuedPayloadsSubmitOncePerFingerprint() async throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("intake-dedupe-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -291,14 +272,15 @@ struct ManualDownloadIntakeTests {
             source: .shareExtension,
             root: root,
         )
-        // Second identical fingerprint (different id) — processor must submit once.
-        _ = try ManualDownloadIntakeHandoff.enqueueMagnet(
+        let second = try ManualDownloadIntakeHandoff.enqueueMagnet(
             url: url,
             mediaType: .ebook,
             source: .appIntent,
             root: root,
         )
-        #expect(first.fingerprint.contains("ebook"))
+        #expect(first.fingerprint == second.fingerprint)
+        #expect(first.id != second.id)
+        #expect(ManualDownloadIntakeHandoff.listPending(root: root).count == 2)
 
         let handler = RecordingIntakeHandler()
         let firstPass = await ManualDownloadIntakeProcessor.processPending(
@@ -307,20 +289,117 @@ struct ManualDownloadIntakeTests {
         )
         #expect(firstPass == 1)
         #expect(handler.handled.count == 1)
+        #expect(ManualDownloadIntakeHandoff.isProcessed(first.id, root: root))
+        #expect(ManualDownloadIntakeHandoff.isProcessed(second.id, root: root))
+        #expect(ManualDownloadIntakeHandoff.listPending(root: root).isEmpty)
+    }
 
-        // Re-enqueue same fingerprint after first was marked processed.
-        _ = try ManualDownloadIntakeHandoff.enqueueMagnet(
+    @Test func failThenExplicitReshareSameMagnetIsProcessed() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("intake-reshare-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let root = dir.appendingPathComponent("handoff", isDirectory: true)
+        let url = URL(string: validMagnet)!
+
+        let first = try ManualDownloadIntakeHandoff.enqueueMagnet(
             url: url,
             mediaType: .ebook,
             source: .shareExtension,
             root: root,
         )
-        let secondPass = await ManualDownloadIntakeProcessor.processPending(
-            handler: handler,
+        let failing = SequenceIntakeHandler(results: [.failed(message: "Deluge down")])
+        _ = await ManualDownloadIntakeProcessor.processPending(handler: failing, root: root)
+        #expect(failing.handled.count == 1)
+        #expect(ManualDownloadIntakeHandoff.isProcessed(first.id, root: root))
+
+        // Later explicit user share of the same magnet must not be fingerprint-blocked.
+        let reshare = try ManualDownloadIntakeHandoff.enqueueMagnet(
+            url: url,
+            mediaType: .ebook,
+            source: .shareExtension,
             root: root,
         )
-        #expect(secondPass == 0)
-        #expect(handler.handled.count == 1)
+        #expect(reshare.id != first.id)
+        #expect(reshare.fingerprint == first.fingerprint)
+
+        let accepting = SequenceIntakeHandler(results: [.submitted(message: "ok")])
+        let pass = await ManualDownloadIntakeProcessor.processPending(
+            handler: accepting,
+            root: root,
+        )
+        #expect(pass == 1)
+        #expect(accepting.handled.count == 1)
+        #expect(ManualDownloadIntakeHandoff.isProcessed(reshare.id, root: root))
+    }
+
+    @Test func sameMagnetDifferentMediaTypesRemainDistinctAttempts() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("intake-media-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let root = dir.appendingPathComponent("handoff", isDirectory: true)
+        let url = URL(string: validMagnet)!
+
+        let ebook = try ManualDownloadIntakeHandoff.enqueueMagnet(
+            url: url,
+            mediaType: .ebook,
+            source: .shareExtension,
+            root: root,
+        )
+        let audio = try ManualDownloadIntakeHandoff.enqueueMagnet(
+            url: url,
+            mediaType: .audiobook,
+            source: .shareExtension,
+            root: root,
+        )
+        #expect(ebook.fingerprint != audio.fingerprint)
+
+        let handler = RecordingIntakeHandler()
+        let pass = await ManualDownloadIntakeProcessor.processPending(handler: handler, root: root)
+        #expect(pass == 2)
+        #expect(handler.handled.count == 2)
+        let media = Set(handler.handled.map(\.bookMetadata.requestedMediaType))
+        #expect(media == [.ebook, .audiobook])
+    }
+
+    @Test func torrentFailThenExplicitReshareIsProcessed() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("intake-torrent-reshare-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("Reshare.torrent")
+        let bytes = Data("torrent-reshare-bytes".utf8)
+        try bytes.write(to: file)
+        let root = dir.appendingPathComponent("handoff", isDirectory: true)
+
+        let first = try ManualDownloadIntakeHandoff.enqueueTorrent(
+            from: file,
+            mediaType: .ebook,
+            source: .shareExtension,
+            root: root,
+        )
+        let failing = SequenceIntakeHandler(results: [.failed(message: "reject")])
+        _ = await ManualDownloadIntakeProcessor.processPending(handler: failing, root: root)
+        #expect(failing.handled.count == 1)
+        #expect(ManualDownloadIntakeHandoff.isProcessed(first.id, root: root))
+
+        let second = try ManualDownloadIntakeHandoff.enqueueTorrent(
+            from: file,
+            mediaType: .ebook,
+            source: .shareExtension,
+            root: root,
+        )
+        #expect(second.id != first.id)
+        #expect(second.fingerprint == first.fingerprint)
+
+        let accepting = SequenceIntakeHandler(results: [.submitted(message: "ok")])
+        let pass = await ManualDownloadIntakeProcessor.processPending(
+            handler: accepting,
+            root: root,
+        )
+        #expect(pass == 1)
+        #expect(accepting.handled.count == 1)
     }
 
     @Test func deepLinkRecognizesAddDownload() {

@@ -223,13 +223,38 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
             case .failure(let error):
                 return .failed(message: error.message)
             case .success(let plan):
+                let resolvedReplacing = await resolveReplacing(
+                    candidate,
+                    plan: plan,
+                    explicit: replacing,
+                )
                 switch plan.backend {
                     case .qbittorrent, .deluge, .torbox:
-                        return await submitTorrent(candidate, plan: plan, replacing: replacing)
+                        return await submitTorrent(
+                            candidate,
+                            plan: plan,
+                            replacing: resolvedReplacing,
+                        )
                     case .synology:
-                        return await downloadAndUpload(candidate, plan: plan, replacing: replacing)
+                        return await downloadAndUpload(
+                            candidate,
+                            plan: plan,
+                            replacing: resolvedReplacing,
+                        )
                 }
         }
+    }
+
+    /// Prefer an explicit retry target; otherwise reuse any existing attempt for the
+    /// same magnet/torrent identity so intake reprocessing cannot spam history.
+    private func resolveReplacing(
+        _ candidate: ManualAcquisitionCandidate,
+        plan: Plan,
+        explicit: ManualDownloadJob?,
+    ) async -> ManualDownloadJob? {
+        if let explicit { return explicit }
+        let key = ManualDownloadAttemptIdentity.key(for: candidate, mediaType: plan.media)
+        return await jobs.jobMatchingAttemptIdentity(key)
     }
 
     private func outcome(for job: ManualDownloadJob) -> ManualAcquisitionHandoffResult {

@@ -235,8 +235,10 @@ public protocol ManualDownloadJobStoring: Sendable {
     func record(_ job: ManualDownloadJob) async
     func allJobs() async -> [ManualDownloadJob]
     func job(id: String) async -> ManualDownloadJob?
+    func jobMatchingAttemptIdentity(_ key: String) async -> ManualDownloadJob?
     func delete(id: String) async
     func clearCompleted() async
+    func clearFailed() async
 }
 
 public actor ManualDownloadJobStore: ManualDownloadJobStoring {
@@ -279,6 +281,12 @@ public actor ManualDownloadJobStore: ManualDownloadJobStoring {
         jobs.first { $0.id == id }
     }
 
+    public func jobMatchingAttemptIdentity(_ key: String) -> ManualDownloadJob? {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return jobs.first { $0.attemptIdentityKey == trimmed }
+    }
+
     public func delete(id: String) {
         if let job = jobs.first(where: { $0.id == id }),
             let staged = job.stagedFileURL
@@ -294,6 +302,21 @@ public actor ManualDownloadJobStore: ManualDownloadJobStoring {
 
     public func clearCompleted() {
         jobs.removeAll { $0.status == .complete }
+        save()
+        Task { @MainActor in
+            NotificationCenter.default.post(name: .inkampManualDownloadJobsDidChange, object: nil)
+        }
+    }
+
+    public func clearFailed() {
+        let staged = jobs.compactMap { job -> URL? in
+            guard job.status == .failed else { return nil }
+            return job.stagedFileURL
+        }
+        for url in staged {
+            ManualDownloadStaging.remove(url)
+        }
+        jobs.removeAll { $0.status == .failed }
         save()
         Task { @MainActor in
             NotificationCenter.default.post(name: .inkampManualDownloadJobsDidChange, object: nil)
@@ -366,11 +389,21 @@ public final class RecordingManualDownloadJobStore: ManualDownloadJobStoring, @u
         jobs.first { $0.id == id }
     }
 
+    public func jobMatchingAttemptIdentity(_ key: String) async -> ManualDownloadJob? {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return jobs.first { $0.attemptIdentityKey == trimmed }
+    }
+
     public func delete(id: String) async {
         jobs.removeAll { $0.id == id }
     }
 
     public func clearCompleted() async {
         jobs.removeAll { $0.status == .complete }
+    }
+
+    public func clearFailed() async {
+        jobs.removeAll { $0.status == .failed }
     }
 }

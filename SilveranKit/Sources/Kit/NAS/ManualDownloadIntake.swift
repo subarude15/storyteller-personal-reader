@@ -145,7 +145,9 @@ public enum ManualDownloadIntake {
         return cleaned.isEmpty ? "Torrent file" : cleaned
     }
 
-    /// Stable fingerprint for duplicate-handoff suppression (same magnet/hash + media).
+    /// Content identity for in-queue duplicate suppression (same magnet/hash + media).
+    /// Used to collapse simultaneous pending copies during one drain — not a permanent
+    /// blacklist; a later explicit share creates a new payload UUID and is eligible again.
     public static func fingerprint(
         kind: ManualDownloadIntakeKind,
         magnetURI: String?,
