@@ -94,10 +94,8 @@ public enum ManualMagnetBackendSettings {
     public static let portKey = "punkRally.torboxarr.port"
     public static let usernameKey = "punkRally.torboxarr.username"
 
-    public static var store: UserDefaults = .standard
-
     public static func backend(in defaults: UserDefaults? = nil) -> ManualDownloadBackend {
-        let defaults = defaults ?? store
+        let defaults = defaults ?? .standard
         guard let raw = defaults.string(forKey: backendKey),
             let value = ManualDownloadBackend(rawValue: raw)
         else { return .torBox }
@@ -105,21 +103,21 @@ public enum ManualMagnetBackendSettings {
     }
 
     public static func setBackend(_ backend: ManualDownloadBackend, in defaults: UserDefaults? = nil) {
-        (defaults ?? store).set(backend.rawValue, forKey: backendKey)
+        (defaults ?? .standard).set(backend.rawValue, forKey: backendKey)
     }
 
     public static func host(in defaults: UserDefaults? = nil) -> String {
-        let stored = (defaults ?? store).string(forKey: hostKey)?
+        let stored = (defaults ?? .standard).string(forKey: hostKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return stored.isEmpty ? TorBoxarrConnectionSettings.defaultHost : stored
     }
 
     public static func setHost(_ host: String, in defaults: UserDefaults? = nil) {
-        (defaults ?? store).set(host, forKey: hostKey)
+        (defaults ?? .standard).set(host, forKey: hostKey)
     }
 
     public static func port(in defaults: UserDefaults? = nil) -> Int {
-        let defaults = defaults ?? store
+        let defaults = defaults ?? .standard
         guard let value = defaults.object(forKey: portKey) as? Int, (1...65535).contains(value) else {
             return TorBoxarrConnectionSettings.defaultPort
         }
@@ -127,17 +125,17 @@ public enum ManualMagnetBackendSettings {
     }
 
     public static func setPort(_ port: Int, in defaults: UserDefaults? = nil) {
-        (defaults ?? store).set(port, forKey: portKey)
+        (defaults ?? .standard).set(port, forKey: portKey)
     }
 
     public static func username(in defaults: UserDefaults? = nil) -> String {
-        let stored = (defaults ?? store).string(forKey: usernameKey)?
+        let stored = (defaults ?? .standard).string(forKey: usernameKey)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return stored.isEmpty ? TorBoxarrConnectionSettings.defaultUsername : stored
     }
 
     public static func setUsername(_ username: String, in defaults: UserDefaults? = nil) {
-        (defaults ?? store).set(username, forKey: usernameKey)
+        (defaults ?? .standard).set(username, forKey: usernameKey)
     }
 }
 
