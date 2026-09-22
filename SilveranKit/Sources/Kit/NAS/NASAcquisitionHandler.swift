@@ -370,19 +370,34 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
             return .submitted(message: message)
         } catch let error as QBittorrentClientError {
             let handoff = plan.viaTorBoxarr ? Self.torboxarrHandoff(error) : error.handoff
-            return await recordFailure(candidate, plan: plan, error: handoff, replacing: replacing)
+            return await recordFailure(
+                candidate,
+                plan: plan,
+                error: handoff,
+                replacing: replacing,
+                message: plan.viaTorBoxarr ? ManualMagnetCopy.torBoxarrHandoffMessage(handoff) : nil,
+            )
         } catch let error as DelugeClientError {
             return await recordFailure(candidate, plan: plan, error: error.handoff, replacing: replacing)
         } catch let error as TorBoxClientError {
             return await recordFailure(candidate, plan: plan, error: error.handoff, replacing: replacing)
         } catch let error as NASHandoffError {
-            return await recordFailure(candidate, plan: plan, error: error, replacing: replacing)
+            return await recordFailure(
+                candidate,
+                plan: plan,
+                error: error,
+                replacing: replacing,
+                message: plan.viaTorBoxarr ? ManualMagnetCopy.torBoxarrHandoffMessage(error) : nil,
+            )
         } catch {
             return await recordFailure(
                 candidate,
                 plan: plan,
                 error: .rejected(plan.backend),
                 replacing: replacing,
+                message: plan.viaTorBoxarr
+                    ? ManualMagnetCopy.torBoxarrHandoffMessage(.rejected(.torbox))
+                    : nil,
             )
         }
     }
@@ -465,19 +480,21 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
         plan: Plan,
         error: NASHandoffError,
         replacing: ManualDownloadJob?,
+        message: String? = nil,
     ) async -> ManualAcquisitionHandoffResult {
+        let text = message ?? error.message
         await jobs.record(
             makeJob(
                 candidate,
                 plan: plan,
                 status: .failed,
-                lastError: error.message,
+                lastError: text,
                 replacing: replacing,
                 keepStagedTorrent: true,
                 viaTorBoxarr: plan.viaTorBoxarr,
             )
         )
-        return .failed(message: error.message)
+        return .failed(message: text)
     }
 
     private func makeJob(
@@ -664,8 +681,9 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
         }
     }
 
-    /// TorBoxarr speaks qBittorrent WebAPI. The library folder stays on the job;
-    /// the magnet itself is saved under TorBoxarr’s completed directory.
+    /// TorBoxarr speaks qBittorrent WebAPI. The library folder stays on the job.
+    /// Magnets use multipart/form-data; savepath is TorBoxarr’s container path
+    /// (`app/defaultSavePath`, else `/data/completed`), not the Synology host path.
     private func submitTorBoxarr(
         _ candidate: ManualAcquisitionCandidate,
         plan: Plan,
@@ -679,21 +697,27 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
         }
         let username = bridge.username.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !username.isEmpty else { throw NASHandoffError.backendNotConfigured(.torbox) }
-        let savePath = TorBoxarrConnectionSettings.completedFolder
+        let apiFallback = TorBoxarrConnectionSettings.apiDefaultSavePath
         let jobID: String?
         switch candidate.transportKind {
             case .magnet:
-                let added = try await qbittorrent.addMagnet(
+                let added = try await qbittorrent.addURLsMultipart(
                     baseURL: baseURL,
                     username: username,
                     password: password,
-                    uri: candidate.sourceURL.absoluteString,
-                    savePath: savePath,
+                    urls: candidate.sourceURL.absoluteString,
                     start: start,
+                    savePathFallback: apiFallback,
                 )
                 jobID = TorrentHash.normalized(added.jobID)
                     ?? TorrentHash.fromMagnet(candidate.sourceURL.absoluteString)
             case .torrent:
+                let savePath = try await qbittorrent.resolveDefaultSavePath(
+                    baseURL: baseURL,
+                    username: username,
+                    password: password,
+                    fallback: apiFallback,
+                )
                 if let local = candidate.localTorrentFileURL, ManualDownloadStaging.exists(local) {
                     jobID = try await qbittorrent.addTorrentFile(
                         baseURL: baseURL,
@@ -705,14 +729,15 @@ public struct NASAcquisitionHandler: ManualAcquisitionHandling {
                         start: start,
                     ).jobID
                 } else {
-                    jobID = try await qbittorrent.addTorrentURL(
+                    let added = try await qbittorrent.addURLsMultipart(
                         baseURL: baseURL,
                         username: username,
                         password: password,
-                        url: candidate.sourceURL.absoluteString,
-                        savePath: savePath,
+                        urls: candidate.sourceURL.absoluteString,
                         start: start,
-                    ).jobID
+                        savePathFallback: apiFallback,
+                    )
+                    jobID = added.jobID
                 }
             case .directHTTP:
                 throw NASHandoffError.unsupportedAcquisition

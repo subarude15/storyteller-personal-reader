@@ -39,6 +39,27 @@ public enum ManualMagnetCopy {
     public static func failed(_ backend: ManualDownloadBackend) -> String {
         "\(backend.label) submission failed"
     }
+
+    /// TorBoxarr bridge errors. Distinct from cloud TorBox copy; no “check connection”
+    /// wording on an add rejection after a successful login.
+    public static func torBoxarrHandoffMessage(_ error: NASHandoffError) -> String {
+        switch error {
+            case .rejected(.torbox):
+                "Connected to TorBoxarr, but the download request was rejected."
+            case .authenticationFailed(.torbox):
+                "TorBoxarr rejected the credentials.\nCheck the TorBox connection in Settings."
+            case .unreachable(.torbox):
+                "Couldn’t reach TorBoxarr.\nThe NAS may be on a local network only. You can retry later."
+            case .timeout(.torbox):
+                "TorBoxarr timed out.\nCheck the TorBox connection in Settings."
+            case .invalidURL(.torbox):
+                "The TorBoxarr URL is invalid.\nCheck the TorBox connection in Settings."
+            case .backendNotConfigured(.torbox):
+                "TorBoxarr is not configured.\nCheck the TorBox connection in Settings."
+            default:
+                error.message
+        }
+    }
 }
 
 /// TorBoxarr qBittorrent bridge. The WebUI password is not stored here.
@@ -46,8 +67,11 @@ public struct TorBoxarrConnectionSettings: Equatable, Sendable {
     public static let defaultHost = "192.168.1.2"
     public static let defaultPort = 8085
     public static let defaultUsername = "admin"
-    /// TorBoxarr drops completed payloads here. This is not the library folder.
+    /// Synology host path File Station uses when locating completed TorBoxarr payloads.
+    /// Not valid as TorBoxarr’s `torrents/add` savepath (that is a container path).
     public static let completedFolder = "/volume1/data/torrents/completed"
+    /// Fallback container path for TorBoxarr `torrents/add` when `app/defaultSavePath` is unavailable.
+    public static let apiDefaultSavePath = "/data/completed"
 
     public var host: String
     public var port: Int

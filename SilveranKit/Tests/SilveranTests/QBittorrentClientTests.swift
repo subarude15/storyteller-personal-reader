@@ -204,6 +204,95 @@ struct QBittorrentClientTests {
             Issue.record("unexpected \(error)")
         }
     }
+
+    @Test func ordinaryMagnetAddStaysFormURLEncoded() async throws {
+        let transport = QBittorrentScript()
+        transport.handler = { url, _, body, contentType, _ in
+            if url.path.hasSuffix("/auth/login") {
+                return QBittorrentHTTP(status: 200, body: Data("Ok.".utf8), setCookie: "SID=x")
+            }
+            #expect(url.path.hasSuffix("/torrents/add"))
+            #expect(contentType == "application/x-www-form-urlencoded")
+            #expect(!(contentType?.contains("multipart/form-data") ?? false))
+            let form = String(data: body ?? Data(), encoding: .utf8) ?? ""
+            #expect(form.contains("urls="))
+            #expect(form.contains("savepath="))
+            return QBittorrentHTTP(status: 200, body: Data("Ok.".utf8))
+        }
+        let client = QBittorrentClient(transport: transport)
+        _ = try await client.addMagnet(
+            baseURL: "http://qb.example:8080",
+            username: "admin",
+            password: "secret",
+            uri: "magnet:?xt=urn:btih:abc",
+            savePath: "/media/audiobooks",
+            start: true,
+        )
+    }
+
+    @Test func multipartURLAddQueriesDefaultSavePath() async throws {
+        var sawDefault = false
+        let transport = QBittorrentScript()
+        transport.handler = { url, method, body, contentType, cookie in
+            if url.path.hasSuffix("/auth/login") {
+                return QBittorrentHTTP(status: 200, body: Data("Ok.".utf8), setCookie: "SID=bridge")
+            }
+            if url.path.hasSuffix("/app/defaultSavePath") {
+                #expect(method == "GET")
+                #expect(cookie?.contains("SID=bridge") == true)
+                sawDefault = true
+                return QBittorrentHTTP(status: 200, body: Data("/data/completed".utf8))
+            }
+            #expect(url.path.hasSuffix("/torrents/add"))
+            #expect(contentType?.contains("multipart/form-data") == true)
+            #expect(contentType?.contains("application/x-www-form-urlencoded") != true)
+            let text = String(data: body ?? Data(), encoding: .utf8) ?? ""
+            #expect(text.contains("name=\"urls\""))
+            #expect(text.contains("magnet:?xt=urn:btih:abc"))
+            #expect(text.contains("name=\"savepath\""))
+            #expect(text.contains("/data/completed"))
+            #expect(!text.contains("/volume1/data/torrents/completed"))
+            #expect(text.contains("name=\"paused\""))
+            #expect(text.contains("false"))
+            return QBittorrentHTTP(status: 200, body: Data("Ok.".utf8))
+        }
+        let client = QBittorrentClient(transport: transport)
+        _ = try await client.addURLsMultipart(
+            baseURL: "http://torboxarr.example:8085",
+            username: "admin",
+            password: "secret",
+            urls: "magnet:?xt=urn:btih:abc",
+            start: true,
+            savePathFallback: "/data/completed",
+        )
+        #expect(sawDefault)
+    }
+
+    @Test func multipartURLAddUsesFallbackWhenDefaultSavePathFails() async throws {
+        let transport = QBittorrentScript()
+        transport.handler = { url, _, body, contentType, _ in
+            if url.path.hasSuffix("/auth/login") {
+                return QBittorrentHTTP(status: 200, body: Data("Ok.".utf8), setCookie: "SID=x")
+            }
+            if url.path.hasSuffix("/app/defaultSavePath") {
+                return QBittorrentHTTP(status: 500, body: Data("nope".utf8))
+            }
+            #expect(contentType?.contains("multipart/form-data") == true)
+            let text = String(data: body ?? Data(), encoding: .utf8) ?? ""
+            #expect(text.contains("/data/completed"))
+            #expect(!text.contains("/volume1/data/torrents/completed"))
+            return QBittorrentHTTP(status: 200, body: Data("Ok.".utf8))
+        }
+        let client = QBittorrentClient(transport: transport)
+        _ = try await client.addURLsMultipart(
+            baseURL: "http://torboxarr.example:8085",
+            username: "admin",
+            password: "secret",
+            urls: "magnet:?xt=urn:btih:abc",
+            start: true,
+            savePathFallback: TorBoxarrConnectionSettings.apiDefaultSavePath,
+        )
+    }
 }
 
 private final class QBittorrentScript: QBittorrentTransport, @unchecked Sendable {
