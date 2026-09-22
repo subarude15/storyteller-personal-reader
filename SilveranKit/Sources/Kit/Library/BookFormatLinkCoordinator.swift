@@ -290,7 +290,12 @@ public actor BookFormatLinkCoordinator {
         else {
             return .failed(.incompatible)
         }
-        let permitted = canMerge ?? await transport.canMergeBooks(sourceID: sourceID)
+        let permitted: Bool
+        if let canMerge {
+            permitted = canMerge
+        } else {
+            permitted = await transport.canMergeBooks(sourceID: sourceID)
+        }
         guard permitted else {
             return .failed(.authenticationExpired)
         }

@@ -77,7 +77,7 @@ public enum StorytellerBookMergePayload {
         -> StorytellerBookMergeRequest
     {
         let titleSource = firstNonEmpty(ebook.title, audiobook.title)
-        StorytellerBookMergeRequest(
+        return StorytellerBookMergeRequest(
             update: StorytellerBookMergeUpdate(
                 title: titleSource,
                 subtitle: firstPresent(ebook.subtitle, audiobook.subtitle),
