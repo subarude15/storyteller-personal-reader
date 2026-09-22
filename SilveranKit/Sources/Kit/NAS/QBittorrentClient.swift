@@ -136,6 +136,12 @@ public struct QBittorrentTorrentSnapshot: Equatable, Sendable {
     public var downloadRate: Int
     public var size: Int64
     public var completed: Int64
+    /// Torrent display name from `torrents/info`, not the magnet `dn`.
+    public var name: String?
+    /// Directory qBittorrent reports as `save_path`.
+    public var savePath: String?
+    /// Root file or folder qBittorrent reports as `content_path`.
+    public var contentPath: String?
 
     public init(
         hash: String,
@@ -144,6 +150,9 @@ public struct QBittorrentTorrentSnapshot: Equatable, Sendable {
         downloadRate: Int = 0,
         size: Int64 = 0,
         completed: Int64 = 0,
+        name: String? = nil,
+        savePath: String? = nil,
+        contentPath: String? = nil,
     ) {
         self.hash = hash
         self.state = state
@@ -151,6 +160,9 @@ public struct QBittorrentTorrentSnapshot: Equatable, Sendable {
         self.downloadRate = downloadRate
         self.size = size
         self.completed = completed
+        self.name = name
+        self.savePath = savePath
+        self.contentPath = contentPath
     }
 
     public var liveStatus: ManualTorrentLiveStatus {
@@ -174,6 +186,9 @@ public struct QBittorrentTorrentSnapshot: Equatable, Sendable {
             downloadRate: int(fields["dlspeed"]) ?? 0,
             size: int64(fields["size"]) ?? 0,
             completed: int64(fields["completed"]) ?? 0,
+            name: string(fields["name"]),
+            savePath: string(fields["save_path"]),
+            contentPath: string(fields["content_path"]),
         )
     }
 
@@ -316,6 +331,43 @@ public struct QBittorrentClient: Sendable {
             result[snapshot.hash.lowercased()] = snapshot
         }
         return result
+    }
+
+    /// Relative file paths inside one torrent (`torrents/files`). Empty when the hash is gone.
+    public func torrentFiles(
+        baseURL: String,
+        username: String,
+        password: String,
+        hash: String,
+    ) async throws -> [String] {
+        let trimmed = hash.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        let cookie = try await login(baseURL: baseURL, username: username, password: password)
+        guard var endpoint = Self.apiURL(from: baseURL, path: "torrents/files") else {
+            throw QBittorrentClientError.invalidURL
+        }
+        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "hash", value: trimmed)]
+        guard let url = components?.url else { throw QBittorrentClientError.invalidURL }
+        endpoint = url
+        let http: QBittorrentHTTP
+        do {
+            http = try await transport.send(
+                url: endpoint,
+                method: "GET",
+                body: nil,
+                contentType: nil,
+                cookie: cookie,
+                timeout: timeout,
+            )
+        } catch let error as URLError {
+            throw Self.clientError(from: error)
+        }
+        try Self.throwIfHTTPFailed(http)
+        guard let list = try? JSONSerialization.jsonObject(with: http.body) as? [[String: Any]] else {
+            throw QBittorrentClientError.invalidResponse
+        }
+        return list.compactMap { $0["name"] as? String }
     }
 
     public func addTorrentURL(

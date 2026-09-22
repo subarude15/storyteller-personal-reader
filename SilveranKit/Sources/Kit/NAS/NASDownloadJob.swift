@@ -202,6 +202,7 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
 
     public var canTransferToNASNow: Bool {
         backend == .torbox
+            && viaTorBoxarr != true
             && status == .ready
             && !(backendJobID ?? "").isEmpty
     }
@@ -209,6 +210,7 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
     /// Failed NAS transfer for a still-Ready TorBox cloud job — retry transfer only.
     public var canRetryTransferNow: Bool {
         backend == .torbox
+            && viaTorBoxarr != true
             && status == .failed
             && !(backendJobID ?? "").isEmpty
             && ((transferFiles?.isEmpty == false) || (providerFiles?.isEmpty == false))

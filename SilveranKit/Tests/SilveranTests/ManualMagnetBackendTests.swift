@@ -172,6 +172,27 @@ struct ManualMagnetBackendTests {
         #expect(deluge.magnets == [magnet])
     }
 
+    @Test func retryTorBoxarrDoesNotCreateASecondRow() async {
+        let script = BridgeScript()
+        script.loginBody = "Fails."
+        let (handler, jobs) = makeHandler(script: script)
+        let failed = await handler.handle(candidate(magnet, media: .ebook), manualBackend: .torBox)
+        #expect(!failed.isSubmitted)
+        #expect(jobs.jobs.count == 1)
+        let originalID = jobs.jobs[0].id
+        #expect(jobs.jobs[0].viaTorBoxarr == true)
+
+        script.loginBody = "Ok."
+        let retried = await handler.retryDownload(job: jobs.jobs[0], manualBackend: .torBox)
+        #expect(retried.isSubmitted)
+        #expect(jobs.jobs.count == 1)
+        #expect(jobs.jobs[0].id == originalID)
+        #expect(jobs.jobs[0].backend == .torbox)
+        #expect(jobs.jobs[0].viaTorBoxarr == true)
+        #expect(jobs.jobs[0].status == .submitted)
+        #expect(jobs.jobs[0].destination == "/volume1/media/books/books")
+    }
+
     private func candidate(_ magnet: String, media: NASMediaKind) -> ManualAcquisitionCandidate {
         ManualAcquisitionCandidate(
             sourceURL: URL(string: magnet)!,
