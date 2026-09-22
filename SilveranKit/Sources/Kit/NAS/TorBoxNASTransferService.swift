@@ -106,6 +106,12 @@ public struct TorBoxNASTransferService: Sendable {
         var files = plan
         for index in files.indices {
             if files[index].status == .complete { continue }
+            // Explicit transfer/retry of a failed file: clear the dead task and resubmit once.
+            if files[index].status == .failed {
+                files[index].status = .pending
+                files[index].nasTaskID = nil
+                files[index].lastError = nil
+            }
             files[index] = await transferOne(
                 files[index],
                 job: working,
@@ -205,6 +211,15 @@ public struct TorBoxNASTransferService: Sendable {
         do {
             try await transfer.ensureDestination(fileDestination)
 
+            // Already started (possibly without a task ID): never create another DS task.
+            if state.status == .started {
+                return try await reconcileStarted(
+                    state,
+                    transfer: transfer,
+                    destination: fileDestination,
+                )
+            }
+
             if try await transfer.remoteFileExists(
                 destination: fileDestination,
                 filename: state.filename,
@@ -261,25 +276,11 @@ public struct TorBoxNASTransferService: Sendable {
             state.status = .started
             state.lastError = nil
 
-            if let taskID, let snap = try await transfer.taskSnapshot(taskID: taskID) {
-                return try await reconcileTask(
-                    snap,
-                    state: state,
-                    transfer: transfer,
-                    destination: fileDestination,
-                )
-            }
-            // Some DSM builds return no task id; verify immediately if the file landed.
-            if try await transfer.remoteFileExists(
+            return try await reconcileStarted(
+                state,
+                transfer: transfer,
                 destination: fileDestination,
-                filename: state.filename,
-                expectedSize: state.expectedSize,
-            ) {
-                state.status = .complete
-                state.lastError = nil
-                state.remotePath = fileDestination.volumePath + "/" + state.filename
-            }
-            return state
+            )
         } catch let error as RemoteTransferError {
             if error == .linkExpired {
                 // Clear task and leave pending for outer retry with a fresh URL.
@@ -296,6 +297,55 @@ public struct TorBoxNASTransferService: Sendable {
             state.lastError = RemoteTransferError.nasUnreachable.message
             return state
         }
+    }
+
+    /// Reconcile a `.started` file without submitting another Download Station task.
+    private func reconcileStarted(
+        _ state: RemoteTransferFileState,
+        transfer: any RemoteMediaTransferring,
+        destination: NASTransferDestination,
+    ) async throws -> RemoteTransferFileState {
+        var updated = state
+        updated.status = .started
+
+        if try await transfer.remoteFileExists(
+            destination: destination,
+            filename: updated.filename,
+            expectedSize: updated.expectedSize,
+        ) {
+            updated.status = .complete
+            updated.lastError = nil
+            updated.remotePath = destination.volumePath + "/" + updated.filename
+            return updated
+        }
+
+        if let taskID = updated.nasTaskID, !taskID.isEmpty {
+            if let snap = try await transfer.taskSnapshot(taskID: taskID) {
+                return try await reconcileTask(
+                    snap,
+                    state: updated,
+                    transfer: transfer,
+                    destination: destination,
+                )
+            }
+        }
+
+        if let snap = try await transfer.findMatchingTask(
+            destination: destination,
+            expectedFilename: updated.filename,
+            expectedSize: updated.expectedSize,
+        ) {
+            updated.nasTaskID = snap.id
+            return try await reconcileTask(
+                snap,
+                state: updated,
+                transfer: transfer,
+                destination: destination,
+            )
+        }
+
+        // Still in flight (or ID not yet discoverable). Do not resubmit.
+        return updated
     }
 
     /// Preserve nested torrent folders under the job destination (multi-track audiobooks).
@@ -325,16 +375,40 @@ public struct TorBoxNASTransferService: Sendable {
             return updated
         }
         if snap.status.isTerminalSuccess {
-            // Download Station may keep the remote URL basename; rename to our filename.
-            let names = try await transfer.listDestinationFilenames(destination: destination)
-            if !names.contains(updated.filename) {
-                let candidates = names.filter { $0 != updated.filename }
-                if let raw = candidates.last {
-                    try? await transfer.renameInDestination(
+            if try await transfer.remoteFileExists(
+                destination: destination,
+                filename: updated.filename,
+                expectedSize: updated.expectedSize,
+            ) {
+                updated.status = .complete
+                updated.lastError = nil
+                updated.remotePath = destination.volumePath + "/" + updated.filename
+                return updated
+            }
+            // Only rename the file this Download Station task reports — never an
+            // arbitrary directory entry (destination may already hold other books).
+            guard let outputName = SynologyDownloadStationClient.outputFilename(from: snap) else {
+                updated.status = .failed
+                updated.lastError = RemoteTransferError.outputUnidentified.message
+                return updated
+            }
+            if outputName != updated.filename {
+                let names = try await transfer.listDestinationFilenames(destination: destination)
+                guard names.contains(outputName) else {
+                    updated.status = .failed
+                    updated.lastError = RemoteTransferError.outputUnidentified.message
+                    return updated
+                }
+                do {
+                    try await transfer.renameInDestination(
                         destination: destination,
-                        from: raw,
+                        from: outputName,
                         to: updated.filename,
                     )
+                } catch {
+                    updated.status = .failed
+                    updated.lastError = RemoteTransferError.outputUnidentified.message
+                    return updated
                 }
             }
             let ok = try await transfer.verifyFile(
@@ -348,7 +422,7 @@ public struct TorBoxNASTransferService: Sendable {
                 updated.remotePath = destination.volumePath + "/" + updated.filename
             } else {
                 updated.status = .failed
-                updated.lastError = RemoteTransferError.rejected.message
+                updated.lastError = RemoteTransferError.outputUnidentified.message
             }
             return updated
         }
@@ -371,35 +445,36 @@ public struct TorBoxNASTransferService: Sendable {
         guard !files.isEmpty else { return job }
         for index in files.indices {
             if files[index].status == .complete { continue }
-            if files[index].status == .pending || files[index].nasTaskID == nil {
-                files[index] = await transferOne(
-                    files[index],
-                    job: job,
-                    context: context,
-                    transfer: transfer,
-                    destination: destination,
-                )
-            } else if let taskID = files[index].nasTaskID {
-                do {
-                    if let snap = try await transfer.taskSnapshot(taskID: taskID) {
+            switch files[index].status {
+                case .started:
+                    // Never treat missing nasTaskID as permission to create another task.
+                    do {
                         let fileDestination = Self.destination(
                             for: destination,
                             relativePath: files[index].relativePath,
                         )
-                        files[index] = try await reconcileTask(
-                            snap,
-                            state: files[index],
+                        files[index] = try await reconcileStarted(
+                            files[index],
                             transfer: transfer,
                             destination: fileDestination,
                         )
+                    } catch let error as RemoteTransferError {
+                        files[index].status = .failed
+                        files[index].lastError = error.message
+                    } catch {
+                        files[index].status = .failed
+                        files[index].lastError = RemoteTransferError.nasUnreachable.message
                     }
-                } catch let error as RemoteTransferError {
-                    files[index].status = .failed
-                    files[index].lastError = error.message
-                } catch {
-                    files[index].status = .failed
-                    files[index].lastError = RemoteTransferError.nasUnreachable.message
-                }
+                case .pending:
+                    files[index] = await transferOne(
+                        files[index],
+                        job: job,
+                        context: context,
+                        transfer: transfer,
+                        destination: destination,
+                    )
+                case .failed, .complete:
+                    break
             }
         }
         var working = job

@@ -94,6 +94,8 @@ public enum RemoteTransferError: Error, Equatable, Sendable {
     case noSelectableFiles
     case unsupportedArchivesOnly
     case partialFailure
+    /// Download finished but the output filename could not be safely identified.
+    case outputUnidentified
 
     public var message: String {
         switch self {
@@ -121,6 +123,8 @@ public enum RemoteTransferError: Error, Equatable, Sendable {
                 "This TorBox torrent only contains archives.\nArchive extraction is not supported yet."
             case .partialFailure:
                 "Some files failed to transfer to the NAS.\nRetry to finish the remaining files."
+            case .outputUnidentified:
+                "The NAS finished downloading, but the output file could not be identified safely.\nNothing else in the folder was renamed. Retry the transfer."
         }
     }
 }
@@ -137,6 +141,12 @@ public protocol RemoteMediaTransferring: Sendable {
         destination: NASTransferDestination,
     ) async throws -> String?
     func taskSnapshot(taskID: String) async throws -> SynologyDownloadTaskSnapshot?
+    /// Locate an already-created Download Station task without creating another.
+    func findMatchingTask(
+        destination: NASTransferDestination,
+        expectedFilename: String,
+        expectedSize: Int64?,
+    ) async throws -> SynologyDownloadTaskSnapshot?
     func listDestinationFilenames(destination: NASTransferDestination) async throws -> [String]
     func renameInDestination(
         destination: NASTransferDestination,
@@ -231,6 +241,7 @@ public struct SynologyRemoteMediaTransfer: RemoteMediaTransferring {
                 password: password,
                 sourceURL: source.url,
                 destination: dsDest,
+                expectedFilename: source.filename,
             )
         } catch let error as SynologyClientError {
             throw map(error)
@@ -246,6 +257,32 @@ public struct SynologyRemoteMediaTransfer: RemoteMediaTransferring {
                 taskIDs: [taskID],
             )
             return tasks.first
+        } catch let error as SynologyClientError {
+            throw map(error)
+        }
+    }
+
+    public func findMatchingTask(
+        destination: NASTransferDestination,
+        expectedFilename: String,
+        expectedSize: Int64?,
+    ) async throws -> SynologyDownloadTaskSnapshot? {
+        guard
+            let dsDest = SynologyDownloadStationClient.downloadStationDestination(
+                fromVolumePath: destination.volumePath
+            )
+        else {
+            throw RemoteTransferError.destinationInvalid
+        }
+        do {
+            return try await downloadStation.findTask(
+                baseURL: baseURL,
+                username: username,
+                password: password,
+                destination: dsDest,
+                expectedFilename: expectedFilename,
+                expectedSize: expectedSize,
+            )
         } catch let error as SynologyClientError {
             throw map(error)
         }

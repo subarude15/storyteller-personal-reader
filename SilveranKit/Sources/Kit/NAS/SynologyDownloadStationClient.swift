@@ -91,6 +91,10 @@ public struct SynologyDownloadStationClient: Sendable {
 
     /// Create an HTTP download task on the NAS. Destination is share-relative
     /// (`media/books/...`) without a leading slash.
+    ///
+    /// Some DSM builds omit `task_id` in the create response. This method lists
+    /// tasks before/after create on the **same session** and recovers the new ID
+    /// without consulting signed source URLs.
     @discardableResult
     public func createURLTask(
         baseURL: String,
@@ -98,12 +102,14 @@ public struct SynologyDownloadStationClient: Sendable {
         password: String,
         sourceURL: URL,
         destination: String,
+        expectedFilename: String? = nil,
     ) async throws -> String? {
         let dest = Self.normalizeDestination(destination)
         guard !dest.isEmpty else { throw SynologyClientError.invalidURL }
         let sid = try await login(baseURL: baseURL, username: username, password: password)
         defer { Task { try? await logout(baseURL: baseURL, sid: sid) } }
 
+        let before = try await listTasks(baseURL: baseURL, sid: sid)
         guard let endpoint = Self.taskURL(from: baseURL) else { throw SynologyClientError.invalidURL }
         var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
         // Do not put the signed TorBox URL into debug logs — only into the request.
@@ -127,14 +133,20 @@ public struct SynologyDownloadStationClient: Sendable {
             }
             throw SynologyClientError.rejected
         }
-        // Some DSM builds return empty data; list later to reconcile.
         if let data = json["data"] as? [String: Any] {
-            if let ids = data["task_id"] as? [String], let first = ids.first {
+            if let ids = data["task_id"] as? [String], let first = ids.first, !first.isEmpty {
                 return first
             }
-            if let id = data["task_id"] as? String { return id }
+            if let id = data["task_id"] as? String, !id.isEmpty { return id }
         }
-        return nil
+        // DSM returned success without an ID — recover via before/after task list.
+        let after = try await listTasks(baseURL: baseURL, sid: sid)
+        return Self.identifyCreatedTask(
+            before: before,
+            after: after,
+            destination: dest,
+            expectedFilename: expectedFilename,
+        )?.id
     }
 
     public func taskInfo(
@@ -147,27 +159,7 @@ public struct SynologyDownloadStationClient: Sendable {
         guard !ids.isEmpty else { return [] }
         let sid = try await login(baseURL: baseURL, username: username, password: password)
         defer { Task { try? await logout(baseURL: baseURL, sid: sid) } }
-
-        guard let endpoint = Self.taskURL(from: baseURL) else { throw SynologyClientError.invalidURL }
-        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
-        components?.queryItems = [
-            URLQueryItem(name: "api", value: "SYNO.DownloadStation.Task"),
-            URLQueryItem(name: "version", value: "1"),
-            URLQueryItem(name: "method", value: "getinfo"),
-            URLQueryItem(name: "id", value: ids.joined(separator: ",")),
-            URLQueryItem(name: "additional", value: "detail,transfer"),
-            URLQueryItem(name: "_sid", value: sid),
-        ]
-        guard let url = components?.url else { throw SynologyClientError.invalidURL }
-        var request = URLRequest(url: url, timeoutInterval: timeout)
-        request.httpMethod = "GET"
-        let http = try await send(request)
-        try Self.throwIfFailed(http)
-        guard let json = Self.json(http.body), json["success"] as? Bool == true else {
-            throw SynologyClientError.invalidResponse
-        }
-        let tasks = (json["data"] as? [String: Any])?["tasks"] as? [[String: Any]] ?? []
-        return tasks.compactMap(Self.parseTask)
+        return try await taskInfo(baseURL: baseURL, sid: sid, taskIDs: ids)
     }
 
     public func listTasks(
@@ -177,27 +169,98 @@ public struct SynologyDownloadStationClient: Sendable {
     ) async throws -> [SynologyDownloadTaskSnapshot] {
         let sid = try await login(baseURL: baseURL, username: username, password: password)
         defer { Task { try? await logout(baseURL: baseURL, sid: sid) } }
+        return try await listTasks(baseURL: baseURL, sid: sid)
+    }
 
-        guard let endpoint = Self.taskURL(from: baseURL) else { throw SynologyClientError.invalidURL }
-        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
-        components?.queryItems = [
-            URLQueryItem(name: "api", value: "SYNO.DownloadStation.Task"),
-            URLQueryItem(name: "version", value: "1"),
-            URLQueryItem(name: "method", value: "list"),
-            URLQueryItem(name: "additional", value: "detail,transfer"),
-            URLQueryItem(name: "limit", value: "-1"),
-            URLQueryItem(name: "_sid", value: sid),
-        ]
-        guard let url = components?.url else { throw SynologyClientError.invalidURL }
-        var request = URLRequest(url: url, timeoutInterval: timeout)
-        request.httpMethod = "GET"
-        let http = try await send(request)
-        try Self.throwIfFailed(http)
-        guard let json = Self.json(http.body), json["success"] as? Bool == true else {
-            throw SynologyClientError.invalidResponse
+    /// Find an existing Download Station task for a transfer we already started.
+    /// Matches destination + expected filename title — never uses signed URLs.
+    public func findTask(
+        baseURL: String,
+        username: String,
+        password: String,
+        destination: String,
+        expectedFilename: String,
+        expectedSize: Int64? = nil,
+    ) async throws -> SynologyDownloadTaskSnapshot? {
+        let dest = Self.normalizeDestination(destination)
+        let tasks = try await listTasks(baseURL: baseURL, username: username, password: password)
+        return Self.matchTask(
+            in: tasks,
+            destination: dest,
+            expectedFilename: expectedFilename,
+            expectedSize: expectedSize,
+        )
+    }
+
+    /// Pure helper: pick the newly created task from a before/after list diff.
+    public static func identifyCreatedTask(
+        before: [SynologyDownloadTaskSnapshot],
+        after: [SynologyDownloadTaskSnapshot],
+        destination: String,
+        expectedFilename: String?,
+    ) -> SynologyDownloadTaskSnapshot? {
+        let beforeIDs = Set(before.map(\.id))
+        let created = after.filter { !beforeIDs.contains($0.id) }
+        return matchTask(
+            in: created,
+            destination: normalizeDestination(destination),
+            expectedFilename: expectedFilename ?? "",
+            expectedSize: nil,
+            allowSingleWithoutName: true,
+        )
+    }
+
+    /// Basename reported by Download Station for the downloaded file, if usable.
+    public static func outputFilename(from task: SynologyDownloadTaskSnapshot) -> String? {
+        let raw = (task.title as NSString).lastPathComponent
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty, raw != ".", !raw.contains("/") else { return nil }
+        let sanitized = NASPathSafety.sanitizeComponent(raw)
+        return sanitized.isEmpty ? nil : sanitized
+    }
+
+    public static func destinationsMatch(_ lhs: String?, _ rhs: String) -> Bool {
+        guard let lhs else { return false }
+        let a = normalizeDestination(lhs)
+        let b = normalizeDestination(rhs)
+        if a.isEmpty || b.isEmpty { return false }
+        return a == b || a.hasSuffix(b) || b.hasSuffix(a)
+    }
+
+    private static func matchTask(
+        in tasks: [SynologyDownloadTaskSnapshot],
+        destination: String,
+        expectedFilename: String,
+        expectedSize: Int64?,
+        allowSingleWithoutName: Bool = false,
+    ) -> SynologyDownloadTaskSnapshot? {
+        var candidates = tasks
+        if !destination.isEmpty {
+            let destFiltered = candidates.filter { destinationsMatch($0.destination, destination) }
+            if !destFiltered.isEmpty { candidates = destFiltered }
         }
-        let tasks = (json["data"] as? [String: Any])?["tasks"] as? [[String: Any]] ?? []
-        return tasks.compactMap(Self.parseTask)
+        let expected = expectedFilename.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !expected.isEmpty {
+            let exact = candidates.filter {
+                (($0.title as NSString).lastPathComponent)
+                    .caseInsensitiveCompare(expected) == .orderedSame
+            }
+            if exact.count == 1 { return exact[0] }
+            if exact.count > 1 {
+                if let expectedSize, expectedSize > 0 {
+                    let sized = exact.filter { $0.size == 0 || $0.size == expectedSize }
+                    if sized.count == 1 { return sized[0] }
+                }
+                return nil
+            }
+        }
+        if allowSingleWithoutName, candidates.count == 1 { return candidates[0] }
+        if candidates.count == 1, expected.isEmpty { return candidates[0] }
+        if let expectedSize, expectedSize > 0 {
+            let sized = candidates.filter { $0.size == expectedSize }
+            if sized.count == 1 { return sized[0] }
+        }
+        return nil
     }
 
     /// Share-relative destination for Download Station create.
@@ -220,6 +283,56 @@ public struct SynologyDownloadStationClient: Sendable {
     }
 
     // MARK: - Auth
+
+    private func listTasks(baseURL: String, sid: String) async throws -> [SynologyDownloadTaskSnapshot] {
+        guard let endpoint = Self.taskURL(from: baseURL) else { throw SynologyClientError.invalidURL }
+        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "api", value: "SYNO.DownloadStation.Task"),
+            URLQueryItem(name: "version", value: "1"),
+            URLQueryItem(name: "method", value: "list"),
+            URLQueryItem(name: "additional", value: "detail,transfer"),
+            URLQueryItem(name: "limit", value: "-1"),
+            URLQueryItem(name: "_sid", value: sid),
+        ]
+        guard let url = components?.url else { throw SynologyClientError.invalidURL }
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.httpMethod = "GET"
+        let http = try await send(request)
+        try Self.throwIfFailed(http)
+        guard let json = Self.json(http.body), json["success"] as? Bool == true else {
+            throw SynologyClientError.invalidResponse
+        }
+        let tasks = (json["data"] as? [String: Any])?["tasks"] as? [[String: Any]] ?? []
+        return tasks.compactMap(Self.parseTask)
+    }
+
+    private func taskInfo(
+        baseURL: String,
+        sid: String,
+        taskIDs: [String],
+    ) async throws -> [SynologyDownloadTaskSnapshot] {
+        guard let endpoint = Self.taskURL(from: baseURL) else { throw SynologyClientError.invalidURL }
+        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "api", value: "SYNO.DownloadStation.Task"),
+            URLQueryItem(name: "version", value: "1"),
+            URLQueryItem(name: "method", value: "getinfo"),
+            URLQueryItem(name: "id", value: taskIDs.joined(separator: ",")),
+            URLQueryItem(name: "additional", value: "detail,transfer"),
+            URLQueryItem(name: "_sid", value: sid),
+        ]
+        guard let url = components?.url else { throw SynologyClientError.invalidURL }
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.httpMethod = "GET"
+        let http = try await send(request)
+        try Self.throwIfFailed(http)
+        guard let json = Self.json(http.body), json["success"] as? Bool == true else {
+            throw SynologyClientError.invalidResponse
+        }
+        let tasks = (json["data"] as? [String: Any])?["tasks"] as? [[String: Any]] ?? []
+        return tasks.compactMap(Self.parseTask)
+    }
 
     private func login(baseURL: String, username: String, password: String) async throws -> String {
         guard let endpoint = SynologyFileStationClient.authURL(from: baseURL) else {
