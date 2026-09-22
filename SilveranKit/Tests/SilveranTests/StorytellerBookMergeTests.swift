@@ -73,6 +73,9 @@ struct StorytellerBookMergeTests {
         #expect(json.contains("\"from\""))
         #expect(json.contains(ebookUUID))
         #expect(json.contains(audioUUID))
+        #expect(!json.contains("\"rating\""))
+        #expect(!json.contains("\"collections\""))
+        #expect(!json.contains("\"series\""))
         #expect(!json.contains("ebook"))
         #expect(!json.contains("audiobook"))
     }
@@ -217,6 +220,46 @@ struct StorytellerBookMergeTests {
         #expect(document.links.contains { $0.removed && $0.id == existing.id })
         #expect(await cache.load(sourceID: "server").activeLinks.isEmpty)
         #expect(await transport.mergeRequests.first?.from == [ebookUUID, audioUUID])
+    }
+
+    @Test func successfulMergeKeepsLocalTombstoneWhenLinkPushFails() async {
+        let ebook = mergeBook(uuid: ebookUUID, title: "The Devils", ebook: true)
+        let audio = mergeBook(uuid: audioUUID, title: "The Devils", audiobook: true)
+        let existing = BookFormatLink(
+            members: [ebook.id, audio.id],
+            primary: ebook.id,
+            updatedAt: Date(timeIntervalSince1970: 5),
+            removed: false,
+        )
+        let cache = FormatLinkCacheDouble()
+        await cache.save(
+            sourceID: "server",
+            document: BookFormatLinkDocument(updatedAt: existing.updatedAt, links: [existing]),
+        )
+        let transport = FormatLinkTransportDouble()
+        await transport.setMerge(
+            .success(mergeBook(uuid: ebookUUID, title: "The Devils", ebook: true, audiobook: true))
+        )
+        await transport.setPush(.failure(reason: "collection write failed"))
+        let coordinator = BookFormatLinkCoordinator(
+            cache: cache,
+            transport: transport,
+            mergeState: MergeStateDouble(),
+        )
+        let outcome = await coordinator.merge(
+            sourceID: "server",
+            current: ebook,
+            other: audio,
+            library: [ebook, audio],
+        )
+        guard case .merged(let document, _) = outcome else {
+            Issue.record("expected merged, got \(outcome)")
+            return
+        }
+        #expect(document.activeLinks.isEmpty)
+        #expect(await cache.load(sourceID: "server").activeLinks.isEmpty)
+        #expect(await transport.pushCount == 1)
+        #expect(await transport.mergeCount == 1)
     }
 
     @Test func stateMigrationAppliesSnapshotOnlyAfterSuccess() async {

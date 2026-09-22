@@ -249,7 +249,7 @@ struct StorytellerBookRelationsUpdatePayload: Codable {
     var status: StorytellerStatusRelationUpdate?
 }
 
-public struct StorytellerBookMergeUpdate: Codable, Equatable, Sendable {
+public struct StorytellerBookMergeUpdate: Equatable, Sendable {
     public var title: String?
     public var subtitle: String?
     public var language: String?
@@ -271,6 +271,27 @@ public struct StorytellerBookMergeUpdate: Codable, Equatable, Sendable {
         self.publicationDate = publicationDate
         self.description = description
         self.rating = rating
+    }
+}
+
+extension StorytellerBookMergeUpdate: Encodable {
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(title, forKey: .title)
+        try container.encodeIfPresent(subtitle, forKey: .subtitle)
+        try container.encodeIfPresent(language, forKey: .language)
+        try container.encodeIfPresent(publicationDate, forKey: .publicationDate)
+        try container.encodeIfPresent(description, forKey: .description)
+        try container.encodeIfPresent(rating, forKey: .rating)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case title
+        case subtitle
+        case language
+        case publicationDate
+        case description
+        case rating
     }
 }
 

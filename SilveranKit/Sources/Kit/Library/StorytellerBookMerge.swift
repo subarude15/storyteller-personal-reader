@@ -87,10 +87,12 @@ public enum StorytellerBookMergePayload {
                 rating: ebook.rating ?? audiobook.rating,
             ),
             relations: StorytellerBookMergeRelations(
-                creators: uniqueCreators(ebook: ebook, audiobook: audiobook),
-                series: uniqueSeries([ebook.series ?? [], audiobook.series ?? []]),
-                collections: uniqueCollections([ebook.collections ?? [], audiobook.collections ?? []]),
-                tags: uniqueTags([ebook.tags ?? [], audiobook.tags ?? []]),
+                creators: nilIfEmpty(uniqueCreators(ebook: ebook, audiobook: audiobook)),
+                series: nilIfEmpty(uniqueSeries([ebook.series ?? [], audiobook.series ?? []])),
+                collections: nilIfEmpty(
+                    uniqueCollections([ebook.collections ?? [], audiobook.collections ?? []])
+                ),
+                tags: nilIfEmpty(uniqueTags([ebook.tags ?? [], audiobook.tags ?? []])),
             ),
             from: [ebook.uuid, audiobook.uuid],
         )
@@ -123,6 +125,10 @@ public enum StorytellerBookMergePayload {
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         return try decoder.decode(StorytellerBookMetadataPayload.self, from: data)
             .scoped(to: sourceID)
+    }
+
+    private static func nilIfEmpty<T>(_ values: [T]) -> [T]? {
+        values.isEmpty ? nil : values
     }
 
     private static func firstPresent(_ left: String?, _ right: String?) -> String? {

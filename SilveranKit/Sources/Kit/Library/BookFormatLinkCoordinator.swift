@@ -360,9 +360,12 @@ public actor BookFormatLinkCoordinator {
             links: links.sorted { $0.id < $1.id },
         )
         if didTombstone {
+            // Merge already succeeded. Persist the tombstone locally even if the
+            // collection push fails so a later refresh cannot resurrect the pair.
+            await cache.save(sourceID: sourceID, document: proposed)
             switch await push(proposed, sourceID: sourceID) {
                 case .success:
-                    await cache.save(sourceID: sourceID, document: proposed)
+                    break
                 case .failure(let reason):
                     debugLog(
                         "[BookFormatLink] merge succeeded but link cleanup failed: \(reason)"
