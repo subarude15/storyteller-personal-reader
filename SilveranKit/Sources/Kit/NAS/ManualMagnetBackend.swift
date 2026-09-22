@@ -60,6 +60,9 @@ public enum ManualMagnetCopy {
                 error.message
         }
     }
+
+    public static let torBoxarrAmbiguousMatch =
+        "Couldn’t tell which TorBoxarr download matches this magnet.\nNothing was bound to the wrong torrent."
 }
 
 /// TorBoxarr qBittorrent bridge. The WebUI password is not stored here.

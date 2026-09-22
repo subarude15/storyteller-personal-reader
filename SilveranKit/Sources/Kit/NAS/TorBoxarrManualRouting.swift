@@ -11,6 +11,38 @@
 
 import Foundation
 
+/// Outcome of matching a submitted magnet to TorBoxarr’s qBittorrent `hash` (PublicID).
+public enum TorBoxarrPublicIDResolution: Equatable, Sendable {
+    case resolved(String)
+    case notFound
+    case ambiguous
+}
+
+/// Locate TorBoxarr’s PublicID by magnet identity — never by display name alone.
+public enum TorBoxarrJobIdentity {
+    /// Match `magnet_uri` BTIH identity against the submitted magnet.
+    /// Multiple rows with the same PublicID collapse to one; distinct PublicIDs are ambiguous.
+    public static func resolve(
+        torrents: [QBittorrentTorrentSnapshot],
+        magnetURI: String,
+    ) -> TorBoxarrPublicIDResolution {
+        guard let wanted = TorrentHash.fromMagnet(magnetURI) else { return .notFound }
+        var publicIDs = Set<String>()
+        for torrent in torrents {
+            guard let reported = torrent.magnetURI,
+                let identity = TorrentHash.fromMagnet(reported),
+                identity == wanted
+            else { continue }
+            let id = torrent.hash.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty else { continue }
+            publicIDs.insert(id)
+        }
+        if publicIDs.isEmpty { return .notFound }
+        if publicIDs.count == 1, let only = publicIDs.first { return .resolved(only) }
+        return .ambiguous
+    }
+}
+
 public enum TorBoxarrPayloadLocator {
     public struct Item: Equatable, Sendable {
         public var name: String

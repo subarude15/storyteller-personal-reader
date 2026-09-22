@@ -66,6 +66,7 @@ struct ManualMagnetBackendTests {
         #expect(paths.contains { $0 == "/api/v2/auth/login" })
         #expect(paths.contains { $0 == "/api/v2/app/defaultSavePath" })
         #expect(paths.contains { $0 == "/api/v2/torrents/add" })
+        #expect(paths.contains { $0 == "/api/v2/torrents/info" })
         #expect(script.addContentTypes.allSatisfy { $0.contains("multipart/form-data") })
         #expect(script.addContentTypes.allSatisfy { !$0.contains("application/x-www-form-urlencoded") })
         let add = script.bodies.first { $0.contains("name=\"urls\"") } ?? ""
@@ -78,8 +79,69 @@ struct ManualMagnetBackendTests {
         #expect(jobs.jobs[0].backend == .torbox)
         #expect(jobs.jobs[0].viaTorBoxarr == true)
         #expect(jobs.jobs[0].status == .submitted)
+        #expect(jobs.jobs[0].backendJobID == BridgeScript.publicID)
+        #expect(jobs.jobs[0].backendJobID != TorrentHash.fromMagnet(magnet))
+        #expect(jobs.jobs[0].providerInfoHash == TorrentHash.fromMagnet(magnet))
         #expect(jobs.jobs[0].destination == "/volume1/media/books/books")
         #expect(jobs.jobs[0].destination != TorBoxarrConnectionSettings.completedFolder)
+    }
+
+    @Test func torBoxSubmissionResolvesExistingDedupedPublicID() async {
+        let script = BridgeScript()
+        script.infoAlreadyPresent = true
+        let (handler, jobs) = makeHandler(script: script)
+        let result = await handler.handle(candidate(magnet, media: .ebook), manualBackend: .torBox)
+        #expect(result.isSubmitted)
+        #expect(jobs.jobs[0].backendJobID == BridgeScript.publicID)
+        #expect(jobs.jobs[0].backendJobID != TorrentHash.fromMagnet(magnet))
+    }
+
+    @Test func torBoxSubmissionIgnoresUnrelatedAndSameTitleRows() async {
+        let script = BridgeScript()
+        script.extraInfoRows = [
+            BridgeScript.infoRow(
+                hash: "other-public-id",
+                magnet: otherMagnet,
+                name: "Last Days",
+            ),
+            BridgeScript.infoRow(
+                hash: "title-only-id",
+                magnet: "magnet:?xt=urn:btih:ffffffffffffffffffffffffffffffffffffffff&dn=Last+Days",
+                name: "Last Days",
+            ),
+        ]
+        let (handler, jobs) = makeHandler(script: script)
+        let result = await handler.handle(candidate(magnet, media: .ebook), manualBackend: .torBox)
+        #expect(result.isSubmitted)
+        #expect(jobs.jobs[0].backendJobID == BridgeScript.publicID)
+        #expect(jobs.jobs[0].backendJobID != "other-public-id")
+        #expect(jobs.jobs[0].backendJobID != "title-only-id")
+    }
+
+    @Test func torBoxSubmissionDoesNotBindAmbiguousPublicIDs() async {
+        let script = BridgeScript()
+        script.matchingInfoRows = [
+            BridgeScript.infoRow(hash: "public-a", magnet: magnet, name: "A"),
+            BridgeScript.infoRow(hash: "public-b", magnet: magnet, name: "B"),
+        ]
+        let (handler, jobs) = makeHandler(script: script)
+        let result = await handler.handle(candidate(magnet, media: .ebook), manualBackend: .torBox)
+        #expect(!result.isSubmitted)
+        #expect(result.message.contains("Couldn’t tell which TorBoxarr"))
+        #expect(jobs.jobs[0].backendJobID != "public-a")
+        #expect(jobs.jobs[0].backendJobID != "public-b")
+        #expect(jobs.jobs[0].backendJobID != TorrentHash.fromMagnet(magnet))
+    }
+
+    @Test func torBoxSubmissionLeavesPublicIDUnresolvedWithoutStoringBTIH() async {
+        let script = BridgeScript()
+        script.infoBodyOverride = "[]"
+        let (handler, jobs) = makeHandler(script: script)
+        let result = await handler.handle(candidate(magnet, media: .ebook), manualBackend: .torBox)
+        #expect(result.isSubmitted)
+        #expect(jobs.jobs[0].backendJobID == nil)
+        #expect(jobs.jobs[0].providerInfoHash == TorrentHash.fromMagnet(magnet))
+        #expect(jobs.jobs[0].status == .submitted)
     }
 
     @Test func torBoxSubmissionFallsBackToContainerSavePathWhenDefaultIsMissing() async {
@@ -286,17 +348,33 @@ struct ManualMagnetBackendTests {
 }
 
 private final class BridgeScript: QBittorrentTransport, @unchecked Sendable {
+    static let publicID = "TORBOXARR_PUBLIC_ID"
     var paths: [String] = []
     var bodies: [String] = []
     var savePaths: [String] = []
     var addContentTypes: [String] = []
+    var infoHashQueries: [String] = []
     var error: URLError?
     var loginBody = "Ok."
     var addBody = "Ok."
     var version = "v5.0.0"
     var defaultSavePath = "/data/completed"
     var failDefaultSavePath = false
+    /// When true, torrents/info already contains the magnet before add (dedupe).
+    var infoAlreadyPresent = false
+    var extraInfoRows: [String] = []
+    var matchingInfoRows: [String]?
+    var infoBodyOverride: String?
+    private var acceptedMagnet: String?
     private let lock = NSLock()
+
+    static func infoRow(hash: String, magnet: String, name: String) -> String {
+        let escapedMagnet = magnet.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return """
+        {"hash":"\(hash)","state":"downloading","progress":0.1,"dlspeed":0,"size":10,"completed":1,"name":"\(name)","save_path":"/data/completed","content_path":"/data/completed/\(name)","magnet_uri":"\(escapedMagnet)","infohash_v1":"\(hash)"}
+        """
+    }
 
     func send(
         url: URL,
@@ -318,7 +396,17 @@ private final class BridgeScript: QBittorrentTransport, @unchecked Sendable {
             {
                 savePaths.append(path.removingPercentEncoding ?? path)
             }
+            if let urls = multipartField("urls", in: text) {
+                acceptedMagnet = urls
+            }
         }
+        if url.path.hasSuffix("/torrents/info"),
+            let hashes = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "hashes" })?.value
+        {
+            infoHashQueries.append(hashes)
+        }
+        let magnetForInfo = acceptedMagnet
         lock.unlock()
         if url.path.hasSuffix("/auth/login") {
             return QBittorrentHTTP(status: 200, body: Data(loginBody.utf8), setCookie: "SID=abc")
@@ -331,6 +419,27 @@ private final class BridgeScript: QBittorrentTransport, @unchecked Sendable {
                 return QBittorrentHTTP(status: 500, body: Data("error".utf8))
             }
             return QBittorrentHTTP(status: 200, body: Data(defaultSavePath.utf8))
+        }
+        if url.path.hasSuffix("/torrents/info") {
+            if let override = infoBodyOverride {
+                return QBittorrentHTTP(status: 200, body: Data(override.utf8))
+            }
+            var rows = extraInfoRows
+            if let matchingInfoRows {
+                rows.append(contentsOf: matchingInfoRows)
+            } else if let magnet = magnetForInfo {
+                rows.append(Self.infoRow(hash: Self.publicID, magnet: magnet, name: "Last Days"))
+            } else if infoAlreadyPresent {
+                rows.append(
+                    Self.infoRow(
+                        hash: Self.publicID,
+                        magnet: "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Last+Days",
+                        name: "Last Days",
+                    )
+                )
+            }
+            let body = "[\(rows.joined(separator: ","))]"
+            return QBittorrentHTTP(status: 200, body: Data(body.utf8))
         }
         return QBittorrentHTTP(status: 200, body: Data(addBody.utf8))
     }

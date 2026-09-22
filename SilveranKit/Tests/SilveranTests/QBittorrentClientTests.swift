@@ -293,6 +293,40 @@ struct QBittorrentClientTests {
             savePathFallback: TorBoxarrConnectionSettings.apiDefaultSavePath,
         )
     }
+
+    @Test func resolveTorBoxarrPublicIDMatchesMagnetURINotTitle() async throws {
+        let magnet = "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Wanted"
+        let other = "magnet:?xt=urn:btih:abcdefabcdefabcdefabcdefabcdefabcdefabcd&dn=Wanted"
+        let transport = QBittorrentScript()
+        transport.handler = { url, _, _, _, _ in
+            if url.path.hasSuffix("/auth/login") {
+                return QBittorrentHTTP(status: 200, body: Data("Ok.".utf8), setCookie: "SID=x")
+            }
+            #expect(url.path.hasSuffix("/torrents/info"))
+            #expect(url.query?.contains("hashes=") != true)
+            return QBittorrentHTTP(
+                status: 200,
+                body: Data(
+                    """
+                    [
+                      {"hash":"wrong","state":"downloading","progress":0.1,"name":"Wanted","magnet_uri":"\(other)"},
+                      {"hash":"TORBOXARR_PUBLIC_ID","state":"downloading","progress":0.2,"name":"Wanted","magnet_uri":"\(magnet)"}
+                    ]
+                    """.utf8
+                ),
+            )
+        }
+        let client = QBittorrentClient(transport: transport)
+        let result = try await client.resolveTorBoxarrPublicID(
+            baseURL: "http://torboxarr.example:8085",
+            username: "admin",
+            password: "secret",
+            magnetURI: magnet,
+            attempts: 1,
+            retryDelayNanoseconds: 0,
+        )
+        #expect(result == .resolved("TORBOXARR_PUBLIC_ID"))
+    }
 }
 
 private final class QBittorrentScript: QBittorrentTransport, @unchecked Sendable {

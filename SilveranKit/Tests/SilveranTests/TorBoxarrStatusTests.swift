@@ -17,11 +17,98 @@ import Testing
 
 @Suite("TorBoxarr manual job lifecycle")
 struct TorBoxarrStatusTests {
-    private let hash = "0123456789abcdef0123456789abcdef01234567"
+    private let btih = "0123456789abcdef0123456789abcdef01234567"
+    private let publicID = "TORBOXARR_PUBLIC_ID"
+    private let magnet = "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Magnet%20Display%20Name"
     private let apiCompleted = TorBoxarrConnectionSettings.apiCompletedFolder
     private let hostCompleted = TorBoxarrConnectionSettings.hostCompletedFolder
     private let ebook = "/volume1/media/books/books"
     private let audiobook = "/volume1/media/books/audiobooks"
+
+    @Test func statusPollUsesTorBoxarrPublicIDNotMagnetBTIH() async {
+        let bridge = BridgeStatusScript()
+        bridge.infoBody = infoJSON(state: "downloading", progress: 0.4)
+        let jobs = StatusHistory()
+        await jobs.record(sample(status: .submitted, backendJobID: publicID))
+        _ = await makeRefresh(jobs: jobs, bridge: bridge, cloud: CloudSpy(), nas: NASScript()).refresh()
+
+        #expect(jobs.jobs[0].status == .downloading)
+        #expect(jobs.jobs[0].backendJobID == publicID)
+        #expect(jobs.jobs[0].backendJobID != btih)
+        #expect(bridge.urls.contains { url in
+            url.path.contains("/torrents/info")
+                && (url.query?.contains(publicID) == true)
+                && (url.query?.contains(btih) != true)
+        })
+    }
+
+    @Test func statusRematchesPublicIDWhenStoredIDWasMagnetBTIH() async {
+        let bridge = BridgeStatusScript()
+        bridge.infoByHash = [:] // BTIH poll misses
+        bridge.listBody = """
+        [\(infoObject(hash: publicID, state: "downloading", progress: 0.2, magnetURI: magnet))]
+        """
+        let jobs = StatusHistory()
+        await jobs.record(
+            sample(status: .submitted, backendJobID: btih, providerInfoHash: btih)
+        )
+        _ = await makeRefresh(jobs: jobs, bridge: bridge, cloud: CloudSpy(), nas: NASScript()).refresh()
+
+        #expect(jobs.jobs[0].backendJobID == publicID)
+        #expect(jobs.jobs[0].backendJobID != btih)
+        #expect(jobs.jobs[0].status == .downloading)
+        #expect(jobs.jobs[0].status != .failed)
+        #expect(jobs.jobs[0].lastError?.contains("no longer in TorBox") != true)
+    }
+
+    @Test func unresolvedPublicIDStaysUnknownInsteadOfGone() async {
+        let bridge = BridgeStatusScript()
+        bridge.listBody = "[]"
+        let jobs = StatusHistory()
+        await jobs.record(sample(status: .submitted, backendJobID: nil, providerInfoHash: btih))
+        _ = await makeRefresh(jobs: jobs, bridge: bridge, cloud: CloudSpy(), nas: NASScript()).refresh()
+        #expect(jobs.jobs[0].status == .unknown)
+        #expect(jobs.jobs[0].status != .failed)
+        #expect(jobs.jobs[0].backendJobID == nil)
+    }
+
+    @Test func ambiguousMagnetMatchDoesNotBindArbitrarily() async {
+        let bridge = BridgeStatusScript()
+        bridge.listBody = """
+        [\(infoObject(hash: "public-a", state: "downloading", progress: 0.1, magnetURI: magnet)),\
+        \(infoObject(hash: "public-b", state: "downloading", progress: 0.2, magnetURI: magnet))]
+        """
+        let jobs = StatusHistory()
+        await jobs.record(sample(status: .submitted, backendJobID: nil, providerInfoHash: btih))
+        _ = await makeRefresh(jobs: jobs, bridge: bridge, cloud: CloudSpy(), nas: NASScript()).refresh()
+        #expect(jobs.jobs[0].status == .unknown)
+        #expect(jobs.jobs[0].backendJobID == nil)
+        #expect(jobs.jobs[0].lastError?.contains("Couldn’t tell which TorBoxarr") == true)
+    }
+
+    @Test func locatorIgnoresSameTitleWithDifferentMagnet() {
+        let other = "magnet:?xt=urn:btih:ffffffffffffffffffffffffffffffffffffffff&dn=Selected%20Title"
+        let result = TorBoxarrJobIdentity.resolve(
+            torrents: [
+                QBittorrentTorrentSnapshot(
+                    hash: "wrong",
+                    state: "downloading",
+                    progress: 0.1,
+                    name: "Selected Title",
+                    magnetURI: other,
+                ),
+                QBittorrentTorrentSnapshot(
+                    hash: publicID,
+                    state: "downloading",
+                    progress: 0.1,
+                    name: "Selected Title",
+                    magnetURI: magnet,
+                ),
+            ],
+            magnetURI: magnet,
+        )
+        #expect(result == .resolved(publicID))
+    }
 
     @Test func submittedJobIsPolledThroughTheTorBoxarrBridge() async {
         let bridge = BridgeStatusScript()
@@ -313,18 +400,21 @@ struct TorBoxarrStatusTests {
         status: ManualDownloadJobStatus,
         destination: String? = nil,
         media: NASMediaKind = .ebook,
+        backendJobID: String? = "TORBOXARR_PUBLIC_ID",
+        providerInfoHash: String? = nil,
     ) -> ManualDownloadJob {
         ManualDownloadJob(
             id: "tb",
             title: "Magnet Display Name",
             author: "Ada",
-            sourceURL: "magnet:?xt=urn:btih:\(hash)&dn=Magnet%20Display%20Name",
+            sourceURL: magnet,
             sourceHost: "magnet",
             backend: .torbox,
             mediaType: media,
             destination: destination ?? ebook,
-            backendJobID: hash,
+            backendJobID: backendJobID,
             status: status,
+            providerInfoHash: providerInfoHash ?? btih,
             providerFiles: [TorrentJobFile(id: "1", name: "book.epub", size: 10)],
             viaTorBoxarr: true,
         )
@@ -374,6 +464,28 @@ struct TorBoxarrStatusTests {
         }
     }
 
+    private func infoObject(
+        hash: String,
+        state: String,
+        progress: Double,
+        contentPath: String? = nil,
+        savePath: String? = nil,
+        torrentName: String = "Selected Title",
+        magnetURI: String? = nil,
+        speed: Int = 0,
+        size: Int = 100,
+        completedBytes: Int = 0,
+    ) -> String {
+        let content = contentPath.map { "\"\($0)\"" } ?? "null"
+        let save = savePath ?? apiCompleted
+        let magnet = magnetURI ?? magnet
+        let escaped = magnet.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return """
+        {"hash":"\(hash)","state":"\(state)","progress":\(progress),"dlspeed":\(speed),"size":\(size),"completed":\(completedBytes),"name":"\(torrentName)","save_path":"\(save)","content_path":\(content),"magnet_uri":"\(escaped)","infohash_v1":"\(hash)"}
+        """
+    }
+
     private func infoJSON(
         state: String,
         progress: Double,
@@ -384,11 +496,7 @@ struct TorBoxarrStatusTests {
         size: Int = 100,
         completedBytes: Int = 0,
     ) -> String {
-        let content = contentPath.map { "\"\($0)\"" } ?? "null"
-        let save = savePath ?? apiCompleted
-        return """
-        [{"hash":"\(hash)","state":"\(state)","progress":\(progress),"dlspeed":\(speed),"size":\(size),"completed":\(completedBytes),"name":"\(torrentName)","save_path":"\(save)","content_path":\(content)}]
-        """
+        "[\(infoObject(hash: publicID, state: state, progress: progress, contentPath: contentPath, savePath: savePath, torrentName: torrentName, magnetURI: magnet, speed: speed, size: size, completedBytes: completedBytes))]"
     }
 }
 
@@ -428,6 +536,10 @@ private final class BridgeStatusScript: QBittorrentTransport, @unchecked Sendabl
     var urls: [URL] = []
     var loginBodies: [String] = []
     var infoBody = "[]"
+    /// When set, hash-filtered info queries return this map (missing → `[]`).
+    var infoByHash: [String: String]?
+    /// Full list response for unfiltered `torrents/info` (PublicID rematch).
+    var listBody: String?
     var filesBody = "[]"
     var errorOnInfo = false
 
@@ -448,6 +560,22 @@ private final class BridgeStatusScript: QBittorrentTransport, @unchecked Sendabl
         if errorOnInfo { throw URLError(.cannotConnectToHost) }
         if url.path.contains("/torrents/files") {
             return QBittorrentHTTP(status: 200, body: Data(filesBody.utf8))
+        }
+        if url.path.contains("/torrents/info") {
+            let hashes = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "hashes" })?.value
+            if hashes == nil {
+                return QBittorrentHTTP(status: 200, body: Data((listBody ?? infoBody).utf8))
+            }
+            if let infoByHash {
+                let keys = hashes!.split(separator: "|").map { $0.lowercased() }
+                let rows = keys.compactMap { infoByHash[$0] ?? infoByHash[String($0)] }
+                if rows.isEmpty {
+                    return QBittorrentHTTP(status: 200, body: Data("[]".utf8))
+                }
+                return QBittorrentHTTP(status: 200, body: Data("[\(rows.joined(separator: ","))]".utf8))
+            }
+            return QBittorrentHTTP(status: 200, body: Data(infoBody.utf8))
         }
         return QBittorrentHTTP(status: 200, body: Data(infoBody.utf8))
     }

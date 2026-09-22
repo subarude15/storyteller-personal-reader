@@ -142,6 +142,13 @@ public struct QBittorrentTorrentSnapshot: Equatable, Sendable {
     public var savePath: String?
     /// Root file or folder qBittorrent reports as `content_path`.
     public var contentPath: String?
+    /// Magnet URI when the bridge exposes one (TorBoxarr includes the original magnet).
+    public var magnetURI: String?
+    /// qBittorrent `infohash_v1` when present. TorBoxarr may project its PublicID here.
+    public var infohashV1: String?
+    /// Unix timestamp from `added_on` when present.
+    public var addedOn: Int64?
+    public var category: String?
 
     public init(
         hash: String,
@@ -153,6 +160,10 @@ public struct QBittorrentTorrentSnapshot: Equatable, Sendable {
         name: String? = nil,
         savePath: String? = nil,
         contentPath: String? = nil,
+        magnetURI: String? = nil,
+        infohashV1: String? = nil,
+        addedOn: Int64? = nil,
+        category: String? = nil,
     ) {
         self.hash = hash
         self.state = state
@@ -163,6 +174,10 @@ public struct QBittorrentTorrentSnapshot: Equatable, Sendable {
         self.name = name
         self.savePath = savePath
         self.contentPath = contentPath
+        self.magnetURI = magnetURI
+        self.infohashV1 = infohashV1
+        self.addedOn = addedOn
+        self.category = category
     }
 
     public var liveStatus: ManualTorrentLiveStatus {
@@ -189,6 +204,10 @@ public struct QBittorrentTorrentSnapshot: Equatable, Sendable {
             name: string(fields["name"]),
             savePath: string(fields["save_path"]),
             contentPath: string(fields["content_path"]),
+            magnetURI: string(fields["magnet_uri"]),
+            infohashV1: string(fields["infohash_v1"]),
+            addedOn: int64(fields["added_on"]),
+            category: string(fields["category"]),
         )
     }
 
@@ -359,37 +378,62 @@ public struct QBittorrentClient: Sendable {
     ) async throws -> [String: QBittorrentTorrentSnapshot] {
         let unique = Array(Set(hashes.filter { !$0.isEmpty }))
         guard !unique.isEmpty else { return [:] }
-        let cookie = try await login(baseURL: baseURL, username: username, password: password)
-        guard var endpoint = Self.apiURL(from: baseURL, path: "torrents/info") else {
-            throw QBittorrentClientError.invalidURL
-        }
-        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
-        components?.queryItems = [URLQueryItem(name: "hashes", value: unique.joined(separator: "|"))]
-        guard let url = components?.url else { throw QBittorrentClientError.invalidURL }
-        endpoint = url
-        let http: QBittorrentHTTP
-        do {
-            http = try await transport.send(
-                url: endpoint,
-                method: "GET",
-                body: nil,
-                contentType: nil,
-                cookie: cookie,
-                timeout: timeout,
-            )
-        } catch let error as URLError {
-            throw Self.clientError(from: error)
-        }
-        try Self.throwIfHTTPFailed(http)
-        guard let list = try? JSONSerialization.jsonObject(with: http.body) as? [[String: Any]] else {
-            throw QBittorrentClientError.invalidResponse
-        }
+        let list = try await fetchTorrentInfo(
+            baseURL: baseURL,
+            username: username,
+            password: password,
+            hashes: unique,
+        )
         var result: [String: QBittorrentTorrentSnapshot] = [:]
-        for item in list {
-            guard let snapshot = QBittorrentTorrentSnapshot.parse(item) else { continue }
+        for snapshot in list {
             result[snapshot.hash.lowercased()] = snapshot
         }
         return result
+    }
+
+    /// All torrents from `GET /api/v2/torrents/info` (no hash filter).
+    public func listTorrents(
+        baseURL: String,
+        username: String,
+        password: String,
+    ) async throws -> [QBittorrentTorrentSnapshot] {
+        try await fetchTorrentInfo(
+            baseURL: baseURL,
+            username: username,
+            password: password,
+            hashes: nil,
+        )
+    }
+
+    /// After TorBoxarr accepts an add, locate its PublicID (`hash`) by magnet identity.
+    /// Retries briefly because the bridge may expose the job a moment after `Ok.`
+    public func resolveTorBoxarrPublicID(
+        baseURL: String,
+        username: String,
+        password: String,
+        magnetURI: String,
+        attempts: Int = 6,
+        retryDelayNanoseconds: UInt64 = 250_000_000,
+    ) async throws -> TorBoxarrPublicIDResolution {
+        guard TorrentHash.fromMagnet(magnetURI) != nil else { return .notFound }
+        let rounds = max(attempts, 1)
+        for round in 0..<rounds {
+            let list = try await listTorrents(
+                baseURL: baseURL,
+                username: username,
+                password: password,
+            )
+            let result = TorBoxarrJobIdentity.resolve(torrents: list, magnetURI: magnetURI)
+            switch result {
+                case .resolved, .ambiguous:
+                    return result
+                case .notFound:
+                    if round + 1 < rounds, retryDelayNanoseconds > 0 {
+                        try await Task.sleep(nanoseconds: retryDelayNanoseconds)
+                    }
+            }
+        }
+        return .notFound
     }
 
     /// Relative file paths inside one torrent (`torrents/files`). Empty when the hash is gone.
@@ -427,6 +471,42 @@ public struct QBittorrentClient: Sendable {
             throw QBittorrentClientError.invalidResponse
         }
         return list.compactMap { $0["name"] as? String }
+    }
+
+    private func fetchTorrentInfo(
+        baseURL: String,
+        username: String,
+        password: String,
+        hashes: [String]?,
+    ) async throws -> [QBittorrentTorrentSnapshot] {
+        let cookie = try await login(baseURL: baseURL, username: username, password: password)
+        guard var endpoint = Self.apiURL(from: baseURL, path: "torrents/info") else {
+            throw QBittorrentClientError.invalidURL
+        }
+        if let hashes, !hashes.isEmpty {
+            var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+            components?.queryItems = [URLQueryItem(name: "hashes", value: hashes.joined(separator: "|"))]
+            guard let url = components?.url else { throw QBittorrentClientError.invalidURL }
+            endpoint = url
+        }
+        let http: QBittorrentHTTP
+        do {
+            http = try await transport.send(
+                url: endpoint,
+                method: "GET",
+                body: nil,
+                contentType: nil,
+                cookie: cookie,
+                timeout: timeout,
+            )
+        } catch let error as URLError {
+            throw Self.clientError(from: error)
+        }
+        try Self.throwIfHTTPFailed(http)
+        guard let list = try? JSONSerialization.jsonObject(with: http.body) as? [[String: Any]] else {
+            throw QBittorrentClientError.invalidResponse
+        }
+        return list.compactMap(QBittorrentTorrentSnapshot.parse)
     }
 
     public func addTorrentURL(
