@@ -1197,6 +1197,16 @@ public actor BookServiceActor {
         return result
     }
 
+    public func mergeStorytellerBooks(
+        sourceID: BookSourceID,
+        request: StorytellerBookMergeRequest,
+    ) async -> StorytellerBookMergeHTTPResult {
+        guard let storyteller = await storytellerActor(for: sourceID) else {
+            return .failure(.sourceMissing)
+        }
+        return await storyteller.mergeBooks(request)
+    }
+
     public func startAlignment(
         for bookID: BookID,
         restart: AlignmentRestartMode = .none,

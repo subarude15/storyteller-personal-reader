@@ -1961,6 +1961,38 @@ public final class MediaViewModel {
         return outcome
     }
 
+    public func mergeBookFormats(
+        _ other: BookMetadata,
+        into current: BookMetadata,
+    ) async -> BookFormatLinkOutcome {
+        let outcome = await BookFormatLinkCoordinator.shared.merge(
+            sourceID: current.sourceID,
+            current: current,
+            other: other,
+            library: library.bookMetaData,
+            canMerge: uploadPermittedSourceIDs.contains(current.sourceID),
+        )
+        if case .merged(let document, let status) = outcome {
+            for absorbed in status.absorbedBookIDs {
+                deletedBookIDs.insert(absorbed)
+            }
+            replaceFormatLinks(sourceID: current.sourceID, with: document.activeLinks)
+            scheduleLibraryDerivation(reason: "mergeBookFormats")
+            _ = await BookServiceActor.shared.fetchLibraryInformation()
+            await refreshMetadata(source: "mergeBookFormats")
+            await refreshBookFormatLinksFromServer()
+            #if os(iOS)
+            if let lastOpen = LastOpenBookStore.load(),
+                status.absorbedBookIDs.contains(lastOpen.bookID)
+            {
+                LastOpenBookStore.clear()
+            }
+            NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
+            #endif
+        }
+        return outcome
+    }
+
     public func unlinkBookFormats(_ book: BookMetadata) async -> BookFormatLinkOutcome {
         let outcome = await BookFormatLinkCoordinator.shared.unlink(
             sourceID: book.sourceID,

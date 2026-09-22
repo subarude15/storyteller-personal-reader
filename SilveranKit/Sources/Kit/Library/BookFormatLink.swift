@@ -17,8 +17,10 @@ import Foundation
 // composite BookIDs; they are read by UUID and rewritten as schema 2.
 //
 // Readaloud creation still uses `POST /api/v2/books/{id}/process`, and only when one
-// record already has both an e-book and an audiobook. Split records are not sent through
-// merge, and the UI must not call them ready until a record's readaloud status is ALIGNED.
+// record already has both an e-book and an audiobook. The optional Confirm Link action
+// "Merge in Storyteller" is the explicit path that calls merge and then process.
+// The default Link Formats action still does not merge, and the UI must not call a
+// record ready until its readaloud status is ALIGNED.
 
 public enum BookFormatKind: String, Codable, Sendable, CaseIterable {
     case ebook
@@ -129,6 +131,7 @@ public enum BookFormatLinkAction: Sendable {
     case link
     case unlink
     case retry
+    case merge
 }
 
 public enum BookFormatLinkFailure: Equatable, Sendable {
@@ -148,6 +151,8 @@ public enum BookFormatLinkFailure: Equatable, Sendable {
                 case .link: "Nothing was linked."
                 case .unlink: "The formats are still linked."
                 case .retry: "Readaloud was not started."
+                case .merge:
+                    "Both Storyteller records and the existing Link Formats association were left unchanged."
             }
         switch self {
             case .offline:
@@ -235,7 +240,42 @@ public enum BookFormatLinkOutcome: Equatable, Sendable {
     case linked(BookFormatLinkDocument, ReadaloudAlignment)
     case unlinked(BookFormatLinkDocument)
     case alignment(ReadaloudAlignment)
+    case merged(BookFormatLinkDocument, StorytellerBookMergeStatus)
     case failed(BookFormatLinkFailure)
+}
+
+public struct StorytellerBookMergeStatus: Equatable, Sendable {
+    public var survivingBookID: BookID
+    public var absorbedBookIDs: [BookID]
+    public var alignmentStarted: Bool
+    public var alignment: ReadaloudAlignment
+    public var migrationWarning: String?
+
+    public init(
+        survivingBookID: BookID,
+        absorbedBookIDs: [BookID],
+        alignmentStarted: Bool,
+        alignment: ReadaloudAlignment,
+        migrationWarning: String? = nil,
+    ) {
+        self.survivingBookID = survivingBookID
+        self.absorbedBookIDs = absorbedBookIDs
+        self.alignmentStarted = alignmentStarted
+        self.alignment = alignment
+        self.migrationWarning = migrationWarning
+    }
+
+    public var headline: String { "Books merged" }
+
+    public var processingMessage: String { "Starting Read & Listen…" }
+
+    public var detail: String {
+        if alignmentStarted {
+            return "Read & Listen is processing in Storyteller."
+        }
+        return
+            "Books merged, but Read & Listen did not start. You can retry alignment from the book."
+    }
 }
 
 public struct DecodedBookFormatLinks: Equatable, Sendable {

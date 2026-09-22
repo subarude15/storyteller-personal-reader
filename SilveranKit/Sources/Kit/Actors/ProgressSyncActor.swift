@@ -518,6 +518,83 @@ public actor ProgressSyncActor {
     }
 
     /// Get reconciled progress for a single book
+    public func snapshotMergeProgress(bookIDs: [BookID]) async -> (
+        progress: [BookID: BookProgress],
+        pending: [PendingProgressSync],
+        history: [BookID: [SyncHistoryEntry]],
+    ) {
+        _ = await ensureQueueLoaded()
+        _ = await ensureHistoryLoaded()
+        var progress: [BookID: BookProgress] = [:]
+        var pending: [PendingProgressSync] = []
+        var history: [BookID: [SyncHistoryEntry]] = [:]
+        for bookID in bookIDs {
+            if let value = await getBookProgress(for: bookID) {
+                progress[bookID] = value
+            }
+            pending.append(contentsOf: pendingProgressQueue.filter { $0.bookID == bookID })
+            if let entries = syncHistory[bookID] {
+                history[bookID] = entries
+            }
+        }
+        return (progress, pending, history)
+    }
+
+    /// Rekeys the newest progress, pending rows, and history onto the surviving book.
+    /// Absorbed keys are left in place so nothing is deleted if apply is only partial.
+    public func applyMergeProgress(
+        _ snapshot: StorytellerMergeLocalSnapshot,
+        surviving: BookID,
+    ) async {
+        _ = await ensureQueueLoaded()
+        _ = await ensureHistoryLoaded()
+
+        if let winner = StorytellerBookMergeProgress.preferred(from: snapshot.progress),
+            let locator = winner.locator,
+            let timestamp = winner.timestamp
+        {
+            _ = await queueOfflineProgress(
+                bookID: surviving,
+                locator: locator,
+                timestamp: timestamp,
+                syncedToStoryteller: false,
+            )
+        }
+
+        for pending in snapshot.pending where pending.bookID != surviving {
+            if let existing = pendingProgressQueue.first(where: { $0.bookID == surviving }),
+                existing.timestamp >= pending.timestamp
+            {
+                continue
+            }
+            _ = await queueOfflineProgress(
+                bookID: surviving,
+                locator: pending.locator,
+                timestamp: pending.timestamp,
+                syncedToStoryteller: false,
+            )
+        }
+
+        var survivingHistory = syncHistory[surviving] ?? []
+        var historySeen = Set(
+            survivingHistory.map { "\($0.timestamp)|\($0.sourceIdentifier)|\($0.result.rawValue)" }
+        )
+        for (bookID, entries) in snapshot.history where bookID != surviving {
+            for entry in entries {
+                let key = "\(entry.timestamp)|\(entry.sourceIdentifier)|\(entry.result.rawValue)"
+                guard historySeen.insert(key).inserted else { continue }
+                survivingHistory.append(entry)
+            }
+        }
+        if !survivingHistory.isEmpty {
+            survivingHistory.sort { $0.timestamp > $1.timestamp }
+            syncHistory[surviving] = survivingHistory
+            await saveHistoryToDisk()
+        }
+
+        await notifyObservers()
+    }
+
     public func getBookProgress(for bookID: BookID) async -> BookProgress? {
         _ = await ensureQueueLoaded()
 

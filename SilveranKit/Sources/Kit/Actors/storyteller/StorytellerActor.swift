@@ -1510,6 +1510,72 @@ public actor StorytellerActor {
         }
     }
 
+    /// Merges 2–3 Storyteller books into the first UUID in `request.from`.
+    /// Server implementation: `storyteller/web/src/app/api/v2/books/merge/route.ts` (POST, `bookCreate`).
+    public func mergeBooks(_ request: StorytellerBookMergeRequest) async
+        -> StorytellerBookMergeHTTPResult
+    {
+        guard let (baseURL, token) = await ensureAuthentication() else {
+            return .failure(
+                BookFormatLinkMerge.failure(
+                    forTransportReason: Self.bookFormatLinkAuthReason(connectionStatus)
+                )
+            )
+        }
+        let mergeURL =
+            baseURL
+            .appendingPathComponent("books")
+            .appendingPathComponent("merge")
+
+        var allowedStatuses = Set(200..<300)
+        allowedStatuses.insert(401)
+        allowedStatuses.insert(403)
+        allowedStatuses.insert(404)
+        allowedStatuses.insert(405)
+
+        do {
+            let payload = try StorytellerBookMergePayload.encode(request)
+            let response = try await httpPost(
+                mergeURL.absoluteString,
+                headers: [
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "Authorization": authorizationHeaderValue(for: token),
+                ],
+                body: payload,
+                session: urlSession,
+                allowedStatusCodes: allowedStatuses,
+            )
+
+            switch evaluateResponse(
+                response,
+                methodName: "mergeBooks",
+                context: request.from.joined(separator: ","),
+            ) {
+                case .success:
+                    do {
+                        let book = try StorytellerBookMergePayload.decodeSurvivingBook(
+                            response.data,
+                            sourceID: sourceRecordValue.id,
+                        )
+                        return .success(book)
+                    } catch {
+                        logStorytellerError("mergeBooks decode", error: error)
+                        return .failure(.serverRejected)
+                    }
+                case .unauthorized:
+                    return .failure(.authenticationExpired)
+                case .notFound:
+                    return .failure(.sourceMissing)
+                case .notModified, .unexpected:
+                    return .failure(.serverRejected)
+            }
+        } catch {
+            logStorytellerError("mergeBooks", error: error)
+            return .failure(BookFormatLinkMerge.failure(forTransportReason: error.localizedDescription))
+        }
+    }
+
     /// Starts alignment processing for a book (creates readaloud from ebook + audiobook).
     /// Server implementation: `storyteller/web/src/app/api/v2/books/[bookId]/process/route.ts` (POST handler).
     public func startAlignment(for bookId: String, restart: AlignmentRestartMode = .none) async

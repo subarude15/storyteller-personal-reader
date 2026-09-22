@@ -9,6 +9,11 @@ public protocol BookFormatLinkTransport: Sendable {
     func fetchDocument(sourceID: BookSourceID) async -> BookFormatLinkFetchResult
     func pushDocument(sourceID: BookSourceID, description: String) async -> BookFormatLinkPushResult
     func startAlignment(bookID: BookID, restart: AlignmentRestartMode) async -> Bool
+    func canMergeBooks(sourceID: BookSourceID) async -> Bool
+    func mergeBooks(
+        sourceID: BookSourceID,
+        request: StorytellerBookMergeRequest,
+    ) async -> StorytellerBookMergeHTTPResult
 }
 
 public struct UserDefaultsBookFormatLinkCache: BookFormatLinkCache, @unchecked Sendable {
@@ -61,6 +66,17 @@ public struct StorytellerBookFormatLinkTransport: BookFormatLinkTransport {
     public func startAlignment(bookID: BookID, restart: AlignmentRestartMode) async -> Bool {
         await BookServiceActor.shared.startAlignment(for: bookID, restart: restart)
     }
+
+    public func canMergeBooks(sourceID: BookSourceID) async -> Bool {
+        await BookServiceActor.shared.storytellerBookCreateAccess(sourceID: sourceID) == .allowed
+    }
+
+    public func mergeBooks(
+        sourceID: BookSourceID,
+        request: StorytellerBookMergeRequest,
+    ) async -> StorytellerBookMergeHTTPResult {
+        await BookServiceActor.shared.mergeStorytellerBooks(sourceID: sourceID, request: request)
+    }
 }
 
 public actor BookFormatLinkCoordinator {
@@ -68,14 +84,17 @@ public actor BookFormatLinkCoordinator {
 
     private let cache: any BookFormatLinkCache
     private let transport: any BookFormatLinkTransport
+    private let mergeState: any StorytellerBookMergeStateStore
     private var inFlight = false
 
     public init(
         cache: any BookFormatLinkCache = UserDefaultsBookFormatLinkCache(),
         transport: any BookFormatLinkTransport = StorytellerBookFormatLinkTransport(),
+        mergeState: any StorytellerBookMergeStateStore = DefaultStorytellerBookMergeStateStore(),
     ) {
         self.cache = cache
         self.transport = transport
+        self.mergeState = mergeState
     }
 
     public func cachedActiveLinks(sourceID: BookSourceID) async -> [BookFormatLink] {
@@ -248,6 +267,145 @@ public actor BookFormatLinkCoordinator {
                 await cache.save(sourceID: sourceID, document: proposed)
                 return .unlinked(proposed)
         }
+    }
+
+    public func merge(
+        sourceID: BookSourceID,
+        current: BookMetadata,
+        other: BookMetadata,
+        library: [BookMetadata],
+        canMerge: Bool? = nil,
+    ) async -> BookFormatLinkOutcome {
+        if inFlight { return .failed(.duplicateSubmission) }
+        inFlight = true
+        defer { inFlight = false }
+
+        guard library.contains(where: { $0.id == current.id }),
+            library.contains(where: { $0.id == other.id })
+        else {
+            return .failed(.sourceMissing)
+        }
+        guard StorytellerBookMergeEligibility.isEligible(current, other),
+            let pair = StorytellerBookMergePayload.pair(current: current, other: other)
+        else {
+            return .failed(.incompatible)
+        }
+        let permitted: Bool
+        if let canMerge {
+            permitted = canMerge
+        } else {
+            permitted = await transport.canMergeBooks(sourceID: sourceID)
+        }
+        guard permitted else {
+            return .failed(.authenticationExpired)
+        }
+
+        let local = await cache.load(sourceID: sourceID)
+        let linksForSnapshot: BookFormatLinkDocument
+        switch await transport.fetchDocument(sourceID: sourceID) {
+            case .unavailable:
+                linksForSnapshot = local
+            case .empty:
+                linksForSnapshot = local
+            case .document(let raw):
+                if let decoded = Self.decoded(raw, sourceID: sourceID) {
+                    linksForSnapshot = BookFormatLinkMerge.merge(
+                        local: local,
+                        remote: decoded.document,
+                    )
+                } else {
+                    linksForSnapshot = local
+                }
+        }
+        let snapshot = await mergeState.snapshot(
+            bookIDs: [pair.ebook.id, pair.audiobook.id],
+            links: linksForSnapshot,
+        )
+        let request = StorytellerBookMergePayload.request(
+            ebook: pair.ebook,
+            audiobook: pair.audiobook,
+        )
+
+        let mergedBook: BookMetadata
+        switch await transport.mergeBooks(sourceID: sourceID, request: request) {
+            case .failure(let failure):
+                return .failed(failure)
+            case .success(let book):
+                mergedBook = book
+        }
+
+        let survivingID = BookID(sourceID: sourceID, uuid: mergedBook.uuid)
+        let absorbedIDs = [pair.ebook.id, pair.audiobook.id].filter { $0 != survivingID }
+        let migrationWarning = await mergeState.apply(
+            snapshot: snapshot,
+            surviving: survivingID,
+        )
+
+        let now = Date()
+        var links = snapshot.links.links
+        var didTombstone = false
+        for existing in snapshot.links.activeLinks
+        where existing.members.contains(pair.ebook.id)
+            || existing.members.contains(pair.audiobook.id)
+        {
+            links.removeAll { $0.id == existing.id }
+            links.append(
+                BookFormatLink(
+                    id: existing.id,
+                    members: existing.members,
+                    primary: existing.primary,
+                    updatedAt: now,
+                    removed: true,
+                )
+            )
+            didTombstone = true
+        }
+        let proposed = BookFormatLinkDocument(
+            updatedAt: didTombstone ? now : snapshot.links.updatedAt,
+            links: links.sorted { $0.id < $1.id },
+        )
+        if didTombstone {
+            // Merge already succeeded. Persist the tombstone locally even if the
+            // collection push fails so a later refresh cannot resurrect the pair.
+            await cache.save(sourceID: sourceID, document: proposed)
+            switch await push(proposed, sourceID: sourceID) {
+                case .success:
+                    break
+                case .failure(let reason):
+                    debugLog(
+                        "[BookFormatLink] merge succeeded but link cleanup failed: \(reason)"
+                    )
+            }
+        }
+
+        let started = await transport.startAlignment(bookID: survivingID, restart: .none)
+        let alignment =
+            started
+            ? ReadaloudAlignment(
+                phase: .queued,
+                bookID: survivingID,
+                canRetry: false,
+                canStart: false,
+                message: "Read & Listen is processing in Storyteller.",
+            )
+            : ReadaloudAlignment(
+                phase: .failed,
+                bookID: survivingID,
+                canRetry: true,
+                canStart: false,
+                message:
+                    "Books merged, but Read & Listen did not start. You can retry alignment from the book.",
+            )
+        return .merged(
+            proposed,
+            StorytellerBookMergeStatus(
+                survivingBookID: survivingID,
+                absorbedBookIDs: absorbedIDs,
+                alignmentStarted: started,
+                alignment: alignment,
+                migrationWarning: migrationWarning,
+            ),
+        )
     }
 
     public func retryAlignment(members: [BookMetadata]) async -> BookFormatLinkOutcome {

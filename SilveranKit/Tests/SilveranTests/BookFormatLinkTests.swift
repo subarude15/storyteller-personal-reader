@@ -799,7 +799,7 @@ private func makeBook(
     )
 }
 
-private actor FormatLinkCacheDouble: BookFormatLinkCache {
+actor FormatLinkCacheDouble: BookFormatLinkCache {
     var documents: [BookSourceID: BookFormatLinkDocument] = [:]
 
     func load(sourceID: BookSourceID) async -> BookFormatLinkDocument {
@@ -811,7 +811,7 @@ private actor FormatLinkCacheDouble: BookFormatLinkCache {
     }
 }
 
-private final class FormatLinkPushGate: @unchecked Sendable {
+final class FormatLinkPushGate: @unchecked Sendable {
     private let lock = NSLock()
     private var waiters: [CheckedContinuation<Void, Never>] = []
     private var open = false
@@ -841,7 +841,7 @@ private final class FormatLinkPushGate: @unchecked Sendable {
     }
 }
 
-private actor FormatLinkTransportDouble: BookFormatLinkTransport {
+actor FormatLinkTransportDouble: BookFormatLinkTransport {
     var fetchResult: BookFormatLinkFetchResult = .empty
     var pushResult: BookFormatLinkPushResult = .success
     private(set) var pushCount = 0
@@ -850,6 +850,12 @@ private actor FormatLinkTransportDouble: BookFormatLinkTransport {
     private var alignmentResult = true
     private var holdPush = false
     private let gate = FormatLinkPushGate()
+    var canMerge = true
+    var mergeResult: StorytellerBookMergeHTTPResult = .failure(.serverRejected)
+    private(set) var mergeCount = 0
+    private(set) var mergeRequests: [StorytellerBookMergeRequest] = []
+    private var holdMerge = false
+    private let mergeGate = FormatLinkPushGate()
 
     func setFetch(_ result: BookFormatLinkFetchResult) {
         fetchResult = result
@@ -869,6 +875,22 @@ private actor FormatLinkTransportDouble: BookFormatLinkTransport {
 
     func releasePushes() {
         gate.openGate()
+    }
+
+    func setMerge(_ result: StorytellerBookMergeHTTPResult) {
+        mergeResult = result
+    }
+
+    func setCanMerge(_ value: Bool) {
+        canMerge = value
+    }
+
+    func holdNextMerges() {
+        holdMerge = true
+    }
+
+    func releaseMerges() {
+        mergeGate.openGate()
     }
 
     func fetchDocument(sourceID: BookSourceID) async -> BookFormatLinkFetchResult {
@@ -892,5 +914,23 @@ private actor FormatLinkTransportDouble: BookFormatLinkTransport {
     func startAlignment(bookID: BookID, restart: AlignmentRestartMode) async -> Bool {
         alignmentStarts.append((bookID, restart))
         return alignmentResult
+    }
+
+    func canMergeBooks(sourceID: BookSourceID) async -> Bool {
+        _ = sourceID
+        return canMerge
+    }
+
+    func mergeBooks(
+        sourceID: BookSourceID,
+        request: StorytellerBookMergeRequest,
+    ) async -> StorytellerBookMergeHTTPResult {
+        _ = sourceID
+        mergeCount += 1
+        mergeRequests.append(request)
+        if holdMerge {
+            await mergeGate.wait()
+        }
+        return mergeResult
     }
 }
