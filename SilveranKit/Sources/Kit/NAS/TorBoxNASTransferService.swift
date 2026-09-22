@@ -59,7 +59,7 @@ public struct TorBoxNASTransferService: Sendable {
     /// Start or resume NAS transfer for a Ready / failed-transfer TorBox job.
     @discardableResult
     public func transfer(job: ManualDownloadJob, force: Bool = false) async -> ManualDownloadJob {
-        guard job.backend == .torbox else { return job }
+        guard job.backend == .torbox, job.viaTorBoxarr != true else { return job }
         guard job.status == .ready || job.canRetryTransferNow || job.status == .transferring else {
             return job
         }
@@ -150,7 +150,7 @@ public struct TorBoxNASTransferService: Sendable {
         let current = await jobs.allJobs()
         var changed: [ManualDownloadJob] = []
 
-        for job in current where job.backend == .torbox {
+        for job in current where job.backend == .torbox && job.viaTorBoxarr != true {
             if job.status == .transferring {
                 let updated = await pollInFlight(job, context: context)
                 if updated != job {

@@ -230,6 +230,35 @@ public struct QBittorrentClient: Sendable {
         }
     }
 
+    /// Confirms the qBittorrent-compatible API answers after login. Does not add a torrent.
+    public func appVersion(baseURL: String, username: String, password: String) async throws -> String {
+        let cookie = try await login(baseURL: baseURL, username: username, password: password)
+        guard let endpoint = Self.apiURL(from: baseURL, path: "app/version") else {
+            throw QBittorrentClientError.invalidURL
+        }
+        let http: QBittorrentHTTP
+        do {
+            http = try await transport.send(
+                url: endpoint,
+                method: "GET",
+                body: nil,
+                contentType: nil,
+                cookie: cookie,
+                timeout: timeout,
+            )
+        } catch let error as URLError {
+            throw Self.clientError(from: error)
+        }
+        try Self.throwIfHTTPFailed(http)
+        let text = String(data: http.body, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        // A version string is short. HTML error pages are not a successful probe.
+        guard !text.isEmpty, text.count < 40, !text.contains("<"), !text.contains(">") else {
+            throw QBittorrentClientError.invalidResponse
+        }
+        return text
+    }
+
     public func addMagnet(
         baseURL: String,
         username: String,

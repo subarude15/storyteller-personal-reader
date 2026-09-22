@@ -245,6 +245,7 @@ public struct ManualDownloadStatusRefresh: Sendable {
     ) async -> [ManualDownloadJob] {
         let targets = current.filter {
             $0.backend == .torbox
+                && $0.viaTorBoxarr != true
                 && $0.status.isActive
                 && $0.status != .transferring
                 && !($0.backendJobID ?? "").isEmpty
@@ -292,7 +293,9 @@ public struct ManualDownloadStatusRefresh: Sendable {
 
     /// Remove a TorBox cloud torrent when the user deletes a Downloads row.
     public func deleteRemoteIfNeeded(job: ManualDownloadJob) async {
-        guard job.backend == .torbox, let id = job.backendJobID, !id.isEmpty else { return }
+        guard job.backend == .torbox, job.viaTorBoxarr != true, let id = job.backendJobID, !id.isEmpty else {
+            return
+        }
         let context = await environment.load()
         let key = context.credentials.torboxAPIKey
         guard !key.isEmpty else { return }
