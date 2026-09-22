@@ -246,6 +246,9 @@ public struct ManualDownloadStatusRefresh: Sendable {
 
     /// TorBoxarr jobs use the qBittorrent bridge, then File Station for the library move.
     /// The TorBox cloud API and `TorBoxNASTransferService` do not see these jobs.
+    ///
+    /// `backendJobID` must be TorBoxarr’s PublicID (`hash` from torrents/info), not the
+    /// magnet BTIH. When the ID is missing or the hash poll misses, rematch via `magnet_uri`.
     private func refreshTorBoxarr(
         _ current: [ManualDownloadJob],
         context: NASHandoffContext,
@@ -254,35 +257,113 @@ public struct ManualDownloadStatusRefresh: Sendable {
             $0.backend == .torbox
                 && $0.viaTorBoxarr == true
                 && $0.status.isActive
-                && !($0.backendJobID ?? "").isEmpty
+                && (
+                    !($0.backendJobID ?? "").isEmpty
+                        || ($0.sourceURL.flatMap(TorrentHash.fromMagnet) != nil)
+                )
         }
         guard !targets.isEmpty else { return [] }
         guard let baseURL = context.torboxarr.baseURL else { return await markUnknown(targets) }
-        let hashes = targets.compactMap { TorrentHash.normalized($0.backendJobID) }
-        let snapshots: [String: QBittorrentTorrentSnapshot]
-        do {
-            snapshots = try await qbittorrent.torrentStatuses(
-                baseURL: baseURL,
-                username: context.torboxarr.username,
-                password: context.credentials.torboxarrPassword,
-                hashes: hashes,
-            )
-        } catch {
-            return await markUnknown(targets)
+        let username = context.torboxarr.username
+        let password = context.credentials.torboxarrPassword
+
+        let withIDs = targets.filter { !($0.backendJobID ?? "").isEmpty }
+        var byHash: [String: QBittorrentTorrentSnapshot] = [:]
+        if !withIDs.isEmpty {
+            let hashes = withIDs.compactMap { TorrentHash.normalized($0.backendJobID) }
+            do {
+                byHash = try await qbittorrent.torrentStatuses(
+                    baseURL: baseURL,
+                    username: username,
+                    password: password,
+                    hashes: hashes,
+                )
+            } catch {
+                return await markUnknown(targets)
+            }
         }
+
+        var listed: [QBittorrentTorrentSnapshot]?
+        func allTorrents() async throws -> [QBittorrentTorrentSnapshot] {
+            if let listed { return listed }
+            let value = try await qbittorrent.listTorrents(
+                baseURL: baseURL,
+                username: username,
+                password: password,
+            )
+            listed = value
+            return value
+        }
+
         var changed: [ManualDownloadJob] = []
         for job in targets {
-            guard let hash = TorrentHash.normalized(job.backendJobID)?.lowercased(),
-                let snapshot = snapshots[hash]
-            else {
-                let next = ManualDownloadStatusMapping.markFailed(
-                    job,
-                    message: "That torrent is no longer in TorBox.",
+            if let hash = TorrentHash.normalized(job.backendJobID)?.lowercased(),
+                let snapshot = byHash[hash]
+            {
+                changed.append(
+                    await reconcileTorBoxarr(job, hash: hash, snapshot: snapshot, context: context)
                 )
-                changed.append(await store(next))
                 continue
             }
-            changed.append(await reconcileTorBoxarr(job, hash: hash, snapshot: snapshot, context: context))
+
+            guard let magnet = job.sourceURL, TorrentHash.fromMagnet(magnet) != nil else {
+                if (job.backendJobID ?? "").isEmpty {
+                    changed.append(await store(ManualDownloadStatusMapping.markUnknown(job)))
+                } else {
+                    let next = ManualDownloadStatusMapping.markFailed(
+                        job,
+                        message: "That torrent is no longer in TorBox.",
+                    )
+                    changed.append(await store(next))
+                }
+                continue
+            }
+
+            let list: [QBittorrentTorrentSnapshot]
+            do {
+                list = try await allTorrents()
+            } catch {
+                changed.append(await store(ManualDownloadStatusMapping.markUnknown(job)))
+                continue
+            }
+
+            switch TorBoxarrJobIdentity.resolve(torrents: list, magnetURI: magnet) {
+                case .resolved(let publicID):
+                    var updated = job
+                    updated.backendJobID = TorrentHash.normalized(publicID) ?? publicID
+                    if updated.providerInfoHash == nil {
+                        updated.providerInfoHash = TorrentHash.fromMagnet(magnet)
+                    }
+                    updated.lastError = nil
+                    let key = publicID.lowercased()
+                    if let snapshot = list.first(where: { $0.hash.lowercased() == key }) {
+                        changed.append(
+                            await reconcileTorBoxarr(
+                                updated,
+                                hash: key,
+                                snapshot: snapshot,
+                                context: context,
+                            )
+                        )
+                    } else {
+                        changed.append(await store(ManualDownloadStatusMapping.markUnknown(updated)))
+                    }
+                case .notFound:
+                    if (job.backendJobID ?? "").isEmpty {
+                        // Still waiting for TorBoxarr to expose the accepted job.
+                        changed.append(await store(ManualDownloadStatusMapping.markUnknown(job)))
+                    } else {
+                        let next = ManualDownloadStatusMapping.markFailed(
+                            job,
+                            message: "That torrent is no longer in TorBox.",
+                        )
+                        changed.append(await store(next))
+                    }
+                case .ambiguous:
+                    var next = ManualDownloadStatusMapping.markUnknown(job)
+                    next.lastError = ManualMagnetCopy.torBoxarrAmbiguousMatch
+                    changed.append(await store(next))
+            }
         }
         return changed
     }
@@ -294,13 +375,18 @@ public struct ManualDownloadStatusRefresh: Sendable {
         context: NASHandoffContext,
     ) async -> ManualDownloadJob {
         let live = snapshot.liveStatus
-        let completed = TorBoxarrConnectionSettings.completedFolder
+        let apiRoot = TorBoxarrPayloadLocator.apiCompletedRoot(
+            savePath: snapshot.savePath,
+            contentPath: snapshot.contentPath,
+        )
+        let hostRoot = TorBoxarrConnectionSettings.hostCompletedFolder
         var payloads = TorBoxarrPayloadLocator.items(
             contentPath: snapshot.contentPath,
             savePath: snapshot.savePath,
             torrentName: snapshot.name,
             fileNames: [],
-            completedFolder: completed,
+            apiCompletedFolder: apiRoot,
+            hostCompletedFolder: hostRoot,
         )
         let awaitingRoute = job.status == .routing || job.status == .readyToRoute
         if payloads.isEmpty, live.status == .complete || awaitingRoute {
@@ -319,13 +405,14 @@ public struct ManualDownloadStatusRefresh: Sendable {
                     savePath: snapshot.savePath,
                     torrentName: snapshot.name,
                     fileNames: files,
-                    completedFolder: completed,
+                    apiCompletedFolder: apiRoot,
+                    hostCompletedFolder: hostRoot,
                 )
             } catch {
                 return await store(ManualDownloadStatusMapping.markUnknown(job))
             }
         }
-        payloads = payloads.filter { Self.isScopedPayload($0, completedFolder: completed) }
+        payloads = payloads.filter { Self.isScopedPayload($0, completedFolder: hostRoot) }
         if live.status != .complete, !awaitingRoute {
             return await store(ManualDownloadStatusMapping.apply(live, to: job))
         }

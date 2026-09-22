@@ -3,16 +3,50 @@
 //  SilveranKit
 //
 //  Which completed-folder entry belongs to one TorBoxarr torrent.
+//  TorBoxarr reports content_path / save_path in the container namespace;
+//  File Station moves use the Synology host path for the same relative child.
 //  Never the whole completed directory, and never a sibling torrent.
 //
 //  SPDX-License-Identifier: AGPL-3.0-only
 
 import Foundation
 
+/// Outcome of matching a submitted magnet to TorBoxarr’s qBittorrent `hash` (PublicID).
+public enum TorBoxarrPublicIDResolution: Equatable, Sendable {
+    case resolved(String)
+    case notFound
+    case ambiguous
+}
+
+/// Locate TorBoxarr’s PublicID by magnet identity — never by display name alone.
+public enum TorBoxarrJobIdentity {
+    /// Match `magnet_uri` BTIH identity against the submitted magnet.
+    /// Multiple rows with the same PublicID collapse to one; distinct PublicIDs are ambiguous.
+    public static func resolve(
+        torrents: [QBittorrentTorrentSnapshot],
+        magnetURI: String,
+    ) -> TorBoxarrPublicIDResolution {
+        guard let wanted = TorrentHash.fromMagnet(magnetURI) else { return .notFound }
+        var publicIDs = Set<String>()
+        for torrent in torrents {
+            guard let reported = torrent.magnetURI,
+                let identity = TorrentHash.fromMagnet(reported),
+                identity == wanted
+            else { continue }
+            let id = torrent.hash.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty else { continue }
+            publicIDs.insert(id)
+        }
+        if publicIDs.isEmpty { return .notFound }
+        if publicIDs.count == 1, let only = publicIDs.first { return .resolved(only) }
+        return .ambiguous
+    }
+}
+
 public enum TorBoxarrPayloadLocator {
     public struct Item: Equatable, Sendable {
         public var name: String
-        /// Volume path of the one file or top-level folder to move.
+        /// Synology host volume path of the one file or top-level folder to move.
         public var sourceVolumePath: String
 
         public init(name: String, sourceVolumePath: String) {
@@ -22,65 +56,107 @@ public enum TorBoxarrPayloadLocator {
     }
 
     /// Prefer `content_path`, then `save_path` + torrent `name`, then `torrents/files`.
-    /// Paths outside the completed folder are not guessed from a magnet display name.
+    ///
+    /// - `apiCompletedFolder`: TorBoxarr container root (e.g. `/data/completed`) used to
+    ///   interpret qBittorrent `content_path` / `save_path`.
+    /// - `hostCompletedFolder`: Synology host root (e.g. `/volume1/data/torrents/completed`)
+    ///   used to build File Station `sourceVolumePath`.
     public static func items(
         contentPath: String?,
         savePath: String?,
         torrentName: String?,
         fileNames: [String],
-        completedFolder: String,
+        apiCompletedFolder: String,
+        hostCompletedFolder: String,
     ) -> [Item] {
-        guard let completed = NASPathSafety.normalizeBase(completedFolder) else { return [] }
+        guard let apiRoot = NASPathSafety.normalizeBase(apiCompletedFolder),
+            let hostRoot = NASPathSafety.normalizeBase(hostCompletedFolder)
+        else { return [] }
         if let content = nonempty(contentPath) {
-            if let item = childItem(path: content, completed: completed) {
+            if let item = childItem(path: content, apiRoot: apiRoot, hostRoot: hostRoot) {
                 return [item]
             }
-            return fileItems(fileNames, completed: completed)
+            return fileItems(fileNames, hostRoot: hostRoot)
         }
-        if let item = namedItem(savePath: savePath, torrentName: torrentName, completed: completed) {
+        if let item = namedItem(
+            savePath: savePath,
+            torrentName: torrentName,
+            apiRoot: apiRoot,
+            hostRoot: hostRoot,
+        ) {
             return [item]
         }
-        return fileItems(fileNames, completed: completed)
+        return fileItems(fileNames, hostRoot: hostRoot)
     }
 
-    private static func childItem(path raw: String, completed: String) -> Item? {
+    /// Container completed root for interpreting TorBoxarr status paths.
+    /// Prefers `save_path` when it is a valid parent of `content_path`, or equals
+    /// `content_path` (multifile at the completed root); otherwise the configured fallback.
+    public static func apiCompletedRoot(
+        savePath: String?,
+        contentPath: String?,
+        fallback: String = TorBoxarrConnectionSettings.apiCompletedFolder,
+    ) -> String {
+        let fallbackRoot = NASPathSafety.normalizeBase(fallback)
+            ?? TorBoxarrConnectionSettings.apiCompletedFolder
+        guard let save = NASPathSafety.normalizeBase(savePath ?? ""), !save.isEmpty else {
+            return fallbackRoot
+        }
+        if let content = NASPathSafety.normalizeBase(contentPath ?? ""), !content.isEmpty {
+            if content != save, NASPathSafety.staysWithin(root: save, path: content) {
+                return save
+            }
+            if content == save {
+                return save
+            }
+            return fallbackRoot
+        }
+        return save
+    }
+
+    private static func childItem(path raw: String, apiRoot: String, hostRoot: String) -> Item? {
         guard let path = NASPathSafety.normalizeBase(raw),
-            path != completed,
-            NASPathSafety.staysWithin(root: completed, path: path)
+            path != apiRoot,
+            NASPathSafety.staysWithin(root: apiRoot, path: path)
         else { return nil }
-        let relative = String(path.dropFirst(completed.count + 1))
+        let relative = String(path.dropFirst(apiRoot.count + 1))
         guard let name = firstComponent(relative) else { return nil }
-        return item(name: name, completed: completed)
+        return item(name: name, hostRoot: hostRoot)
     }
 
-    private static func namedItem(savePath: String?, torrentName: String?, completed: String) -> Item? {
+    private static func namedItem(
+        savePath: String?,
+        torrentName: String?,
+        apiRoot: String,
+        hostRoot: String,
+    ) -> Item? {
         guard let name = singleComponent(torrentName),
             let save = NASPathSafety.normalizeBase(savePath ?? ""),
-            save == completed || NASPathSafety.staysWithin(root: completed, path: save)
+            save == apiRoot || NASPathSafety.staysWithin(root: apiRoot, path: save)
         else { return nil }
-        if save != completed, (save as NSString).lastPathComponent == name {
-            return item(name: name, completed: completed)
+        if save != apiRoot, (save as NSString).lastPathComponent == name {
+            return item(name: name, hostRoot: hostRoot)
         }
-        guard save == completed else { return nil }
-        return item(name: name, completed: completed)
+        guard save == apiRoot else { return nil }
+        return item(name: name, hostRoot: hostRoot)
     }
 
-    private static func fileItems(_ fileNames: [String], completed: String) -> [Item] {
+    private static func fileItems(_ fileNames: [String], hostRoot: String) -> [Item] {
         var seen: Set<String> = []
         var result: [Item] = []
         for raw in fileNames {
             guard let name = firstComponent(raw), seen.insert(name).inserted else { continue }
-            guard let item = item(name: name, completed: completed) else { continue }
+            guard let item = item(name: name, hostRoot: hostRoot) else { continue }
             result.append(item)
         }
         return result
     }
 
-    private static func item(name: String, completed: String) -> Item? {
-        let source = completed + "/" + name
+    private static func item(name: String, hostRoot: String) -> Item? {
+        let source = hostRoot + "/" + name
         guard let normalized = NASPathSafety.normalizeBase(source),
-            normalized != completed,
-            NASPathSafety.staysWithin(root: completed, path: normalized),
+            normalized != hostRoot,
+            NASPathSafety.staysWithin(root: hostRoot, path: normalized),
             (normalized as NSString).lastPathComponent == name
         else { return nil }
         return Item(name: name, sourceVolumePath: normalized)

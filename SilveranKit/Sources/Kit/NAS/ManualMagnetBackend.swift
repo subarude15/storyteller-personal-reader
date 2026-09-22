@@ -39,6 +39,30 @@ public enum ManualMagnetCopy {
     public static func failed(_ backend: ManualDownloadBackend) -> String {
         "\(backend.label) submission failed"
     }
+
+    /// TorBoxarr bridge errors. Distinct from cloud TorBox copy; no “check connection”
+    /// wording on an add rejection after a successful login.
+    public static func torBoxarrHandoffMessage(_ error: NASHandoffError) -> String {
+        switch error {
+            case .rejected(.torbox):
+                "Connected to TorBoxarr, but the download request was rejected."
+            case .authenticationFailed(.torbox):
+                "TorBoxarr rejected the credentials.\nCheck the TorBox connection in Settings."
+            case .unreachable(.torbox):
+                "Couldn’t reach TorBoxarr.\nThe NAS may be on a local network only. You can retry later."
+            case .timeout(.torbox):
+                "TorBoxarr timed out.\nCheck the TorBox connection in Settings."
+            case .invalidURL(.torbox):
+                "The TorBoxarr URL is invalid.\nCheck the TorBox connection in Settings."
+            case .backendNotConfigured(.torbox):
+                "TorBoxarr is not configured.\nCheck the TorBox connection in Settings."
+            default:
+                error.message
+        }
+    }
+
+    public static let torBoxarrAmbiguousMatch =
+        "Couldn’t tell which TorBoxarr download matches this magnet.\nNothing was bound to the wrong torrent."
 }
 
 /// TorBoxarr qBittorrent bridge. The WebUI password is not stored here.
@@ -46,8 +70,15 @@ public struct TorBoxarrConnectionSettings: Equatable, Sendable {
     public static let defaultHost = "192.168.1.2"
     public static let defaultPort = 8085
     public static let defaultUsername = "admin"
-    /// TorBoxarr drops completed payloads here. This is not the library folder.
-    public static let completedFolder = "/volume1/data/torrents/completed"
+    /// Synology host path File Station uses when locating completed TorBoxarr payloads.
+    /// Not valid as TorBoxarr’s `torrents/add` savepath or as a `content_path` root.
+    public static let hostCompletedFolder = "/volume1/data/torrents/completed"
+    /// TorBoxarr container completed root (`savepath` / `content_path` / `save_path` namespace).
+    public static let apiCompletedFolder = "/data/completed"
+    /// Alias for `hostCompletedFolder` (UI + File Station call sites).
+    public static let completedFolder = hostCompletedFolder
+    /// Alias for `apiCompletedFolder` (TorBoxarr add fallback).
+    public static let apiDefaultSavePath = apiCompletedFolder
 
     public var host: String
     public var port: Int

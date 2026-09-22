@@ -5,6 +5,10 @@
 //  TorBoxarr manual jobs poll the qBittorrent bridge and move one payload
 //  from the completed folder to the job destination. No TorBox cloud API.
 //
+//  TorBoxarr reports content_path / save_path in the container namespace
+//  (/data/completed/…). File Station moves use the Synology host path
+//  (/volume1/data/torrents/completed/…).
+//
 //  SPDX-License-Identifier: AGPL-3.0-only
 
 import Foundation
@@ -13,10 +17,98 @@ import Testing
 
 @Suite("TorBoxarr manual job lifecycle")
 struct TorBoxarrStatusTests {
-    private let hash = "0123456789abcdef0123456789abcdef01234567"
-    private let completed = TorBoxarrConnectionSettings.completedFolder
+    private let btih = "0123456789abcdef0123456789abcdef01234567"
+    private let publicID = "TORBOXARR_PUBLIC_ID"
+    private let magnet = "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Magnet%20Display%20Name"
+    private let apiCompleted = TorBoxarrConnectionSettings.apiCompletedFolder
+    private let hostCompleted = TorBoxarrConnectionSettings.hostCompletedFolder
     private let ebook = "/volume1/media/books/books"
     private let audiobook = "/volume1/media/books/audiobooks"
+
+    @Test func statusPollUsesTorBoxarrPublicIDNotMagnetBTIH() async {
+        let bridge = BridgeStatusScript()
+        bridge.infoBody = infoJSON(state: "downloading", progress: 0.4)
+        let jobs = StatusHistory()
+        await jobs.record(sample(status: .submitted, backendJobID: publicID))
+        _ = await makeRefresh(jobs: jobs, bridge: bridge, cloud: CloudSpy(), nas: NASScript()).refresh()
+
+        #expect(jobs.jobs[0].status == .downloading)
+        #expect(jobs.jobs[0].backendJobID == publicID)
+        #expect(jobs.jobs[0].backendJobID != btih)
+        #expect(bridge.urls.contains { url in
+            url.path.contains("/torrents/info")
+                && (url.query?.contains(publicID) == true)
+                && (url.query?.contains(btih) != true)
+        })
+    }
+
+    @Test func statusRematchesPublicIDWhenStoredIDWasMagnetBTIH() async {
+        let bridge = BridgeStatusScript()
+        bridge.infoByHash = [:] // BTIH poll misses
+        bridge.listBody = """
+        [\(infoObject(hash: publicID, state: "downloading", progress: 0.2, magnetURI: magnet))]
+        """
+        let jobs = StatusHistory()
+        await jobs.record(
+            sample(status: .submitted, backendJobID: btih, providerInfoHash: btih)
+        )
+        _ = await makeRefresh(jobs: jobs, bridge: bridge, cloud: CloudSpy(), nas: NASScript()).refresh()
+
+        #expect(jobs.jobs[0].backendJobID == publicID)
+        #expect(jobs.jobs[0].backendJobID != btih)
+        #expect(jobs.jobs[0].status == .downloading)
+        #expect(jobs.jobs[0].status != .failed)
+        #expect(jobs.jobs[0].lastError?.contains("no longer in TorBox") != true)
+    }
+
+    @Test func unresolvedPublicIDStaysUnknownInsteadOfGone() async {
+        let bridge = BridgeStatusScript()
+        bridge.listBody = "[]"
+        let jobs = StatusHistory()
+        await jobs.record(sample(status: .submitted, backendJobID: nil, providerInfoHash: btih))
+        _ = await makeRefresh(jobs: jobs, bridge: bridge, cloud: CloudSpy(), nas: NASScript()).refresh()
+        #expect(jobs.jobs[0].status == .unknown)
+        #expect(jobs.jobs[0].status != .failed)
+        #expect(jobs.jobs[0].backendJobID == nil)
+    }
+
+    @Test func ambiguousMagnetMatchDoesNotBindArbitrarily() async {
+        let bridge = BridgeStatusScript()
+        bridge.listBody = """
+        [\(infoObject(hash: "public-a", state: "downloading", progress: 0.1, magnetURI: magnet)),\
+        \(infoObject(hash: "public-b", state: "downloading", progress: 0.2, magnetURI: magnet))]
+        """
+        let jobs = StatusHistory()
+        await jobs.record(sample(status: .submitted, backendJobID: nil, providerInfoHash: btih))
+        _ = await makeRefresh(jobs: jobs, bridge: bridge, cloud: CloudSpy(), nas: NASScript()).refresh()
+        #expect(jobs.jobs[0].status == .unknown)
+        #expect(jobs.jobs[0].backendJobID == nil)
+        #expect(jobs.jobs[0].lastError?.contains("Couldn’t tell which TorBoxarr") == true)
+    }
+
+    @Test func locatorIgnoresSameTitleWithDifferentMagnet() {
+        let other = "magnet:?xt=urn:btih:ffffffffffffffffffffffffffffffffffffffff&dn=Selected%20Title"
+        let result = TorBoxarrJobIdentity.resolve(
+            torrents: [
+                QBittorrentTorrentSnapshot(
+                    hash: "wrong",
+                    state: "downloading",
+                    progress: 0.1,
+                    name: "Selected Title",
+                    magnetURI: other,
+                ),
+                QBittorrentTorrentSnapshot(
+                    hash: publicID,
+                    state: "downloading",
+                    progress: 0.1,
+                    name: "Selected Title",
+                    magnetURI: magnet,
+                ),
+            ],
+            magnetURI: magnet,
+        )
+        #expect(result == .resolved(publicID))
+    }
 
     @Test func submittedJobIsPolledThroughTheTorBoxarrBridge() async {
         let bridge = BridgeStatusScript()
@@ -76,12 +168,13 @@ struct TorBoxarrStatusTests {
         #expect(jobs.jobs[0].lastError?.contains("bridge-secret") != true)
     }
 
-    @Test func completedTorrentRoutesOnlyItsPayloadAndStaysRoutingUntilTheLibraryHasIt() async {
+    @Test func completedTorrentRoutesContainerContentPathToHostFileStationPath() async {
         let bridge = BridgeStatusScript()
         bridge.infoBody = infoJSON(
             state: "uploading",
             progress: 1,
-            contentPath: completed + "/Selected Title",
+            contentPath: apiCompleted + "/Selected Title",
+            savePath: apiCompleted,
             torrentName: "API Name That Is Wrong",
         )
         let cloud = CloudSpy()
@@ -95,7 +188,10 @@ struct TorBoxarrStatusTests {
         #expect(jobs.jobs[0].status == .routing)
         #expect(jobs.jobs[0].status != .complete)
         #expect(jobs.jobs[0].destination == ebook)
+        #expect(jobs.jobs[0].lastError?.contains("Nothing was moved") != true)
         #expect(movedVolumePaths(nas.movedPaths) == ["/data/torrents/completed/Selected Title"])
+        #expect(nas.movedPaths.allSatisfy { $0.contains("/data/torrents/completed/Selected Title") })
+        #expect(nas.movedPaths.allSatisfy { !$0.contains("/data/completed/") })
         #expect(nas.destinations == ["/media/books/books"])
         #expect(nas.removeSrc == ["true"])
         #expect(nas.movedPaths.allSatisfy { !$0.contains("Other Book") && !$0.contains("API Name") && !$0.contains("Magnet Display") })
@@ -113,6 +209,8 @@ struct TorBoxarrStatusTests {
         #expect(landed.job.mediaType == .ebook)
         #expect(landed.routingIndex < landed.completeIndex)
         #expect(movedVolumePaths(landed.moved) == ["/data/torrents/completed/Selected Title"])
+        #expect(landed.moved.allSatisfy { $0.contains("/data/torrents/completed/Selected Title") })
+        #expect(landed.moved.allSatisfy { !$0.contains("/data/completed/") })
         #expect(landed.destinations == ["/media/books/books"])
         #expect(landed.cloudCalls == 0)
     }
@@ -127,12 +225,13 @@ struct TorBoxarrStatusTests {
         #expect(landed.cloudCalls == 0)
     }
 
-    @Test func multifileTorrentMovesTheTopLevelFolderOnce() async {
+    @Test func multifileTorrentWithInternalPathsMovesTheTopLevelFolderOnce() async {
         let bridge = BridgeStatusScript()
         bridge.infoBody = infoJSON(
             state: "stalledUP",
             progress: 1,
-            contentPath: completed,
+            contentPath: apiCompleted,
+            savePath: apiCompleted,
             torrentName: "Magnet Display Name",
         )
         bridge.filesBody = """
@@ -148,6 +247,8 @@ struct TorBoxarrStatusTests {
 
         #expect(bridge.urls.contains { $0.path.contains("/torrents/files") })
         #expect(movedVolumePaths(nas.movedPaths) == ["/data/torrents/completed/Selected Title"])
+        #expect(nas.movedPaths.allSatisfy { $0.contains("/data/torrents/completed/Selected Title") })
+        #expect(nas.movedPaths.allSatisfy { !$0.contains("/data/completed/") })
         #expect(nas.destinations == ["/media/books/audiobooks"])
         #expect(jobs.jobs[0].status == .complete)
         #expect(jobs.jobs[0].destination == audiobook)
@@ -186,27 +287,87 @@ struct TorBoxarrStatusTests {
         #expect(jobs.jobs.count == 1)
     }
 
-    @Test func locatorPrefersContentPathOverDisplayNameAndSiblings() {
+    @Test func locatorMapsContainerContentPathToHostVolumePath() {
         let items = TorBoxarrPayloadLocator.items(
-            contentPath: completed + "/Selected Title/book.epub",
-            savePath: completed,
+            contentPath: apiCompleted + "/Selected Title/book.epub",
+            savePath: apiCompleted,
             torrentName: "Magnet Display Name",
             fileNames: ["Other Book/a.epub", "Selected Title/book.epub"],
-            completedFolder: completed,
+            apiCompletedFolder: apiCompleted,
+            hostCompletedFolder: hostCompleted,
         )
         #expect(items.map(\.name) == ["Selected Title"])
-        #expect(items.first?.sourceVolumePath == completed + "/Selected Title")
+        #expect(items.first?.sourceVolumePath == hostCompleted + "/Selected Title")
+        #expect(items.first?.sourceVolumePath.hasPrefix(apiCompleted) != true)
     }
 
-    @Test func locatorRefusesToSweepTheCompletedFolder() {
+    @Test func locatorRefusesToMoveTheApiCompletedRootItself() {
         let items = TorBoxarrPayloadLocator.items(
-            contentPath: completed,
-            savePath: completed,
+            contentPath: apiCompleted,
+            savePath: apiCompleted,
             torrentName: nil,
             fileNames: ["../secrets", ""],
-            completedFolder: completed,
+            apiCompletedFolder: apiCompleted,
+            hostCompletedFolder: hostCompleted,
         )
         #expect(items.isEmpty)
+    }
+
+    @Test func locatorRejectsTraversalAndSiblingSweeps() {
+        let outside = TorBoxarrPayloadLocator.items(
+            contentPath: "/data/other/Selected Title",
+            savePath: apiCompleted,
+            torrentName: "Selected Title",
+            fileNames: [],
+            apiCompletedFolder: apiCompleted,
+            hostCompletedFolder: hostCompleted,
+        )
+        #expect(outside.isEmpty)
+
+        let traversal = TorBoxarrPayloadLocator.items(
+            contentPath: apiCompleted + "/../secrets",
+            savePath: apiCompleted,
+            torrentName: nil,
+            fileNames: ["../escape", "..", "."],
+            apiCompletedFolder: apiCompleted,
+            hostCompletedFolder: hostCompleted,
+        )
+        #expect(traversal.isEmpty)
+    }
+
+    @Test func hostStyleContentPathIsNotAcceptedAgainstApiRoot() {
+        // Regression: comparing container paths to the Synology host root used to
+        // fail silently. Host-style paths must not be treated as TorBoxarr API paths.
+        let items = TorBoxarrPayloadLocator.items(
+            contentPath: hostCompleted + "/Selected Title",
+            savePath: hostCompleted,
+            torrentName: "Selected Title",
+            fileNames: [],
+            apiCompletedFolder: apiCompleted,
+            hostCompletedFolder: hostCompleted,
+        )
+        #expect(items.isEmpty)
+    }
+
+    @Test func apiCompletedRootPrefersSavePathWhenItParentsContentPath() {
+        #expect(
+            TorBoxarrPayloadLocator.apiCompletedRoot(
+                savePath: "/data/downloads",
+                contentPath: "/data/downloads/Selected Title",
+            ) == "/data/downloads"
+        )
+        #expect(
+            TorBoxarrPayloadLocator.apiCompletedRoot(
+                savePath: apiCompleted,
+                contentPath: apiCompleted + "/Selected Title",
+            ) == apiCompleted
+        )
+        #expect(
+            TorBoxarrPayloadLocator.apiCompletedRoot(
+                savePath: nil,
+                contentPath: apiCompleted + "/Selected Title",
+            ) == apiCompleted
+        )
     }
 
     private func routeUntilListed(destination: String, media: NASMediaKind) async -> Landed {
@@ -214,7 +375,8 @@ struct TorBoxarrStatusTests {
         bridge.infoBody = infoJSON(
             state: "pausedUP",
             progress: 1,
-            contentPath: completed + "/Selected Title",
+            contentPath: apiCompleted + "/Selected Title",
+            savePath: apiCompleted,
             torrentName: "Magnet Display Name",
         )
         let nas = NASScript()
@@ -238,18 +400,21 @@ struct TorBoxarrStatusTests {
         status: ManualDownloadJobStatus,
         destination: String? = nil,
         media: NASMediaKind = .ebook,
+        backendJobID: String? = "TORBOXARR_PUBLIC_ID",
+        providerInfoHash: String? = nil,
     ) -> ManualDownloadJob {
         ManualDownloadJob(
             id: "tb",
             title: "Magnet Display Name",
             author: "Ada",
-            sourceURL: "magnet:?xt=urn:btih:\(hash)&dn=Magnet%20Display%20Name",
+            sourceURL: magnet,
             sourceHost: "magnet",
             backend: .torbox,
             mediaType: media,
             destination: destination ?? ebook,
-            backendJobID: hash,
+            backendJobID: backendJobID,
             status: status,
+            providerInfoHash: providerInfoHash ?? btih,
             providerFiles: [TorrentJobFile(id: "1", name: "book.epub", size: 10)],
             viaTorBoxarr: true,
         )
@@ -299,6 +464,28 @@ struct TorBoxarrStatusTests {
         }
     }
 
+    private func infoObject(
+        hash: String,
+        state: String,
+        progress: Double,
+        contentPath: String? = nil,
+        savePath: String? = nil,
+        torrentName: String = "Selected Title",
+        magnetURI: String? = nil,
+        speed: Int = 0,
+        size: Int = 100,
+        completedBytes: Int = 0,
+    ) -> String {
+        let content = contentPath.map { "\"\($0)\"" } ?? "null"
+        let save = savePath ?? apiCompleted
+        let magnet = magnetURI ?? magnet
+        let escaped = magnet.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return """
+        {"hash":"\(hash)","state":"\(state)","progress":\(progress),"dlspeed":\(speed),"size":\(size),"completed":\(completedBytes),"name":"\(torrentName)","save_path":"\(save)","content_path":\(content),"magnet_uri":"\(escaped)","infohash_v1":"\(hash)"}
+        """
+    }
+
     private func infoJSON(
         state: String,
         progress: Double,
@@ -309,11 +496,7 @@ struct TorBoxarrStatusTests {
         size: Int = 100,
         completedBytes: Int = 0,
     ) -> String {
-        let content = contentPath.map { "\"\($0)\"" } ?? "null"
-        let save = (savePath ?? completed)
-        return """
-        [{"hash":"\(hash)","state":"\(state)","progress":\(progress),"dlspeed":\(speed),"size":\(size),"completed":\(completedBytes),"name":"\(torrentName)","save_path":"\(save)","content_path":\(content)}]
-        """
+        "[\(infoObject(hash: publicID, state: state, progress: progress, contentPath: contentPath, savePath: savePath, torrentName: torrentName, magnetURI: magnet, speed: speed, size: size, completedBytes: completedBytes))]"
     }
 }
 
@@ -353,6 +536,10 @@ private final class BridgeStatusScript: QBittorrentTransport, @unchecked Sendabl
     var urls: [URL] = []
     var loginBodies: [String] = []
     var infoBody = "[]"
+    /// When set, hash-filtered info queries return this map (missing → `[]`).
+    var infoByHash: [String: String]?
+    /// Full list response for unfiltered `torrents/info` (PublicID rematch).
+    var listBody: String?
     var filesBody = "[]"
     var errorOnInfo = false
 
@@ -373,6 +560,22 @@ private final class BridgeStatusScript: QBittorrentTransport, @unchecked Sendabl
         if errorOnInfo { throw URLError(.cannotConnectToHost) }
         if url.path.contains("/torrents/files") {
             return QBittorrentHTTP(status: 200, body: Data(filesBody.utf8))
+        }
+        if url.path.contains("/torrents/info") {
+            let hashes = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "hashes" })?.value
+            if hashes == nil {
+                return QBittorrentHTTP(status: 200, body: Data((listBody ?? infoBody).utf8))
+            }
+            if let infoByHash {
+                let keys = hashes!.split(separator: "|").map { $0.lowercased() }
+                let rows = keys.compactMap { infoByHash[$0] ?? infoByHash[String($0)] }
+                if rows.isEmpty {
+                    return QBittorrentHTTP(status: 200, body: Data("[]".utf8))
+                }
+                return QBittorrentHTTP(status: 200, body: Data("[\(rows.joined(separator: ","))]".utf8))
+            }
+            return QBittorrentHTTP(status: 200, body: Data(infoBody.utf8))
         }
         return QBittorrentHTTP(status: 200, body: Data(infoBody.utf8))
     }
