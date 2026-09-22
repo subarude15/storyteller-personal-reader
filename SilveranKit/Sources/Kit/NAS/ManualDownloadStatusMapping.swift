@@ -183,7 +183,6 @@ extension ManualDownloadJob {
             return
         }
         switch status {
-        switch status {
             case .readyToRoute, .routing, .complete:
                 delugeReachedFinalRouting = true
             case .submitted, .queued, .downloading, .processing, .delugeFinishing, .downloaded,
