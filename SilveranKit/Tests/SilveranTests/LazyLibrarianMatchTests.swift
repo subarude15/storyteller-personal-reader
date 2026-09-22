@@ -135,23 +135,77 @@ struct LazyLibrarianMatchTests {
             candidates: candidates,
             preference: .askWhenUncertain,
         )
-        guard case .ambiguous(let best, let shown) = ask else {
+        guard case .ambiguous(_, let shown) = ask else {
             Issue.record("expected needs-attention ambiguity")
             return
         }
-        #expect(best.bookID == "A")
-        #expect(shown.map(\.bookID) == ["A", "B"])
+        #expect(Set(shown.map(\.bookID)) == ["A", "B"])
 
         let auto = LazyLibrarianMatcher.resolve(
             work: work(year: "2012"),
             candidates: candidates,
             preference: .useBestMatch,
         )
-        guard case .matched(let hit, _, _) = auto else {
-            Issue.record("expected automatic best match")
+        guard case .ambiguous = auto else {
+            Issue.record("a tie must stay needs attention even in automatic mode")
             return
         }
-        #expect(hit.bookID == "A")
+        #expect(
+            LazyLibrarianMatcher.bestResolvable(
+                work: work(year: "2012"),
+                candidates: candidates,
+            ) == nil
+        )
+    }
+
+    @Test func tiedTitleAndAuthorStaysAmbiguousWhenBookIDSortsFirst() {
+        let candidates = [
+            candidate(id: "B", year: nil),
+            candidate(id: "A", year: nil),
+        ]
+        let decision = LazyLibrarianMatcher.resolve(
+            work: work(year: nil),
+            candidates: candidates,
+            preference: .useBestMatch,
+        )
+        guard case .ambiguous(_, let shown) = decision else {
+            Issue.record("equal title and author must not be split by bookID")
+            return
+        }
+        #expect(Set(shown.map(\.bookID)) == Set(["A", "B"]))
+        #expect(LazyLibrarianMatcher.bestResolvable(work: work(year: nil), candidates: candidates) == nil)
+    }
+
+    @Test func automaticModeSelectsUniquelyStrongerMetadata() {
+        let byYear = LazyLibrarianMatcher.resolve(
+            work: work(year: "2012"),
+            candidates: [
+                candidate(id: "A", year: "1999"),
+                candidate(id: "B", year: "2012"),
+            ],
+            preference: .useBestMatch,
+        )
+        if case .matched(let yearHit, _, let yearTier) = byYear {
+            #expect(yearHit.bookID == "B")
+            #expect(yearTier == .exactTitleAuthor)
+        } else {
+            Issue.record("publication year should separate an otherwise equal pair")
+        }
+
+        let byISBN = LazyLibrarianMatcher.resolve(
+            work: work(isbn13: "9780312642174"),
+            candidates: [
+                candidate(id: "A", isbn: "1111111111"),
+                candidate(id: "Z", title: "Last Days", isbn: "9780312642174"),
+            ],
+            preference: .useBestMatch,
+        )
+        if case .matched(let isbnHit, let reason, _) = byISBN {
+            #expect(isbnHit.bookID == "Z")
+            #expect(reason == "Matched by ISBN")
+        } else {
+            Issue.record("ISBN should beat a title and author hit")
+        }
     }
 
     @Test func titleOnlyResultsAreNotUsedAutomatically() {

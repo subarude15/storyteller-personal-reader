@@ -1,8 +1,10 @@
 import Foundation
 
 /// How ink+amp treats a LazyLibrarian result that is not an obvious match.
-/// Default is to ask. Exact identifier, ISBN, and a single title+author match
-/// can still proceed without asking.
+/// Default is to ask. A unique identifier, ISBN, or single title+author match
+/// can still proceed without asking. Automatic mode also takes a uniquely
+/// stronger title+author match, including a publication-year split, and leaves
+/// a real tie in Needs attention. Book id order is not a match signal.
 public enum LazyLibrarianAutomaticMatching: String, Codable, CaseIterable, Sendable, Identifiable {
     case askWhenUncertain
     case useBestMatch
@@ -83,6 +85,7 @@ public enum LazyLibrarianMatchCopy {
 extension LazyLibrarianMatcher {
     /// Rank candidates, then decide whether to queue, ask, or stop.
     /// Networking stays in `LazyLibrarianClient`.
+    /// A tie after tier and publication year stays ambiguous in both modes.
     public static func resolve(
         work: CanonicalBookWork,
         candidates: [LazyLibrarianCandidate],
@@ -92,16 +95,19 @@ extension LazyLibrarianMatcher {
         let reasonable = ranked.filter(\.tier.isReasonable)
         let review = reasonable + ranked.filter { $0.tier == .titleOnly }
         guard let best = review.first else { return .noMatch }
+        let shown = review.map(\.candidate)
 
         switch preference {
             case .useBestMatch:
-                if let top = reasonable.first {
-                    return matched(top)
+                if let winner = uniqueReasonable(work: work, reasonable: reasonable) {
+                    return matched(winner)
                 }
-                return .ambiguous(best: best.candidate, candidates: review.map(\.candidate))
+                return .ambiguous(best: best.candidate, candidates: shown)
             case .askWhenUncertain:
-                if let top = reasonable.first, top.tier >= .isbn {
-                    return matched(top)
+                if let winner = uniqueReasonable(work: work, reasonable: reasonable),
+                    winner.tier >= .isbn
+                {
+                    return matched(winner)
                 }
                 let ids = Set(reasonable.map(\.candidate.bookID))
                 if ids.count == 1, let only = reasonable.first {
@@ -113,8 +119,25 @@ extension LazyLibrarianMatcher {
                         return matched(only)
                     }
                 }
-                return .ambiguous(best: best.candidate, candidates: review.map(\.candidate))
+                return .ambiguous(best: best.candidate, candidates: shown)
         }
+    }
+
+    /// The one reasonable candidate that outranks the rest.
+    /// Publication year can split a tie when the library item has a year.
+    /// LazyLibrarian bookID order is ignored.
+    private static func uniqueReasonable(
+        work: CanonicalBookWork,
+        reasonable: [(candidate: LazyLibrarianCandidate, tier: LazyLibrarianMatchTier)],
+    ) -> (candidate: LazyLibrarianCandidate, tier: LazyLibrarianMatchTier)? {
+        guard let top = reasonable.map(\.tier).max() else { return nil }
+        var tied = reasonable.filter { $0.tier == top }
+        if let year = publicationYear(work.publicationYear) {
+            let dated = tied.filter { $0.candidate.year == year }
+            if !dated.isEmpty { tied = dated }
+        }
+        guard tied.count == 1 else { return nil }
+        return tied[0]
     }
 
     /// Highest-ranked title+author (or better) candidate. Nil when the only hits are title-only.

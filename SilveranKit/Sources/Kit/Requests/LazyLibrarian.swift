@@ -236,6 +236,7 @@ public enum LazyLibrarianMatcher {
             let leftYear = year != nil && lhs.candidate.year == year
             let rightYear = year != nil && rhs.candidate.year == year
             if leftYear != rightYear { return leftYear }
+            // Stable review-list order only. Matching must not treat this as evidence.
             return lhs.candidate.bookID < rhs.candidate.bookID
         }
         return rows

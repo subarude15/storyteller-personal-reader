@@ -322,7 +322,7 @@ private struct LazyLibrarianSettingsSection: View {
                 }
             }
             Text(
-                "Exact title and author matches can still proceed when you ask to confirm uncertain ones. Unrelated title-only results are never chosen automatically."
+                "Exact title and author matches can still proceed when you ask to confirm uncertain ones. Automatic mode takes a uniquely stronger match and leaves a tie for review. Title-only results are never chosen automatically."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
