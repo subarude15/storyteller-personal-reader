@@ -199,7 +199,7 @@ struct ManualDownloadIntakeTests {
         #expect(ManualDownloadIntakeHandoff.listPending(root: root).count == 2)
     }
 
-    @Test func magnetHandoffFailureLeavesPayloadForRetry() async throws {
+    @Test func magnetHandoffFailureConsumesQueueSoLifecycleCannotResubmit() async throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("intake-magnet-fail-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -220,22 +220,21 @@ struct ManualDownloadIntakeTests {
         )
         #expect(failPass == 0)
         #expect(failing.handled.count == 1)
-        #expect(!ManualDownloadIntakeHandoff.isProcessed(payload.id, root: root))
-        #expect(!ManualDownloadIntakeHandoff.isFingerprintProcessed(payload.fingerprint, root: root))
-        #expect(ManualDownloadIntakeHandoff.listPending(root: root).count == 1)
+        #expect(ManualDownloadIntakeHandoff.isProcessed(payload.id, root: root))
+        #expect(ManualDownloadIntakeHandoff.isFingerprintProcessed(payload.fingerprint, root: root))
+        #expect(ManualDownloadIntakeHandoff.listPending(root: root).isEmpty)
 
-        let succeeding = SequenceIntakeHandler(results: [.submitted(message: "ok")])
+        // A later lifecycle drain must not call the handler again.
+        let second = SequenceIntakeHandler(results: [.submitted(message: "should not run")])
         let okPass = await ManualDownloadIntakeProcessor.processPending(
-            handler: succeeding,
+            handler: second,
             root: root,
         )
-        #expect(okPass == 1)
-        #expect(succeeding.handled.count == 1)
-        #expect(ManualDownloadIntakeHandoff.isProcessed(payload.id, root: root))
-        #expect(ManualDownloadIntakeHandoff.listPending(root: root).isEmpty)
+        #expect(okPass == 0)
+        #expect(second.handled.isEmpty)
     }
 
-    @Test func torrentHandoffFailurePreservesStagedCopyForRetry() async throws {
+    @Test func torrentHandoffFailureConsumesQueueAndRemovesAppGroupCopy() async throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("intake-torrent-fail-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -250,30 +249,13 @@ struct ManualDownloadIntakeTests {
             source: .shareExtension,
             root: root,
         )
-        guard let stagedBefore = ManualDownloadIntakeHandoff.stagedTorrentURL(payload, root: root) else {
-            Issue.record("missing staged torrent")
-            return
-        }
+        #expect(ManualDownloadIntakeHandoff.stagedTorrentURL(payload, root: root) != nil)
 
         let failing = SequenceIntakeHandler(results: [.failed(message: "network")])
         _ = await ManualDownloadIntakeProcessor.processPending(handler: failing, root: root)
         #expect(failing.handled.count == 1)
-        #expect(!ManualDownloadIntakeHandoff.isProcessed(payload.id, root: root))
-        #expect(ManualDownloadIntakeHandoff.listPending(root: root).count == 1)
-        guard let stagedAfterFail = ManualDownloadIntakeHandoff.stagedTorrentURL(payload, root: root) else {
-            Issue.record("staged torrent removed after failed handoff")
-            return
-        }
-        #expect(try Data(contentsOf: stagedAfterFail) == bytes)
-        #expect(stagedAfterFail == stagedBefore)
-
-        let succeeding = SequenceIntakeHandler(results: [.submitted(message: "ok")])
-        let okPass = await ManualDownloadIntakeProcessor.processPending(
-            handler: succeeding,
-            root: root,
-        )
-        #expect(okPass == 1)
         #expect(ManualDownloadIntakeHandoff.isProcessed(payload.id, root: root))
+        #expect(ManualDownloadIntakeHandoff.listPending(root: root).isEmpty)
         #expect(ManualDownloadIntakeHandoff.stagedTorrentURL(payload, root: root) == nil)
     }
 

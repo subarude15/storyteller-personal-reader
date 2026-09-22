@@ -12,6 +12,7 @@ import Foundation
 public enum ManualDownloadIntakeProcessor {
     /// Consume pending App Group (or test-root) payloads once.
     /// Duplicate id/fingerprint is a no-op — no second Deluge submit.
+    /// Failed handoffs still consume the queue; Retry lives on the Downloads job.
     @discardableResult
     public static func processPending(
         handler: any ManualAcquisitionHandling,
@@ -59,10 +60,9 @@ public enum ManualDownloadIntakeProcessor {
                     continue
                 case .success(let candidate):
                     let result = await handler.handle(candidate)
-                    guard intakeHandoffSucceeded(result) else {
-                        // Failed Deluge/NAS handoff: keep JSON + App Group torrent for retry.
-                        continue
-                    }
+                    // Consume the intake queue for both success and failure. Leaving a
+                    // failed payload queued re-submits on every foreground and duplicates
+                    // Downloads history. User Retry goes through the failed job record.
                     ManualDownloadIntakeHandoff.markProcessed(payload, bundle: bundle, root: root)
                     if payload.kind == .torrentFile {
                         ManualDownloadIntakeHandoff.removeStagedTorrent(
@@ -71,7 +71,9 @@ public enum ManualDownloadIntakeProcessor {
                             root: root,
                         )
                     }
-                    processed += 1
+                    if intakeHandoffSucceeded(result) {
+                        processed += 1
+                    }
             }
         }
         if processed > 0 {

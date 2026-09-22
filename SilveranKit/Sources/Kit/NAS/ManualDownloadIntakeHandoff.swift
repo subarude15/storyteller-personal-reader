@@ -211,6 +211,24 @@ public enum ManualDownloadIntakeHandoff {
         trimProcessed(in: processed)
     }
 
+    /// Drop pending intake JSON + staged torrent for a fingerprint without writing a
+    /// permanent processed marker. Used by Delete Attempt / Clear Failed so the same
+    /// magnet can be shared again later, but cannot auto-recreate a deleted attempt.
+    public static func abandonPending(
+        matchingFingerprint fingerprint: String,
+        bundle: Bundle = .main,
+        root: URL? = nil,
+    ) {
+        let trimmed = fingerprint.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard let intake = intakeRoot(bundle: bundle, root: root) else { return }
+        for payload in listPending(bundle: bundle, root: root) where payload.fingerprint == trimmed {
+            let json = intake.appendingPathComponent("\(payload.id).json", isDirectory: false)
+            try? FileManager.default.removeItem(at: json)
+            removeStagedTorrent(payload, bundle: bundle, root: root)
+        }
+    }
+
     public static func removeStagedTorrent(
         _ payload: ManualDownloadIntakePayload,
         bundle: Bundle = .main,

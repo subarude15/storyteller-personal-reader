@@ -15,6 +15,7 @@ public struct DownloadsView: View {
     @State private var isRefreshing = false
     @State private var showManualAdd = false
     @State private var pendingMagnet = ""
+    @State private var showClearFailedConfirm = false
 
     private var buckets: ManualDownloadBuckets {
         ManualDownloadBuckets.partition(jobs)
@@ -61,6 +62,13 @@ public struct DownloadsView: View {
                 }
                 .accessibilityLabel("Add Download")
             }
+            if !buckets.failed.isEmpty {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Clear Failed") {
+                        showClearFailedConfirm = true
+                    }
+                }
+            }
             if !buckets.recent.isEmpty {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Clear Completed") {
@@ -68,6 +76,20 @@ public struct DownloadsView: View {
                     }
                 }
             }
+        }
+        .confirmationDialog(
+            "Clear all failed attempts?",
+            isPresented: $showClearFailedConfirm,
+            titleVisibility: .visible,
+        ) {
+            Button("Clear Failed", role: .destructive) {
+                Task { await clearFailed() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "Removes failed download history only. Successful downloads and media files are not deleted. Providers are not contacted."
+            )
         }
         .sheet(isPresented: $showManualAdd) {
             NavigationStack {
@@ -160,6 +182,11 @@ public struct DownloadsView: View {
         await reload()
     }
 
+    private func clearFailed() async {
+        await ManualDownloadAttemptCleanup.clearFailed()
+        await reload()
+    }
+
     private func retry(_ job: ManualDownloadJob) async {
         busyID = job.id
         defer { busyID = nil }
@@ -202,10 +229,12 @@ public struct DownloadsView: View {
     private func deleteAttempt(_ job: ManualDownloadJob, deleteFromTorBox: Bool) async {
         busyID = job.id
         defer { busyID = nil }
+        // Optional TorBox cloud delete is explicit user confirmation only.
+        // Attempt history cleanup never resubmits magnets or contacts Deluge/qBit.
         if deleteFromTorBox {
             await ManualDownloadStatusRefresh.live().deleteRemoteIfNeeded(job: job)
         }
-        await ManualDownloadJobStore.shared.delete(id: job.id)
+        await ManualDownloadAttemptCleanup.deleteAttempt(job)
         await reload()
     }
 
