@@ -89,6 +89,10 @@ public struct DownloadsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .inkampOpenManualMagnet)) { note in
             if let url = note.object as? URL {
+                // The root view persists every incoming magnet first so cold launches
+                // cannot lose it. Clear that backup when the live notification reaches
+                // Downloads, otherwise the same magnet can reopen on the next launch.
+                _ = ManualDownloadMagnetDeepLinkStore.consume()
                 presentMagnet(url)
             } else {
                 openPendingMagnetIfNeeded()
