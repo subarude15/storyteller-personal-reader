@@ -68,10 +68,14 @@ public struct TorBoxarrConnectionSettings: Equatable, Sendable {
     public static let defaultPort = 8085
     public static let defaultUsername = "admin"
     /// Synology host path File Station uses when locating completed TorBoxarr payloads.
-    /// Not valid as TorBoxarr’s `torrents/add` savepath (that is a container path).
-    public static let completedFolder = "/volume1/data/torrents/completed"
-    /// Fallback container path for TorBoxarr `torrents/add` when `app/defaultSavePath` is unavailable.
-    public static let apiDefaultSavePath = "/data/completed"
+    /// Not valid as TorBoxarr’s `torrents/add` savepath or as a `content_path` root.
+    public static let hostCompletedFolder = "/volume1/data/torrents/completed"
+    /// TorBoxarr container completed root (`savepath` / `content_path` / `save_path` namespace).
+    public static let apiCompletedFolder = "/data/completed"
+    /// Alias for `hostCompletedFolder` (UI + File Station call sites).
+    public static let completedFolder = hostCompletedFolder
+    /// Alias for `apiCompletedFolder` (TorBoxarr add fallback).
+    public static let apiDefaultSavePath = apiCompletedFolder
 
     public var host: String
     public var port: Int

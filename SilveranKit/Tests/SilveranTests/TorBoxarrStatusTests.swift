@@ -5,6 +5,10 @@
 //  TorBoxarr manual jobs poll the qBittorrent bridge and move one payload
 //  from the completed folder to the job destination. No TorBox cloud API.
 //
+//  TorBoxarr reports content_path / save_path in the container namespace
+//  (/data/completed/…). File Station moves use the Synology host path
+//  (/volume1/data/torrents/completed/…).
+//
 //  SPDX-License-Identifier: AGPL-3.0-only
 
 import Foundation
@@ -14,7 +18,8 @@ import Testing
 @Suite("TorBoxarr manual job lifecycle")
 struct TorBoxarrStatusTests {
     private let hash = "0123456789abcdef0123456789abcdef01234567"
-    private let completed = TorBoxarrConnectionSettings.completedFolder
+    private let apiCompleted = TorBoxarrConnectionSettings.apiCompletedFolder
+    private let hostCompleted = TorBoxarrConnectionSettings.hostCompletedFolder
     private let ebook = "/volume1/media/books/books"
     private let audiobook = "/volume1/media/books/audiobooks"
 
@@ -76,12 +81,13 @@ struct TorBoxarrStatusTests {
         #expect(jobs.jobs[0].lastError?.contains("bridge-secret") != true)
     }
 
-    @Test func completedTorrentRoutesOnlyItsPayloadAndStaysRoutingUntilTheLibraryHasIt() async {
+    @Test func completedTorrentRoutesContainerContentPathToHostFileStationPath() async {
         let bridge = BridgeStatusScript()
         bridge.infoBody = infoJSON(
             state: "uploading",
             progress: 1,
-            contentPath: completed + "/Selected Title",
+            contentPath: apiCompleted + "/Selected Title",
+            savePath: apiCompleted,
             torrentName: "API Name That Is Wrong",
         )
         let cloud = CloudSpy()
@@ -95,9 +101,10 @@ struct TorBoxarrStatusTests {
         #expect(jobs.jobs[0].status == .routing)
         #expect(jobs.jobs[0].status != .complete)
         #expect(jobs.jobs[0].destination == ebook)
+        #expect(jobs.jobs[0].lastError?.contains("Nothing was moved") != true)
         #expect(movedVolumePaths(nas.movedPaths) == ["/data/torrents/completed/Selected Title"])
-        #expect(nas.movedPaths.allSatisfy { $0.hasPrefix(TorBoxarrConnectionSettings.completedFolder) })
-        #expect(nas.movedPaths.allSatisfy { !$0.hasPrefix(TorBoxarrConnectionSettings.apiDefaultSavePath) })
+        #expect(nas.movedPaths.allSatisfy { $0.contains("/data/torrents/completed/Selected Title") })
+        #expect(nas.movedPaths.allSatisfy { !$0.contains("/data/completed/") })
         #expect(nas.destinations == ["/media/books/books"])
         #expect(nas.removeSrc == ["true"])
         #expect(nas.movedPaths.allSatisfy { !$0.contains("Other Book") && !$0.contains("API Name") && !$0.contains("Magnet Display") })
@@ -115,6 +122,8 @@ struct TorBoxarrStatusTests {
         #expect(landed.job.mediaType == .ebook)
         #expect(landed.routingIndex < landed.completeIndex)
         #expect(movedVolumePaths(landed.moved) == ["/data/torrents/completed/Selected Title"])
+        #expect(landed.moved.allSatisfy { $0.contains("/data/torrents/completed/Selected Title") })
+        #expect(landed.moved.allSatisfy { !$0.contains("/data/completed/") })
         #expect(landed.destinations == ["/media/books/books"])
         #expect(landed.cloudCalls == 0)
     }
@@ -129,12 +138,13 @@ struct TorBoxarrStatusTests {
         #expect(landed.cloudCalls == 0)
     }
 
-    @Test func multifileTorrentMovesTheTopLevelFolderOnce() async {
+    @Test func multifileTorrentWithInternalPathsMovesTheTopLevelFolderOnce() async {
         let bridge = BridgeStatusScript()
         bridge.infoBody = infoJSON(
             state: "stalledUP",
             progress: 1,
-            contentPath: completed,
+            contentPath: apiCompleted,
+            savePath: apiCompleted,
             torrentName: "Magnet Display Name",
         )
         bridge.filesBody = """
@@ -150,6 +160,8 @@ struct TorBoxarrStatusTests {
 
         #expect(bridge.urls.contains { $0.path.contains("/torrents/files") })
         #expect(movedVolumePaths(nas.movedPaths) == ["/data/torrents/completed/Selected Title"])
+        #expect(nas.movedPaths.allSatisfy { $0.contains("/data/torrents/completed/Selected Title") })
+        #expect(nas.movedPaths.allSatisfy { !$0.contains("/data/completed/") })
         #expect(nas.destinations == ["/media/books/audiobooks"])
         #expect(jobs.jobs[0].status == .complete)
         #expect(jobs.jobs[0].destination == audiobook)
@@ -188,27 +200,87 @@ struct TorBoxarrStatusTests {
         #expect(jobs.jobs.count == 1)
     }
 
-    @Test func locatorPrefersContentPathOverDisplayNameAndSiblings() {
+    @Test func locatorMapsContainerContentPathToHostVolumePath() {
         let items = TorBoxarrPayloadLocator.items(
-            contentPath: completed + "/Selected Title/book.epub",
-            savePath: completed,
+            contentPath: apiCompleted + "/Selected Title/book.epub",
+            savePath: apiCompleted,
             torrentName: "Magnet Display Name",
             fileNames: ["Other Book/a.epub", "Selected Title/book.epub"],
-            completedFolder: completed,
+            apiCompletedFolder: apiCompleted,
+            hostCompletedFolder: hostCompleted,
         )
         #expect(items.map(\.name) == ["Selected Title"])
-        #expect(items.first?.sourceVolumePath == completed + "/Selected Title")
+        #expect(items.first?.sourceVolumePath == hostCompleted + "/Selected Title")
+        #expect(items.first?.sourceVolumePath.hasPrefix(apiCompleted) != true)
     }
 
-    @Test func locatorRefusesToSweepTheCompletedFolder() {
+    @Test func locatorRefusesToMoveTheApiCompletedRootItself() {
         let items = TorBoxarrPayloadLocator.items(
-            contentPath: completed,
-            savePath: completed,
+            contentPath: apiCompleted,
+            savePath: apiCompleted,
             torrentName: nil,
             fileNames: ["../secrets", ""],
-            completedFolder: completed,
+            apiCompletedFolder: apiCompleted,
+            hostCompletedFolder: hostCompleted,
         )
         #expect(items.isEmpty)
+    }
+
+    @Test func locatorRejectsTraversalAndSiblingSweeps() {
+        let outside = TorBoxarrPayloadLocator.items(
+            contentPath: "/data/other/Selected Title",
+            savePath: apiCompleted,
+            torrentName: "Selected Title",
+            fileNames: [],
+            apiCompletedFolder: apiCompleted,
+            hostCompletedFolder: hostCompleted,
+        )
+        #expect(outside.isEmpty)
+
+        let traversal = TorBoxarrPayloadLocator.items(
+            contentPath: apiCompleted + "/../secrets",
+            savePath: apiCompleted,
+            torrentName: nil,
+            fileNames: ["../escape", "..", "."],
+            apiCompletedFolder: apiCompleted,
+            hostCompletedFolder: hostCompleted,
+        )
+        #expect(traversal.isEmpty)
+    }
+
+    @Test func hostStyleContentPathIsNotAcceptedAgainstApiRoot() {
+        // Regression: comparing container paths to the Synology host root used to
+        // fail silently. Host-style paths must not be treated as TorBoxarr API paths.
+        let items = TorBoxarrPayloadLocator.items(
+            contentPath: hostCompleted + "/Selected Title",
+            savePath: hostCompleted,
+            torrentName: "Selected Title",
+            fileNames: [],
+            apiCompletedFolder: apiCompleted,
+            hostCompletedFolder: hostCompleted,
+        )
+        #expect(items.isEmpty)
+    }
+
+    @Test func apiCompletedRootPrefersSavePathWhenItParentsContentPath() {
+        #expect(
+            TorBoxarrPayloadLocator.apiCompletedRoot(
+                savePath: "/data/downloads",
+                contentPath: "/data/downloads/Selected Title",
+            ) == "/data/downloads"
+        )
+        #expect(
+            TorBoxarrPayloadLocator.apiCompletedRoot(
+                savePath: apiCompleted,
+                contentPath: apiCompleted + "/Selected Title",
+            ) == apiCompleted
+        )
+        #expect(
+            TorBoxarrPayloadLocator.apiCompletedRoot(
+                savePath: nil,
+                contentPath: apiCompleted + "/Selected Title",
+            ) == apiCompleted
+        )
     }
 
     private func routeUntilListed(destination: String, media: NASMediaKind) async -> Landed {
@@ -216,7 +288,8 @@ struct TorBoxarrStatusTests {
         bridge.infoBody = infoJSON(
             state: "pausedUP",
             progress: 1,
-            contentPath: completed + "/Selected Title",
+            contentPath: apiCompleted + "/Selected Title",
+            savePath: apiCompleted,
             torrentName: "Magnet Display Name",
         )
         let nas = NASScript()
@@ -312,7 +385,7 @@ struct TorBoxarrStatusTests {
         completedBytes: Int = 0,
     ) -> String {
         let content = contentPath.map { "\"\($0)\"" } ?? "null"
-        let save = (savePath ?? completed)
+        let save = savePath ?? apiCompleted
         return """
         [{"hash":"\(hash)","state":"\(state)","progress":\(progress),"dlspeed":\(speed),"size":\(size),"completed":\(completedBytes),"name":"\(torrentName)","save_path":"\(save)","content_path":\(content)}]
         """

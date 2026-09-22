@@ -294,13 +294,18 @@ public struct ManualDownloadStatusRefresh: Sendable {
         context: NASHandoffContext,
     ) async -> ManualDownloadJob {
         let live = snapshot.liveStatus
-        let completed = TorBoxarrConnectionSettings.completedFolder
+        let apiRoot = TorBoxarrPayloadLocator.apiCompletedRoot(
+            savePath: snapshot.savePath,
+            contentPath: snapshot.contentPath,
+        )
+        let hostRoot = TorBoxarrConnectionSettings.hostCompletedFolder
         var payloads = TorBoxarrPayloadLocator.items(
             contentPath: snapshot.contentPath,
             savePath: snapshot.savePath,
             torrentName: snapshot.name,
             fileNames: [],
-            completedFolder: completed,
+            apiCompletedFolder: apiRoot,
+            hostCompletedFolder: hostRoot,
         )
         let awaitingRoute = job.status == .routing || job.status == .readyToRoute
         if payloads.isEmpty, live.status == .complete || awaitingRoute {
@@ -319,13 +324,14 @@ public struct ManualDownloadStatusRefresh: Sendable {
                     savePath: snapshot.savePath,
                     torrentName: snapshot.name,
                     fileNames: files,
-                    completedFolder: completed,
+                    apiCompletedFolder: apiRoot,
+                    hostCompletedFolder: hostRoot,
                 )
             } catch {
                 return await store(ManualDownloadStatusMapping.markUnknown(job))
             }
         }
-        payloads = payloads.filter { Self.isScopedPayload($0, completedFolder: completed) }
+        payloads = payloads.filter { Self.isScopedPayload($0, completedFolder: hostRoot) }
         if live.status != .complete, !awaitingRoute {
             return await store(ManualDownloadStatusMapping.apply(live, to: job))
         }
