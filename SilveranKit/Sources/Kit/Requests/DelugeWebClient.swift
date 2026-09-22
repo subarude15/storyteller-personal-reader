@@ -240,13 +240,24 @@ public struct DelugeWebClient: Sendable {
             cookie: session.cookie,
             id: 10,
         )
-        if response.error != nil {
-            throw DelugeClientError.rejected
-        }
         if let hash = response.result as? String, !hash.isEmpty {
             return hash
         }
-        if response.result == nil {
+
+        // Deluge may return null/error when the magnet is already present. Treat
+        // that as an idempotent success when the BTIH is visible in the daemon
+        // instead of showing a false "rejected" failure in ink+amp.
+        if method == "core.add_torrent_magnet",
+            let expectedHash = TorrentHash.fromMagnet(source),
+            let torrents = try? await listTorrents(endpoint: session.endpoint, cookie: session.cookie),
+            torrents.contains(where: {
+                TorrentHash.normalized($0.id) == TorrentHash.normalized(expectedHash)
+            })
+        {
+            return expectedHash
+        }
+
+        if response.error != nil || response.result == nil {
             throw DelugeClientError.rejected
         }
         return nil

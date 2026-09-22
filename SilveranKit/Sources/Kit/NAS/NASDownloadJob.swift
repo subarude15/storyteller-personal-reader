@@ -188,6 +188,7 @@ public protocol ManualDownloadJobStoring: Sendable {
     func record(_ job: ManualDownloadJob) async
     func allJobs() async -> [ManualDownloadJob]
     func job(id: String) async -> ManualDownloadJob?
+    func delete(id: String) async
     func clearCompleted() async
 }
 
@@ -231,6 +232,19 @@ public actor ManualDownloadJobStore: ManualDownloadJobStoring {
         jobs.first { $0.id == id }
     }
 
+    public func delete(id: String) {
+        if let job = jobs.first(where: { $0.id == id }),
+            let staged = job.stagedFileURL
+        {
+            ManualDownloadStaging.remove(staged)
+        }
+        jobs.removeAll { $0.id == id }
+        save()
+        Task { @MainActor in
+            NotificationCenter.default.post(name: .inkampManualDownloadJobsDidChange, object: nil)
+        }
+    }
+
     public func clearCompleted() {
         jobs.removeAll { $0.status == .complete }
         save()
@@ -269,6 +283,9 @@ extension Notification.Name {
     public static let inkampProcessManualDownloadIntake = Notification.Name(
         "inkampProcessManualDownloadIntake"
     )
+    public static let inkampOpenManualMagnet = Notification.Name(
+        "inkampOpenManualMagnet"
+    )
 }
 
 public enum ManualDownloadIntakeDeepLink {
@@ -300,6 +317,10 @@ public final class RecordingManualDownloadJobStore: ManualDownloadJobStoring, @u
 
     public func job(id: String) async -> ManualDownloadJob? {
         jobs.first { $0.id == id }
+    }
+
+    public func delete(id: String) async {
+        jobs.removeAll { $0.id == id }
     }
 
     public func clearCompleted() async {

@@ -14,6 +14,7 @@ public struct DownloadsView: View {
     @State private var busyID: String?
     @State private var isRefreshing = false
     @State private var showManualAdd = false
+    @State private var pendingMagnet = ""
 
     private var buckets: ManualDownloadBuckets {
         ManualDownloadBuckets.partition(jobs)
@@ -70,7 +71,8 @@ public struct DownloadsView: View {
         }
         .sheet(isPresented: $showManualAdd) {
             NavigationStack {
-                ManualAddDownloadView {
+                ManualAddDownloadView(initialMagnet: pendingMagnet) {
+                    pendingMagnet = ""
                     showManualAdd = false
                     Task { await refresh(forceBackend: true) }
                 }
@@ -84,6 +86,17 @@ public struct DownloadsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .inkampManualDownloadJobsDidChange)) { _ in
             Task { await reload() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .inkampOpenManualMagnet)) { note in
+            if let url = note.object as? URL {
+                // The root view persists every incoming magnet first so cold launches
+                // cannot lose it. Clear that backup when the live notification reaches
+                // Downloads, otherwise the same magnet can reopen on the next launch.
+                _ = ManualDownloadMagnetDeepLinkStore.consume()
+                presentMagnet(url)
+            } else {
+                openPendingMagnetIfNeeded()
+            }
         }
     }
 
@@ -102,6 +115,8 @@ public struct DownloadsView: View {
                         await retryRouting(job)
                     } onDeleteLocal: {
                         await deleteLocal(job)
+                    } onDeleteAttempt: {
+                        await deleteAttempt(job)
                     }
                 }
             }
@@ -109,6 +124,7 @@ public struct DownloadsView: View {
     }
 
     private func startPolling() async {
+        openPendingMagnetIfNeeded()
         await refresh(forceBackend: true)
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(8))
@@ -166,6 +182,25 @@ public struct DownloadsView: View {
         await NASAcquisitionHandler.live().deleteLocalCopy(job: job)
         await reload()
     }
+
+    private func deleteAttempt(_ job: ManualDownloadJob) async {
+        busyID = job.id
+        defer { busyID = nil }
+        await ManualDownloadJobStore.shared.delete(id: job.id)
+        await reload()
+    }
+
+    private func openPendingMagnetIfNeeded() {
+        if let url = ManualDownloadMagnetDeepLinkStore.consume() {
+            presentMagnet(url)
+        }
+    }
+
+    private func presentMagnet(_ url: URL) {
+        guard url.scheme?.lowercased() == "magnet", NASMagnetValidation.isValid(url) else { return }
+        pendingMagnet = url.absoluteString
+        showManualAdd = true
+    }
 }
 
 private struct DownloadsJobRow: View {
@@ -176,6 +211,7 @@ private struct DownloadsJobRow: View {
     var onRetryDownload: () async -> Void
     var onRetryRouting: () async -> Void
     var onDeleteLocal: () async -> Void
+    var onDeleteAttempt: () async -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -265,6 +301,12 @@ private struct DownloadsJobRow: View {
                 case .none:
                     EmptyView()
             }
+            if job.status == .failed {
+                Button("Delete Attempt", role: .destructive) {
+                    Task { await onDeleteAttempt() }
+                }
+                .disabled(busyID != nil)
+            }
         }
         .font(.subheadline)
     }
@@ -279,11 +321,16 @@ struct ManualAddDownloadView: View {
     var onFinished: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var magnetText = ""
+    @State private var magnetText: String
     @State private var mediaType: NASMediaKind = .ebook
     @State private var settings = NASDownloadSettingsStore.shared.snapshot
     @State private var isSubmitting = false
     @State private var errorMessage: String?
+
+    init(initialMagnet: String = "", onFinished: @escaping () -> Void) {
+        self.onFinished = onFinished
+        _magnetText = State(initialValue: initialMagnet)
+    }
 
     var body: some View {
         Form {
