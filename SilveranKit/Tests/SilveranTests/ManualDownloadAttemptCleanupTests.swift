@@ -85,8 +85,8 @@ struct ManualDownloadAttemptCleanupTests {
 
         #expect(await store.allJobs().isEmpty)
         #expect(ManualDownloadIntakeHandoff.listPending(root: root).isEmpty)
-        // Abandon must not permanently block a future intentional share of the same magnet.
-        #expect(!ManualDownloadIntakeHandoff.isFingerprintProcessed(payload.fingerprint, root: root))
+        // Abandoned payload UUID was never consumed via markProcessed — only dropped.
+        #expect(!ManualDownloadIntakeHandoff.isProcessed(payload.id, root: root))
     }
 
     @Test func deletedAttemptDoesNotReappearAfterIntakeLifecycleDrain() async throws {
@@ -135,6 +135,128 @@ struct ManualDownloadAttemptCleanupTests {
         #expect(
             ManualDownloadBuckets.partition(await store.allJobs()).attentionCount == 0
         )
+    }
+
+    @Test func failDeleteThenExplicitSameMagnetSubmitsAgain() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("fail-delete-reshare-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let root = dir.appendingPathComponent("handoff", isDirectory: true)
+
+        let store = RecordingManualDownloadJobStore()
+        let deluge = DelugeScriptTransport()
+        var calls = 0
+        deluge.handler = {
+            calls += 1
+            if calls == 1 {
+                return #"{"result":null,"error":{"message":"Rejected"},"id":10}"#
+            }
+            return #"{"result":"hashabc","error":null,"id":10}"#
+        }
+        let handler = NASAcquisitionHandler(
+            environment: StaticNASHandoffEnvironment(
+                context: NASHandoffContext(
+                    settings: NASDownloadSettingsSnapshot(
+                        torrentClient: .deluge,
+                        delugeBaseURL: "http://deluge.example:8112",
+                        ebookFolder: "/volume1/media/books/books",
+                    ),
+                    credentials: NASBackendCredentials(delugePassword: "pw"),
+                )
+            ),
+            deluge: DelugeWebClient(transport: deluge),
+            jobs: store,
+        )
+
+        let firstPayload = try ManualDownloadIntakeHandoff.enqueueMagnet(
+            url: URL(string: magnet)!,
+            mediaType: .ebook,
+            source: .shareExtension,
+            root: root,
+        )
+        _ = await ManualDownloadIntakeProcessor.processPending(handler: handler, root: root)
+        let failed = await store.allJobs()
+        #expect(failed.count == 1)
+        #expect(failed[0].status == .failed)
+        #expect(calls == 1)
+        #expect(ManualDownloadIntakeHandoff.isProcessed(firstPayload.id, root: root))
+
+        await ManualDownloadAttemptCleanup.deleteAttempt(failed[0], jobs: store, intakeRoot: root)
+        #expect(await store.allJobs().isEmpty)
+
+        // Explicit share of the same magnet after Delete Attempt must submit once.
+        let secondPayload = try ManualDownloadIntakeHandoff.enqueueMagnet(
+            url: URL(string: magnet)!,
+            mediaType: .ebook,
+            source: .shareExtension,
+            root: root,
+        )
+        #expect(secondPayload.id != firstPayload.id)
+        _ = await ManualDownloadIntakeProcessor.processPending(handler: handler, root: root)
+        let afterReshare = await store.allJobs()
+        #expect(afterReshare.count == 1)
+        #expect(afterReshare[0].status == .submitted)
+        #expect(calls == 2)
+        #expect(afterReshare[0].id != failed[0].id)
+    }
+
+    @Test func failClearFailedThenExplicitSameMagnetSubmitsAgain() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("fail-clear-reshare-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let root = dir.appendingPathComponent("handoff", isDirectory: true)
+
+        let store = RecordingManualDownloadJobStore()
+        let deluge = DelugeScriptTransport()
+        var calls = 0
+        deluge.handler = {
+            calls += 1
+            if calls == 1 {
+                return #"{"result":null,"error":{"message":"Rejected"},"id":10}"#
+            }
+            return #"{"result":"hashabc","error":null,"id":10}"#
+        }
+        let handler = NASAcquisitionHandler(
+            environment: StaticNASHandoffEnvironment(
+                context: NASHandoffContext(
+                    settings: NASDownloadSettingsSnapshot(
+                        torrentClient: .deluge,
+                        delugeBaseURL: "http://deluge.example:8112",
+                        ebookFolder: "/volume1/media/books/books",
+                    ),
+                    credentials: NASBackendCredentials(delugePassword: "pw"),
+                )
+            ),
+            deluge: DelugeWebClient(transport: deluge),
+            jobs: store,
+        )
+
+        _ = try ManualDownloadIntakeHandoff.enqueueMagnet(
+            url: URL(string: magnet)!,
+            mediaType: .ebook,
+            source: .shareExtension,
+            root: root,
+        )
+        _ = await ManualDownloadIntakeProcessor.processPending(handler: handler, root: root)
+        #expect(await store.allJobs().count == 1)
+        #expect(calls == 1)
+
+        await ManualDownloadAttemptCleanup.clearFailed(jobs: store, intakeRoot: root)
+        #expect(await store.allJobs().isEmpty)
+
+        _ = try ManualDownloadIntakeHandoff.enqueueMagnet(
+            url: URL(string: magnet)!,
+            mediaType: .ebook,
+            source: .shareExtension,
+            root: root,
+        )
+        _ = await ManualDownloadIntakeProcessor.processPending(handler: handler, root: root)
+        let afterReshare = await store.allJobs()
+        #expect(afterReshare.count == 1)
+        #expect(afterReshare[0].status == .submitted)
+        #expect(calls == 2)
     }
 
     @Test func repeatedFailedIntakeUpsertsSingleHistoryRow() async {

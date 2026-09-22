@@ -168,6 +168,10 @@ public enum ManualDownloadIntakeHandoff {
         return payloads.sorted { $0.createdAt < $1.createdAt }
     }
 
+    /// Whether this exact queued payload UUID was already consumed.
+    /// Payload-ID markers are permanent one-time queue consumption; they do not
+    /// blacklist content fingerprints, so a later explicit share of the same magnet
+    /// (new UUID) remains eligible.
     public static func isProcessed(
         _ id: String,
         bundle: Bundle = .main,
@@ -179,17 +183,9 @@ public enum ManualDownloadIntakeHandoff {
         return FileManager.default.fileExists(atPath: marker.path)
     }
 
-    public static func isFingerprintProcessed(
-        _ fingerprint: String,
-        bundle: Bundle = .main,
-        root: URL? = nil,
-    ) -> Bool {
-        guard let intake = try? ensureDirectories(bundle: bundle, root: root) else { return false }
-        let marker = intake.appendingPathComponent(processedFolderName, isDirectory: true)
-            .appendingPathComponent("fp-\(fingerprintHash(fingerprint)).done", isDirectory: false)
-        return FileManager.default.fileExists(atPath: marker.path)
-    }
-
+    /// Permanently record this payload UUID as consumed and drop its pending JSON.
+    /// Does not write a content-fingerprint marker — duplicate suppression for
+    /// simultaneous/stale queue copies happens at process-pending time.
     public static func markProcessed(
         _ payload: ManualDownloadIntakePayload,
         bundle: Bundle = .main,
@@ -198,13 +194,7 @@ public enum ManualDownloadIntakeHandoff {
         guard let intake = try? ensureDirectories(bundle: bundle, root: root) else { return }
         let processed = intake.appendingPathComponent(processedFolderName, isDirectory: true)
         let idMarker = processed.appendingPathComponent("\(payload.id).done", isDirectory: false)
-        let fpMarker = processed.appendingPathComponent(
-            "fp-\(fingerprintHash(payload.fingerprint)).done",
-            isDirectory: false,
-        )
-        let data = Data()
-        try? data.write(to: idMarker, options: [.atomic])
-        try? data.write(to: fpMarker, options: [.atomic])
+        try? Data().write(to: idMarker, options: [.atomic])
         // Remove the JSON handoff record. Keep torrent bytes until the host copies them.
         let json = intake.appendingPathComponent("\(payload.id).json", isDirectory: false)
         try? FileManager.default.removeItem(at: json)
@@ -212,8 +202,8 @@ public enum ManualDownloadIntakeHandoff {
     }
 
     /// Drop pending intake JSON + staged torrent for a fingerprint without writing a
-    /// permanent processed marker. Used by Delete Attempt / Clear Failed so the same
-    /// magnet can be shared again later, but cannot auto-recreate a deleted attempt.
+    /// processed marker. Used by Delete Attempt / Clear Failed so the same magnet can
+    /// be shared again later, while preventing the old queued payload from resurrecting.
     public static func abandonPending(
         matchingFingerprint fingerprint: String,
         bundle: Bundle = .main,
@@ -303,12 +293,6 @@ public enum ManualDownloadIntakeHandoff {
         let data = try encoder.encode(payload)
         let url = root.appendingPathComponent("\(payload.id).json", isDirectory: false)
         try data.write(to: url, options: [.atomic])
-    }
-
-    private static func fingerprintHash(_ fingerprint: String) -> String {
-        let digest = fingerprint.data(using: .utf8) ?? Data()
-        let hex = digest.map { String(format: "%02x", $0) }.joined()
-        return String(hex.prefix(40))
     }
 
     private static func trimProcessed(in folder: URL) {

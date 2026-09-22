@@ -10,9 +10,15 @@
 import Foundation
 
 public enum ManualDownloadIntakeProcessor {
-    /// Consume pending App Group (or test-root) payloads once.
-    /// Duplicate id/fingerprint is a no-op — no second Deluge submit.
-    /// Failed handoffs still consume the queue; Retry lives on the Downloads job.
+    /// Consume pending App Group (or test-root) payloads once per payload UUID.
+    ///
+    /// - Consumed payload IDs are permanent one-time queue consumption.
+    /// - Fingerprint dedupe only collapses duplicate/stale copies in the *current*
+    ///   pending queue (one submit per fingerprint per drain).
+    /// - A later explicit `enqueueMagnet` / `enqueueTorrent` of the same content
+    ///   creates a new payload UUID and remains eligible — fingerprints are never
+    ///   permanently blacklisted.
+    /// - Failed handoffs still consume the queue; Retry lives on the Downloads job.
     @discardableResult
     public static func processPending(
         handler: any ManualAcquisitionHandling,
@@ -22,20 +28,27 @@ public enum ManualDownloadIntakeProcessor {
         ManualDownloadIntakeHandoff.clearPendingSignal()
         let pending = ManualDownloadIntakeHandoff.listPending(bundle: bundle, root: root)
         var processed = 0
+        // In-drain fingerprint set: suppress duplicate queued copies / stale replays
+        // of the same logical pending item without blocking future explicit shares.
+        var seenFingerprints = Set<String>()
         for payload in pending {
-            if ManualDownloadIntakeHandoff.isProcessed(payload.id, bundle: bundle, root: root)
-                || ManualDownloadIntakeHandoff.isFingerprintProcessed(
-                    payload.fingerprint,
-                    bundle: bundle,
-                    root: root,
-                )
-            {
+            if ManualDownloadIntakeHandoff.isProcessed(payload.id, bundle: bundle, root: root) {
                 ManualDownloadIntakeHandoff.markProcessed(payload, bundle: bundle, root: root)
                 if payload.kind == .torrentFile {
                     ManualDownloadIntakeHandoff.removeStagedTorrent(payload, bundle: bundle, root: root)
                 }
                 continue
             }
+
+            if seenFingerprints.contains(payload.fingerprint) {
+                // Duplicate pending copy of the same content — consume without submit.
+                ManualDownloadIntakeHandoff.markProcessed(payload, bundle: bundle, root: root)
+                if payload.kind == .torrentFile {
+                    ManualDownloadIntakeHandoff.removeStagedTorrent(payload, bundle: bundle, root: root)
+                }
+                continue
+            }
+            seenFingerprints.insert(payload.fingerprint)
 
             let candidateResult: Result<ManualAcquisitionCandidate, ManualDownloadIntakeError>
             switch payload.kind {
