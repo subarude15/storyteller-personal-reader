@@ -234,6 +234,33 @@ public struct AudiobookProviderItem: Equatable, Sendable {
     }
 }
 
+enum LibraryBookIdentifiers {
+    static func harvest(_ fields: [String?]) -> (work: String?, edition: String?) {
+        var work: String?
+        var edition: String?
+        for field in fields {
+            guard let field else { continue }
+            if work == nil, let id = first(field, pattern: "OL\\d+W") {
+                work = "/works/\(id)"
+            }
+            if edition == nil, let id = first(field, pattern: "OL\\d+M") {
+                edition = "/books/\(id)"
+            }
+        }
+        return (work, edition)
+    }
+
+    private static func first(_ text: String, pattern: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let upper = text.uppercased()
+        let range = NSRange(upper.startIndex..., in: upper)
+        guard let match = regex.firstMatch(in: upper, range: range),
+            let swiftRange = Range(match.range, in: upper)
+        else { return nil }
+        return String(upper[swiftRange])
+    }
+}
+
 public protocol AudiobookCatalogProviding: Sendable {
     var kind: AudiobookProviderKind { get }
     func search(_ work: CanonicalBookWork) async throws -> [AudiobookProviderItem]
@@ -250,6 +277,8 @@ public struct CanonicalBookWork: Equatable, Sendable {
     public var openLibraryWorkID: String?
     public var openLibraryEditionID: String?
     public var publicationYear: String?
+    public var isbn10: String?
+    public var isbn13: String?
 
     public init(
         workID: String,
@@ -261,6 +290,8 @@ public struct CanonicalBookWork: Equatable, Sendable {
         openLibraryWorkID: String?,
         openLibraryEditionID: String?,
         publicationYear: String?,
+        isbn10: String? = nil,
+        isbn13: String? = nil,
     ) {
         self.workID = workID
         self.title = title
@@ -271,22 +302,30 @@ public struct CanonicalBookWork: Equatable, Sendable {
         self.openLibraryWorkID = openLibraryWorkID
         self.openLibraryEditionID = openLibraryEditionID
         self.publicationYear = publicationYear
+        self.isbn10 = isbn10
+        self.isbn13 = isbn13
     }
 
     public static func library(_ book: BookMetadata) -> CanonicalBookWork {
-        let isbn = BookFormatTexts.isbnTokens(in: [
-            book.title, book.subtitle, book.description,
-        ]).sorted().first
+        let fields = [
+            book.title, book.subtitle, book.description, book.source,
+        ] + (book.tags?.map(\.name) ?? [])
+        let isbns = BookFormatTexts.isbnTokens(in: fields)
+        let isbn13 = isbns.first { $0.count == 13 }
+        let isbn10 = isbns.first { $0.count == 10 }
+        let identifiers = LibraryBookIdentifiers.harvest(fields)
         return CanonicalBookWork(
             workID: book.id.description,
             title: book.title,
             subtitle: book.subtitle,
             authors: book.authors?.compactMap(\.name).filter { !$0.isEmpty } ?? [],
             language: book.language,
-            isbn: isbn,
-            openLibraryWorkID: nil,
-            openLibraryEditionID: nil,
+            isbn: isbn13 ?? isbn10 ?? isbns.sorted().first,
+            openLibraryWorkID: identifiers.work,
+            openLibraryEditionID: identifiers.edition,
             publicationYear: BookMetadata.publicationYear(from: book.publicationDate),
+            isbn10: isbn10,
+            isbn13: isbn13,
         )
     }
 

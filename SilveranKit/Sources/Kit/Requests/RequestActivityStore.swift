@@ -105,13 +105,23 @@ public final class RequestActivityStore: @unchecked Sendable {
         now: Date = Date(),
         fallbackFromRequestID: String? = nil,
         fallbackKind: RequestFallbackKind? = nil,
+        existingRequestID: String? = nil,
     ) {
         guard !outcomes.isEmpty else { return }
         let workID = work.openLibraryWorkID ?? work.workID
         lock.lock()
         var items = loadUnlocked()
-        let existingIndex = items.firstIndex {
-            $0.canonicalWorkID == workID && $0.provider == provider
+        let existingIndex: Int?
+        if let existingRequestID, !existingRequestID.isEmpty {
+            guard let index = items.firstIndex(where: { $0.id == existingRequestID }) else {
+                lock.unlock()
+                return
+            }
+            existingIndex = index
+        } else {
+            existingIndex = items.firstIndex {
+                $0.canonicalWorkID == workID && $0.provider == provider
+            }
         }
         var item =
             existingIndex.map { items[$0] }
@@ -163,20 +173,36 @@ public final class RequestActivityStore: @unchecked Sendable {
             } else {
                 item.formatStatuses.append(status)
             }
-            if outcome.phase == .failed {
+            if outcome.phase == .failed || outcome.phase == .needsAttention {
                 item.lastError = outcome.detail
                 item.attentionReason = outcome.detail
             }
         }
         item.requestedFormats = BookRequestFormat.allCases.filter { formats.contains($0) }
         item = RequestActivityAttention.apply(item, now: now)
+        let unresolved = outcomes.contains { $0.phase == .failed || $0.phase == .needsAttention }
+        let stillNeedsAttention = item.formatStatuses.contains { $0.status.needsAttentionBucket }
+        if let candidates = outcomes.first(where: { !$0.matchCandidates.isEmpty })?.matchCandidates {
+            item.matchCandidates = candidates
+        } else if !unresolved, !stillNeedsAttention {
+            item.matchCandidates = nil
+        }
+        if let attention = outcomes.compactMap(\.matchAttention).first {
+            item.matchAttention = attention
+        } else if !unresolved, !stillNeedsAttention {
+            item.matchAttention = nil
+        }
+        if let reason = outcomes.compactMap(\.matchReason).first {
+            item.matchReason = reason
+        } else if unresolved {
+            item.matchReason = nil
+        }
         // Drop stale lastError after a successful retry/submission when nothing
         // remains failed / needs attention. Keep it if this batch failed or
         // another requested format is still in an attention state.
-        let submissionFailed = outcomes.contains { $0.phase == .failed }
-        let stillNeedsAttention = item.formatStatuses.contains { $0.status.needsAttentionBucket }
-        if !submissionFailed, !stillNeedsAttention {
+        if !unresolved, !stillNeedsAttention {
             item.lastError = nil
+            item.attentionReason = nil
         }
         let previous = existingIndex.map { items[$0] }
         item = RequestActivityTimeline.recordingTransitions(

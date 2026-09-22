@@ -8,6 +8,7 @@ final class RequestActivityViewModel: ObservableObject {
     @Published private(set) var isRefreshing = false
     @Published private(set) var checkingItemID: String?
     @Published private(set) var retryingItemID: String?
+    @Published private(set) var resolvingItemID: String?
     @Published var lazyLibrarianUnavailableMessage: String?
     @Published var actionError: String?
     @Published var actionInfo: String?
@@ -175,7 +176,8 @@ final class RequestActivityViewModel: ObservableObject {
 
     /// Retry only formats RequestActivityRetryPolicy marks retryable.
     func retryRequest(itemID: String) {
-        guard checkingItemID == nil, retryingItemID == nil, fallbackItemID == nil else { return }
+        guard checkingItemID == nil, retryingItemID == nil, fallbackItemID == nil, resolvingItemID == nil
+        else { return }
         actionError = nil
         actionInfo = nil
         fallbackNotice = nil
@@ -208,7 +210,55 @@ final class RequestActivityViewModel: ObservableObject {
                 self.items = self.history.allItems()
                 if let message = submission.message, !message.isEmpty {
                     self.actionError = message
-                } else if let failed = submission.outcomes.first(where: { $0.phase == .failed }) {
+                } else if let failed = submission.outcomes.first(where: {
+                    $0.matchAttention == .providerFailure || ($0.phase == .failed && $0.matchAttention == nil)
+                }) {
+                    self.actionError = failed.detail
+                }
+            }
+        }
+    }
+
+    func useBestLazyLibrarianMatch(itemID: String) {
+        guard let item = history.item(id: itemID) else {
+            actionError = "Request not found."
+            return
+        }
+        guard let candidate = LazyLibrarianMatcher.bestResolvable(
+            work: item.canonicalWorkForRetry(),
+            candidates: item.matchCandidates ?? [],
+        ) else { return }
+        resolveLazyLibrarianMatch(itemID: itemID, candidate: candidate)
+    }
+
+    func resolveLazyLibrarianMatch(itemID: String, candidate: LazyLibrarianCandidate) {
+        guard checkingItemID == nil, retryingItemID == nil, fallbackItemID == nil, resolvingItemID == nil
+        else { return }
+        actionError = nil
+        guard let current = history.item(id: itemID) else {
+            actionError = "Request not found."
+            return
+        }
+        resolvingItemID = itemID
+        Task { [weak self] in
+            guard let self else { return }
+            defer {
+                Task { @MainActor in
+                    self.resolvingItemID = nil
+                }
+            }
+            let submission = await BookRequests.resolveLazyLibrarianMatch(
+                item: current,
+                candidate: candidate,
+                history: self.history,
+            )
+            await MainActor.run {
+                self.items = self.history.allItems()
+                if let message = submission.message, !message.isEmpty {
+                    self.actionError = message
+                } else if let failed = submission.outcomes.first(where: {
+                    $0.matchAttention == .providerFailure || ($0.phase == .failed && $0.matchAttention == nil)
+                }) {
                     self.actionError = failed.detail
                 }
             }
@@ -614,6 +664,7 @@ struct RequestActivityChainDetailView: View {
     @State private var openingAlternate = false
     @State private var showingFallback = false
     @State private var showingManualSearch = false
+    @State private var showingMatches = false
 
     private var chain: RequestActivityChain? {
         model.chain(id: chainID)
@@ -636,7 +687,8 @@ struct RequestActivityChainDetailView: View {
     private var isBusy: Bool {
         guard let actionItemID else { return openingAlternate }
         return model.checkingItemID == actionItemID || model.retryingItemID == actionItemID
-            || model.fallbackItemID == actionItemID || openingAlternate
+            || model.fallbackItemID == actionItemID || model.resolvingItemID == actionItemID
+            || openingAlternate
     }
 
     var body: some View {
@@ -759,6 +811,11 @@ struct RequestActivityChainDetailView: View {
                         }
                     }
                     .padding(.vertical, 2)
+                }
+                if let reason = actionItem?.matchReason, actionItem?.matchAttention == nil {
+                    Text(reason)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -931,6 +988,15 @@ struct RequestActivityChainDetailView: View {
                         .disabled(isBusy)
                     }
 
+                    if let actionItem {
+                        LazyLibrarianMatchActionButtons(
+                            item: actionItem,
+                            isBusy: isBusy,
+                            resolving: model.resolvingItemID == actionItem.id,
+                            onReview: { showingMatches = true },
+                            onUseBest: { model.useBestLazyLibrarianMatch(itemID: actionItem.id) },
+                        )
+                    }
                     Button {
                         showingManualSearch = true
                     } label: {
@@ -949,6 +1015,17 @@ struct RequestActivityChainDetailView: View {
                 Text(
                     "Removes this app’s tracking for every provider attempt in this request. It does not cancel LazyLibrarian or Shelfarr."
                 )
+            }
+        }
+        .sheet(isPresented: $showingMatches) {
+            if let actionItem {
+                LazyLibrarianMatchReviewSheet(candidates: actionItem.matchCandidates ?? []) { candidate in
+                    model.resolveLazyLibrarianMatch(itemID: actionItem.id, candidate: candidate)
+                }
+                #if os(iOS)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                #endif
             }
         }
     }
@@ -1069,6 +1146,7 @@ struct RequestActivityDetailView: View {
     @State private var openingAlternate = false
     @State private var showingFallback = false
     @State private var showingManualSearch = false
+    @State private var showingMatches = false
 
     private var item: RequestActivityItem? {
         model.item(id: itemID)
@@ -1081,7 +1159,8 @@ struct RequestActivityDetailView: View {
 
     private var isBusy: Bool {
         model.checkingItemID == itemID || model.retryingItemID == itemID
-            || model.fallbackItemID == itemID || openingAlternate
+            || model.fallbackItemID == itemID || model.resolvingItemID == itemID
+            || openingAlternate
     }
 
     var body: some View {
@@ -1169,6 +1248,17 @@ struct RequestActivityDetailView: View {
                 #endif
             }
         }
+        .sheet(isPresented: $showingMatches) {
+            if let item {
+                LazyLibrarianMatchReviewSheet(candidates: item.matchCandidates ?? []) { candidate in
+                    model.resolveLazyLibrarianMatch(itemID: item.id, candidate: candidate)
+                }
+                #if os(iOS)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                #endif
+            }
+        }
     }
 
     @ViewBuilder
@@ -1237,6 +1327,11 @@ struct RequestActivityDetailView: View {
                         }
                     }
                     .padding(.vertical, 2)
+                }
+                if let reason = item.matchReason, item.matchAttention == nil {
+                    Text(reason)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 LabeledContent("Last checked", value: dateLabel(item.lastCheckedAt))
                 if let bookID = item.providerBookID {
@@ -1347,6 +1442,13 @@ struct RequestActivityDetailView: View {
                         .disabled(isBusy)
                     }
 
+                    LazyLibrarianMatchActionButtons(
+                        item: item,
+                        isBusy: isBusy,
+                        resolving: model.resolvingItemID == itemID,
+                        onReview: { showingMatches = true },
+                        onUseBest: { model.useBestLazyLibrarianMatch(itemID: itemID) },
+                    )
                     Button {
                         showingManualSearch = true
                     } label: {

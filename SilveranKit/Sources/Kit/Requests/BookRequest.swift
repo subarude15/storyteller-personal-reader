@@ -61,6 +61,7 @@ public enum BookRequestPhase: Equatable, Sendable {
     case alreadyRequested
     case alreadyAvailable
     case failed
+    case needsAttention
 }
 
 public struct BookRequestOutcome: Equatable, Sendable {
@@ -68,17 +69,26 @@ public struct BookRequestOutcome: Equatable, Sendable {
     public var phase: BookRequestPhase
     public var detail: String
     public var providerBookID: String?
+    public var matchCandidates: [LazyLibrarianCandidate]
+    public var matchReason: String?
+    public var matchAttention: LazyLibrarianMatchAttention?
 
     public init(
         format: BookRequestFormat,
         phase: BookRequestPhase,
         detail: String,
         providerBookID: String? = nil,
+        matchCandidates: [LazyLibrarianCandidate] = [],
+        matchReason: String? = nil,
+        matchAttention: LazyLibrarianMatchAttention? = nil,
     ) {
         self.format = format
         self.phase = phase
         self.detail = detail
         self.providerBookID = providerBookID
+        self.matchCandidates = matchCandidates
+        self.matchReason = matchReason
+        self.matchAttention = matchAttention
     }
 }
 
@@ -306,6 +316,7 @@ public enum BookRequests {
                         formats: guardResult.toSend,
                         baseURL: settings.lazyLibrarianBaseURL,
                         apiKey: key,
+                        matching: LazyLibrarianMatchingSettings.preference,
                     )
                 case .shelfarr:
                     let idea = readingIdea(work)
@@ -351,6 +362,66 @@ public enum BookRequests {
             "[RequestActivity] request end work=\(work.workID) provider=\(provider.rawValue) outcomes=\(outcomes.count)"
         )
         return BookRequestSubmission(provider: provider, outcomes: outcomes)
+    }
+
+    /// Queue a chosen LazyLibrarian candidate on the existing request row.
+    public static func resolveLazyLibrarianMatch(
+        item: RequestActivityItem,
+        candidate: LazyLibrarianCandidate,
+        client: LazyLibrarianClient = LazyLibrarianClient(),
+        history: RequestActivityStore = .shared,
+        now: Date = Date(),
+    ) async -> BookRequestSubmission {
+        guard item.provider == .lazyLibrarian else {
+            return BookRequestSubmission(
+                provider: item.provider,
+                outcomes: [],
+                message: "This request is not a LazyLibrarian request.",
+            )
+        }
+        let formats = RequestActivityRetryPolicy.retryableFormats(for: item)
+        guard !formats.isEmpty else {
+            return BookRequestSubmission(
+                provider: .lazyLibrarian,
+                outcomes: [],
+                message: "Nothing to queue.",
+            )
+        }
+        let settings = await SettingsActor.shared.config
+        let key = (try? await AuthenticationActor.shared.loadLazyLibrarianAPIKey()) ?? ""
+        let work = item.canonicalWorkForRetry()
+        let reason = matchReason(for: candidate, work: work)
+        let outcomes = await client.queueResolved(
+            bookID: candidate.bookID,
+            formats: formats,
+            baseURL: settings.lazyLibrarianBaseURL,
+            apiKey: key,
+            matchReason: reason,
+        )
+        if !outcomes.isEmpty {
+            history.recordSubmission(
+                work: work,
+                provider: .lazyLibrarian,
+                outcomes: outcomes,
+                now: now,
+                existingRequestID: item.id,
+            )
+        }
+        return BookRequestSubmission(provider: .lazyLibrarian, outcomes: outcomes)
+    }
+
+    private static func matchReason(
+        for candidate: LazyLibrarianCandidate,
+        work: CanonicalBookWork,
+    ) -> String {
+        if case .matched(_, let reason, _) = LazyLibrarianMatcher.resolve(
+            work: work,
+            candidates: [candidate],
+            preference: .useBestMatch,
+        ) {
+            return reason
+        }
+        return "Chosen LazyLibrarian match"
     }
 
     /// Retry only formats that RequestActivityRetryPolicy marks retryable.

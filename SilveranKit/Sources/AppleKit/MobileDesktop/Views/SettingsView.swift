@@ -291,6 +291,7 @@ private struct LazyLibrarianSettingsSection: View {
     @State private var keyError: String?
     @State private var checking = false
     @State private var syncStatus: SettingsSyncStatus = .offlineWillSyncLater
+    @State private var automaticMatching = LazyLibrarianMatchingSettings.preference
 
     private var integrationConfigured: Bool {
         enabled || !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -306,6 +307,25 @@ private struct LazyLibrarianSettingsSection: View {
     var body: some View {
         Section {
             Toggle("Enabled", isOn: $enabled)
+            Picker(
+                "Automatic matching",
+                selection: Binding(
+                    get: { automaticMatching },
+                    set: { value in
+                        automaticMatching = value
+                        LazyLibrarianMatchingSettings.preference = value
+                    },
+                ),
+            ) {
+                ForEach(LazyLibrarianAutomaticMatching.allCases) { option in
+                    Text(option.label).tag(option)
+                }
+            }
+            Text(
+                "Exact title and author matches can still proceed when you ask to confirm uncertain ones. Unrelated title-only results are never chosen automatically."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
             TextField(
                 "Server URL",
                 text: $baseURL,

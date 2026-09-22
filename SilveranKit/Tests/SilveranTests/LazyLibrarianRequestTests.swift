@@ -281,8 +281,10 @@ struct LazyLibrarianRequestTests {
             baseURL: base,
             apiKey: key,
         )
-        #expect(outcomes.allSatisfy { $0.phase == .failed })
-        #expect(outcomes.allSatisfy { $0.detail.contains("Several books matched") })
+        #expect(outcomes.allSatisfy { $0.phase == .needsAttention })
+        #expect(outcomes.allSatisfy { $0.detail.contains("couldn’t confidently choose") })
+        #expect(outcomes[0].matchAttention == .ambiguous)
+        #expect(outcomes[0].matchCandidates.count == 2)
         #expect(!script.commands.contains("queueBook"))
         #expect(!script.commands.contains("addBook"))
     }
@@ -291,7 +293,7 @@ struct LazyLibrarianRequestTests {
         let script = Script()
         script.handler = { cmd, _ in
             if cmd == "findBook" {
-                return Script.http(self.hit(author: "Charles Dickens"))
+                return Script.http(self.hit(id: "DICKENS", author: "Charles Dickens"))
             }
             return Script.http("OK")
         }
@@ -302,7 +304,9 @@ struct LazyLibrarianRequestTests {
             apiKey: key,
         )
         #expect(outcomes.map(\.phase) == [.failed])
-        #expect(outcomes[0].detail.contains("No confident match"))
+        #expect(outcomes[0].detail.contains("No LazyLibrarian candidates were found"))
+        #expect(outcomes[0].matchAttention == .noMatch)
+        #expect(outcomes[0].matchCandidates.isEmpty)
         #expect(!script.commands.contains("queueBook"))
     }
 
