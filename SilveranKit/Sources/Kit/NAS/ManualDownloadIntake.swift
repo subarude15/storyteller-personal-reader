@@ -303,3 +303,26 @@ extension ManualDownloadIntakePayload {
         }
     }
 }
+
+
+/// Persists a raw magnet deep link long enough for the Downloads UI to consume it
+/// after a cold launch. This prevents Safari -> ink+amp handoffs from being lost
+/// before the tab hierarchy is mounted.
+public enum ManualDownloadMagnetDeepLinkStore {
+    private static let key = "inkamp.manualDownload.pendingMagnet"
+
+    public static func save(_ url: URL) {
+        guard url.scheme?.lowercased() == "magnet", NASMagnetValidation.isValid(url) else { return }
+        UserDefaults.standard.set(url.absoluteString, forKey: key)
+    }
+
+    public static func consume() -> URL? {
+        guard let raw = UserDefaults.standard.string(forKey: key) else { return nil }
+        UserDefaults.standard.removeObject(forKey: key)
+        guard let url = URL(string: raw),
+            url.scheme?.lowercased() == "magnet",
+            NASMagnetValidation.isValid(url)
+        else { return nil }
+        return url
+    }
+}
