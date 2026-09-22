@@ -478,15 +478,23 @@ private struct HomeTabView: View {
             .background(chrome.bg)
             .navigationTitle("ink+amp")
             .toolbar {
-                if mediaViewModel?.hasServerConnectionIssue == true {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            showOfflineSheet = true
-                        } label: {
-                            Image(systemName: mediaViewModel?.connectionIssueIcon ?? "exclamationmark.triangle")
-                                .foregroundStyle(.red)
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 12) {
+                        if mediaViewModel?.hasServerConnectionIssue == true {
+                            Button {
+                                showOfflineSheet = true
+                            } label: {
+                                Image(systemName: mediaViewModel?.connectionIssueIcon ?? "exclamationmark.triangle")
+                                    .foregroundStyle(.red)
+                            }
+                            .accessibilityLabel("Server connection issue")
                         }
-                        .accessibilityLabel("Server connection issue")
+                        Button {
+                            showSettings = true
+                        } label: {
+                            Label("Settings", systemImage: "gearshape")
+                        }
+                        .accessibilityLabel("Settings")
                     }
                 }
             }
