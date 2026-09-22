@@ -137,8 +137,20 @@ public struct PunkRallyTabView: View {
                 #if os(iOS) || os(macOS)
                 RequestNotificationTapHandler.install()
                 #endif
+                #if os(iOS)
+                ManualDownloadIntakeHandoff.installAppObserver {
+                    NotificationCenter.default.post(
+                        name: .inkampProcessManualDownloadIntake,
+                        object: nil
+                    )
+                }
+                #endif
                 Task { await reloadMoreBadge() }
                 openPendingRequestActivityIfNeeded()
+                Task { await processManualDownloadIntake() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .inkampProcessManualDownloadIntake)) { _ in
+                Task { await processManualDownloadIntake() }
             }
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowShelf)) { _ in
                 selectedTab = .shelf
@@ -185,6 +197,7 @@ public struct PunkRallyTabView: View {
                         name: .punkRallyHomeQueueDidChange,
                         object: nil
                     )
+                    Task { await processManualDownloadIntake() }
                     Task { await StatsSyncCoordinator.shared.syncNow(reason: "appActive") }
                     Task { await YouTubePlayheadSyncCoordinator.shared.syncNow(reason: "appActive") }
                     Task { await PodcastSyncCoordinator.shared.syncNow(reason: "appActive") }
@@ -236,6 +249,11 @@ public struct PunkRallyTabView: View {
         selectedTab = .more
         morePath = NavigationPath()
         morePath.append(route)
+    }
+
+    private func processManualDownloadIntake() async {
+        _ = await ManualDownloadIntakeProcessor.processPending(handler: NASAcquisitionHandler.live())
+        await reloadMoreBadge()
     }
 
     private func reloadMoreBadge() async {

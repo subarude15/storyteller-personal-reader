@@ -7,17 +7,17 @@ import WidgetKit
 #endif
 
 public enum SilveranWidgetConstants {
-    public static let appGroupInfoKey = "SILVERAN_WIDGET_APP_GROUP"
+    public static let appGroupInfoKey = AppGroupContainer.appGroupInfoKey
     /// AltStore Classic writes the *resigned* App Group identifiers here for the
     /// app and for every embedded app extension (`ResignAppOperation.prepare`).
     /// AltStore appends the signing team identifier to each declared group
     /// (`<group>.<TEAMID>` in `FetchProvisioningProfilesOperation.updateAppGroups`),
     /// so a hard-coded group id resolves to a container that does not exist on a
     /// sideloaded build. Always read this key first.
-    public static let altStoreAppGroupsInfoKey = "ALTAppGroups"
+    public static let altStoreAppGroupsInfoKey = AppGroupContainer.altStoreAppGroupsInfoKey
     /// Fallback for builds that are not resigned by AltStore (Xcode, TestFlight,
     /// paid team) — Sideload + ink+amp use group.com.punkrally.reader.
-    public static let fallbackAppGroupIdentifier = "group.com.punkrally.reader"
+    public static let fallbackAppGroupIdentifier = AppGroupContainer.fallbackAppGroupIdentifier
     public static let readingWidgetKind = "SilveranReadingWidget"
     /// ink+amp Continue + Up next. A new kind so iOS drops the stale
     /// Continue-only instance of `InkAmpContinueWidget` (WidgetKit binds an
@@ -145,27 +145,9 @@ public enum SilveranWidgetSnapshotStore {
     private static let coversDirectoryName = "Covers"
 
     /// Candidate App Group identifiers for a bundle, most-trusted first.
-    ///
-    /// Order:
-    /// 1. `ALTAppGroups` — the identifiers AltStore actually granted this bundle
-    ///    when it resigned the IPA. On free/personal teams these are rewritten to
-    ///    `<declared-group>.<TEAMID>`, which is why a hard-coded group id reads back
-    ///    an empty container even though the group exists.
-    /// 2. `SILVERAN_WIDGET_APP_GROUP` — build-time value for Xcode/TestFlight/paid
-    ///    team installs (and the literal fallback baked into the Sideload target).
-    /// 3. `group.com.punkrally.reader` — last-resort constant.
+    /// Delegates to `AppGroupContainer` so Share Extension / intake share the same order.
     public static func appGroupCandidates(bundle: Bundle = .main) -> [String] {
-        let altStoreGroups = bundle.object(
-            forInfoDictionaryKey: SilveranWidgetConstants.altStoreAppGroupsInfoKey
-        ) as? [String]
-        let configured = bundle.object(
-            forInfoDictionaryKey: SilveranWidgetConstants.appGroupInfoKey
-        ) as? String
-        return groupCandidates(
-            altStoreGroups: altStoreGroups,
-            configured: configured,
-            fallback: SilveranWidgetConstants.fallbackAppGroupIdentifier,
-        )
+        AppGroupContainer.appGroupCandidates(bundle: bundle)
     }
 
     /// Pure helper (unit-tested): filters junk and de-duplicates while preserving order.
@@ -174,51 +156,21 @@ public enum SilveranWidgetSnapshotStore {
         configured: String?,
         fallback: String,
     ) -> [String] {
-        var candidates: [String] = []
-        for group in altStoreGroups ?? [] where isUsableGroupIdentifier(group) {
-            candidates.append(group)
-        }
-        if let configured, isUsableGroupIdentifier(configured) {
-            candidates.append(configured)
-        }
-        if isUsableGroupIdentifier(fallback) {
-            candidates.append(fallback)
-        }
-        var seen = Set<String>()
-        return candidates.filter { seen.insert($0).inserted }
-    }
-
-    private static func isUsableGroupIdentifier(_ value: String) -> Bool {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Reject empty / unexpanded build settings left in unsigned IPAs.
-        return !trimmed.isEmpty && !trimmed.contains("$(")
+        AppGroupContainer.groupCandidates(
+            altStoreGroups: altStoreGroups,
+            configured: configured,
+            fallback: fallback,
+        )
     }
 
     /// First candidate that resolves a container; otherwise the preferred candidate
     /// (so callers can still log which group id *should* have worked).
     public static func appGroupIdentifier(bundle: Bundle = .main) -> String {
-        let candidates = appGroupCandidates(bundle: bundle)
-        if let resolved = candidates.first(where: { containerExists(for: $0) }) {
-            return resolved
-        }
-        return candidates.first ?? SilveranWidgetConstants.fallbackAppGroupIdentifier
+        AppGroupContainer.appGroupIdentifier(bundle: bundle)
     }
 
     public static func sharedContainerURL(bundle: Bundle = .main) -> URL? {
-        for candidate in appGroupCandidates(bundle: bundle) {
-            if let url = FileManager.default.containerURL(
-                forSecurityApplicationGroupIdentifier: candidate
-            ) {
-                return url
-            }
-        }
-        return nil
-    }
-
-    private static func containerExists(for identifier: String) -> Bool {
-        FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: identifier
-        ) != nil
+        AppGroupContainer.sharedContainerURL(bundle: bundle)
     }
 
     /// One-line Console probe: App Group ids seen + whether a container resolved.

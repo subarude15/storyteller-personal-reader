@@ -345,6 +345,11 @@ private struct iOSRootView: View {
             }
             return
         }
+        if ManualDownloadIntakeDeepLink.isAddDownloadURL(url) {
+            NotificationCenter.default.post(name: .inkampProcessManualDownloadIntake, object: nil)
+            NotificationCenter.default.post(name: .inkampShowManualDownloads, object: nil)
+            return
+        }
         guard let bookID = SilveranBookLink.bookID(from: url) else { return }
         mediaViewModel.pendingOpenBookID = bookID
     }
