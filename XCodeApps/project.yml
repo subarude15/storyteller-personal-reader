@@ -65,6 +65,7 @@ targets:
           - CFBundleURLName: com.punkrally.reader
             CFBundleURLSchemes:
               - punkrally
+              - magnet
     sources:
       - path: XCodeApps
         includes:
@@ -121,6 +122,7 @@ targets:
           - CFBundleURLName: com.punkrally.reader
             CFBundleURLSchemes:
               - punkrally
+              - magnet
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -201,6 +203,7 @@ targets:
           - CFBundleURLName: com.punkrally.reader
             CFBundleURLSchemes:
               - punkrally
+              - magnet
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
