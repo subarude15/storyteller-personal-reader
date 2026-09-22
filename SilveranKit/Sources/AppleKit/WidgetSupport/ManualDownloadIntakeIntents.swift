@@ -2,7 +2,6 @@
 import AppIntents
 import Foundation
 import SilveranKit
-import UniformTypeIdentifiers
 
 /// Shortcuts action: enqueue a magnet or .torrent for PR71 routing.
 /// Does not inspect the clipboard — only explicit parameters.
@@ -102,11 +101,12 @@ public enum ManualDownloadIntakeMediaTypeAppEnum: String, AppEnum {
     case ebook
     case audiobook
 
-    public static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Media type")
-    public static var caseDisplayRepresentations: [ManualDownloadIntakeMediaTypeAppEnum: DisplayRepresentation] = [
-        .ebook: "eBook",
-        .audiobook: "Audiobook",
-    ]
+    public static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Media type")
+    public static let caseDisplayRepresentations: [ManualDownloadIntakeMediaTypeAppEnum: DisplayRepresentation] =
+        [
+            .ebook: "eBook",
+            .audiobook: "Audiobook",
+        ]
 
     public var nasMediaKind: NASMediaKind {
         switch self {
