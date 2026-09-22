@@ -199,6 +199,84 @@ struct ManualDownloadIntakeTests {
         #expect(ManualDownloadIntakeHandoff.listPending(root: root).count == 2)
     }
 
+    @Test func magnetHandoffFailureLeavesPayloadForRetry() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("intake-magnet-fail-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let root = dir.appendingPathComponent("handoff", isDirectory: true)
+        let url = URL(string: validMagnet)!
+        let payload = try ManualDownloadIntakeHandoff.enqueueMagnet(
+            url: url,
+            mediaType: .ebook,
+            source: .shareExtension,
+            root: root,
+        )
+
+        let failing = SequenceIntakeHandler(results: [.failed(message: "Deluge auth")])
+        let failPass = await ManualDownloadIntakeProcessor.processPending(
+            handler: failing,
+            root: root,
+        )
+        #expect(failPass == 0)
+        #expect(failing.handled.count == 1)
+        #expect(!ManualDownloadIntakeHandoff.isProcessed(payload.id, root: root))
+        #expect(!ManualDownloadIntakeHandoff.isFingerprintProcessed(payload.fingerprint, root: root))
+        #expect(ManualDownloadIntakeHandoff.listPending(root: root).count == 1)
+
+        let succeeding = SequenceIntakeHandler(results: [.submitted(message: "ok")])
+        let okPass = await ManualDownloadIntakeProcessor.processPending(
+            handler: succeeding,
+            root: root,
+        )
+        #expect(okPass == 1)
+        #expect(succeeding.handled.count == 1)
+        #expect(ManualDownloadIntakeHandoff.isProcessed(payload.id, root: root))
+        #expect(ManualDownloadIntakeHandoff.listPending(root: root).isEmpty)
+    }
+
+    @Test func torrentHandoffFailurePreservesStagedCopyForRetry() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("intake-torrent-fail-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("RetryMe.torrent")
+        let bytes = Data("torrent-retry-bytes".utf8)
+        try bytes.write(to: file)
+        let root = dir.appendingPathComponent("handoff", isDirectory: true)
+        let payload = try ManualDownloadIntakeHandoff.enqueueTorrent(
+            from: file,
+            mediaType: .audiobook,
+            source: .shareExtension,
+            root: root,
+        )
+        guard let stagedBefore = ManualDownloadIntakeHandoff.stagedTorrentURL(payload, root: root) else {
+            Issue.record("missing staged torrent")
+            return
+        }
+
+        let failing = SequenceIntakeHandler(results: [.failed(message: "network")])
+        _ = await ManualDownloadIntakeProcessor.processPending(handler: failing, root: root)
+        #expect(failing.handled.count == 1)
+        #expect(!ManualDownloadIntakeHandoff.isProcessed(payload.id, root: root))
+        #expect(ManualDownloadIntakeHandoff.listPending(root: root).count == 1)
+        guard let stagedAfterFail = ManualDownloadIntakeHandoff.stagedTorrentURL(payload, root: root) else {
+            Issue.record("staged torrent removed after failed handoff")
+            return
+        }
+        #expect(try Data(contentsOf: stagedAfterFail) == bytes)
+        #expect(stagedAfterFail == stagedBefore)
+
+        let succeeding = SequenceIntakeHandler(results: [.submitted(message: "ok")])
+        let okPass = await ManualDownloadIntakeProcessor.processPending(
+            handler: succeeding,
+            root: root,
+        )
+        #expect(okPass == 1)
+        #expect(ManualDownloadIntakeHandoff.isProcessed(payload.id, root: root))
+        #expect(ManualDownloadIntakeHandoff.stagedTorrentURL(payload, root: root) == nil)
+    }
+
     @Test func duplicateHandoffDoesNotSubmitTwice() async throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("intake-dedupe-\(UUID().uuidString)", isDirectory: true)
@@ -260,5 +338,22 @@ private final class RecordingIntakeHandler: ManualAcquisitionHandling, @unchecke
     func handle(_ candidate: ManualAcquisitionCandidate) async -> ManualAcquisitionHandoffResult {
         handled.append(candidate)
         return .submitted(message: "test")
+    }
+}
+
+private final class SequenceIntakeHandler: ManualAcquisitionHandling, @unchecked Sendable {
+    private var results: [ManualAcquisitionHandoffResult]
+    private(set) var handled: [ManualAcquisitionCandidate] = []
+
+    init(results: [ManualAcquisitionHandoffResult]) {
+        self.results = results
+    }
+
+    func handle(_ candidate: ManualAcquisitionCandidate) async -> ManualAcquisitionHandoffResult {
+        handled.append(candidate)
+        if results.isEmpty {
+            return .failed(message: "unexpected extra handle")
+        }
+        return results.removeFirst()
     }
 }

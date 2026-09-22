@@ -58,7 +58,11 @@ public enum ManualDownloadIntakeProcessor {
                     // Leave payload for a later retry only when the torrent file is still there.
                     continue
                 case .success(let candidate):
-                    _ = await handler.handle(candidate)
+                    let result = await handler.handle(candidate)
+                    guard intakeHandoffSucceeded(result) else {
+                        // Failed Deluge/NAS handoff: keep JSON + App Group torrent for retry.
+                        continue
+                    }
                     ManualDownloadIntakeHandoff.markProcessed(payload, bundle: bundle, root: root)
                     if payload.kind == .torrentFile {
                         ManualDownloadIntakeHandoff.removeStagedTorrent(
@@ -74,5 +78,18 @@ public enum ManualDownloadIntakeProcessor {
             NotificationCenter.default.post(name: .inkampShowManualDownloads, object: nil)
         }
         return processed
+    }
+
+    /// Intake drain only consumes the queue when NAS handoff actually accepted the item.
+    private static func intakeHandoffSucceeded(_ result: ManualAcquisitionHandoffResult) -> Bool {
+        switch result {
+            case .submitted, .completed:
+                true
+            case .placeholder, .failed:
+                false
+            default:
+                // ManualAcquisitionHandoffResult is closed; satisfy exhaustive-switch rule.
+                false
+        }
     }
 }
