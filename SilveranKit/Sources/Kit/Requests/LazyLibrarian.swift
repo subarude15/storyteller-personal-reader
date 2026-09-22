@@ -584,7 +584,7 @@ public struct LazyLibrarianClient: Sendable {
         var reason: String
     }
 
-    private enum MatchLookupFailure: Sendable {
+    private enum MatchLookupFailure: Error, Sendable {
         case noMatch
         case ambiguous([LazyLibrarianCandidate])
         case message(String)
