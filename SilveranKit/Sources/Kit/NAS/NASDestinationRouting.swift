@@ -101,6 +101,11 @@ public enum NASBackendRouting {
         switch transport {
             case .magnet, .torrent:
                 switch settings.torrentClient {
+                    case .torbox:
+                        if !settings.torboxEnabled {
+                            return .failure(.backendNotConfigured(.torbox))
+                        }
+                        return .success(.torbox)
                     case .qbittorrent:
                         if settings.trimmedQBittorrentBaseURL.isEmpty {
                             return .failure(.backendNotConfigured(.qbittorrent))

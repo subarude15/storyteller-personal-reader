@@ -21,6 +21,8 @@ public enum ManualDownloadJobStatus: String, Codable, Sendable, CaseIterable {
     case submitted
     case queued
     case downloading
+    /// Provider is checking / assembling / processing (TorBox and similar).
+    case processing
     /// Deluge finished downloading but is still relocating incoming → completed.
     case delugeFinishing
     /// At Deluge completed staging; ink+amp may call move_storage.
@@ -29,6 +31,8 @@ public enum ManualDownloadJobStatus: String, Codable, Sendable, CaseIterable {
     case routing
     case downloaded
     case uploading
+    /// TorBox (and similar) content is fully available. Phase 2 will transfer to NAS.
+    case ready
     case complete
     case failed
     case unknown
@@ -38,11 +42,13 @@ public enum ManualDownloadJobStatus: String, Codable, Sendable, CaseIterable {
             case .submitted: "Submitted"
             case .queued: "Queued"
             case .downloading: "Downloading"
+            case .processing: "Processing"
             case .delugeFinishing: "Deluge finishing"
             case .readyToRoute: "Ready to route"
             case .routing: "Moving to library"
             case .downloaded: "Downloaded"
             case .uploading: "Uploading"
+            case .ready: "Ready"
             case .complete: "Complete"
             case .failed: "Failed"
             case .unknown: "Unknown"
@@ -52,18 +58,18 @@ public enum ManualDownloadJobStatus: String, Codable, Sendable, CaseIterable {
     public var canRetryUpload: Bool {
         switch self {
             case .downloaded, .failed: true
-            case .submitted, .queued, .downloading, .delugeFinishing, .readyToRoute, .routing,
-                .uploading, .complete, .unknown:
+            case .submitted, .queued, .downloading, .processing, .delugeFinishing, .readyToRoute,
+                .routing, .uploading, .ready, .complete, .unknown:
                 false
         }
     }
 
     public var isActive: Bool {
         switch self {
-            case .queued, .submitted, .downloading, .delugeFinishing, .readyToRoute, .routing,
-                .downloaded, .uploading, .unknown:
+            case .queued, .submitted, .downloading, .processing, .delugeFinishing, .readyToRoute,
+                .routing, .downloaded, .uploading, .unknown:
                 true
-            case .complete, .failed:
+            case .ready, .complete, .failed:
                 false
         }
     }
@@ -92,6 +98,14 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
     /// Set once this Deluge job reaches `readyToRoute` / `routing`. Distinguishes
     /// final-move failures from initial addMagnet failures that still carry a BTIH.
     public var delugeReachedFinalRouting: Bool?
+    /// Raw provider status string (TorBox download_state, etc.) for debugging.
+    public var providerRawStatus: String?
+    /// Info-hash when the provider exposes one (kept separately from numeric TorBox ids).
+    public var providerInfoHash: String?
+    /// TorBox auth_id (and similar) retained for Phase 2 requestdl.
+    public var providerAuthID: String?
+    /// Provider file stubs for Phase 2 NAS transfer / file selection.
+    public var providerFiles: [TorrentJobFile]?
 
     public init(
         id: String = UUID().uuidString,
@@ -114,6 +128,10 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
         totalSize: Int64? = nil,
         lastStatusAt: Date? = nil,
         delugeReachedFinalRouting: Bool? = nil,
+        providerRawStatus: String? = nil,
+        providerInfoHash: String? = nil,
+        providerAuthID: String? = nil,
+        providerFiles: [TorrentJobFile]? = nil,
     ) {
         self.id = id
         self.title = title
@@ -135,6 +153,10 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
         self.totalSize = totalSize
         self.lastStatusAt = lastStatusAt
         self.delugeReachedFinalRouting = delugeReachedFinalRouting
+        self.providerRawStatus = providerRawStatus
+        self.providerInfoHash = providerInfoHash
+        self.providerAuthID = providerAuthID
+        self.providerFiles = providerFiles
     }
 
     public var hasReachedDelugeFinalRouting: Bool {
@@ -150,7 +172,7 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
     }
 
     public var canRetryTorrentNow: Bool {
-        (backend == .qbittorrent || backend == .deluge)
+        (backend == .qbittorrent || backend == .deluge || backend == .torbox)
             && status == .failed
             && !canRetryRoutingNow
             && (sourceURL != nil || hasStagedFile)

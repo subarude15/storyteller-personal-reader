@@ -14,7 +14,7 @@ struct NASDownloadsSettingsSection: View {
             Text("NAS Downloads")
         } footer: {
             Text(
-                "Configure torrent clients, Synology upload, and destination folders. Active jobs live in Downloads (More → Downloads)."
+                "Configure TorBox / Deluge / qBittorrent, Synology upload, and destination folders. Active jobs live in Downloads (More → Downloads)."
             )
         }
     }
@@ -26,16 +26,19 @@ struct NASDownloadsSettingsView: View {
     @State private var qbPasswordSaved = false
     @State private var synologyPasswordDraft = ""
     @State private var synologyPasswordSaved = false
+    @State private var torboxAPIKeyDraft = ""
+    @State private var torboxAPIKeySaved = false
     @State private var qbStatus: QBittorrentConnection?
     @State private var synologyStatus: SynologyConnection?
     @State private var delugeStatus: DelugeConnection?
+    @State private var torboxStatus: TorBoxConnection?
     @State private var checking: String?
     @State private var secretError: String?
 
     var body: some View {
         List {
             Section {
-                Picker("Torrent client", selection: torrentClientBinding) {
+                Picker("Default torrent provider", selection: torrentClientBinding) {
                     ForEach(NASTorrentClient.allCases, id: \.self) { client in
                         Text(client.label).tag(client)
                     }
@@ -43,10 +46,45 @@ struct NASDownloadsSettingsView: View {
                 Toggle("Start downloads automatically", isOn: startAutomaticallyBinding)
                 Toggle("Create title/author subfolders", isOn: subfoldersBinding)
             } header: {
-                Text("Routing")
+                Text("Torrent Provider")
             } footer: {
                 Text(
-                    "Torrents and magnets go to the selected torrent client. Direct HTTP files download locally, then upload to Synology. Subfolders stay under the configured folder."
+                    "Magnets and .torrent files go to the selected provider. TorBox is recommended for new setups; Deluge and qBittorrent remain available. Direct HTTP files still download locally, then upload to Synology."
+                )
+            }
+
+            Section {
+                Toggle("Enabled", isOn: torboxEnabledBinding)
+                SecureField(
+                    "API Key",
+                    text: $torboxAPIKeyDraft,
+                    prompt: Text(torboxAPIKeySaved ? "Saved — enter a new key to replace" : "TorBox API token"),
+                )
+                .textContentType(.password)
+                .autocorrectionDisabled()
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                .keyboardType(.asciiCapable)
+                #endif
+                .onSubmit { Task { await saveTorBoxAPIKey() } }
+                if torboxAPIKeySaved, torboxAPIKeyDraft.isEmpty {
+                    Text("••••••••••••••••")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("API key saved")
+                    Button("Remove API Key", role: .destructive) {
+                        Task { await removeTorBoxAPIKey() }
+                    }
+                }
+                testButton(id: "torbox", title: "Test Connection") {
+                    await testTorBox()
+                }
+                statusRow(ok: torboxStatus?.isOK == true, message: torboxStatus?.message)
+            } header: {
+                Text("TorBox")
+            } footer: {
+                Text(
+                    "API key is stored in the device Keychain and never shown in full after save. Create one at torbox.app → Settings → API. Phase 1 tracks TorBox jobs in Downloads; automatic NAS transfer is Phase 2."
                 )
             }
 
@@ -76,7 +114,9 @@ struct NASDownloadsSettingsView: View {
             } header: {
                 Text("Destination folders")
             } footer: {
-                Text("The app picks the folder from the book type. You do not choose it each time.")
+                Text(
+                    "Used now for Deluge/qBittorrent/Synology routing, and retained for TorBox → NAS transfer in Phase 2."
+                )
             }
 
             Section {
@@ -147,7 +187,7 @@ struct NASDownloadsSettingsView: View {
                 Text("Deluge")
             } footer: {
                 Text(
-                    "Reuses the existing Deluge WebUI password from Settings. Magnets start in Incoming; after Deluge moves them to Completed, ink+amp routes to the eBook or Audiobook folder."
+                    "Optional fallback provider. Reuses the existing Deluge WebUI password from Settings. Magnets start in Incoming; after Deluge moves them to Completed, ink+amp routes to the eBook or Audiobook folder."
                 )
             }
 
@@ -252,6 +292,7 @@ struct NASDownloadsSettingsView: View {
             snapshot = NASDownloadSettingsStore.shared.snapshot
             qbPasswordSaved = await AuthenticationActor.shared.hasQBittorrentPassword()
             synologyPasswordSaved = await AuthenticationActor.shared.hasSynologyPassword()
+            torboxAPIKeySaved = await AuthenticationActor.shared.hasTorBoxAPIKey()
             let configURL = await SettingsActor.shared.config.delugeBaseURL
             let resolved = snapshot.resolvedDelugeBaseURL(configURL: configURL)
             if snapshot.trimmedDelugeBaseURL.isEmpty, !resolved.isEmpty {
@@ -266,12 +307,16 @@ struct NASDownloadsSettingsView: View {
             persist()
             let qbDraft = qbPasswordDraft
             let synologyDraft = synologyPasswordDraft
+            let torboxDraft = torboxAPIKeyDraft
             Task {
                 if !qbDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     try? await AuthenticationActor.shared.saveQBittorrentPassword(qbDraft)
                 }
                 if !synologyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     try? await AuthenticationActor.shared.saveSynologyPassword(synologyDraft)
+                }
+                if !torboxDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    try? await AuthenticationActor.shared.saveTorBoxAPIKey(torboxDraft)
                 }
             }
         }
@@ -281,6 +326,13 @@ struct NASDownloadsSettingsView: View {
         Binding(
             get: { snapshot.torrentClient },
             set: { snapshot.torrentClient = $0; persist() },
+        )
+    }
+
+    private var torboxEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { snapshot.torboxEnabled },
+            set: { snapshot.torboxEnabled = $0; persist() },
         )
     }
 
@@ -370,6 +422,31 @@ struct NASDownloadsSettingsView: View {
         }
     }
 
+    private func saveTorBoxAPIKey() async {
+        let draft = torboxAPIKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !draft.isEmpty else { return }
+        do {
+            try await AuthenticationActor.shared.saveTorBoxAPIKey(draft)
+            torboxAPIKeyDraft = ""
+            torboxAPIKeySaved = true
+            secretError = nil
+        } catch {
+            secretError = "Could not save the TorBox API key."
+        }
+    }
+
+    private func removeTorBoxAPIKey() async {
+        do {
+            try await AuthenticationActor.shared.deleteTorBoxAPIKey()
+            torboxAPIKeyDraft = ""
+            torboxAPIKeySaved = false
+            torboxStatus = nil
+            secretError = nil
+        } catch {
+            secretError = "Could not remove the TorBox API key."
+        }
+    }
+
     private func saveQBittorrentPassword() async {
         let draft = qbPasswordDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !draft.isEmpty else { return }
@@ -418,6 +495,16 @@ struct NASDownloadsSettingsView: View {
         } catch {
             secretError = "Could not remove the Synology password."
         }
+    }
+
+    private func testTorBox() async {
+        checking = "torbox"
+        torboxStatus = nil
+        defer { checking = nil }
+        persist()
+        await saveTorBoxAPIKey()
+        let key = (try? await AuthenticationActor.shared.loadTorBoxAPIKey()) ?? ""
+        torboxStatus = await TorBoxClient().testConnection(apiKey: key)
     }
 
     private func testQBittorrent() async {

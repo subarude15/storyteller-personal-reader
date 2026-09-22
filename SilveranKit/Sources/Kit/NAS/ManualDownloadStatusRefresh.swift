@@ -13,17 +13,20 @@ public struct ManualDownloadStatusRefresh: Sendable {
     public var environment: any NASHandoffEnvironment
     public var qbittorrent: QBittorrentClient
     public var deluge: DelugeWebClient
+    public var torbox: TorBoxClient
     public var jobs: any ManualDownloadJobStoring
 
     public init(
         environment: any NASHandoffEnvironment,
         qbittorrent: QBittorrentClient = QBittorrentClient(),
         deluge: DelugeWebClient = DelugeWebClient(),
+        torbox: TorBoxClient = TorBoxClient(),
         jobs: any ManualDownloadJobStoring = ManualDownloadJobStore.shared,
     ) {
         self.environment = environment
         self.qbittorrent = qbittorrent
         self.deluge = deluge
+        self.torbox = torbox
         self.jobs = jobs
     }
 
@@ -38,6 +41,7 @@ public struct ManualDownloadStatusRefresh: Sendable {
         var updated: [ManualDownloadJob] = []
         updated.append(contentsOf: await refreshQBittorrent(current, context: context))
         updated.append(contentsOf: await refreshDeluge(current, context: context))
+        updated.append(contentsOf: await refreshTorBox(current, context: context))
         return updated
     }
 
@@ -225,6 +229,67 @@ public struct ManualDownloadStatusRefresh: Sendable {
             )
             await jobs.record(next)
             return next
+        }
+    }
+
+    private func refreshTorBox(
+        _ current: [ManualDownloadJob],
+        context: NASHandoffContext,
+    ) async -> [ManualDownloadJob] {
+        let targets = current.filter {
+            $0.backend == .torbox && $0.status.isActive && !($0.backendJobID ?? "").isEmpty
+        }
+        guard !targets.isEmpty else { return [] }
+        let key = context.credentials.torboxAPIKey
+        guard !key.isEmpty else { return await markUnknown(targets) }
+        var changed: [ManualDownloadJob] = []
+        for job in targets {
+            guard let id = job.backendJobID else {
+                let next = ManualDownloadStatusMapping.markUnknown(job)
+                await jobs.record(next)
+                changed.append(next)
+                continue
+            }
+            do {
+                let info = try await torbox.getTorrent(apiKey: key, id: id, bypassCache: true)
+                let next = TorBoxStatusMapping.apply(info, to: job)
+                await jobs.record(next)
+                changed.append(next)
+            } catch let error as TorBoxClientError {
+                switch error {
+                    case .rejected(let detail)
+                    where detail.lowercased().contains("not found")
+                        || detail.lowercased().contains("no torrent"):
+                        let next = ManualDownloadStatusMapping.markFailed(
+                            job,
+                            message: "That torrent is no longer in TorBox.",
+                        )
+                        await jobs.record(next)
+                        changed.append(next)
+                    default:
+                        let next = ManualDownloadStatusMapping.markUnknown(job)
+                        await jobs.record(next)
+                        changed.append(next)
+                }
+            } catch {
+                let next = ManualDownloadStatusMapping.markUnknown(job)
+                await jobs.record(next)
+                changed.append(next)
+            }
+        }
+        return changed
+    }
+
+    /// Remove a TorBox cloud torrent when the user deletes a Downloads row.
+    public func deleteRemoteIfNeeded(job: ManualDownloadJob) async {
+        guard job.backend == .torbox, let id = job.backendJobID, !id.isEmpty else { return }
+        let context = await environment.load()
+        let key = context.credentials.torboxAPIKey
+        guard !key.isEmpty else { return }
+        do {
+            try await torbox.deleteTorrent(apiKey: key, id: id)
+        } catch {
+            debugLog("[TorBox] delete remote failed id=\(id)")
         }
     }
 
