@@ -291,6 +291,149 @@ public actor AuthenticationActor {
         return !password.isEmpty
     }
 
+    public struct StorytellerCredentialBackup: Codable, Equatable, Sendable {
+        public var sourceID: BookSourceID
+        public var url: String
+        public var lanURL: String?
+        public var username: String
+        public var password: String
+
+        public init(
+            sourceID: BookSourceID,
+            url: String,
+            lanURL: String?,
+            username: String,
+            password: String
+        ) {
+            self.sourceID = sourceID
+            self.url = url
+            self.lanURL = lanURL
+            self.username = username
+            self.password = password
+        }
+    }
+
+    public struct LegacyStorytellerCredentialBackup: Codable, Equatable, Sendable {
+        public var url: String
+        public var username: String
+        public var password: String
+    }
+
+    /// Explicit credential allowlist for an encrypted ink+amp backup.
+    ///
+    /// This intentionally exports values through the actor's typed accessors instead
+    /// of dumping the Keychain database, which may contain unrelated app or signing
+    /// records.
+    public struct PortableBackup: Codable, Equatable, Sendable {
+        public var storyteller: [StorytellerCredentialBackup]
+        public var legacyStoryteller: LegacyStorytellerCredentialBackup?
+        public var hardcoverToken: String?
+        public var lazyLibrarianAPIKey: String?
+        public var prowlarrAPIKey: String?
+        public var jackettAPIKey: String?
+        public var delugePassword: String?
+        public var qbittorrentPassword: String?
+        public var synologyPassword: String?
+        public var torboxAPIKey: String?
+        public var torboxarrPassword: String?
+
+        public init(
+            storyteller: [StorytellerCredentialBackup] = [],
+            legacyStoryteller: LegacyStorytellerCredentialBackup? = nil,
+            hardcoverToken: String? = nil,
+            lazyLibrarianAPIKey: String? = nil,
+            prowlarrAPIKey: String? = nil,
+            jackettAPIKey: String? = nil,
+            delugePassword: String? = nil,
+            qbittorrentPassword: String? = nil,
+            synologyPassword: String? = nil,
+            torboxAPIKey: String? = nil,
+            torboxarrPassword: String? = nil
+        ) {
+            self.storyteller = storyteller
+            self.legacyStoryteller = legacyStoryteller
+            self.hardcoverToken = hardcoverToken
+            self.lazyLibrarianAPIKey = lazyLibrarianAPIKey
+            self.prowlarrAPIKey = prowlarrAPIKey
+            self.jackettAPIKey = jackettAPIKey
+            self.delugePassword = delugePassword
+            self.qbittorrentPassword = qbittorrentPassword
+            self.synologyPassword = synologyPassword
+            self.torboxAPIKey = torboxAPIKey
+            self.torboxarrPassword = torboxarrPassword
+        }
+    }
+
+    public func makePortableBackup(sourceIDs: [BookSourceID]) async throws -> PortableBackup {
+        var storyteller: [StorytellerCredentialBackup] = []
+        for sourceID in sourceIDs {
+            guard let credentials = try await loadCredentials(sourceID: sourceID) else { continue }
+            storyteller.append(
+                StorytellerCredentialBackup(
+                    sourceID: sourceID,
+                    url: credentials.url,
+                    lanURL: credentials.lanURL,
+                    username: credentials.username,
+                    password: credentials.password
+                )
+            )
+        }
+
+        let legacyStoryteller: LegacyStorytellerCredentialBackup?
+        if let credentials = try await loadCredentials() {
+            legacyStoryteller = LegacyStorytellerCredentialBackup(
+                url: credentials.url,
+                username: credentials.username,
+                password: credentials.password
+            )
+        } else {
+            legacyStoryteller = nil
+        }
+
+        return PortableBackup(
+            storyteller: storyteller.sorted { $0.sourceID < $1.sourceID },
+            legacyStoryteller: legacyStoryteller,
+            hardcoverToken: try await loadHardcoverToken(),
+            lazyLibrarianAPIKey: try await loadLazyLibrarianAPIKey(),
+            prowlarrAPIKey: try await loadProwlarrAPIKey(),
+            jackettAPIKey: try await loadJackettAPIKey(),
+            delugePassword: try await loadDelugePassword(),
+            qbittorrentPassword: try await loadQBittorrentPassword(),
+            synologyPassword: try await loadSynologyPassword(),
+            torboxAPIKey: try await loadTorBoxAPIKey(),
+            torboxarrPassword: try await loadTorBoxarrPassword()
+        )
+    }
+
+    /// Restores only values present in the backup. Existing credentials that are
+    /// absent from the file are left untouched.
+    public func restorePortableBackup(_ backup: PortableBackup) async throws {
+        for credentials in backup.storyteller {
+            try await saveCredentials(
+                url: credentials.url,
+                lanURL: credentials.lanURL,
+                username: credentials.username,
+                password: credentials.password,
+                sourceID: credentials.sourceID
+            )
+        }
+
+        if let legacy = backup.legacyStoryteller {
+            try await saveString(legacy.url, for: serverURLKey)
+            try await saveString(legacy.username, for: usernameKey)
+            try await saveString(legacy.password, for: passwordKey)
+        }
+        if let value = backup.hardcoverToken { try await saveHardcoverToken(value) }
+        if let value = backup.lazyLibrarianAPIKey { try await saveLazyLibrarianAPIKey(value) }
+        if let value = backup.prowlarrAPIKey { try await saveProwlarrAPIKey(value) }
+        if let value = backup.jackettAPIKey { try await saveJackettAPIKey(value) }
+        if let value = backup.delugePassword { try await saveDelugePassword(value) }
+        if let value = backup.qbittorrentPassword { try await saveQBittorrentPassword(value) }
+        if let value = backup.synologyPassword { try await saveSynologyPassword(value) }
+        if let value = backup.torboxAPIKey { try await saveTorBoxAPIKey(value) }
+        if let value = backup.torboxarrPassword { try await saveTorBoxarrPassword(value) }
+    }
+
     private func saveString(_ value: String, for account: String) async throws {
         guard let data = value.data(using: .utf8) else {
             throw KeychainError.invalidData
