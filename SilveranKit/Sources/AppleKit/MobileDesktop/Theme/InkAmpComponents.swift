@@ -137,15 +137,24 @@ public struct InkAmpProgressBar: View {
         self.height = height
     }
 
+    /// Fill width for the accent capsule. Zero progress must not paint a residual dot.
+    public static func fillWidth(progress: Double, totalWidth: CGFloat) -> CGFloat {
+        let clamped = min(max(progress, 0), 1)
+        guard clamped > 0 else { return 0 }
+        return totalWidth * clamped
+    }
+
     public var body: some View {
         GeometryReader { proxy in
-            let clamped = min(max(progress, 0), 1)
+            let fill = Self.fillWidth(progress: progress, totalWidth: proxy.size.width)
             ZStack(alignment: .leading) {
                 Capsule(style: .continuous)
                     .fill(theme.progress.opacity(0.18))
-                Capsule(style: .continuous)
-                    .fill(theme.progress)
-                    .frame(width: max(height, proxy.size.width * clamped))
+                if fill > 0 {
+                    Capsule(style: .continuous)
+                        .fill(theme.progress)
+                        .frame(width: fill)
+                }
             }
         }
         .frame(height: height)

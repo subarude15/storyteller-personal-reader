@@ -86,4 +86,13 @@ struct InkAmpAppThemeTests {
             #expect(names.contains(role), "Missing semantic role \(role)")
         }
     }
+
+    @Test func progressBarFillWidthHidesAccentAtZero() {
+        let total: CGFloat = 200
+        #expect(InkAmpProgressBar.fillWidth(progress: 0, totalWidth: total) == 0)
+        #expect(InkAmpProgressBar.fillWidth(progress: -0.5, totalWidth: total) == 0)
+        #expect(InkAmpProgressBar.fillWidth(progress: 0.25, totalWidth: total) == 50)
+        #expect(InkAmpProgressBar.fillWidth(progress: 1, totalWidth: total) == total)
+        #expect(InkAmpProgressBar.fillWidth(progress: 1.5, totalWidth: total) == total)
+    }
 }
