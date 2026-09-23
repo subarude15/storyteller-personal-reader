@@ -155,6 +155,10 @@ public struct SilveranWidgetSnapshot: Codable, Sendable, Hashable {
 }
 
 public enum SilveranWidgetSnapshotStore {
+    /// Hidden at the App Group root because AltStore Classic excludes hidden
+    /// entries while backing up App Group containers. Widget snapshots and cover
+    /// thumbnails are derived data and must never be restored across installs.
+    public static let transientStateDirectoryName = ".InkAmpWidgetState"
     private static let snapshotFilename = "currently-reading.json"
     private static let coversDirectoryName = "Covers"
 
@@ -233,6 +237,7 @@ public enum SilveranWidgetSnapshotStore {
 
         do {
             try ensureDirectoryExists(at: container)
+            try prepareTransientState(in: container)
             try ensureDirectoryExists(at: coversDirectory(in: container))
             var snapshot = makeSnapshot(
                 metadata: metadata,
@@ -360,12 +365,61 @@ public enum SilveranWidgetSnapshotStore {
         }
     }
 
+    public static func transientStateDirectory(in container: URL) -> URL {
+        container.appendingPathComponent(transientStateDirectoryName, isDirectory: true)
+    }
+
+    /// Clears any state that could have been reintroduced by an external full
+    /// container restore. Durable app data is not stored in this directory.
+    public static func resetTransientStateAfterExternalRestore(bundle: Bundle = .main) {
+        guard let container = sharedContainerURL(bundle: bundle) else { return }
+        do {
+            let directory = transientStateDirectory(in: container)
+            if FileManager.default.fileExists(atPath: directory.path) {
+                try FileManager.default.removeItem(at: directory)
+            }
+            try removeLegacyTopLevelState(in: container)
+            try prepareTransientState(in: container)
+            reloadWidgetTimelines()
+        } catch {
+            debugLog("[SilveranWidgetSnapshotStore] Failed to reset transient state: \(error)")
+        }
+    }
+
     private static func snapshotURL(in container: URL) -> URL {
-        container.appendingPathComponent(snapshotFilename, isDirectory: false)
+        transientStateDirectory(in: container)
+            .appendingPathComponent(snapshotFilename, isDirectory: false)
     }
 
     private static func coversDirectory(in container: URL) -> URL {
-        container.appendingPathComponent(coversDirectoryName, isDirectory: true)
+        transientStateDirectory(in: container)
+            .appendingPathComponent(coversDirectoryName, isDirectory: true)
+    }
+
+    public static func prepareTransientState(in container: URL) throws {
+        let directory = transientStateDirectory(in: container)
+        try ensureDirectoryExists(at: directory)
+
+        // Also tell Apple backup services this directory is cache-like. The
+        // leading dot handles AltStore Classic's independent App Group copier.
+        var resourceValues = URLResourceValues()
+        resourceValues.isExcludedFromBackup = true
+        var mutableDirectory = directory
+        try mutableDirectory.setResourceValues(resourceValues)
+
+        try removeLegacyTopLevelState(in: container)
+    }
+
+    private static func removeLegacyTopLevelState(in container: URL) throws {
+        let legacyEntries = [
+            container.appendingPathComponent(snapshotFilename, isDirectory: false),
+            container.appendingPathComponent(coversDirectoryName, isDirectory: true),
+            container.appendingPathComponent("continue-now.json", isDirectory: false),
+            container.appendingPathComponent("ContinueCovers", isDirectory: true),
+        ]
+        for url in legacyEntries where FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
     }
 
     private static func ensureDirectoryExists(at url: URL) throws {
