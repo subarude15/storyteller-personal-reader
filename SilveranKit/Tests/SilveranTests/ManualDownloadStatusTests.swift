@@ -220,6 +220,27 @@ struct ManualDownloadHistoryTests {
         #expect(job.retryAction == .retryRouting)
     }
 
+    @Test func failedTorBoxarrRoutingExposesRetryMoveNotMagnetResubmit() {
+        var job = sampleJob(backend: .torbox, status: .failed, hash: "publicid")
+        job.viaTorBoxarr = true
+        job.fileStationReachedFinalRouting = true
+        job.fileStationMoveTaskID = "task-old"
+        #expect(job.canRetryRoutingNow)
+        #expect(!job.canRetryTorrentNow)
+        #expect(!job.canRetryTransferNow)
+        #expect(job.retryAction == .retryRouting)
+    }
+
+    @Test func failedTorBoxarrSubmitWithoutRoutingUsesTorrentRetry() {
+        var job = sampleJob(backend: .torbox, status: .failed, hash: nil)
+        job.viaTorBoxarr = true
+        job.sourceURL = "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567"
+        job.fileStationReachedFinalRouting = nil
+        #expect(!job.canRetryRoutingNow)
+        #expect(job.canRetryTorrentNow)
+        #expect(job.retryAction == .retryTorrent)
+    }
+
     @Test func failedDelugeSubmitWithMagnetHashUsesTorrentRetryNotMove() {
         // makeJob derives backendJobID from magnet BTIH even when addMagnet fails.
         let magnet =

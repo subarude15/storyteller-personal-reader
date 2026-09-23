@@ -119,6 +119,7 @@ public enum ManualDownloadStatusMapping {
             updated.lastError = nil
         }
         updated.markDelugeFinalRoutingIfNeeded()
+        updated.markFileStationFinalRoutingIfNeeded()
         return updated
     }
 
@@ -153,7 +154,9 @@ public enum ManualDownloadStatusMapping {
         updated.progress = 1
         updated.lastError = nil
         updated.lastStatusAt = date
+        updated.fileStationMoveTaskID = nil
         updated.markDelugeFinalRoutingIfNeeded()
+        updated.markFileStationFinalRoutingIfNeeded()
         return updated
     }
 
@@ -187,6 +190,22 @@ extension ManualDownloadJob {
         switch status {
             case .readyToRoute, .routing, .complete:
                 delugeReachedFinalRouting = true
+            case .submitted, .queued, .downloading, .processing, .delugeFinishing, .downloaded,
+                .uploading, .ready, .transferring, .failed, .unknown:
+                break
+        }
+    }
+
+    /// Persist that TorBoxarr File Station routing has begun (Retry Move, not Retry).
+    mutating func markFileStationFinalRoutingIfNeeded(force: Bool = false) {
+        guard backend == .torbox, viaTorBoxarr == true else { return }
+        if force {
+            fileStationReachedFinalRouting = true
+            return
+        }
+        switch status {
+            case .readyToRoute, .routing, .complete:
+                fileStationReachedFinalRouting = true
             case .submitted, .queued, .downloading, .processing, .delugeFinishing, .downloaded,
                 .uploading, .ready, .transferring, .failed, .unknown:
                 break

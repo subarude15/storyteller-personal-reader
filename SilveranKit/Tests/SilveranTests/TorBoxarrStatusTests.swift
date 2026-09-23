@@ -179,7 +179,7 @@ struct TorBoxarrStatusTests {
         )
         let cloud = CloudSpy()
         let nas = NASScript()
-        nas.revealAfterMove = false
+        nas.taskFinished = false
         let jobs = StatusHistory()
         await jobs.record(sample(status: .submitted, destination: ebook, media: .ebook))
         _ = await makeRefresh(jobs: jobs, bridge: bridge, cloud: cloud, nas: nas).refresh()
@@ -187,6 +187,7 @@ struct TorBoxarrStatusTests {
         #expect(jobs.statuses.contains(.routing))
         #expect(jobs.jobs[0].status == .routing)
         #expect(jobs.jobs[0].status != .complete)
+        #expect(jobs.jobs[0].fileStationMoveTaskID == "task-1")
         #expect(jobs.jobs[0].destination == ebook)
         #expect(jobs.jobs[0].lastError?.contains("Nothing was moved") != true)
         #expect(movedVolumePaths(nas.movedPaths) == ["/data/torrents/completed/Selected Title"])
@@ -194,12 +195,178 @@ struct TorBoxarrStatusTests {
         #expect(nas.movedPaths.allSatisfy { !$0.contains("/data/completed/") })
         #expect(nas.destinations == ["/data/media/books/books"])
         #expect(nas.removeSrc == ["true"])
+        #expect(nas.statusCalls == 0) // no same-pass polling
         #expect(nas.movedPaths.allSatisfy { !$0.contains("Other Book") && !$0.contains("API Name") && !$0.contains("Magnet Display") })
         #expect(bridge.urls.allSatisfy { !$0.path.contains("/torrents/files") })
         #expect(bridge.urls.allSatisfy { !$0.path.contains("setLocation") && !$0.path.contains("torrents/delete") })
         #expect(cloud.calls == 0)
         #expect(jobs.jobs[0].lastError?.contains("nas-secret") != true)
         #expect(jobs.jobs[0].lastError?.contains("bridge-secret") != true)
+    }
+
+    @Test func copyMoveStartLeavesJobRoutingWithPersistedTaskID() async {
+        let bridge = BridgeStatusScript()
+        bridge.infoBody = infoJSON(
+            state: "uploading",
+            progress: 1,
+            contentPath: apiCompleted + "/Selected Title",
+            savePath: apiCompleted,
+        )
+        let nas = NASScript()
+        nas.taskFinished = false
+        let jobs = StatusHistory()
+        await jobs.record(sample(status: .submitted, destination: ebook, media: .ebook))
+        _ = await makeRefresh(jobs: jobs, bridge: bridge, cloud: CloudSpy(), nas: nas).refresh()
+
+        #expect(jobs.jobs[0].status == .routing)
+        #expect(jobs.jobs[0].fileStationMoveTaskID == "task-1")
+        #expect(nas.startCalls == 1)
+        #expect(nas.statusCalls == 0)
+        #expect(jobs.jobs[0].status != .failed)
+        #expect(jobs.jobs[0].lastError == nil)
+    }
+
+    @Test func nextRefreshSeesRunningTaskWithoutSecondCopyMoveStart() async {
+        let bridge = BridgeStatusScript()
+        bridge.infoBody = infoJSON(
+            state: "uploading",
+            progress: 1,
+            contentPath: apiCompleted + "/Selected Title",
+            savePath: apiCompleted,
+        )
+        let nas = NASScript()
+        nas.taskFinished = false
+        let jobs = StatusHistory()
+        await jobs.record(sample(status: .submitted, destination: ebook, media: .ebook))
+        let refresh = makeRefresh(jobs: jobs, bridge: bridge, cloud: CloudSpy(), nas: nas)
+        _ = await refresh.refresh()
+        #expect(nas.startCalls == 1)
+
+        _ = await refresh.refresh()
+        #expect(jobs.jobs[0].status == .routing)
+        #expect(jobs.jobs[0].fileStationMoveTaskID == "task-1")
+        #expect(nas.startCalls == 1)
+        #expect(nas.statusCalls >= 1)
+    }
+
+    @Test func laterRefreshSeesFinishedTaskAndDestinationPayloadCompletes() async {
+        let landed = await routeUntilListed(destination: ebook, media: .ebook)
+        #expect(landed.job.status == .complete)
+        #expect(landed.job.fileStationMoveTaskID == nil)
+        #expect(landed.startCalls == 1)
+        #expect(landed.routingIndex < landed.completeIndex)
+    }
+
+    @Test func relaunchWithPersistedRoutingTaskResumesWithoutDuplicateMove() async {
+        let bridge = BridgeStatusScript()
+        bridge.infoBody = infoJSON(
+            state: "uploading",
+            progress: 1,
+            contentPath: apiCompleted + "/Selected Title",
+            savePath: apiCompleted,
+        )
+        let nas = NASScript()
+        nas.taskFinished = false
+        let jobs = StatusHistory()
+        var job = sample(status: .routing, destination: ebook, media: .ebook)
+        job.fileStationMoveTaskID = "task-persisted"
+        job.fileStationReachedFinalRouting = true
+        job.filename = "Selected Title"
+        await jobs.record(job)
+        _ = await makeRefresh(jobs: jobs, bridge: bridge, cloud: CloudSpy(), nas: nas).refresh()
+
+        #expect(nas.startCalls == 0)
+        #expect(nas.statusCalls >= 1)
+        #expect(jobs.jobs[0].status == .routing)
+        #expect(jobs.jobs[0].fileStationMoveTaskID == "task-persisted")
+    }
+
+    @Test func destinationAlreadyContainsPayloadCompletesWithoutStartingCopyMove() async {
+        let bridge = BridgeStatusScript()
+        bridge.infoBody = infoJSON(
+            state: "uploading",
+            progress: 1,
+            contentPath: apiCompleted + "/Selected Title",
+            savePath: apiCompleted,
+        )
+        let nas = NASScript()
+        nas.listNames = ["Selected Title"]
+        nas.listAlwaysShow = true
+        let jobs = StatusHistory()
+        await jobs.record(sample(status: .submitted, destination: ebook, media: .ebook))
+        _ = await makeRefresh(jobs: jobs, bridge: bridge, cloud: CloudSpy(), nas: nas).refresh()
+
+        #expect(jobs.jobs[0].status == .complete)
+        #expect(nas.startCalls == 0)
+        #expect(jobs.jobs[0].fileStationMoveTaskID == nil)
+    }
+
+    @Test func dsmTaskFailureProducesFailedRoutingErrorWithoutDuplicateMove() async {
+        let bridge = BridgeStatusScript()
+        bridge.infoBody = infoJSON(
+            state: "uploading",
+            progress: 1,
+            contentPath: apiCompleted + "/Selected Title",
+            savePath: apiCompleted,
+        )
+        let nas = NASScript()
+        nas.taskFinished = false
+        let jobs = StatusHistory()
+        await jobs.record(sample(status: .submitted, destination: ebook, media: .ebook))
+        let refresh = makeRefresh(jobs: jobs, bridge: bridge, cloud: CloudSpy(), nas: nas)
+        _ = await refresh.refresh()
+        nas.taskFailed = true
+        _ = await refresh.refresh()
+
+        #expect(jobs.jobs[0].status == .failed)
+        #expect(jobs.jobs[0].canRetryRoutingNow)
+        #expect(jobs.jobs[0].retryAction == .retryRouting)
+        #expect(jobs.jobs[0].lastError?.contains("CopyMove task failed") == true)
+        #expect(nas.startCalls == 1)
+        #expect(jobs.jobs[0].lastError?.contains("nas-secret") != true)
+    }
+
+    @Test func temporaryNASStatusFailureDoesNotStartSecondMove() async {
+        let bridge = BridgeStatusScript()
+        bridge.infoBody = infoJSON(
+            state: "uploading",
+            progress: 1,
+            contentPath: apiCompleted + "/Selected Title",
+            savePath: apiCompleted,
+        )
+        let nas = NASScript()
+        nas.taskFinished = false
+        let jobs = StatusHistory()
+        await jobs.record(sample(status: .submitted, destination: ebook, media: .ebook))
+        let refresh = makeRefresh(jobs: jobs, bridge: bridge, cloud: CloudSpy(), nas: nas)
+        _ = await refresh.refresh()
+        nas.statusThrowsUnreachable = true
+        _ = await refresh.refresh()
+
+        #expect(jobs.jobs[0].status == .routing)
+        #expect(jobs.jobs[0].fileStationMoveTaskID == "task-1")
+        #expect(nas.startCalls == 1)
+        #expect(jobs.jobs[0].status != .failed)
+    }
+
+    @Test func fileStationMoveTaskIDRoundTripsThroughCodable() throws {
+        var job = sample(status: .routing, destination: ebook, media: .ebook)
+        job.fileStationMoveTaskID = "task-abc"
+        job.fileStationReachedFinalRouting = true
+        let data = try JSONEncoder().encode(job)
+        let decoded = try JSONDecoder().decode(ManualDownloadJob.self, from: data)
+        #expect(decoded.fileStationMoveTaskID == "task-abc")
+        #expect(decoded.fileStationReachedFinalRouting == true)
+
+        // Legacy jobs without the new keys still decode.
+        let legacy = """
+        {"id":"tb","title":"t","author":"a","sourceHost":"magnet","backend":"torbox","mediaType":"ebook","destination":"\(ebook)","submittedAt":"2026-01-01T00:00:00Z","status":"routing","viaTorBoxarr":true}
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let old = try decoder.decode(ManualDownloadJob.self, from: Data(legacy.utf8))
+        #expect(old.fileStationMoveTaskID == nil)
+        #expect(old.fileStationReachedFinalRouting == nil)
     }
 
     @Test func ebookDestinationIsKeptAndJobCompletesOnlyAfterTheMoveLands() async {
@@ -213,6 +380,7 @@ struct TorBoxarrStatusTests {
         #expect(landed.moved.allSatisfy { !$0.contains("/data/completed/") })
         #expect(landed.destinations == ["/data/media/books/books"])
         #expect(landed.cloudCalls == 0)
+        #expect(landed.startCalls == 1)
     }
 
     @Test func audiobookDestinationIsKeptAndJobCompletesOnlyAfterTheMoveLands() async {
@@ -238,12 +406,17 @@ struct TorBoxarrStatusTests {
         [{"name":"Selected Title/chapter 1.mp3"},{"name":"Selected Title/chapter 2.mp3"}]
         """
         let nas = NASScript()
-        nas.revealAfterMove = true
-        nas.listNames = ["Selected Title"]
+        nas.taskFinished = false
         let cloud = CloudSpy()
         let jobs = StatusHistory()
         await jobs.record(sample(status: .downloading, destination: audiobook, media: .audiobook))
-        _ = await makeRefresh(jobs: jobs, bridge: bridge, cloud: cloud, nas: nas).refresh()
+        let refresh = makeRefresh(jobs: jobs, bridge: bridge, cloud: cloud, nas: nas)
+        _ = await refresh.refresh()
+        #expect(jobs.jobs[0].status == .routing)
+        #expect(nas.startCalls == 1)
+        nas.taskFinished = true
+        nas.listNames = ["Selected Title"]
+        _ = await refresh.refresh()
 
         #expect(bridge.urls.contains { $0.path.contains("/torrents/files") })
         #expect(movedVolumePaths(nas.movedPaths) == ["/data/torrents/completed/Selected Title"])
@@ -252,6 +425,7 @@ struct TorBoxarrStatusTests {
         #expect(nas.destinations == ["/data/media/books/audiobooks"])
         #expect(jobs.jobs[0].status == .complete)
         #expect(jobs.jobs[0].destination == audiobook)
+        #expect(nas.startCalls == 1)
         #expect(cloud.calls == 0)
     }
 
@@ -380,12 +554,17 @@ struct TorBoxarrStatusTests {
             torrentName: "Magnet Display Name",
         )
         let nas = NASScript()
-        nas.revealAfterMove = true
-        nas.listNames = ["Selected Title"]
+        nas.taskFinished = false
         let cloud = CloudSpy()
         let jobs = StatusHistory()
         await jobs.record(sample(status: .submitted, destination: destination, media: media))
-        _ = await makeRefresh(jobs: jobs, bridge: bridge, cloud: cloud, nas: nas).refresh()
+        let refresh = makeRefresh(jobs: jobs, bridge: bridge, cloud: cloud, nas: nas)
+        _ = await refresh.refresh()
+        #expect(jobs.jobs[0].status == .routing)
+        #expect(jobs.jobs[0].fileStationMoveTaskID == "task-1")
+        nas.taskFinished = true
+        nas.listNames = ["Selected Title"]
+        _ = await refresh.refresh()
         return Landed(
             job: jobs.jobs[0],
             routingIndex: jobs.statuses.firstIndex(of: .routing) ?? -1,
@@ -393,6 +572,7 @@ struct TorBoxarrStatusTests {
             moved: nas.movedPaths,
             destinations: nas.destinations,
             cloudCalls: cloud.calls,
+            startCalls: nas.startCalls,
         )
     }
 
@@ -507,6 +687,7 @@ private struct Landed {
     var moved: [String]
     var destinations: [String]
     var cloudCalls: Int
+    var startCalls: Int
 }
 
 private final class StatusHistory: ManualDownloadJobStoring, @unchecked Sendable {
@@ -604,7 +785,12 @@ private final class NASScript: SynologyTransport, @unchecked Sendable {
     var removeSrc: [String] = []
     var listNames: [String] = []
     var listCalls = 0
-    var revealAfterMove = false
+    var startCalls = 0
+    var statusCalls = 0
+    var taskFinished = true
+    var taskFailed = false
+    var listAlwaysShow = false
+    var statusThrowsUnreachable = false
 
     func send(_ request: URLRequest) async throws -> SynologyHTTP {
         called = true
@@ -618,6 +804,7 @@ private final class NASScript: SynologyTransport, @unchecked Sendable {
             return SynologyHTTP(status: 200, body: Data(#"{"success":true,"data":{"sid":"sid"}}"#.utf8))
         }
         if value("api") == "SYNO.FileStation.CopyMove", value("method") == "start" {
+            startCalls += 1
             movedPaths.append(value("path") ?? "")
             destinations.append(value("dest_folder_path") ?? "")
             removeSrc.append(value("remove_src") ?? "")
@@ -627,17 +814,33 @@ private final class NASScript: SynologyTransport, @unchecked Sendable {
             )
         }
         if value("api") == "SYNO.FileStation.CopyMove", value("method") == "status" {
+            statusCalls += 1
+            if statusThrowsUnreachable {
+                throw URLError(.cannotConnectToHost)
+            }
+            if taskFailed {
+                return SynologyHTTP(
+                    status: 200,
+                    body: Data(#"{"success":true,"data":{"finished":true,"error":{"code":1000}}}"#.utf8),
+                )
+            }
+            let finished = taskFinished
             return SynologyHTTP(
                 status: 200,
-                body: Data(#"{"success":true,"data":{"finished":true}}"#.utf8),
+                body: Data(
+                    "{\"success\":true,\"data\":{\"finished\":\(finished)}}".utf8
+                ),
             )
         }
         if value("method") == "list" {
             listCalls += 1
-            let show = revealAfterMove && listCalls >= 2
-            let files = show
-                ? listNames.map { "{\"name\":\"\($0.replacingOccurrences(of: "\"", with: ""))\"}" }.joined(separator: ",")
-                : ""
+            let files: String
+            if listAlwaysShow || (taskFinished && !listNames.isEmpty) {
+                files = listNames.map { "{\"name\":\"\($0.replacingOccurrences(of: "\"", with: ""))\"}" }
+                    .joined(separator: ",")
+            } else {
+                files = ""
+            }
             return SynologyHTTP(
                 status: 200,
                 body: Data("{\"success\":true,\"data\":{\"files\":[\(files)]}}".utf8),

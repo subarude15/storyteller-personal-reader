@@ -102,6 +102,94 @@ struct SynologyFileStationTests {
             ) == .cannotReachServer
         )
     }
+
+    @Test func startMoveItemReturnsTaskIDWithoutStatusPolling() async throws {
+        let transport = SynologyScript()
+        var statusCalls = 0
+        var startCalls = 0
+        transport.handler = { request, _ in
+            let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let api = items.first { $0.name == "api" }?.value
+            let method = items.first { $0.name == "method" }?.value
+            if request.url?.path.contains("auth.cgi") == true {
+                return SynologyHTTP(
+                    status: 200,
+                    body: Data(#"{"success":true,"data":{"sid":"sid"}}"#.utf8),
+                )
+            }
+            if api == "SYNO.FileStation.CopyMove", method == "start" {
+                startCalls += 1
+                return SynologyHTTP(
+                    status: 200,
+                    body: Data(#"{"success":true,"data":{"taskid":"move-42"}}"#.utf8),
+                )
+            }
+            if api == "SYNO.FileStation.CopyMove", method == "status" {
+                statusCalls += 1
+                return SynologyHTTP(
+                    status: 200,
+                    body: Data(#"{"success":true,"data":{"finished":false}}"#.utf8),
+                )
+            }
+            return SynologyHTTP(status: 200, body: Data(#"{"success":true}"#.utf8))
+        }
+        let client = SynologyFileStationClient(transport: transport)
+        let taskID = try await client.startMoveItem(
+            baseURL: "http://nas.example:5000",
+            username: "josh",
+            password: "secret",
+            sourceVolumePath: "/volume1/data/torrents/completed/Book",
+            destinationVolumeDirectory: "/volume1/data/media/books/books",
+        )
+        #expect(taskID == "move-42")
+        #expect(startCalls == 1)
+        #expect(statusCalls == 0)
+    }
+
+    @Test func moveItemPollsStatusWithDelayNotImmediateBurst() async throws {
+        let transport = SynologyScript()
+        var statusCalls = 0
+        var timestamps: [Date] = []
+        transport.handler = { request, _ in
+            let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let api = items.first { $0.name == "api" }?.value
+            let method = items.first { $0.name == "method" }?.value
+            if request.url?.path.contains("auth.cgi") == true {
+                return SynologyHTTP(
+                    status: 200,
+                    body: Data(#"{"success":true,"data":{"sid":"sid"}}"#.utf8),
+                )
+            }
+            if api == "SYNO.FileStation.CopyMove", method == "start" {
+                return SynologyHTTP(
+                    status: 200,
+                    body: Data(#"{"success":true,"data":{"taskid":"move-slow"}}"#.utf8),
+                )
+            }
+            if api == "SYNO.FileStation.CopyMove", method == "status" {
+                statusCalls += 1
+                timestamps.append(Date())
+                let finished = statusCalls >= 2
+                return SynologyHTTP(
+                    status: 200,
+                    body: Data("{\"success\":true,\"data\":{\"finished\":\(finished)}}".utf8),
+                )
+            }
+            return SynologyHTTP(status: 200, body: Data(#"{"success":true}"#.utf8))
+        }
+        let client = SynologyFileStationClient(transport: transport)
+        try await client.moveItem(
+            baseURL: "http://nas.example:5000",
+            username: "josh",
+            password: "secret",
+            sourceVolumePath: "/volume1/data/torrents/completed/Book",
+            destinationVolumeDirectory: "/volume1/data/media/books/audiobooks",
+        )
+        #expect(statusCalls == 2)
+        #expect(timestamps.count == 2)
+        // Real delay between polls — not eight immediate back-to-back requests.
+        #expect(timestamps[1].timeIntervalSince(timestamps[0]) >= 0.2)
+    }
 }
 
 private final class SynologyScript: SynologyTransport, @unchecked Sendable {

@@ -494,15 +494,24 @@ public struct SynologyFileStationClient: Sendable {
         return files.compactMap { $0["name"] as? String }
     }
 
-    /// Move one file or folder into `destinationVolumeDirectory` and wait until File Station finishes.
+    /// Outcome of a `SYNO.FileStation.CopyMove` task status query.
+    public enum FileStationMoveTaskStatus: Equatable, Sendable {
+        case running
+        case finished
+        case failed
+    }
+
+    /// Start moving one file or folder into `destinationVolumeDirectory`.
+    /// Returns the DSM CopyMove `taskid`. Does **not** wait for completion —
+    /// callers persist the id and reconcile on later status refreshes.
     /// Source and destination are DSM volume paths (`/volume1/...`). This does not delete siblings.
-    public func moveItem(
+    public func startMoveItem(
         baseURL: String,
         username: String,
         password: String,
         sourceVolumePath: String,
         destinationVolumeDirectory: String,
-    ) async throws {
+    ) async throws -> String {
         let source: SynologyFileStationPath
         let destination: SynologyFileStationPath
         switch SynologyPathMapping.resolve(sourceVolumePath) {
@@ -529,10 +538,56 @@ public struct SynologyFileStationClient: Sendable {
             source: source.fileStationPath,
             destination: destination.fileStationPath,
         )
-        guard !taskID.isEmpty else { return }
-        // ponytail: eight status polls. A stuck task throws and the caller leaves the job Routing.
+        guard !taskID.isEmpty else { throw SynologyClientError.rejected }
+        return taskID
+    }
+
+    /// Query an in-flight CopyMove task without starting another one.
+    public func moveTaskStatus(
+        baseURL: String,
+        username: String,
+        password: String,
+        taskID: String,
+    ) async throws -> FileStationMoveTaskStatus {
+        let trimmed = taskID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw SynologyClientError.invalidResponse }
+        let sid = try await login(baseURL: baseURL, username: username, password: password)
+        defer { Task { try? await logout(baseURL: baseURL, sid: sid) } }
+        return try await queryMoveStatus(baseURL: baseURL, sid: sid, taskID: trimmed)
+    }
+
+    /// Legacy helper: start a move and return once DSM reports finished.
+    /// Prefer `startMoveItem` + `moveTaskStatus` for long-running library moves.
+    /// Polls with real backoff — never issues a burst of immediate status checks.
+    public func moveItem(
+        baseURL: String,
+        username: String,
+        password: String,
+        sourceVolumePath: String,
+        destinationVolumeDirectory: String,
+    ) async throws {
+        let taskID = try await startMoveItem(
+            baseURL: baseURL,
+            username: username,
+            password: password,
+            sourceVolumePath: sourceVolumePath,
+            destinationVolumeDirectory: destinationVolumeDirectory,
+        )
+        // ponytail: short wait with backoff for callers that still want sync completion.
+        // Primary TorBoxarr path persists the taskid and reconciles on refresh instead.
+        var delayNanos: UInt64 = 250_000_000
         for _ in 0..<8 {
-            if try await moveFinished(baseURL: baseURL, sid: sid, taskID: taskID) { return }
+            try await Task.sleep(nanoseconds: delayNanos)
+            switch try await moveTaskStatus(
+                baseURL: baseURL,
+                username: username,
+                password: password,
+                taskID: taskID,
+            ) {
+                case .finished: return
+                case .failed: throw SynologyClientError.rejected
+                case .running: delayNanos = min(delayNanos * 2, 2_000_000_000)
+            }
         }
         throw SynologyClientError.timeout
     }
@@ -567,7 +622,11 @@ public struct SynologyFileStationClient: Sendable {
         return data?["taskid"] as? String ?? ""
     }
 
-    private func moveFinished(baseURL: String, sid: String, taskID: String) async throws -> Bool {
+    private func queryMoveStatus(
+        baseURL: String,
+        sid: String,
+        taskID: String,
+    ) async throws -> FileStationMoveTaskStatus {
         let http = try await entry(
             baseURL: baseURL,
             sid: sid,
@@ -582,8 +641,9 @@ public struct SynologyFileStationClient: Sendable {
             throw SynologyClientError.rejected
         }
         let data = json["data"] as? [String: Any] ?? [:]
-        if data["error"] != nil { throw SynologyClientError.rejected }
-        return data["finished"] as? Bool == true
+        if data["error"] != nil { return .failed }
+        if data["finished"] as? Bool == true { return .finished }
+        return .running
     }
 
     private func entry(

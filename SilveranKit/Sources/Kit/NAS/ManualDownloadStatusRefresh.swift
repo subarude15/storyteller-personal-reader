@@ -57,22 +57,33 @@ public struct ManualDownloadStatusRefresh: Sendable {
         return updated
     }
 
-    /// Retry a failed Deluge final-route move without re-submitting the torrent.
+    /// Retry a failed final-route move without re-submitting the torrent/magnet.
     @discardableResult
     public func retryRouting(job: ManualDownloadJob) async -> ManualDownloadJob {
-        guard job.canRetryRoutingNow,
-            let hash = TorrentHash.normalized(job.backendJobID)
-        else {
-            return job
+        guard job.canRetryRoutingNow else { return job }
+        if job.backend == .deluge {
+            guard let hash = TorrentHash.normalized(job.backendJobID) else { return job }
+            var pending = job
+            pending.status = .readyToRoute
+            pending.markDelugeFinalRoutingIfNeeded(force: true)
+            pending.lastError = nil
+            pending.lastStatusAt = Date()
+            await jobs.record(pending)
+            let context = await environment.load()
+            return await routeDelugeJob(pending, hash: hash, context: context)
         }
-        var pending = job
-        pending.status = .readyToRoute
-        pending.markDelugeFinalRoutingIfNeeded(force: true)
-        pending.lastError = nil
-        pending.lastStatusAt = Date()
-        await jobs.record(pending)
-        let context = await environment.load()
-        return await routeDelugeJob(pending, hash: hash, context: context)
+        if job.backend == .torbox, job.viaTorBoxarr == true {
+            var pending = job
+            pending.status = .readyToRoute
+            pending.fileStationMoveTaskID = nil
+            pending.markFileStationFinalRoutingIfNeeded(force: true)
+            pending.lastError = nil
+            pending.lastStatusAt = Date()
+            await jobs.record(pending)
+            let context = await environment.load()
+            return await retryTorBoxarrRouting(pending, context: context)
+        }
+        return job
     }
 
     private func refreshQBittorrent(
@@ -260,10 +271,13 @@ public struct ManualDownloadStatusRefresh: Sendable {
                 && (
                     !($0.backendJobID ?? "").isEmpty
                         || ($0.sourceURL.flatMap(TorrentHash.fromMagnet) != nil)
+                        || $0.hasActiveFileStationMove
                 )
         }
         guard !targets.isEmpty else { return [] }
-        guard let baseURL = context.torboxarr.baseURL else { return await markUnknown(targets) }
+        guard let baseURL = context.torboxarr.baseURL else {
+            return await reconcileTorBoxarrWithoutBridge(targets, context: context)
+        }
         let username = context.torboxarr.username
         let password = context.credentials.torboxarrPassword
 
@@ -279,7 +293,7 @@ public struct ManualDownloadStatusRefresh: Sendable {
                     hashes: hashes,
                 )
             } catch {
-                return await markUnknown(targets)
+                return await reconcileTorBoxarrWithoutBridge(targets, context: context)
             }
         }
 
@@ -306,6 +320,12 @@ public struct ManualDownloadStatusRefresh: Sendable {
                 continue
             }
 
+            // Bridge miss while a File Station move is already running — resume that task.
+            if job.hasActiveFileStationMove {
+                changed.append(await routeTorBoxarr(job, live: routingLive(job), payloads: [], context: context))
+                continue
+            }
+
             guard let magnet = job.sourceURL, TorrentHash.fromMagnet(magnet) != nil else {
                 if (job.backendJobID ?? "").isEmpty {
                     changed.append(await store(ManualDownloadStatusMapping.markUnknown(job)))
@@ -323,7 +343,13 @@ public struct ManualDownloadStatusRefresh: Sendable {
             do {
                 list = try await allTorrents()
             } catch {
-                changed.append(await store(ManualDownloadStatusMapping.markUnknown(job)))
+                if job.hasActiveFileStationMove {
+                    changed.append(
+                        await routeTorBoxarr(job, live: routingLive(job), payloads: [], context: context)
+                    )
+                } else {
+                    changed.append(await store(ManualDownloadStatusMapping.markUnknown(job)))
+                }
                 continue
             }
 
@@ -345,11 +371,24 @@ public struct ManualDownloadStatusRefresh: Sendable {
                                 context: context,
                             )
                         )
+                    } else if updated.hasActiveFileStationMove {
+                        changed.append(
+                            await routeTorBoxarr(
+                                updated,
+                                live: routingLive(updated),
+                                payloads: [],
+                                context: context,
+                            )
+                        )
                     } else {
                         changed.append(await store(ManualDownloadStatusMapping.markUnknown(updated)))
                     }
                 case .notFound:
-                    if (job.backendJobID ?? "").isEmpty {
+                    if job.hasActiveFileStationMove {
+                        changed.append(
+                            await routeTorBoxarr(job, live: routingLive(job), payloads: [], context: context)
+                        )
+                    } else if (job.backendJobID ?? "").isEmpty {
                         // Still waiting for TorBoxarr to expose the accepted job.
                         changed.append(await store(ManualDownloadStatusMapping.markUnknown(job)))
                     } else {
@@ -366,6 +405,48 @@ public struct ManualDownloadStatusRefresh: Sendable {
             }
         }
         return changed
+    }
+
+    /// Bridge unreachable: keep observing any persisted File Station move; otherwise Unknown.
+    private func reconcileTorBoxarrWithoutBridge(
+        _ targets: [ManualDownloadJob],
+        context: NASHandoffContext,
+    ) async -> [ManualDownloadJob] {
+        var changed: [ManualDownloadJob] = []
+        for job in targets {
+            if job.hasActiveFileStationMove || (job.status == .routing && job.hasReachedFileStationFinalRouting) {
+                changed.append(await routeTorBoxarr(job, live: routingLive(job), payloads: [], context: context))
+            } else {
+                changed.append(await store(ManualDownloadStatusMapping.markUnknown(job)))
+            }
+        }
+        return changed
+    }
+
+    private func retryTorBoxarrRouting(
+        _ job: ManualDownloadJob,
+        context: NASHandoffContext,
+    ) async -> ManualDownloadJob {
+        guard let baseURL = context.torboxarr.baseURL else {
+            return await routeTorBoxarr(job, live: routingLive(job), payloads: payloadsFromJob(job), context: context)
+        }
+        let hash = TorrentHash.normalized(job.backendJobID)
+        if let hash {
+            do {
+                let snapshots = try await qbittorrent.torrentStatuses(
+                    baseURL: baseURL,
+                    username: context.torboxarr.username,
+                    password: context.credentials.torboxarrPassword,
+                    hashes: [hash],
+                )
+                if let snapshot = snapshots[hash.lowercased()] {
+                    return await reconcileTorBoxarr(job, hash: hash.lowercased(), snapshot: snapshot, context: context)
+                }
+            } catch {
+                // Fall through to File Station-only retry using persisted payload name.
+            }
+        }
+        return await routeTorBoxarr(job, live: routingLive(job), payloads: payloadsFromJob(job), context: context)
     }
 
     private func reconcileTorBoxarr(
@@ -389,8 +470,12 @@ public struct ManualDownloadStatusRefresh: Sendable {
             hostCompletedFolder: hostRoot,
         )
         let awaitingRoute = job.status == .routing || job.status == .readyToRoute
+            || job.hasActiveFileStationMove
         if payloads.isEmpty, live.status == .complete || awaitingRoute {
             guard let baseURL = context.torboxarr.baseURL else {
+                if job.hasActiveFileStationMove {
+                    return await routeTorBoxarr(job, live: live, payloads: payloadsFromJob(job), context: context)
+                }
                 return await store(ManualDownloadStatusMapping.markUnknown(job))
             }
             do {
@@ -409,6 +494,9 @@ public struct ManualDownloadStatusRefresh: Sendable {
                     hostCompletedFolder: hostRoot,
                 )
             } catch {
+                if job.hasActiveFileStationMove {
+                    return await routeTorBoxarr(job, live: live, payloads: payloadsFromJob(job), context: context)
+                }
                 return await store(ManualDownloadStatusMapping.markUnknown(job))
             }
         }
@@ -421,29 +509,56 @@ public struct ManualDownloadStatusRefresh: Sendable {
 
     /// qBittorrent setLocation is not used. TorBoxarr is only assumed to write the
     /// completed folder; File Station moves that one payload onto the library share.
+    ///
+    /// CopyMove is asynchronous: start persists `fileStationMoveTaskID` and leaves the
+    /// job `.routing`. Later refreshes reconcile the DSM task — never start a duplicate.
     private func routeTorBoxarr(
         _ job: ManualDownloadJob,
         live: ManualTorrentLiveStatus,
         payloads: [TorBoxarrPayloadLocator.Item],
         context: NASHandoffContext,
     ) async -> ManualDownloadJob {
-        guard !payloads.isEmpty else {
+        var effectivePayloads = payloads
+        if effectivePayloads.isEmpty {
+            effectivePayloads = payloadsFromJob(job)
+        }
+        debugLog("[TorBoxarrRoute] complete detected job=\(job.id)")
+        for item in effectivePayloads {
+            debugLog("[TorBoxarrRoute] source=\(Self.safePath(item.sourceVolumePath))")
+        }
+        debugLog("[TorBoxarrRoute] destination=\(Self.safePath(job.destination))")
+        if let name = effectivePayloads.first?.name ?? job.filename {
+            debugLog("[TorBoxarrRoute] payload=\(name)")
+        }
+
+        guard !effectivePayloads.isEmpty || job.hasActiveFileStationMove || !(job.filename ?? "").isEmpty else {
             var pending = routed(live, job: job, status: .readyToRoute)
+            pending.markFileStationFinalRoutingIfNeeded(force: true)
             pending.lastError =
                 "Couldn’t tell which completed files belong to this download.\nNothing was moved."
+            debugLog("[TorBoxarrRoute] failure stage=payload error=unidentified")
             return await store(pending)
         }
         guard context.settings.isSynologyConfigured, !context.credentials.synologyPassword.isEmpty else {
             var pending = routed(live, job: job, status: .routing)
+            pending.markFileStationFinalRoutingIfNeeded(force: true)
             pending.lastError =
                 "Synology isn’t configured, so this download can’t be moved into the library yet."
+            debugLog("[TorBoxarrRoute] failure stage=auth error=synology-not-configured")
             return await store(pending)
         }
         let baseURL = context.settings.trimmedSynologyBaseURL
         let username = context.settings.trimmedSynologyUsername
         let password = context.credentials.synologyPassword
         var routing = routed(live, job: job, status: .routing)
+        routing.markFileStationFinalRoutingIfNeeded(force: true)
+        if let name = effectivePayloads.first?.name, (routing.filename ?? "").isEmpty {
+            routing.filename = name
+        }
+        // Preserve an in-flight task id across the routed() mapping.
+        routing.fileStationMoveTaskID = job.fileStationMoveTaskID
         routing = await store(routing)
+
         do {
             try await fileStation.ensureFolder(
                 baseURL: baseURL,
@@ -457,35 +572,150 @@ public struct ManualDownloadStatusRefresh: Sendable {
                 password: password,
                 volumeDirectory: job.destination,
             )
-            if Self.destinationHas(payloads, names: present) {
+            let checkPayloads = effectivePayloads.isEmpty
+                ? payloadsFromNames([routing.filename].compactMap { $0 })
+                : effectivePayloads
+            let filenamePresent = routing.filename.map { present.contains($0) } ?? false
+            let alreadyThere = Self.destinationHas(checkPayloads, names: present) || filenamePresent
+            debugLog("[TorBoxarrRoute] destination check present=\(alreadyThere)")
+            if alreadyThere {
+                debugLog("[TorBoxarrRoute] destination verified")
+                debugLog("[TorBoxarrRoute] complete")
                 return await store(ManualDownloadStatusMapping.markComplete(routing))
             }
-            for item in payloads where !present.contains(item.name) {
-                try await fileStation.moveItem(
+
+            if let taskID = routing.fileStationMoveTaskID,
+                !taskID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                return await reconcileFileStationMove(
+                    routing,
+                    taskID: taskID,
+                    payloads: checkPayloads,
                     baseURL: baseURL,
                     username: username,
                     password: password,
-                    sourceVolumePath: item.sourceVolumePath,
-                    destinationVolumeDirectory: job.destination,
                 )
             }
-            let arrived = try await fileStation.listFilenames(
+
+            let toMove = checkPayloads.filter { !present.contains($0.name) }
+            guard let item = toMove.first else {
+                debugLog("[TorBoxarrRoute] destination verified")
+                debugLog("[TorBoxarrRoute] complete")
+                return await store(ManualDownloadStatusMapping.markComplete(routing))
+            }
+            debugLog("[TorBoxarrRoute] source=\(Self.safePath(item.sourceVolumePath))")
+            debugLog("[TorBoxarrRoute] payload=\(item.name)")
+            debugLog("[TorBoxarrRoute] starting CopyMove")
+            let taskID = try await fileStation.startMoveItem(
                 baseURL: baseURL,
                 username: username,
                 password: password,
-                volumeDirectory: job.destination,
+                sourceVolumePath: item.sourceVolumePath,
+                destinationVolumeDirectory: job.destination,
             )
-            if Self.destinationHas(payloads, names: arrived) {
-                return await store(ManualDownloadStatusMapping.markComplete(routing))
-            }
-            routing.lastError =
-                "The download finished, but the files are not in the library folder yet."
+            routing.fileStationMoveTaskID = taskID
+            routing.filename = item.name
+            routing.lastError = nil
             routing.lastStatusAt = Date()
+            debugLog("[TorBoxarrRoute] CopyMove started task=\(taskID)")
+            // Stay Routing — normal Downloads refresh reconciles the DSM task.
             return await store(routing)
         } catch {
-            routing.lastError = Self.torboxarrRouteFailure(error)
-            routing.lastStatusAt = Date()
-            return await store(routing)
+            let stage = Self.torboxarrFailureStage(error)
+            let message = Self.torboxarrRouteFailure(error)
+            debugLog("[TorBoxarrRoute] failure stage=\(stage) error=\(Self.sanitizeError(message))")
+            // Hard failures become Failed so Retry Move appears; keep recoverable
+            // routing when a task id already exists and the NAS was only briefly unreachable.
+            if routing.hasActiveFileStationMove, Self.isTemporaryNASFailure(error) {
+                routing.lastError = nil
+                routing.lastStatusAt = Date()
+                return await store(routing)
+            }
+            var failed = ManualDownloadStatusMapping.markFailed(routing, message: message)
+            failed.fileStationMoveTaskID = routing.fileStationMoveTaskID
+            failed.markFileStationFinalRoutingIfNeeded(force: true)
+            return await store(failed)
+        }
+    }
+
+    private func reconcileFileStationMove(
+        _ job: ManualDownloadJob,
+        taskID: String,
+        payloads: [TorBoxarrPayloadLocator.Item],
+        baseURL: String,
+        username: String,
+        password: String,
+    ) async -> ManualDownloadJob {
+        debugLog("[TorBoxarrRoute] reconciling task=\(taskID)")
+        do {
+            let status = try await fileStation.moveTaskStatus(
+                baseURL: baseURL,
+                username: username,
+                password: password,
+                taskID: taskID,
+            )
+            switch status {
+                case .running:
+                    debugLog("[TorBoxarrRoute] task running")
+                    var running = job
+                    running.status = .routing
+                    running.fileStationMoveTaskID = taskID
+                    running.lastError = nil
+                    running.lastStatusAt = Date()
+                    return await store(running)
+                case .finished:
+                    debugLog("[TorBoxarrRoute] task finished")
+                    let arrived = try await fileStation.listFilenames(
+                        baseURL: baseURL,
+                        username: username,
+                        password: password,
+                        volumeDirectory: job.destination,
+                    )
+                    let filenamePresent = job.filename.map { arrived.contains($0) } ?? false
+                    let verified = Self.destinationHas(payloads, names: arrived) || filenamePresent
+                    debugLog("[TorBoxarrRoute] destination check present=\(verified)")
+                    if verified {
+                        debugLog("[TorBoxarrRoute] destination verified")
+                        debugLog("[TorBoxarrRoute] complete")
+                        return await store(ManualDownloadStatusMapping.markComplete(job))
+                    }
+                    debugLog("[TorBoxarrRoute] failure stage=verify error=destination-missing")
+                    var failed = ManualDownloadStatusMapping.markFailed(
+                        job,
+                        message: Self.torboxarrVerifyFailure,
+                    )
+                    failed.fileStationMoveTaskID = nil
+                    failed.markFileStationFinalRoutingIfNeeded(force: true)
+                    return await store(failed)
+                case .failed:
+                    debugLog("[TorBoxarrRoute] failure stage=task error=copymove-failed")
+                    var failed = ManualDownloadStatusMapping.markFailed(
+                        job,
+                        message: Self.torboxarrTaskFailure,
+                    )
+                    // Keep task id so Retry Move clears it explicitly; do not auto-restart.
+                    failed.fileStationMoveTaskID = taskID
+                    failed.markFileStationFinalRoutingIfNeeded(force: true)
+                    return await store(failed)
+            }
+        } catch {
+            // Temporary status lookup failure — keep Routing + task id, do not start another move.
+            if Self.isTemporaryNASFailure(error) {
+                debugLog("[TorBoxarrRoute] failure stage=status error=temporary-unreachable")
+                var running = job
+                running.status = .routing
+                running.fileStationMoveTaskID = taskID
+                running.lastError = nil
+                running.lastStatusAt = Date()
+                return await store(running)
+            }
+            let stage = Self.torboxarrFailureStage(error)
+            let message = Self.torboxarrRouteFailure(error)
+            debugLog("[TorBoxarrRoute] failure stage=\(stage) error=\(Self.sanitizeError(message))")
+            var failed = ManualDownloadStatusMapping.markFailed(job, message: message)
+            failed.fileStationMoveTaskID = taskID
+            failed.markFileStationFinalRoutingIfNeeded(force: true)
+            return await store(failed)
         }
     }
 
@@ -504,6 +734,32 @@ public struct ManualDownloadStatusRefresh: Sendable {
             ),
             to: job,
         )
+    }
+
+    private func routingLive(_ job: ManualDownloadJob) -> ManualTorrentLiveStatus {
+        ManualTorrentLiveStatus(
+            status: .routing,
+            progress: job.progress ?? 1,
+            downloadRate: nil,
+            totalSize: job.totalSize,
+            completedSize: job.byteCount,
+        )
+    }
+
+    private func payloadsFromJob(_ job: ManualDownloadJob) -> [TorBoxarrPayloadLocator.Item] {
+        payloadsFromNames([job.filename].compactMap { $0 })
+    }
+
+    private func payloadsFromNames(_ names: [String]) -> [TorBoxarrPayloadLocator.Item] {
+        let hostRoot = TorBoxarrConnectionSettings.hostCompletedFolder
+        return names.compactMap { name -> TorBoxarrPayloadLocator.Item? in
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            let source = hostRoot + "/" + trimmed
+            let item = TorBoxarrPayloadLocator.Item(name: trimmed, sourceVolumePath: source)
+            guard Self.isScopedPayload(item, completedFolder: hostRoot) else { return nil }
+            return item
+        }
     }
 
     private static func destinationHas(
@@ -531,19 +787,72 @@ public struct ManualDownloadStatusRefresh: Sendable {
         return true
     }
 
+    private static let torboxarrTaskFailure =
+        "The NAS CopyMove task failed while moving the download into the library.\nFiles were left in the TorBox completed folder."
+    private static let torboxarrVerifyFailure =
+        "The NAS finished the move, but the files are not in the library folder.\nFiles may still be in the TorBox completed folder."
+
     private static func torboxarrRouteFailure(_ error: Error) -> String {
         let left = "Files were left in the TorBox completed folder."
-        guard let synology = error as? SynologyClientError else {
-            return "The NAS rejected the move into the library folder.\n\(left)"
+        if let synology = error as? SynologyClientError {
+            switch synology {
+                case .authenticationFailed:
+                    return "NAS authentication failed while moving the download.\n\(left)"
+                case .cannotReachServer:
+                    return "Couldn’t reach the NAS to move the download.\n\(left)"
+                case .timeout:
+                    return "The NAS timed out while moving the download.\n\(left)"
+                case .rejected:
+                    return "The NAS rejected the CopyMove request.\n\(left)"
+                case .invalidURL, .invalidResponse, .verificationFailed:
+                    return "The NAS rejected the move into the library folder.\n\(left)"
+            }
         }
+        if let handoff = error as? NASHandoffError {
+            switch handoff {
+                case .emptyDestination, .invalidDestination:
+                    return "The source payload path is missing or invalid.\n\(left)"
+                case .backendNotConfigured, .torrentClientNotSelected, .mediaTypeUnresolved,
+                    .malformedMagnet, .unsupportedAcquisition, .unreachable, .timeout,
+                    .authenticationFailed, .rejected, .invalidURL, .downloadFailed,
+                    .insufficientStorage, .uploadRejected, .uploadInterrupted, .stagedFileMissing:
+                    break
+            }
+        }
+        return "The NAS rejected the move into the library folder.\n\(left)"
+    }
+
+    private static func torboxarrFailureStage(_ error: Error) -> String {
+        if let synology = error as? SynologyClientError {
+            switch synology {
+                case .authenticationFailed: return "auth"
+                case .cannotReachServer, .timeout: return "unreachable"
+                case .rejected: return "copymove-rejected"
+                case .invalidURL, .invalidResponse, .verificationFailed: return "nas-response"
+            }
+        }
+        if error is NASHandoffError { return "source" }
+        return "unknown"
+    }
+
+    private static func isTemporaryNASFailure(_ error: Error) -> Bool {
+        guard let synology = error as? SynologyClientError else { return false }
         switch synology {
-            case .authenticationFailed:
-                return "The NAS rejected the credentials while moving the download.\n\(left)"
-            case .cannotReachServer, .timeout:
-                return "Couldn’t reach the NAS to move the download.\n\(left)"
-            case .invalidURL, .invalidResponse, .rejected, .verificationFailed:
-                return "The NAS rejected the move into the library folder.\n\(left)"
+            case .cannotReachServer, .timeout: return true
+            case .authenticationFailed, .invalidURL, .invalidResponse, .rejected, .verificationFailed:
+                return false
         }
+    }
+
+    private static func safePath(_ path: String) -> String {
+        // Volume paths only — strip query-like fragments; never log credentials.
+        path.split(separator: "?").first.map(String.init) ?? path
+    }
+
+    private static func sanitizeError(_ message: String) -> String {
+        message
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func refreshTorBox(

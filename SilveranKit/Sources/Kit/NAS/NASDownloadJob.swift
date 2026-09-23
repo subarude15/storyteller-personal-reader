@@ -114,6 +114,12 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
     public var transferFiles: [RemoteTransferFileState]?
     /// Manual TorBox submission went through TorBoxarr, not the TorBox cloud API.
     public var viaTorBoxarr: Bool?
+    /// DSM `SYNO.FileStation.CopyMove` taskid for an in-flight library move.
+    /// Provider-neutral; Codable-optional so older saved jobs decode cleanly.
+    public var fileStationMoveTaskID: String?
+    /// Set once TorBoxarr File Station routing begins. Distinguishes routing
+    /// failures (Retry Move) from magnet-submit failures (Retry).
+    public var fileStationReachedFinalRouting: Bool?
 
     public init(
         id: String = UUID().uuidString,
@@ -142,6 +148,8 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
         providerFiles: [TorrentJobFile]? = nil,
         transferFiles: [RemoteTransferFileState]? = nil,
         viaTorBoxarr: Bool? = nil,
+        fileStationMoveTaskID: String? = nil,
+        fileStationReachedFinalRouting: Bool? = nil,
     ) {
         self.id = id
         self.title = title
@@ -169,10 +177,21 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
         self.providerFiles = providerFiles
         self.transferFiles = transferFiles
         self.viaTorBoxarr = viaTorBoxarr
+        self.fileStationMoveTaskID = fileStationMoveTaskID
+        self.fileStationReachedFinalRouting = fileStationReachedFinalRouting
     }
 
     public var hasReachedDelugeFinalRouting: Bool {
         delugeReachedFinalRouting == true
+    }
+
+    public var hasReachedFileStationFinalRouting: Bool {
+        fileStationReachedFinalRouting == true
+    }
+
+    public var hasActiveFileStationMove: Bool {
+        let id = fileStationMoveTaskID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return !id.isEmpty
     }
 
     public var canRetryUploadNow: Bool {
@@ -191,13 +210,21 @@ public struct ManualDownloadJob: Codable, Equatable, Sendable, Identifiable {
             && (sourceURL != nil || hasStagedFile)
     }
 
-    /// Failed after reaching final routing — retry `move_storage`, do not re-add.
+    /// Failed after reaching final routing — retry the library move only, do not re-add.
     public var canRetryRoutingNow: Bool {
-        backend == .deluge
-            && status == .failed
-            && hasReachedDelugeFinalRouting
-            && !(backendJobID ?? "").isEmpty
-            && !destination.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasDestination = !destination.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if backend == .deluge {
+            return status == .failed
+                && hasReachedDelugeFinalRouting
+                && !(backendJobID ?? "").isEmpty
+                && hasDestination
+        }
+        if backend == .torbox, viaTorBoxarr == true {
+            return status == .failed
+                && hasReachedFileStationFinalRouting
+                && hasDestination
+        }
+        return false
     }
 
     public var canTransferToNASNow: Bool {
