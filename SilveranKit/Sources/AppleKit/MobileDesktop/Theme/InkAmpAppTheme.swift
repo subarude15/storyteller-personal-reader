@@ -168,7 +168,9 @@ public enum InkAmpMetrics {
 }
 
 private struct InkAmpAppThemeKey: EnvironmentKey {
-    static let defaultValue = InkAmpAppTheme(colorScheme: .light)
+    // Theme values are immutable value types; EnvironmentKey requires a static
+    // default under strict concurrency.
+    nonisolated(unsafe) static let defaultValue = InkAmpAppTheme(colorScheme: .light)
 }
 
 extension EnvironmentValues {
