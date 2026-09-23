@@ -7,7 +7,7 @@
 //
 //  TorBoxarr reports content_path / save_path in the container namespace
 //  (/data/completed/…). File Station moves use the Synology host path
-//  (/volume1/data/torrents/completed/…).
+//  (/volume1/data/torrents/completed/torboxarr/…).
 //
 //  SPDX-License-Identifier: AGPL-3.0-only
 
@@ -190,8 +190,8 @@ struct TorBoxarrStatusTests {
         #expect(jobs.jobs[0].fileStationMoveTaskID == "task-1")
         #expect(jobs.jobs[0].destination == ebook)
         #expect(jobs.jobs[0].lastError?.contains("Nothing was moved") != true)
-        #expect(movedVolumePaths(nas.movedPaths) == ["/data/torrents/completed/Selected Title"])
-        #expect(nas.movedPaths.allSatisfy { $0.contains("/data/torrents/completed/Selected Title") })
+        #expect(movedVolumePaths(nas.movedPaths) == ["/data/torrents/completed/torboxarr/Selected Title"])
+        #expect(nas.movedPaths.allSatisfy { $0.contains("/data/torrents/completed/torboxarr/Selected Title") })
         #expect(nas.movedPaths.allSatisfy { !$0.contains("/data/completed/") })
         #expect(nas.destinations == ["/data/media/books/books"])
         #expect(nas.removeSrc == ["true"])
@@ -375,8 +375,8 @@ struct TorBoxarrStatusTests {
         #expect(landed.job.destination == ebook)
         #expect(landed.job.mediaType == .ebook)
         #expect(landed.routingIndex < landed.completeIndex)
-        #expect(movedVolumePaths(landed.moved) == ["/data/torrents/completed/Selected Title"])
-        #expect(landed.moved.allSatisfy { $0.contains("/data/torrents/completed/Selected Title") })
+        #expect(movedVolumePaths(landed.moved) == ["/data/torrents/completed/torboxarr/Selected Title"])
+        #expect(landed.moved.allSatisfy { $0.contains("/data/torrents/completed/torboxarr/Selected Title") })
         #expect(landed.moved.allSatisfy { !$0.contains("/data/completed/") })
         #expect(landed.destinations == ["/data/media/books/books"])
         #expect(landed.cloudCalls == 0)
@@ -419,8 +419,8 @@ struct TorBoxarrStatusTests {
         _ = await refresh.refresh()
 
         #expect(bridge.urls.contains { $0.path.contains("/torrents/files") })
-        #expect(movedVolumePaths(nas.movedPaths) == ["/data/torrents/completed/Selected Title"])
-        #expect(nas.movedPaths.allSatisfy { $0.contains("/data/torrents/completed/Selected Title") })
+        #expect(movedVolumePaths(nas.movedPaths) == ["/data/torrents/completed/torboxarr/Selected Title"])
+        #expect(nas.movedPaths.allSatisfy { $0.contains("/data/torrents/completed/torboxarr/Selected Title") })
         #expect(nas.movedPaths.allSatisfy { !$0.contains("/data/completed/") })
         #expect(nas.destinations == ["/data/media/books/audiobooks"])
         #expect(jobs.jobs[0].status == .complete)
