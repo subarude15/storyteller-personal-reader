@@ -219,17 +219,83 @@ struct InkAmpContinueWidgetView: View {
     // MARK: Large
 
     private var largeBody: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 16) {
-                nowColumn(coverSize: 110, titleFont: .title3.weight(.semibold))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                upNextColumn
-                    .frame(width: 168, alignment: .leading)
+        VStack(alignment: .leading, spacing: 12) {
+            GeometryReader { proxy in
+                let gap: CGFloat = 14
+                let usableWidth = max(0, proxy.size.width - gap)
+                let currentWidth = usableWidth * 0.42
+                let queueWidth = usableWidth - currentWidth
+
+                HStack(alignment: .top, spacing: gap) {
+                    largeNowColumn
+                        .frame(width: currentWidth, alignment: .leading)
+
+                    upNextColumn
+                        .frame(width: queueWidth, alignment: .leading)
+                }
             }
-            Spacer(minLength: 0)
+            .frame(maxHeight: .infinity)
+
             actionRow(continueProminent: true)
         }
         .padding(16)
+    }
+
+    private var largeNowColumn: some View {
+        Link(destination: InkAmpContinueWidgetActions.continueURL(for: snapshot)) {
+            VStack(alignment: .leading, spacing: 7) {
+                Text("NOW LISTENING")
+                    .font(.system(size: 9, weight: .bold))
+                    .tracking(0.55)
+                    .foregroundStyle(colors.accent)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(colors.accent.opacity(theme == .light ? 0.14 : 0.18))
+                    )
+
+                cover(
+                    filename: snapshot.coverFilename,
+                    kind: snapshot.kind,
+                    size: 92,
+                )
+
+                Text(snapshot.title ?? "")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(colors.primary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.82)
+                    .multilineTextAlignment(.leading)
+
+                if let subtitle = snapshot.subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.system(size: 10))
+                        .foregroundStyle(colors.secondary)
+                        .lineLimit(1)
+                }
+
+                if let progress = snapshot.clampedProgress {
+                    InkAmpThemedProgressBar(
+                        progress: progress,
+                        fill: colors.progress,
+                        track: colors.progressTrack,
+                        height: 5,
+                    )
+                }
+
+                if let caption = snapshot.progressCaption {
+                    Text(caption)
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundStyle(colors.secondary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Continue, \(snapshot.title ?? "")")
     }
 
     private func nowColumn(coverSize: CGFloat, titleFont: Font) -> some View {
