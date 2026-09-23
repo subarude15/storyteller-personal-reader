@@ -389,6 +389,10 @@ public actor AudioSessionActor {
             if now > baseline + 0.05 {
                 podcastIsPlaying = true
                 await publishPodcastState()
+                NotificationCenter.default.post(
+                    name: .punkRallyPodcastPlaybackBecameActive,
+                    object: nil
+                )
                 return true
             }
             try? await Task.sleep(for: .milliseconds(120))

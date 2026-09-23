@@ -5,6 +5,7 @@ import UIKit
 /// Tracks portrait vs landscape-fullscreen presentation for the expanded podcast video player.
 ///
 /// Owns UI state only — playback stays on `AudioSessionActor` / the shared `AVPlayer`.
+/// Screen wake for that same session is delegated to `VideoPlaybackSleepController`.
 @MainActor
 @Observable
 public final class PodcastVideoPresentationCoordinator {
@@ -51,6 +52,10 @@ public final class PodcastVideoPresentationCoordinator {
         let wasVideo = self.isInternalVideo
         self.isPlayerExpanded = expanded
         self.isInternalVideo = isInternalVideo
+        VideoPlaybackSleepController.shared.notePlayerVisibility(
+            isInternalVideo: isInternalVideo,
+            isPlayerExpanded: isPlayerExpanded
+        )
         // Eligibility change (expanded video on/off) must re-query the delegate
         // mask before the next physical rotation. Unchanged eligibility is a no-op.
         refreshSupportedOrientationsIfNeeded(previousAllowsLandscape: previousAllowsLandscape)
