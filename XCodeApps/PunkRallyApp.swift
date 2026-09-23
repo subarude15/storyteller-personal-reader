@@ -22,7 +22,6 @@ import SilveranKit
 /// MediaViewModel is available in the environment (SilveranReaderApp injects it);
 /// otherwise show ink+amp placeholders so the shell always builds standalone.
 public struct PunkRallyTabView: View {
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab: InkAmpPrimaryTab = .home
     @State private var morePath = NavigationPath()
