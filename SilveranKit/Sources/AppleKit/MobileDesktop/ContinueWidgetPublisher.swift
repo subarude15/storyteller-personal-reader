@@ -30,7 +30,8 @@ public enum ContinueWidgetPublisher {
             },
             onOpen: {
                 Task { @MainActor in
-                    NotificationCenter.default.post(name: .punkRallyOpenContinue, object: nil)
+                    InkAmpPendingDeepLinkStore.shared.set(.continueItem(nil))
+                    InkAmpContinueLink.notifyPendingDeepLinkReady()
                 }
             },
         )
@@ -84,7 +85,8 @@ public enum ContinueWidgetPublisher {
             Task { await handleToggleFromWidget() }
         }
         if ContinueWidgetBridge.consumePendingOpen() {
-            NotificationCenter.default.post(name: .punkRallyOpenContinue, object: nil)
+            InkAmpPendingDeepLinkStore.shared.set(.continueItem(nil))
+            InkAmpContinueLink.notifyPendingDeepLinkReady()
         }
     }
 
@@ -169,7 +171,8 @@ public enum ContinueWidgetPublisher {
             let fresh = await AudioSessionActor.shared.currentSnapshot()
             await publishSession(fresh)
         } else {
-            NotificationCenter.default.post(name: .punkRallyOpenContinue, object: nil)
+            InkAmpPendingDeepLinkStore.shared.set(.continueItem(nil))
+            InkAmpContinueLink.notifyPendingDeepLinkReady()
         }
     }
 }

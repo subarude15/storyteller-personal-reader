@@ -147,6 +147,7 @@ public struct PunkRallyTabView: View {
                 #endif
                 Task { await reloadMoreBadge() }
                 openPendingRequestActivityIfNeeded()
+                consumePendingWidgetDeepLinkIfNeeded()
                 Task { await processManualDownloadIntake() }
             }
             .onReceive(NotificationCenter.default.publisher(for: .inkampProcessManualDownloadIntake)) { _ in
@@ -166,16 +167,26 @@ public struct PunkRallyTabView: View {
                 selectedTab = .more
                 openPendingRequestActivityIfNeeded()
             }
+            .onReceive(
+                NotificationCenter.default.publisher(
+                    for: InkAmpContinueLink.pendingDeepLinkReadyNotification
+                )
+            ) { _ in
+                consumePendingWidgetDeepLinkIfNeeded()
+            }
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowHome)) { _ in
-                selectedTab = .home
+                // Legacy posters (no store write) — seed then consume once.
+                if InkAmpPendingDeepLinkStore.shared.peek() == nil {
+                    InkAmpPendingDeepLinkStore.shared.set(.home)
+                }
+                consumePendingWidgetDeepLinkIfNeeded()
             }
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyOpenContinue)) { note in
-                selectedTab = .home
-                NotificationCenter.default.post(
-                    name: .punkRallyPerformContinue,
-                    object: nil,
-                    userInfo: note.userInfo
-                )
+                if InkAmpPendingDeepLinkStore.shared.peek() == nil {
+                    let itemID = note.userInfo?[InkAmpContinueLink.queueItemUserInfoKey] as? String
+                    InkAmpPendingDeepLinkStore.shared.set(.continueItem(itemID))
+                }
+                consumePendingWidgetDeepLinkIfNeeded()
             }
             .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyRetryStatsSync)
@@ -252,6 +263,28 @@ public struct PunkRallyTabView: View {
         selectedTab = .more
         morePath = NavigationPath()
         morePath.append(route)
+    }
+
+    /// Consume a widget Continue / Home deep link exactly once.
+    /// Cold launch: URL handler stored the action before this shell existed.
+    /// Warm launch: pending-ready / legacy notifications call this immediately.
+    private func consumePendingWidgetDeepLinkIfNeeded() {
+        guard let action = InkAmpPendingDeepLinkStore.shared.consume() else { return }
+        switch InkAmpPendingDeepLinkDelivery.effect(for: action) {
+            case .selectHome:
+                selectedTab = .home
+            case .selectHomeAndContinue(let itemID):
+                selectedTab = .home
+                var info: [AnyHashable: Any]?
+                if let itemID {
+                    info = [InkAmpContinueLink.queueItemUserInfoKey: itemID]
+                }
+                NotificationCenter.default.post(
+                    name: .punkRallyPerformContinue,
+                    object: nil,
+                    userInfo: info
+                )
+        }
     }
 
     private func processManualDownloadIntake() async {
