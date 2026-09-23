@@ -355,6 +355,7 @@ public enum ContinueWidgetSnapshotStore {
                 at: container,
                 withIntermediateDirectories: true,
             )
+            try SilveranWidgetSnapshotStore.prepareTransientState(in: container)
             let covers = coversDirectory(in: container)
             try FileManager.default.createDirectory(
                 at: covers,
@@ -510,11 +511,13 @@ public enum ContinueWidgetSnapshotStore {
     }
 
     private static func snapshotURL(in container: URL) -> URL {
-        container.appendingPathComponent(snapshotFilename, isDirectory: false)
+        SilveranWidgetSnapshotStore.transientStateDirectory(in: container)
+            .appendingPathComponent(snapshotFilename, isDirectory: false)
     }
 
     private static func coversDirectory(in container: URL) -> URL {
-        container.appendingPathComponent(coversDirectoryName, isDirectory: true)
+        SilveranWidgetSnapshotStore.transientStateDirectory(in: container)
+            .appendingPathComponent(coversDirectoryName, isDirectory: true)
     }
 
     /// `nil` drafts keep the rows already on disk (live-session ticks). A non-nil
