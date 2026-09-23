@@ -1,6 +1,11 @@
 import SwiftUI
+import SilveranAppleKit
 
-/// ink+amp Design System Tokens (per UX-SHELL.md and DESIGN.md)
+/// ink+amp Design System Tokens.
+///
+/// Phase 1 chrome colors come from `InkAmpAppTheme` (Blanc/Carmin/Aqua light,
+/// Sea Grey/Tangerine/Leaf Green dark). Reader page themes remain separate
+/// (`ReaderTheme` in SilveranKit) and must not be overloaded for app chrome.
 public enum PunkRallyTheme {
     /// App brand display name
     public static let appName = "ink+amp"
@@ -10,86 +15,46 @@ public enum PunkRallyTheme {
     /// from a fresh book source via SilveranKit's kDefaultStorytellerServerURL.
     public static let defaultStorytellerURL = "https://storyteller.banditoburrito.xyz"
 
-    /// Shared brand accent colors (identical across Light and Dark chrome)
+    /// Shared brand accents for chips / status.
     public enum Accent {
-        /// Burnt orange (#E85D04) — primary CTA and active tab
-        public static let primary = Color(red: 0.910, green: 0.365, blue: 0.016)
-        /// Pressed CTA (#C44E03)
-        public static let primaryPressed = Color(red: 0.769, green: 0.306, blue: 0.012)
-        /// Gold (#E1B46E) — badges, sync indicators, kind chips
-        public static let gold = Color(red: 0.882, green: 0.706, blue: 0.431)
-        /// Danger / error (#FF4D6D)
-        public static let danger = Color(red: 1.000, green: 0.302, blue: 0.427)
-        /// Success / synced (#3DDC97)
+        /// Default light-scheme primary (Carmin). Prefer `primary(for:)` when
+        /// the active color scheme is known.
+        public static let primary = InkAmpAppTheme.resolve(for: .light).accent
+
+        public static func primary(for scheme: ColorScheme) -> Color {
+            InkAmpAppTheme.resolve(for: scheme).accent
+        }
+
+        /// Success / synced
         public static let success = Color(red: 0.239, green: 0.863, blue: 0.592)
+        /// Gold — badges, sync indicators (kept subtle; not a brand primary)
+        public static let gold = Color(red: 0.882, green: 0.706, blue: 0.431)
+        /// Danger / error — Carmin family
+        public static let danger = InkAmpAppTheme.resolve(for: .light).destructive
     }
 
-    /// Chrome palette adaptors for system light and dark modes
+    /// Chrome palette adaptors for system light and dark modes (InkAmpAppTheme).
     public struct Chrome {
         public let scheme: ColorScheme
+        private let theme: InkAmpAppTheme
 
         public init(scheme: ColorScheme) {
             self.scheme = scheme
+            self.theme = InkAmpAppTheme.resolve(for: scheme)
         }
 
-        /// App background
-        public var bg: Color {
-            scheme == .dark
-                ? Color(red: 0.043, green: 0.043, blue: 0.047) // #0B0B0C
-                : Color(red: 0.969, green: 0.961, blue: 0.949) // #F7F5F2 (warm paper)
-        }
-
-        /// Surface (cards, sheets)
-        public var surface: Color {
-            scheme == .dark
-                ? Color(red: 0.086, green: 0.086, blue: 0.094) // #161618
-                : Color.white
-        }
-
-        /// Surface 2 (elevated / pressed / chip wells)
-        public var surface2: Color {
-            scheme == .dark
-                ? Color(red: 0.118, green: 0.118, blue: 0.133) // #1E1E22
-                : Color(red: 0.937, green: 0.918, blue: 0.894) // #EFEAE4
-        }
-
-        /// Borders and hairlines
-        public var border: Color {
-            scheme == .dark
-                ? Color(red: 0.165, green: 0.165, blue: 0.180) // #2A2A2E
-                : Color(red: 0.878, green: 0.855, blue: 0.824) // #E0DAD2
-        }
-
-        /// Primary text
-        public var text: Color {
-            scheme == .dark
-                ? Color(red: 0.957, green: 0.945, blue: 0.918) // #F4F1EA
-                : Color(red: 0.102, green: 0.094, blue: 0.078) // #1A1814
-        }
-
-        /// Secondary muted text
-        public var textMuted: Color {
-            scheme == .dark
-                ? Color(red: 0.604, green: 0.584, blue: 0.549) // #9A958C
-                : Color(red: 0.420, green: 0.396, blue: 0.376) // #6B6560
-        }
-
-        /// Faint / tertiary text
-        public var textFaint: Color {
-            scheme == .dark
-                ? Color(red: 0.420, green: 0.404, blue: 0.376) // #6B6760
-                : Color(red: 0.604, green: 0.580, blue: 0.549) // #9A948C
-        }
-
-        /// Tab bar selection tint
-        public var tabActive: Color {
-            Accent.primary
-        }
-
-        /// Mini-player bar background
-        public var miniBarBg: Color {
-            surface
-        }
+        public var bg: Color { theme.background }
+        public var surface: Color { theme.surface }
+        public var surface2: Color { theme.surfaceElevated }
+        public var border: Color { theme.border }
+        public var text: Color { theme.primaryText }
+        public var textMuted: Color { theme.secondaryText }
+        public var textFaint: Color { theme.tertiaryText }
+        public var tabActive: Color { theme.accent }
+        public var miniBarBg: Color { theme.surfaceElevated }
+        public var accent: Color { theme.accent }
+        public var secondaryAccent: Color { theme.secondaryAccent }
+        public var progress: Color { theme.progress }
     }
 
     /// Kind badge styling definitions
@@ -100,58 +65,51 @@ public enum PunkRallyTheme {
         case podcast = "POD"
 
         public func backgroundColor(scheme: ColorScheme) -> Color {
+            let theme = InkAmpAppTheme.resolve(for: scheme)
             switch self {
             case .ebook:
-                return scheme == .dark
-                    ? Color(red: 0.165, green: 0.165, blue: 0.180)
-                    : Color(red: 0.937, green: 0.918, blue: 0.894)
+                return theme.surface
             case .audiobook:
                 return scheme == .dark
-                    ? Color(red: 0.165, green: 0.141, blue: 0.094)
-                    : Color(red: 0.961, green: 0.929, blue: 0.847)
+                    ? theme.accent.opacity(0.18)
+                    : theme.accent.opacity(0.10)
             case .readaloud:
                 return scheme == .dark
-                    ? Color(red: 0.165, green: 0.094, blue: 0.063)
-                    : Color(red: 0.988, green: 0.910, blue: 0.847)
+                    ? theme.secondaryAccent.opacity(0.28)
+                    : theme.secondaryAccent.opacity(0.22)
             case .podcast:
                 return scheme == .dark
-                    ? Color(red: 0.094, green: 0.125, blue: 0.165)
-                    : Color(red: 0.894, green: 0.933, blue: 0.973)
+                    ? Color.white.opacity(0.08)
+                    : theme.secondaryAccent.opacity(0.16)
             }
         }
 
         public func foregroundColor(scheme: ColorScheme) -> Color {
+            let theme = InkAmpAppTheme.resolve(for: scheme)
             switch self {
             case .ebook:
-                return scheme == .dark
-                    ? Color(red: 0.957, green: 0.945, blue: 0.918)
-                    : Color(red: 0.102, green: 0.094, blue: 0.078)
+                return theme.primaryText
             case .audiobook:
-                return scheme == .dark
-                    ? Accent.gold
-                    : Color(red: 0.541, green: 0.416, blue: 0.165)
+                return theme.accent
             case .readaloud:
-                return scheme == .dark
-                    ? Accent.primary
-                    : Accent.primaryPressed
+                return scheme == .dark ? theme.secondaryAccent : theme.accent
             case .podcast:
-                return scheme == .dark
-                    ? Color(red: 0.541, green: 0.706, blue: 1.000)
-                    : Color(red: 0.184, green: 0.373, blue: 0.604)
+                return theme.secondaryText
             }
         }
     }
 
-    /// Spacing metrics per DESIGN.md
+    /// Spacing metrics — aligned with InkAmpMetrics for Phase 1.
     public enum Metric {
         public static let gridBase: CGFloat = 8
-        public static let screenInset: CGFloat = 16
-        public static let cardPadding: CGFloat = 12
+        public static let screenInset: CGFloat = InkAmpMetrics.screenInset
+        public static let cardPadding: CGFloat = InkAmpMetrics.cardPadding
         public static let gridGutter: CGFloat = 12
         public static let miniBarHeight: CGFloat = 56
-        public static let coverCornerRadius: CGFloat = 8
-        public static let buttonCornerRadius: CGFloat = 12
-        public static let minHitTarget: CGFloat = 44
+        public static let coverCornerRadius: CGFloat = 10
+        public static let buttonCornerRadius: CGFloat = InkAmpMetrics.cardRadius
+        public static let featureCornerRadius: CGFloat = InkAmpMetrics.featureCardRadius
+        public static let minHitTarget: CGFloat = InkAmpMetrics.minHitTarget
     }
 }
 

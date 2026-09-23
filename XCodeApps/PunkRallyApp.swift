@@ -22,7 +22,6 @@ import SilveranKit
 /// MediaViewModel is available in the environment (SilveranReaderApp injects it);
 /// otherwise show ink+amp placeholders so the shell always builds standalone.
 public struct PunkRallyTabView: View {
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab: InkAmpPrimaryTab = .home
     @State private var morePath = NavigationPath()
@@ -34,12 +33,9 @@ public struct PunkRallyTabView: View {
 
     public init() {}
 
-    private var chrome: PunkRallyTheme.Chrome {
-        PunkRallyTheme.Chrome(scheme: colorScheme)
-    }
-
     public var body: some View {
         rootShell
+            .inkAmpAppThemed()
             .modifier(PunkRallyShellToastModifier(showToast: { showShellToast($0) }))
             .modifier(
                 PunkRallyPodcastBridgeModifier(
@@ -80,50 +76,58 @@ public struct PunkRallyTabView: View {
             }
     }
 
-    /// Tab chrome + book card + scene lifecycle (split from body for the type checker).
+    /// Five-tab host only — kept separate so `rootShell` type-checks.
     @ViewBuilder
-    private var rootShell: some View {
-        ZStack {
-            TabView(selection: $selectedTab) {
-                HomeTabView()
-                    .punkRallyMiniPlayerInset()
-                    .tabItem {
-                        Label(InkAmpPrimaryTab.home.title, systemImage: InkAmpPrimaryTab.home.systemImage)
-                    }
-                    .tag(InkAmpPrimaryTab.home)
+    private var primaryTabView: some View {
+        TabView(selection: $selectedTab) {
+            HomeTabView()
+                .punkRallyMiniPlayerInset()
+                .tabItem {
+                    Label(InkAmpPrimaryTab.home.title, systemImage: InkAmpPrimaryTab.home.systemImage)
+                }
+                .tag(InkAmpPrimaryTab.home)
 
-                LibraryTabView()
-                    .punkRallyMiniPlayerInset()
-                    .tabItem {
-                        Label(InkAmpPrimaryTab.library.title, systemImage: InkAmpPrimaryTab.library.systemImage)
-                    }
-                    .tag(InkAmpPrimaryTab.library)
+            LibraryTabView()
+                .punkRallyMiniPlayerInset()
+                .tabItem {
+                    Label(InkAmpPrimaryTab.library.title, systemImage: InkAmpPrimaryTab.library.systemImage)
+                }
+                .tag(InkAmpPrimaryTab.library)
 
-                ShelfTabView()
-                    .punkRallyMiniPlayerInset()
-                    .tabItem {
-                        Label(InkAmpPrimaryTab.shelf.title, systemImage: InkAmpPrimaryTab.shelf.systemImage)
-                    }
-                    .tag(InkAmpPrimaryTab.shelf)
+            ShelfTabView()
+                .punkRallyMiniPlayerInset()
+                .tabItem {
+                    Label(InkAmpPrimaryTab.shelf.title, systemImage: InkAmpPrimaryTab.shelf.systemImage)
+                }
+                .tag(InkAmpPrimaryTab.shelf)
 
-                PodcastsHomeView()
-                    .punkRallyMiniPlayerInset()
-                    .tabItem {
-                        Label(InkAmpPrimaryTab.podcasts.title, systemImage: InkAmpPrimaryTab.podcasts.systemImage)
-                    }
-                    .tag(InkAmpPrimaryTab.podcasts)
+            PodcastsHomeView()
+                .punkRallyMiniPlayerInset()
+                .tabItem {
+                    Label(InkAmpPrimaryTab.podcasts.title, systemImage: InkAmpPrimaryTab.podcasts.systemImage)
+                }
+                .tag(InkAmpPrimaryTab.podcasts)
 
-                MoreTabView(path: $morePath, showSettings: $showSettings)
-                    .punkRallyMiniPlayerInset()
-                    .tabItem {
-                        Label(InkAmpPrimaryTab.more.title, systemImage: InkAmpPrimaryTab.more.systemImage)
-                    }
-                    .tag(InkAmpPrimaryTab.more)
-                    .badge(moreTabBadge > 0 ? moreTabBadge : 0)
-            }
-            .tint(PunkRallyTheme.Accent.primary)
+            MoreTabView(path: $morePath, showSettings: $showSettings)
+                .punkRallyMiniPlayerInset()
+                .tabItem {
+                    Label(InkAmpPrimaryTab.more.title, systemImage: InkAmpPrimaryTab.more.systemImage)
+                }
+                .tag(InkAmpPrimaryTab.more)
+                .badge(moreTabBadge > 0 ? moreTabBadge : 0)
+        }
+    }
+
+    private var shellBase: some View {
+        primaryTabView
+            .modifier(InkAmpTabChromeModifier())
             .preferredColorScheme(nil) // follow system appearance
             .punkRallySheets(showSettings: $showSettings)
+    }
+
+    /// Notification / scene lifecycle chain — isolated so `rootShell` type-checks.
+    private var shellWithLifecycle: some View {
+        shellBase
             .onReceive(NotificationCenter.default.publisher(for: .inkampShowManualDownloads)) { _ in
                 openMoreDestination(.downloads)
             }
@@ -239,14 +243,21 @@ public struct PunkRallyTabView: View {
                     }
                 }
             }
-            .fullScreenCover(item: PlayerPresenter.shared.cardItemBinding) { wrapper in
-                NavigationStack {
-                    PunkRallyPlayerHost.playerView(
-                        for: wrapper.data,
-                        onFailure: { showShellToast("Can't open yet · try again") }
-                    )
+    }
+
+    /// Book card + tab host (split from body for the type checker).
+    @ViewBuilder
+    private var rootShell: some View {
+        ZStack {
+            shellWithLifecycle
+                .fullScreenCover(item: PlayerPresenter.shared.cardItemBinding) { wrapper in
+                    NavigationStack {
+                        PunkRallyPlayerHost.playerView(
+                            for: wrapper.data,
+                            onFailure: { showShellToast("Can't open yet · try again") }
+                        )
+                    }
                 }
-            }
         }
     }
 
@@ -618,7 +629,7 @@ private struct HomeTabView: View {
                     HStack(spacing: 8) {
                         Text("Continue")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(PunkRallyTheme.Accent.primary)
+                            .foregroundStyle(chrome.accent)
                         if let item {
                             KindBadgeView(kind: item.badge, scheme: colorScheme)
                         }
@@ -637,19 +648,20 @@ private struct HomeTabView: View {
                     if let item, let label = item.finishabilityLabel {
                         Text(label)
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(PunkRallyTheme.Accent.primary)
+                            .foregroundStyle(chrome.accent)
                     }
                 }
                 Spacer(minLength: 0)
             }
         }
         .padding(PunkRallyTheme.Metric.cardPadding)
-        .background(chrome.surface)
-        .clipShape(RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius))
+        .background(chrome.surface2)
+        .clipShape(RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.featureCornerRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius)
+            RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.featureCornerRadius, style: .continuous)
                 .stroke(chrome.border, lineWidth: 1)
         )
+        .shadow(color: colorScheme == .dark ? .clear : .black.opacity(0.06), radius: 8, y: 2)
         .contentShape(Rectangle())
         .onTapGesture {
             Task { await openMixedItem(item) }
@@ -735,8 +747,8 @@ private struct HomeTabView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
-        .background(chrome.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .background(chrome.surface2)
+        .clipShape(RoundedRectangle(cornerRadius: InkAmpMetrics.controlRadius, style: .continuous))
     }
 
     @ViewBuilder
@@ -757,7 +769,7 @@ private struct HomeTabView: View {
                             if let why = item.finishabilityLabel {
                                 Text(why)
                                     .font(.caption.weight(.semibold))
-                                    .foregroundStyle(PunkRallyTheme.Accent.primary)
+                                    .foregroundStyle(chrome.accent)
                             }
                         }
                         Spacer(minLength: 0)
@@ -772,10 +784,10 @@ private struct HomeTabView: View {
                 }
             }
             .padding(PunkRallyTheme.Metric.cardPadding)
-            .background(chrome.surface)
-            .clipShape(RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius))
+            .background(chrome.surface2)
+            .clipShape(RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius)
+                RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius, style: .continuous)
                     .stroke(chrome.border, lineWidth: 1)
             )
             .accessibilityIdentifier("finish-tonight")
@@ -1252,6 +1264,19 @@ public struct SyncChipView: View {
         .background(color.opacity(0.12))
         .clipShape(Capsule())
         .accessibilityLabel(Text(label))
+    }
+}
+
+/// Tab tint + bar surface from InkAmpAppTheme (keeps PunkRallyTabView.rootShell small).
+private struct InkAmpTabChromeModifier: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        let theme = InkAmpAppTheme.resolve(for: colorScheme)
+        content
+            .tint(theme.accent)
+            .toolbarBackground(theme.surfaceElevated, for: .tabBar)
+            .toolbarBackground(.visible, for: .tabBar)
     }
 }
 

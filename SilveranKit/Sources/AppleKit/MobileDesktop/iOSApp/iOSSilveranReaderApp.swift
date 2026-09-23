@@ -286,6 +286,7 @@ private struct iOSRootView: View {
                 }
             }
         }
+        .inkAmpAppThemed()
         .onReceive(NotificationCenter.default.publisher(for: .silveranCreateReadaloud)) {
             notification in
             guard AppLaunchContext.environment.readaloudAligner != nil else { return }

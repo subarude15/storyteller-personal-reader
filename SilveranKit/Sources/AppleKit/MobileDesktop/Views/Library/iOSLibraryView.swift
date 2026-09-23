@@ -52,6 +52,8 @@ public enum ConfigurableTab: String, CaseIterable, Identifiable {
 }
 
 public struct iOSLibraryView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    private var theme: InkAmpAppTheme { .resolve(for: colorScheme) }
     @State private var searchText: String = ""
     @State private var selectedTab: Tab = .home
     @State private var showSettings = false
@@ -163,6 +165,9 @@ public struct iOSLibraryView: View {
                 }
                 .tag(Tab.more)
         }
+        .tint(theme.accent)
+        .toolbarBackground(theme.surfaceElevated, for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
         .environment(\.editMetadataAction, handleEditMetadata)
         .id("\(settingsViewModel.tabBarSlot1)-\(settingsViewModel.tabBarSlot2)")
         .onChange(of: selectedTab) { _, _ in

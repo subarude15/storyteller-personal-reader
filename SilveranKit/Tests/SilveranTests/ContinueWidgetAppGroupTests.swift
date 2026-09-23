@@ -291,12 +291,18 @@ struct ContinueWidgetSnapshotTests {
     }
 
     @Test func lightAndDarkPaletteConstantsMatchApprovedHex() {
-        #expect(InkAmpContinueWidgetPalette.Light.aqua == "#95D9C0")
-        #expect(InkAmpContinueWidgetPalette.Light.blanc == "#FFFFFF")
-        #expect(InkAmpContinueWidgetPalette.Light.carmin == "#D41F26")
-        #expect(InkAmpContinueWidgetPalette.Dark.tangerine == "#F58F20")
-        #expect(InkAmpContinueWidgetPalette.Dark.leafGreen == "#467434")
-        #expect(InkAmpContinueWidgetPalette.Dark.seaGrey == "#363636")
+        #expect(InkAmpBrandPalette.aqua == "#95D9C0")
+        #expect(InkAmpBrandPalette.blanc == "#FFFFFF")
+        #expect(InkAmpBrandPalette.carmin == "#D41F26")
+        #expect(InkAmpBrandPalette.tangerine == "#F58F20")
+        #expect(InkAmpBrandPalette.leafGreen == "#467434")
+        #expect(InkAmpBrandPalette.seaGrey == "#363636")
+        #expect(InkAmpContinueWidgetPalette.Light.aqua == InkAmpBrandPalette.aqua)
+        #expect(InkAmpContinueWidgetPalette.Light.blanc == InkAmpBrandPalette.blanc)
+        #expect(InkAmpContinueWidgetPalette.Light.carmin == InkAmpBrandPalette.carmin)
+        #expect(InkAmpContinueWidgetPalette.Dark.tangerine == InkAmpBrandPalette.tangerine)
+        #expect(InkAmpContinueWidgetPalette.Dark.leafGreen == InkAmpBrandPalette.leafGreen)
+        #expect(InkAmpContinueWidgetPalette.Dark.seaGrey == InkAmpBrandPalette.seaGrey)
     }
 
     @Test func upNextRoundTripsThroughJSON() throws {

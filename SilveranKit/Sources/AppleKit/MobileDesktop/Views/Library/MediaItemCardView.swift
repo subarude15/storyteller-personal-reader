@@ -55,7 +55,7 @@ struct MediaItemCardMetrics {
         return MediaItemCardMetrics(
             tileWidth: tileWidth,
             cardPadding: cardPadding,
-            coverCornerRadius: max(8, tileWidth * 0.045),
+            coverCornerRadius: max(10, min(16, tileWidth * 0.055)),
             contentSpacing: contentSpacing,
             coverWidth: coverWidth,
             maxCardHeight: maxCardHeight,
@@ -83,6 +83,7 @@ struct MediaItemCardView: View {
     var debugContext: String? = nil
     @Environment(MediaViewModel.self) private var mediaViewModel
     @Environment(\.colorScheme) private var colorScheme
+    private var theme: InkAmpAppTheme { .resolve(for: colorScheme) }
     #if os(macOS)
     @State private var doubleCoverSwapping = false
     #endif
@@ -526,8 +527,7 @@ struct MediaItemCardView: View {
                     .overlay(alignment: .bottom) {
                         let progress = mediaViewModel.progress(for: item.id)
                         if progressStyle == .line && !shouldRenderDoubleCover {
-                            MediaProgressBar(progress: progress)
-                                .frame(height: 3)
+                            InkAmpProgressBar(progress: progress, height: 3)
                         }
                     }
                     .clipShape(
@@ -596,7 +596,7 @@ struct MediaItemCardView: View {
                         .strokeBorder(
                             isSelected
                                 ? (shouldRenderDoubleCover
-                                    ? resolvedCoverPalette.accent : Color.accentColor)
+                                    ? resolvedCoverPalette.accent : theme.accent)
                                 : Color.clear,
                             lineWidth: 2,
                         )
@@ -624,8 +624,8 @@ struct MediaItemCardView: View {
                     .padding(.bottom, metrics.titleToAuthorGap)
 
                 Text(item.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.primary)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(theme.primaryText)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
@@ -643,6 +643,22 @@ struct MediaItemCardView: View {
             )
         )
         .frame(width: metrics.tileWidth, height: metrics.maxCardHeight, alignment: .top)
+        .background(
+            RoundedRectangle(cornerRadius: InkAmpMetrics.cardRadius, style: .continuous)
+                .fill(theme.surfaceElevated)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: InkAmpMetrics.cardRadius, style: .continuous)
+                .strokeBorder(
+                    theme.border.opacity(colorScheme == .dark ? 0.9 : 0.65),
+                    lineWidth: 1,
+                )
+        )
+        .shadow(
+            color: colorScheme == .dark ? .clear : .black.opacity(0.05),
+            radius: 6,
+            y: 2,
+        )
     }
 
     private var cardContent: some View {
@@ -681,7 +697,7 @@ struct MediaItemCardView: View {
         HStack(spacing: 2) {
             Text(topLineText)
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.secondaryText)
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 4)
@@ -839,18 +855,25 @@ struct ProgressTextBadge: View {
 }
 
 struct MediaProgressBar: View {
+    @Environment(\.colorScheme) private var colorScheme
+    private var theme: InkAmpAppTheme { .resolve(for: colorScheme) }
+
     let progress: Double
     var backgroundOpacity = 0.1
 
     var body: some View {
-        GeometryReader { geometry in
-            let clamped = min(max(progress, 0), 1)
-            ZStack(alignment: .leading) {
-                Rectangle()
-                    .fill(.tint.opacity(backgroundOpacity))
-                Rectangle()
-                    .fill(.tint)
-                    .frame(width: geometry.size.width * CGFloat(clamped))
+        if abs(backgroundOpacity - 0.1) < 0.001 {
+            InkAmpProgressBar(progress: progress, height: 3)
+        } else {
+            GeometryReader { geometry in
+                let clamped = min(max(progress, 0), 1)
+                ZStack(alignment: .leading) {
+                    Rectangle()
+                        .fill(theme.progress.opacity(backgroundOpacity))
+                    Rectangle()
+                        .fill(theme.progress)
+                        .frame(width: geometry.size.width * CGFloat(clamped))
+                }
             }
         }
     }
@@ -1329,5 +1352,67 @@ struct AudioIndicatorBadge: View {
         }
     }
 }
+
+
+#if DEBUG
+private struct MediaItemCardPreviewHost: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let theme = InkAmpAppTheme.resolve(for: colorScheme)
+        let metrics = MediaItemCardMetrics.make(for: 140, mediaKind: .ebook)
+        VStack(alignment: .leading, spacing: 12) {
+            InkAmpSectionHeader("Continue", actionTitle: "See All", action: {})
+            HStack(alignment: .top, spacing: 14) {
+                previewCard(metrics: metrics, theme: theme, title: "Piranesi", author: "Susanna Clarke")
+                previewCard(metrics: metrics, theme: theme, title: "The Left Hand of Darkness", author: "Ursula K. Le Guin")
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(theme.background)
+        .inkAmpAppThemed()
+    }
+
+    private func previewCard(metrics: MediaItemCardMetrics, theme: InkAmpAppTheme, title: String, author: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            RoundedRectangle(cornerRadius: metrics.coverCornerRadius, style: .continuous)
+                .fill(theme.secondaryAccent.opacity(0.35))
+                .frame(width: metrics.coverWidth, height: metrics.coverWidth / 0.66)
+                .overlay(alignment: .bottom) {
+                    InkAmpProgressBar(progress: 0.42, height: 3)
+                }
+            Text(author)
+                .font(.subheadline)
+                .foregroundStyle(theme.secondaryText)
+                .lineLimit(1)
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(theme.primaryText)
+                .lineLimit(2)
+        }
+        .padding(8)
+        .frame(width: metrics.tileWidth, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: InkAmpMetrics.cardRadius, style: .continuous)
+                .fill(theme.surfaceElevated)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: InkAmpMetrics.cardRadius, style: .continuous)
+                .strokeBorder(theme.border, lineWidth: 1)
+        )
+    }
+}
+
+#Preview("Media card · light") {
+    MediaItemCardPreviewHost()
+        .preferredColorScheme(.light)
+}
+
+#Preview("Media card · dark") {
+    MediaItemCardPreviewHost()
+        .preferredColorScheme(.dark)
+}
+#endif
 
 #endif
