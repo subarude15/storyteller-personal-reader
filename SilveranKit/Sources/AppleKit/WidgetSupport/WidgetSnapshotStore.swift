@@ -19,12 +19,17 @@ public enum SilveranWidgetConstants {
     /// paid team) — Sideload + ink+amp use group.com.punkrally.reader.
     public static let fallbackAppGroupIdentifier = AppGroupContainer.fallbackAppGroupIdentifier
     public static let readingWidgetKind = "SilveranReadingWidget"
-    /// Four Continue + Next Up kinds (light/dark × medium/large). New kinds so
-    /// WidgetKit drops stale/blank installs bound to older kind strings.
+    /// Four Continue + Next Up kinds (light/dark × medium/large).
+    ///
+    /// The Medium kinds intentionally use v2. Real-device testing showed both
+    /// v1 Medium registrations could remain pinned to WidgetKit's redacted
+    /// placeholder even while the Large kinds loaded the same shared snapshot.
+    /// New kind identities invalidate only those poisoned Medium timeline caches;
+    /// the working Large v1 registrations remain stable.
     public static let continueWidgetKinds = [
-        "inkamp.continue.light.medium.v1",
+        "inkamp.continue.light.medium.v2",
         "inkamp.continue.light.large.v1",
-        "inkamp.continue.dark.medium.v1",
+        "inkamp.continue.dark.medium.v2",
         "inkamp.continue.dark.large.v1",
     ]
     /// Convenience alias — first of `continueWidgetKinds` (light medium).
@@ -37,6 +42,8 @@ public enum SilveranWidgetConstants {
         "inkamp.continue.v4",
         "InkAmpContinueWidget",
         "inkamp.continue.upnext.v1",
+        "inkamp.continue.light.medium.v1",
+        "inkamp.continue.dark.medium.v1",
     ]
 }
 
