@@ -229,10 +229,10 @@ struct InkAmpContinueWidgetView: View {
         .padding(InkAmpContinueWidgetMetrics.mediumOuterPadding)
     }
 
-    /// Compact Medium current column — vertical stack so title keeps width.
+    /// Compact Medium current column — chip, then cover beside title, then full-width progress.
     private var mediumNowColumn: some View {
         Link(destination: InkAmpContinueWidgetActions.continueURL(for: snapshot)) {
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: InkAmpContinueWidgetMetrics.mediumNowColumnSpacing) {
                 Text("NOW LISTENING")
                     .font(.system(size: 8, weight: .bold))
                     .tracking(0.5)
@@ -244,24 +244,29 @@ struct InkAmpContinueWidgetView: View {
                             .fill(colors.accent.opacity(theme == .light ? 0.14 : 0.18))
                     )
 
-                cover(
-                    filename: snapshot.coverFilename,
-                    kind: snapshot.kind,
-                    size: InkAmpContinueWidgetMetrics.mediumCoverSize,
-                )
+                HStack(alignment: .top, spacing: InkAmpContinueWidgetMetrics.mediumCoverMetadataGap) {
+                    cover(
+                        filename: snapshot.coverFilename,
+                        kind: snapshot.kind,
+                        size: InkAmpContinueWidgetMetrics.mediumCoverSize,
+                    )
 
-                Text(snapshot.title ?? "")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(colors.primary)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.85)
-                    .multilineTextAlignment(.leading)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(snapshot.title ?? "")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(colors.primary)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.85)
+                            .multilineTextAlignment(.leading)
 
-                if let subtitle = snapshot.subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.system(size: 10))
-                        .foregroundStyle(colors.secondary)
-                        .lineLimit(1)
+                        if let subtitle = snapshot.subtitle, !subtitle.isEmpty {
+                            Text(subtitle)
+                                .font(.system(size: 10))
+                                .foregroundStyle(colors.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 if let progress = snapshot.clampedProgress {
@@ -269,13 +274,19 @@ struct InkAmpContinueWidgetView: View {
                         progress: progress,
                         fill: colors.progress,
                         track: colors.progressTrack,
-                        height: 3.5,
+                        height: InkAmpContinueWidgetMetrics.mediumProgressHeight,
                     )
                 }
 
                 if let caption = snapshot.progressCaption {
                     Text(caption)
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .font(
+                            .system(
+                                size: InkAmpContinueWidgetMetrics.mediumCaptionFontSize,
+                                weight: .medium,
+                                design: .rounded,
+                            )
+                        )
                         .foregroundStyle(colors.secondary)
                         .monospacedDigit()
                         .lineLimit(1)
@@ -335,7 +346,7 @@ struct InkAmpContinueWidgetView: View {
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(colors.continueLabel)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6.5)
+                    .padding(.vertical, InkAmpContinueWidgetMetrics.mediumActionVerticalPadding)
                     .background(
                         RoundedRectangle(cornerRadius: 9, style: .continuous)
                             .fill(colors.continueFill)
@@ -348,7 +359,7 @@ struct InkAmpContinueWidgetView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(colors.browseLabel)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6.5)
+                    .padding(.vertical, InkAmpContinueWidgetMetrics.mediumActionVerticalPadding)
                     .background(
                         RoundedRectangle(cornerRadius: 9, style: .continuous)
                             .fill(colors.browseFill)
@@ -767,25 +778,45 @@ private enum InkAmpMediumWidgetPreviewData {
     }
 }
 
-#Preview("Medium long titles · light") {
-    InkAmpContinueWidgetView(
-        entry: InkAmpMediumWidgetPreviewData.longTitleEntry,
-        theme: .light,
-        layout: .medium,
-    )
-    .containerBackground(for: .widget) {
-        Color(hex: InkAmpContinueWidgetPalette.Light.blanc)
+/// Constrains Medium chrome to a realistic systemMedium canvas so vertical overflow is visible.
+private struct InkAmpMediumSystemSizedPreview: View {
+    let theme: InkAmpWidgetTheme
+
+    var body: some View {
+        InkAmpContinueWidgetView(
+            entry: InkAmpMediumWidgetPreviewData.longTitleEntry,
+            theme: theme,
+            layout: .medium,
+        )
+        .frame(
+            width: InkAmpContinueWidgetMetrics.mediumPreviewWidth,
+            height: InkAmpContinueWidgetMetrics.mediumPreviewHeight,
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.15), lineWidth: 1)
+        )
     }
 }
 
-#Preview("Medium long titles · dark") {
-    InkAmpContinueWidgetView(
-        entry: InkAmpMediumWidgetPreviewData.longTitleEntry,
-        theme: .dark,
-        layout: .medium,
-    )
-    .containerBackground(for: .widget) {
-        Color(hex: InkAmpContinueWidgetPalette.Dark.seaGrey)
-    }
+#Preview("Medium systemMedium · light", as: .systemMedium) {
+    InkAmpLightMediumWidget()
+} timeline: {
+    InkAmpMediumWidgetPreviewData.longTitleEntry
+}
+
+#Preview("Medium systemMedium · dark", as: .systemMedium) {
+    InkAmpDarkMediumWidget()
+} timeline: {
+    InkAmpMediumWidgetPreviewData.longTitleEntry
+}
+
+#Preview("Medium fixed canvas · light") {
+    InkAmpMediumSystemSizedPreview(theme: .light)
+}
+
+#Preview("Medium fixed canvas · dark") {
+    InkAmpMediumSystemSizedPreview(theme: .dark)
 }
 #endif

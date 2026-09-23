@@ -39,6 +39,21 @@ public enum InkAmpContinueWidgetMetrics: Sendable {
     public static let mediumCoverSize: CGFloat = 54
     /// Up Next thumbnail on Medium.
     public static let mediumQueueCoverSize: CGFloat = 23
+    /// Spacing between Medium current-column blocks (chip / cover row / progress / caption).
+    public static let mediumNowColumnSpacing: CGFloat = 4
+    /// Gap between Medium cover and title/subtitle in the cover row.
+    public static let mediumCoverMetadataGap: CGFloat = 8
+    /// Compact progress bar height on Medium.
+    public static let mediumProgressHeight: CGFloat = 3.5
+    /// Progress caption point size on Medium (kept small for height budget).
+    public static let mediumCaptionFontSize: CGFloat = 8.5
+    /// Representative systemMedium canvas used by constrained previews / budget checks.
+    public static let mediumPreviewWidth: CGFloat = 360
+    public static let mediumPreviewHeight: CGFloat = 169
+    /// Compact Medium action-row vertical padding.
+    public static let mediumActionVerticalPadding: CGFloat = 6.5
+    /// Approximate Medium action-row height (font + vertical padding).
+    public static let mediumActionRowHeight: CGFloat = 24
     /// Validated Large current cover — frozen; Medium must stay materially smaller.
     public static let largeCoverSize: CGFloat = 92
     /// Historical Medium Up Next fixed width that over-constrained systemMedium.
@@ -51,6 +66,27 @@ public enum InkAmpContinueWidgetMetrics: Sendable {
 
     public static func mediumQueueWidth(usableWidth: CGFloat) -> CGFloat {
         max(0, usableWidth) * mediumQueueFraction
+    }
+
+    /// Lower-bound height for Medium current-column content after the compact HStack redesign.
+    /// Chip + cover row + progress (+ optional caption) with fixed spacing — no title-under-cover stack.
+    public static func mediumNowColumnMinimumHeight(includeCaption: Bool) -> CGFloat {
+        let chipHeight: CGFloat = 18
+        let coverRowHeight = mediumCoverSize
+        let progressBlock = mediumProgressHeight
+        let captionBlock: CGFloat = includeCaption ? (mediumCaptionFontSize + 2) : 0
+        let gaps = mediumNowColumnSpacing * (includeCaption ? 3 : 2)
+        return chipHeight + coverRowHeight + progressBlock + captionBlock + gaps
+    }
+
+    /// Outer padding + column stack spacing + action row + current-column minimum.
+    public static func mediumContentMinimumHeight(includeCaption: Bool) -> CGFloat {
+        let verticalPadding = mediumOuterPadding * 2
+        let bodySpacing: CGFloat = 8
+        return verticalPadding
+            + bodySpacing
+            + mediumNowColumnMinimumHeight(includeCaption: includeCaption)
+            + mediumActionRowHeight
     }
 }
 

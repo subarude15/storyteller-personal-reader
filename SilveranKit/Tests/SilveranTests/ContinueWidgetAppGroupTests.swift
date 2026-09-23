@@ -370,4 +370,24 @@ struct ContinueWidgetSnapshotTests {
         #expect(InkAmpContinueWidgetLayout.medium.upNextLimit == 2)
         #expect(InkAmpContinueWidgetLayout.large.upNextLimit == 3)
     }
+
+    @Test func mediumVerticalBudgetFitsSystemMediumPreviewCanvas() {
+        #expect(InkAmpContinueWidgetMetrics.mediumCaptionFontSize >= 8)
+        #expect(InkAmpContinueWidgetMetrics.mediumCaptionFontSize <= 9)
+        #expect(InkAmpContinueWidgetMetrics.mediumProgressHeight < 5)
+        #expect(InkAmpContinueWidgetMetrics.mediumNowColumnSpacing <= 5)
+
+        let withCaption = InkAmpContinueWidgetMetrics.mediumContentMinimumHeight(
+            includeCaption: true
+        )
+        let withoutCaption = InkAmpContinueWidgetMetrics.mediumContentMinimumHeight(
+            includeCaption: false
+        )
+        #expect(withCaption > withoutCaption)
+        #expect(withCaption <= InkAmpContinueWidgetMetrics.mediumPreviewHeight)
+        #expect(
+            InkAmpContinueWidgetMetrics.mediumNowColumnMinimumHeight(includeCaption: true)
+                < InkAmpContinueWidgetMetrics.mediumCoverSize * 2
+        )
+    }
 }
