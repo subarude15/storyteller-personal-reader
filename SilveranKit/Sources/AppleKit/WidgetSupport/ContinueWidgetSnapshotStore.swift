@@ -488,8 +488,15 @@ public enum ContinueWidgetSnapshotStore {
 
     public static func reloadTimelines() {
         #if canImport(WidgetKit) && (os(iOS) || os(macOS))
-        WidgetCenter.shared.reloadTimelines(ofKind: SilveranWidgetConstants.continueWidgetKind)
+        for kind in timelineKindsToReload {
+            WidgetCenter.shared.reloadTimelines(ofKind: kind)
+        }
         #endif
+    }
+
+    /// Kind identifiers `reloadTimelines()` asks WidgetKit to refresh.
+    public static var timelineKindsToReload: [String] {
+        SilveranWidgetConstants.continueWidgetKinds
     }
 
     // MARK: - Paths
@@ -583,6 +590,8 @@ public enum ContinueWidgetSnapshotStore {
 public enum InkAmpContinueLink {
     public static let continueURL = URL(string: "punkrally://continue")!
     public static let toggleURL = URL(string: "punkrally://continue?action=toggle")!
+    /// Opens Home / the queue view (Browse Queue).
+    public static let homeURL = URL(string: "punkrally://home")!
     /// Query on `punkrally://continue` that opens one Home queue row (Up next).
     public static let queueItemQueryName = "item"
     /// Notification userInfo key carrying `HomeMixedItem.id` from a widget tap.
@@ -592,6 +601,12 @@ public enum InkAmpContinueLink {
         guard url.scheme == "punkrally" else { return false }
         let host = url.host() ?? url.host
         return host == "continue"
+    }
+
+    public static func isHomeURL(_ url: URL) -> Bool {
+        guard url.scheme == "punkrally" else { return false }
+        let host = url.host() ?? url.host
+        return host == "home"
     }
 
     public static func wantsToggle(_ url: URL) -> Bool {

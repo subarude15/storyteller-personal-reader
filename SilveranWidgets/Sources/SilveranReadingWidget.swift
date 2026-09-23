@@ -260,9 +260,9 @@ struct SilveranReadingWidget: Widget {
     }
 }
 
-// @main WidgetBundle lives in InkAmpContinueWidget.swift (registers the
-// Continue tile). This Library widget stays in-tree for paid / SideStore
-// later — it is not part of the Sideload iOS extension.
+// @main WidgetBundle lives in InkAmpContinueWidget.swift (registers the four
+// Continue + Next Up tiles). This Library widget stays in-tree for paid /
+// SideStore later — it is not part of the Sideload iOS extension.
 
 private struct SilveranReadingWidgetView: View {
     let entry: SilveranReadingEntry

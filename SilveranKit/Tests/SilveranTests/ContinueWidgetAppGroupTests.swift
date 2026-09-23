@@ -51,15 +51,37 @@ struct ContinueWidgetAppGroupTests {
         #expect(SilveranWidgetConstants.appGroupInfoKey == "SILVERAN_WIDGET_APP_GROUP")
     }
 
-    @Test func continueKindNeverCollidesWithRetiredTiles() {
-        let kind = SilveranWidgetConstants.continueWidgetKind
-        #expect(kind == "inkamp.continue.upnext.v1")
-        #expect(kind != "InkAmpContinueWidget")
-        #expect(kind != SilveranWidgetConstants.readingWidgetKind)
-        // The parked static tiles must never be registered or reloaded again.
-        for legacy in SilveranWidgetConstants.legacySideloadContinueWidgetKinds {
-            #expect(legacy != kind)
+    @Test func fourContinueKindsAreUniqueAndNotLegacy() {
+        let kinds = SilveranWidgetConstants.continueWidgetKinds
+        #expect(kinds.count == 4)
+        #expect(Set(kinds).count == 4)
+        #expect(kinds == [
+            "inkamp.continue.light.medium.v1",
+            "inkamp.continue.light.large.v1",
+            "inkamp.continue.dark.medium.v1",
+            "inkamp.continue.dark.large.v1",
+        ])
+        // reloadTimelines() iterates continueWidgetKinds — publish must hit all four.
+        #expect(
+            ContinueWidgetSnapshotStore.timelineKindsToReload
+                == SilveranWidgetConstants.continueWidgetKinds
+        )
+        for kind in kinds {
+            #expect(kind != SilveranWidgetConstants.readingWidgetKind)
+            for legacy in SilveranWidgetConstants.legacySideloadContinueWidgetKinds {
+                #expect(legacy != kind)
+            }
         }
+        #expect(
+            SilveranWidgetConstants.legacySideloadContinueWidgetKinds.contains(
+                "inkamp.continue.upnext.v1"
+            )
+        )
+        #expect(
+            SilveranWidgetConstants.legacySideloadContinueWidgetKinds.contains(
+                "InkAmpContinueWidget"
+            )
+        )
     }
 }
 
@@ -127,7 +149,7 @@ struct ContinueWidgetSnapshotTests {
         #expect(snapshot.upNextItems.isEmpty)
     }
 
-    @Test func upNextPaintsAtMostThree() {
+    @Test func upNextPaintsAtMostThreeInSnapshot() {
         let items = (0..<5).map { index in
             ContinueWidgetQueueItem(
                 id: "pod:\(index)",
@@ -140,6 +162,141 @@ struct ContinueWidgetSnapshotTests {
         #expect(snapshot.upNextItems.count == ContinueWidgetSnapshot.upNextLimit)
         #expect(snapshot.upNextItems.map(\.id) == ["pod:0", "pod:1", "pod:2"])
         #expect(snapshot.upNextItems.allSatisfy { !$0.deepLink.isEmpty })
+    }
+
+    @Test func snapshotWithCurrentAndThreeUpNextDecodes() throws {
+        let snapshot = ContinueWidgetSnapshot(
+            title: "The Quiet Path",
+            subtitle: "Ella Monroe",
+            kind: .audiobook,
+            deepLink: InkAmpContinueLink.continueURL.absoluteString,
+            progress: 0.56,
+            elapsedSeconds: 17_640,
+            durationSeconds: 31_680,
+            upNext: [
+                ContinueWidgetQueueItem(
+                    id: "book:preview/good-energy",
+                    title: "Good Energy",
+                    subtitle: "Casey Lin",
+                    kind: .ebook,
+                    deepLink: InkAmpContinueLink.queueItemURL(id: "book:preview/good-energy")
+                        .absoluteString,
+                ),
+                ContinueWidgetQueueItem(
+                    id: "book:preview/next-chapter",
+                    title: "The Next Chapter",
+                    subtitle: "Jordan Lee",
+                    kind: .audiobook,
+                    deepLink: InkAmpContinueLink.queueItemURL(id: "book:preview/next-chapter")
+                        .absoluteString,
+                ),
+                ContinueWidgetQueueItem(
+                    id: "book:preview/make-it-happen",
+                    title: "Make It Happen",
+                    subtitle: "Avery Chen",
+                    kind: .ebook,
+                    deepLink: InkAmpContinueLink.queueItemURL(id: "book:preview/make-it-happen")
+                        .absoluteString,
+                ),
+            ],
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(snapshot)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(ContinueWidgetSnapshot.self, from: data)
+        #expect(decoded.title == "The Quiet Path")
+        #expect(decoded.subtitle == "Ella Monroe")
+        #expect(decoded.progressCaption == "56% · 3h 54m left")
+        #expect(decoded.upNextItems.count == 3)
+        #expect(decoded.upNextItems.map(\.title) == [
+            "Good Energy",
+            "The Next Chapter",
+            "Make It Happen",
+        ])
+    }
+
+    @Test func mediumRendersAtMostTwoUpNextRows() {
+        let items = (0..<5).map { index in
+            ContinueWidgetQueueItem(
+                id: "pod:\(index)",
+                title: "Episode \(index)",
+                kind: .podcast,
+                deepLink: InkAmpContinueLink.queueItemURL(id: "pod:\(index)").absoluteString,
+            )
+        }
+        let snapshot = ContinueWidgetSnapshot(title: "Now", upNext: items)
+        let painted = InkAmpContinueWidgetActions.upNextItems(for: snapshot, layout: .medium)
+        #expect(InkAmpContinueWidgetLayout.medium.upNextLimit == 2)
+        #expect(painted.count == 2)
+        #expect(painted.map(\.id) == ["pod:0", "pod:1"])
+    }
+
+    @Test func largeRendersAtMostThreeUpNextRows() {
+        let items = (0..<5).map { index in
+            ContinueWidgetQueueItem(
+                id: "pod:\(index)",
+                title: "Episode \(index)",
+                kind: .podcast,
+                deepLink: InkAmpContinueLink.queueItemURL(id: "pod:\(index)").absoluteString,
+            )
+        }
+        let snapshot = ContinueWidgetSnapshot(title: "Now", upNext: items)
+        let painted = InkAmpContinueWidgetActions.upNextItems(for: snapshot, layout: .large)
+        #expect(InkAmpContinueWidgetLayout.large.upNextLimit == 3)
+        #expect(painted.count == 3)
+        #expect(painted.map(\.id) == ["pod:0", "pod:1", "pod:2"])
+    }
+
+    @Test func continueUsesCurrentDeepLink() {
+        let custom = "punkrally://continue?item=book:storyteller/abc"
+        let snapshot = ContinueWidgetSnapshot(title: "Now", deepLink: custom)
+        #expect(
+            InkAmpContinueWidgetActions.continueURL(for: snapshot).absoluteString == custom
+        )
+        let empty = ContinueWidgetSnapshot.empty
+        #expect(
+            InkAmpContinueWidgetActions.continueURL(for: empty)
+                == InkAmpContinueLink.continueURL
+        )
+    }
+
+    @Test func upNextUsesRowDeepLinks() {
+        let item = ContinueWidgetQueueItem(
+            id: "pod:ep-9",
+            title: "Cold Open",
+            kind: .podcast,
+            deepLink: "punkrally://continue?item=pod:ep-9",
+        )
+        #expect(
+            InkAmpContinueWidgetActions.upNextURL(for: item).absoluteString
+                == "punkrally://continue?item=pod:ep-9"
+        )
+    }
+
+    @Test func emptySnapshotProducesEmptyState() {
+        let empty = ContinueWidgetSnapshot.empty
+        #expect(InkAmpContinueWidgetActions.showsEmptyState(empty))
+        #expect(!empty.hasItem)
+        let withItem = ContinueWidgetSnapshot(title: "Now")
+        #expect(!InkAmpContinueWidgetActions.showsEmptyState(withItem))
+    }
+
+    @Test func homeScreenWidgetsDoNotUsePlaybackTransportIntents() {
+        #expect(!InkAmpContinueWidgetActions.usesPlaybackTransportIntents)
+        #expect(
+            InkAmpContinueWidgetActions.browseQueueURL() == InkAmpContinueLink.homeURL
+        )
+    }
+
+    @Test func lightAndDarkPaletteConstantsMatchApprovedHex() {
+        #expect(InkAmpContinueWidgetPalette.Light.aqua == "#95D9C0")
+        #expect(InkAmpContinueWidgetPalette.Light.blanc == "#FFFFFF")
+        #expect(InkAmpContinueWidgetPalette.Light.carmin == "#D41F26")
+        #expect(InkAmpContinueWidgetPalette.Dark.tangerine == "#F58F20")
+        #expect(InkAmpContinueWidgetPalette.Dark.leafGreen == "#467434")
+        #expect(InkAmpContinueWidgetPalette.Dark.seaGrey == "#363636")
     }
 
     @Test func upNextRoundTripsThroughJSON() throws {

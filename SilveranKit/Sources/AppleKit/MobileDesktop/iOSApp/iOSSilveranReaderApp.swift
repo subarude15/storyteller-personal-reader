@@ -329,20 +329,14 @@ private struct iOSRootView: View {
     }
 
     private func handleOpenURL(_ url: URL) {
-        if InkAmpContinueLink.isContinueURL(url) {
-            if InkAmpContinueLink.wantsToggle(url) {
-                ContinueWidgetBridge.postToggle()
-            } else {
-                var info: [AnyHashable: Any]?
-                if let itemID = InkAmpContinueLink.queueItemID(from: url) {
-                    info = [InkAmpContinueLink.queueItemUserInfoKey: itemID]
-                }
-                NotificationCenter.default.post(
-                    name: .punkRallyOpenContinue,
-                    object: nil,
-                    userInfo: info
-                )
-            }
+        if InkAmpContinueLink.storePendingDeepLink(from: url) != nil {
+            // Store first so a cold launch keeps the destination; notify so a
+            // warm PunkRallyTabView can consume immediately. Toggle is excluded.
+            InkAmpContinueLink.notifyPendingDeepLinkReady()
+            return
+        }
+        if InkAmpContinueLink.isContinueURL(url), InkAmpContinueLink.wantsToggle(url) {
+            ContinueWidgetBridge.postToggle()
             return
         }
         if url.scheme?.lowercased() == "magnet", NASMagnetValidation.isValid(url) {
