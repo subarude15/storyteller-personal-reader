@@ -474,24 +474,55 @@ public struct SynologyFileStationClient: Sendable {
         let sid = try await login(baseURL: baseURL, username: username, password: password)
         defer { Task { try? await logout(baseURL: baseURL, sid: sid) } }
         guard let endpoint = Self.entryURL(from: baseURL) else { throw SynologyClientError.invalidURL }
-        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
-        components?.queryItems = [
-            URLQueryItem(name: "api", value: "SYNO.FileStation.List"),
-            URLQueryItem(name: "version", value: "2"),
-            URLQueryItem(name: "method", value: "list"),
-            URLQueryItem(name: "folder_path", value: mapped.fileStationPath),
-            URLQueryItem(name: "_sid", value: sid),
-        ]
-        guard let url = components?.url else { throw SynologyClientError.invalidURL }
-        var request = URLRequest(url: url, timeoutInterval: timeout)
-        request.httpMethod = "GET"
-        let http = try await send(request)
-        try Self.throwIfFailed(http)
-        guard let json = Self.json(http.body), json["success"] as? Bool == true else {
-            throw SynologyClientError.invalidResponse
+
+        // DSM File Station list responses are paginated. The old implementation
+        // read only the first page, which caused false "move finished but file
+        // missing" failures once a library folder contained more than one page
+        // of entries. Walk every page before verifying a routed payload.
+        let pageSize = 200
+        var offset = 0
+        var names: [String] = []
+
+        while true {
+            var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+            components?.queryItems = [
+                URLQueryItem(name: "api", value: "SYNO.FileStation.List"),
+                URLQueryItem(name: "version", value: "2"),
+                URLQueryItem(name: "method", value: "list"),
+                URLQueryItem(name: "folder_path", value: mapped.fileStationPath),
+                URLQueryItem(name: "offset", value: String(offset)),
+                URLQueryItem(name: "limit", value: String(pageSize)),
+                URLQueryItem(name: "_sid", value: sid),
+            ]
+            guard let url = components?.url else { throw SynologyClientError.invalidURL }
+            var request = URLRequest(url: url, timeoutInterval: timeout)
+            request.httpMethod = "GET"
+            let http = try await send(request)
+            try Self.throwIfFailed(http)
+            guard let json = Self.json(http.body), json["success"] as? Bool == true else {
+                throw SynologyClientError.invalidResponse
+            }
+
+            let data = json["data"] as? [String: Any] ?? [:]
+            let files = data["files"] as? [[String: Any]] ?? []
+            names.append(contentsOf: files.compactMap { $0["name"] as? String })
+
+            let total: Int? = {
+                if let value = data["total"] as? Int { return value }
+                if let value = data["total"] as? NSNumber { return value.intValue }
+                return nil
+            }()
+
+            offset += files.count
+
+            // If DSM reports a total, trust it. If not, a short page is the end.
+            // Also stop on an empty page so malformed total values cannot loop forever.
+            if files.isEmpty { break }
+            if let total, offset >= total { break }
+            if total == nil, files.count < pageSize { break }
         }
-        let files = (json["data"] as? [String: Any])?["files"] as? [[String: Any]] ?? []
-        return files.compactMap { $0["name"] as? String }
+
+        return names
     }
 
     /// Outcome of a `SYNO.FileStation.CopyMove` task status query.
