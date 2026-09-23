@@ -11,8 +11,14 @@ OUTPUT_DIR="${3:-.buildIosDevice}"
 IPA_NAME="${4:-punkrally-sideload-unsigned.ipa}"
 
 DESTINATION="generic/platform=iOS"
+# Give every sideload artifact a monotonically changing bundle build number.
+# WidgetKit caches extension discovery aggressively; shipping every IPA as build
+# 1 can leave the previous widget extension registered even when the executable
+# changed. GitHub run number is stable, numeric, and changes on every CI build.
+BUILD_NUMBER="${GITHUB_RUN_NUMBER:-$(date +%y%m%d%H%M)}"
 
 echo "==> Building device target: ${SCHEME} (${CONFIGURATION}) for ${DESTINATION}"
+echo "==> Bundle build number: ${BUILD_NUMBER}"
 
 # Resolve package dependencies
 xcodebuild -resolvePackageDependencies \
@@ -57,6 +63,7 @@ xcodebuild -project Silveran.xcodeproj \
     CODE_SIGNING_REQUIRED=NO \
     CODE_SIGN_IDENTITY="" \
     AD_HOC_CODE_SIGNING_ALLOWED=YES \
+    CURRENT_PROJECT_VERSION="${BUILD_NUMBER}" \
     build | xcbeautify
 
 # Locate built .app bundle in Build/Products
@@ -126,6 +133,61 @@ if [[ "${APPEX_COUNT}" -lt 1 ]]; then
     exit 1
 fi
 echo "==> Embedded app extensions: ${APPEX_COUNT}"
+
+# The app and every embedded extension must carry this build's unique version.
+# Besides making artifacts distinguishable, this forces iOS/WidgetKit to
+# rediscover the updated widget bundle instead of serving a cached build-1
+# extension from a previous AltStore install.
+APP_BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "${STAGED_APP}/Info.plist" 2>/dev/null || true)"
+if [[ "${APP_BUILD_NUMBER}" != "${BUILD_NUMBER}" ]]; then
+    echo "ERROR: app CFBundleVersion is '${APP_BUILD_NUMBER}', expected '${BUILD_NUMBER}'."
+    exit 1
+fi
+
+while IFS= read -r APPEX; do
+    [[ -n "${APPEX}" ]] || continue
+    APPEX_NAME="$(basename "${APPEX}")"
+    APPEX_BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "${APPEX}/Info.plist" 2>/dev/null || true)"
+    if [[ "${APPEX_BUILD_NUMBER}" != "${BUILD_NUMBER}" ]]; then
+        echo "ERROR: ${APPEX_NAME} CFBundleVersion is '${APPEX_BUILD_NUMBER}', expected '${BUILD_NUMBER}'."
+        exit 1
+    fi
+    echo "    ${APPEX_NAME} build=${APPEX_BUILD_NUMBER}"
+done < <(find "${STAGED_APP}/PlugIns" -maxdepth 1 -name "*.appex" -type d 2>/dev/null || true)
+echo "==> App + extensions stamped with build ${BUILD_NUMBER}"
+
+# Verify the IPA really embeds the NEW widget bundle, not the previous cached
+# Continue + Up next executable. A green compile alone does not prove the final
+# packaged appex contains the expected WidgetBundle registrations.
+WIDGET_APPEX=""
+while IFS= read -r APPEX; do
+    [[ -n "${APPEX}" ]] || continue
+    BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${APPEX}/Info.plist" 2>/dev/null || true)"
+    if [[ "${BUNDLE_ID}" == "com.punkrally.reader.widgets" ]]; then
+        WIDGET_APPEX="${APPEX}"
+        break
+    fi
+done < <(find "${STAGED_APP}/PlugIns" -maxdepth 1 -name "*.appex" -type d 2>/dev/null || true)
+
+if [[ -z "${WIDGET_APPEX}" ]]; then
+    echo "ERROR: widget extension com.punkrally.reader.widgets is missing from the IPA."
+    exit 1
+fi
+
+WIDGET_EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${WIDGET_APPEX}/Info.plist")"
+WIDGET_STRINGS="$(strings "${WIDGET_APPEX}/${WIDGET_EXECUTABLE}")"
+for REQUIRED_WIDGET_STRING in     "inkamp.continue.light.medium.v1"     "inkamp.continue.light.large.v1"     "inkamp.continue.dark.medium.v1"     "inkamp.continue.dark.large.v1"     "ink+amp Light Medium"     "ink+amp Light Large"     "ink+amp Dark Medium"     "ink+amp Dark Large"
+do
+    if [[ "${WIDGET_STRINGS}" != *"${REQUIRED_WIDGET_STRING}"* ]]; then
+        echo "ERROR: packaged widget binary is missing '${REQUIRED_WIDGET_STRING}'."
+        exit 1
+    fi
+done
+if [[ "${WIDGET_STRINGS}" == *"Continue + Up next"* ]]; then
+    echo "ERROR: packaged widget binary still contains the retired gallery configuration 'Continue + Up next'."
+    exit 1
+fi
+echo "==> New four-widget bundle verified in packaged appex"
 
 if [[ "${SKIP_ADHOC_ENTITLEMENTS:-0}" != "1" ]]; then
     APP_GROUP_ENTITLEMENT="com.apple.security.application-groups"
