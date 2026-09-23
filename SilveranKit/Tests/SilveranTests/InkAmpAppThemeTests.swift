@@ -129,4 +129,20 @@ struct InkAmpAppThemeTests {
         #expect(InkAmpPlayerMetrics.coverCornerRadius > 0)
         #expect(InkAmpPlayerMetrics.optionCornerRadius == InkAmpMetrics.controlRadius)
     }
+
+    @Test func playerSecondaryControlHitTargetMeetsMinimum() {
+        #expect(InkAmpMetrics.minHitTarget >= 44)
+        #expect(InkAmpPlayerMetrics.secondaryControlHitTarget == InkAmpMetrics.minHitTarget)
+        #expect(InkAmpPlayerMetrics.secondaryControlHitTarget >= 44)
+        #expect(
+            InkAmpPlayerMetrics.secondaryControlVisualSize
+                <= InkAmpPlayerMetrics.secondaryControlHitTarget
+        )
+        #expect(
+            max(
+                InkAmpPlayerMetrics.secondaryControlVisualSize,
+                InkAmpPlayerMetrics.secondaryControlHitTarget,
+            ) >= 44
+        )
+    }
 }

@@ -7,6 +7,10 @@ public enum InkAmpPlayerMetrics {
     public static let playButtonSize: CGFloat = 64
     public static let skipButtonSize: CGFloat = 52
     public static let chapterButtonSize: CGFloat = 44
+    /// Minimum tappable size for speed / chapters / sleep (and similar) controls.
+    public static let secondaryControlHitTarget: CGFloat = InkAmpMetrics.minHitTarget
+    /// Compact glyph/background chrome inside the secondary hit target.
+    public static let secondaryControlVisualSize: CGFloat = 38
     /// Cover art width as a fraction of available player width (portrait).
     public static let coverWidthFraction: CGFloat = 0.55
     public static let coverCornerRadius: CGFloat = 18
@@ -132,7 +136,10 @@ public struct InkAmpPlaybackOptionButton<Label: View>: View {
             label
                 .font(.callout.weight(.semibold))
                 .foregroundStyle(selected ? theme.accent : theme.primaryText)
-                .frame(width: 38, height: 38)
+                .frame(
+                    width: InkAmpPlayerMetrics.secondaryControlVisualSize,
+                    height: InkAmpPlayerMetrics.secondaryControlVisualSize,
+                )
                 .background(
                     RoundedRectangle(
                         cornerRadius: InkAmpPlayerMetrics.optionCornerRadius,
@@ -154,6 +161,11 @@ public struct InkAmpPlaybackOptionButton<Label: View>: View {
                         lineWidth: 1,
                     )
                 )
+                .frame(
+                    width: InkAmpPlayerMetrics.secondaryControlHitTarget,
+                    height: InkAmpPlayerMetrics.secondaryControlHitTarget,
+                )
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

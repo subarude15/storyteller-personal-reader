@@ -25,7 +25,7 @@ public struct PlaybackRateButton: View {
         foregroundColor: Color = Color.primary,
         transparency: Double = 1.0,
         showLabel: Bool = true,
-        buttonSize: CGFloat = 38,
+        buttonSize: CGFloat = InkAmpPlayerMetrics.secondaryControlVisualSize,
         showBackground: Bool = true,
         compactLabel: Bool = false,
         iconFont: Font = .callout.weight(.semibold),
@@ -42,6 +42,29 @@ public struct PlaybackRateButton: View {
         self.iconFont = iconFont
     }
 
+    /// Visual chrome may stay compact; the interactive frame is never below the a11y minimum.
+    private var hitTargetSize: CGFloat {
+        max(buttonSize, InkAmpPlayerMetrics.secondaryControlHitTarget)
+    }
+
+    @ViewBuilder
+    private var rateButtonLabel: some View {
+        Image(systemName: "speedometer")
+            .font(iconFont)
+            .foregroundStyle(foregroundColor.opacity(transparency))
+            .frame(width: buttonSize, height: buttonSize)
+            .background(
+                Group {
+                    if showBackground {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(backgroundColor.opacity(0.12 * transparency))
+                    }
+                }
+            )
+            .frame(width: hitTargetSize, height: hitTargetSize)
+            .contentShape(Rectangle())
+    }
+
     public var body: some View {
         VStack(spacing: compactLabel ? 0 : 6) {
             #if os(iOS)
@@ -50,18 +73,7 @@ public struct PlaybackRateButton: View {
                 textFieldValue = formatRate(currentRate)
                 showSpeedPicker = true
             }) {
-                Image(systemName: "speedometer")
-                    .font(iconFont)
-                    .foregroundStyle(foregroundColor.opacity(transparency))
-                    .frame(width: buttonSize, height: buttonSize)
-                    .background(
-                        Group {
-                            if showBackground {
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(backgroundColor.opacity(0.12 * transparency))
-                            }
-                        }
-                    )
+                rateButtonLabel
             }
             .buttonStyle(.plain)
             .sheet(isPresented: $showSpeedPicker) {
@@ -73,18 +85,7 @@ public struct PlaybackRateButton: View {
                 textFieldValue = formatRate(currentRate)
                 showSpeedPicker = true
             }) {
-                Image(systemName: "speedometer")
-                    .font(iconFont)
-                    .foregroundStyle(foregroundColor.opacity(transparency))
-                    .frame(width: buttonSize, height: buttonSize)
-                    .background(
-                        Group {
-                            if showBackground {
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(backgroundColor.opacity(0.12 * transparency))
-                            }
-                        }
-                    )
+                rateButtonLabel
             }
             .buttonStyle(.plain)
             .popover(isPresented: $showSpeedPicker) {

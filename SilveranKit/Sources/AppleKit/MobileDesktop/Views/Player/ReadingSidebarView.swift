@@ -521,11 +521,19 @@ public struct ReadingSidebarView: View {
                         Image(systemName: volumeIcon)
                             .font(.callout.weight(.semibold))
                             .foregroundStyle(primaryColor)
-                            .frame(width: 38, height: 38)
+                            .frame(
+                                width: InkAmpPlayerMetrics.secondaryControlVisualSize,
+                                height: InkAmpPlayerMetrics.secondaryControlVisualSize,
+                            )
                             .background(
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     .fill(secondaryColor.opacity(0.12))
                             )
+                            .frame(
+                                width: InkAmpPlayerMetrics.secondaryControlHitTarget,
+                                height: InkAmpPlayerMetrics.secondaryControlHitTarget,
+                            )
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .popover(isPresented: $showVolumePopover) {
@@ -683,7 +691,10 @@ public struct ReadingSidebarView: View {
                 Image(systemName: model.sleepTimerActive ? "moon.zzz.fill" : "moon.zzz")
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(primaryColor)
-                    .frame(width: 38, height: 38)
+                    .frame(
+                        width: InkAmpPlayerMetrics.secondaryControlVisualSize,
+                        height: InkAmpPlayerMetrics.secondaryControlVisualSize,
+                    )
                     .background(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .fill(
@@ -694,6 +705,11 @@ public struct ReadingSidebarView: View {
                                         : secondaryColor.opacity(0.12))
                             )
                     )
+                    .frame(
+                        width: InkAmpPlayerMetrics.secondaryControlHitTarget,
+                        height: InkAmpPlayerMetrics.secondaryControlHitTarget,
+                    )
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .popover(isPresented: $showSleepTimerPopover) {
