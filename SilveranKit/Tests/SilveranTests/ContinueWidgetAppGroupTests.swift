@@ -57,9 +57,9 @@ struct ContinueWidgetAppGroupTests {
         #expect(kinds.count == 4)
         #expect(Set(kinds).count == 4)
         #expect(kinds == [
-            "inkamp.continue.light.medium.v1",
+            "inkamp.continue.light.medium.v2",
             "inkamp.continue.light.large.v1",
-            "inkamp.continue.dark.medium.v1",
+            "inkamp.continue.dark.medium.v2",
             "inkamp.continue.dark.large.v1",
         ])
         // reloadTimelines() iterates continueWidgetKinds — publish must hit all four.
@@ -81,6 +81,16 @@ struct ContinueWidgetAppGroupTests {
         #expect(
             SilveranWidgetConstants.legacySideloadContinueWidgetKinds.contains(
                 "InkAmpContinueWidget"
+            )
+        )
+        #expect(
+            SilveranWidgetConstants.legacySideloadContinueWidgetKinds.contains(
+                "inkamp.continue.light.medium.v1"
+            )
+        )
+        #expect(
+            SilveranWidgetConstants.legacySideloadContinueWidgetKinds.contains(
+                "inkamp.continue.dark.medium.v1"
             )
         )
     }
