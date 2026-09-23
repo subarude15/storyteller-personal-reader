@@ -64,6 +64,12 @@ Aqua is framing/accent only — the whole tile is not aqua.
 | Up Next row | that row’s `ContinueWidgetQueueItem.deepLink` |
 | Browse Queue / Open ink+amp | `punkrally://home` → Home tab (queue view) |
 
+Deep links are cold-launch safe: `handleOpenURL` writes
+`InkAmpPendingDeepLinkStore` before posting. If `PunkRallyTabView` is not mounted
+yet (startup ProgressView), the action is retained and consumed once on shell
+appear. A warm shell consumes immediately via the pending-ready notification.
+Consume is one-shot — Home does not fire twice.
+
 ## Data
 
 Single source of truth: `ContinueWidgetSnapshot` in the App Group (same

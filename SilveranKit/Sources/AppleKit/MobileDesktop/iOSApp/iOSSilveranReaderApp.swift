@@ -329,7 +329,7 @@ private struct iOSRootView: View {
     }
 
     private func handleOpenURL(_ url: URL) {
-        if let _ = InkAmpContinueLink.storePendingDeepLink(from: url) {
+        if InkAmpContinueLink.storePendingDeepLink(from: url) != nil {
             // Store first so a cold launch keeps the destination; notify so a
             // warm PunkRallyTabView can consume immediately. Toggle is excluded.
             InkAmpContinueLink.notifyPendingDeepLinkReady()
