@@ -226,7 +226,8 @@ struct InkAmpContinueWidgetView: View {
 
             mediumActionRow
         }
-        .padding(InkAmpContinueWidgetMetrics.mediumOuterPadding)
+        .padding(.horizontal, InkAmpContinueWidgetMetrics.mediumOuterPadding)
+        .padding(.vertical, InkAmpContinueWidgetMetrics.mediumOuterVerticalPadding)
     }
 
     /// Compact Medium current column — chip, then cover beside title, then full-width progress.
