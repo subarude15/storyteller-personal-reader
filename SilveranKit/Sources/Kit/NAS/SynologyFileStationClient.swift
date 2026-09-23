@@ -673,6 +673,8 @@ public struct SynologyFileStationClient: Sendable {
         }
         let data = json["data"] as? [String: Any] ?? [:]
         if data["error"] != nil { return .failed }
+        if let errors = data["errors"] as? [Any], !errors.isEmpty { return .failed }
+        if let success = data["success"] as? Bool, success == false { return .failed }
         if data["finished"] as? Bool == true { return .finished }
         return .running
     }
