@@ -1042,6 +1042,16 @@ public actor SettingsActor {
         )
     }
 
+    /// Replaces the durable settings document from a validated encrypted backup.
+    public func restorePortableBackupConfig(_ restored: SilveranGlobalConfig) throws {
+        config = restored
+        #if os(iOS)
+        config.readingBar.showPlayerControls = true
+        #endif
+        try persistCurrentConfig()
+        notifySettingsObservers()
+    }
+
     private func notifySettingsObservers() {
         let observersList = Array(observers.values)
         Task { @SilveranUIActor in

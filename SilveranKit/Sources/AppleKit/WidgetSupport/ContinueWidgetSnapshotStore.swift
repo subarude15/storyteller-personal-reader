@@ -297,6 +297,17 @@ public enum ContinueWidgetSnapshotStore {
         }
     }
 
+    public static func resetLocalFallbackAfterExternalRestore() {
+        UserDefaults.standard.removeObject(forKey: lastTitleDefaultsKey)
+        UserDefaults.standard.removeObject(forKey: lastSnapshotDefaultsKey)
+        publishLock.lock()
+        lastPublishedPaintSignature = nil
+        lastPublishedTransportSignature = nil
+        lastPublishedQueueSignature = nil
+        lastReloadDate = .distantPast
+        publishLock.unlock()
+    }
+
     public static func localFallbackSnapshot() -> ContinueWidgetSnapshot {
         if let data = UserDefaults.standard.data(forKey: lastSnapshotDefaultsKey),
             let snapshot = try? JSONDecoder().decode(ContinueWidgetSnapshot.self, from: data),
@@ -355,6 +366,7 @@ public enum ContinueWidgetSnapshotStore {
                 at: container,
                 withIntermediateDirectories: true,
             )
+            try SilveranWidgetSnapshotStore.prepareTransientState(in: container)
             let covers = coversDirectory(in: container)
             try FileManager.default.createDirectory(
                 at: covers,
@@ -510,11 +522,13 @@ public enum ContinueWidgetSnapshotStore {
     }
 
     private static func snapshotURL(in container: URL) -> URL {
-        container.appendingPathComponent(snapshotFilename, isDirectory: false)
+        SilveranWidgetSnapshotStore.transientStateDirectory(in: container)
+            .appendingPathComponent(snapshotFilename, isDirectory: false)
     }
 
     private static func coversDirectory(in container: URL) -> URL {
-        container.appendingPathComponent(coversDirectoryName, isDirectory: true)
+        SilveranWidgetSnapshotStore.transientStateDirectory(in: container)
+            .appendingPathComponent(coversDirectoryName, isDirectory: true)
     }
 
     /// `nil` drafts keep the rows already on disk (live-session ticks). A non-nil

@@ -1657,6 +1657,25 @@ public actor BookServiceActor {
         }
     }
 
+    /// Replaces the source registry after credentials and source records have been
+    /// restored. Only portable Storyteller records should be supplied; local-folder
+    /// security-scoped bookmarks are device-specific and are intentionally excluded.
+    public func restorePortableBackupSources(_ restored: [BookSourceRecord]) async throws {
+        await ensureSourceRegistryLoaded()
+        var merged = sourceRecords
+        for record in restored where record.kind == .storyteller {
+            merged.replaceOrAppend(record)
+        }
+
+        await closeAllFolderAccess()
+        try await FilesystemActor.shared.saveBookSources(merged)
+        sourceRecords = []
+        sourcesByID = [:]
+        sourceRegistryLoaded = false
+        await ensureSourceRegistryLoaded()
+        await notifyLibraryObservers()
+    }
+
     /// Sources the logged-in user may upload new books to right now: folders always, storyteller
     /// servers when the user holds the server's book-create permission.
     public func uploadPermittedSourceIDs() async -> Set<BookSourceID> {
