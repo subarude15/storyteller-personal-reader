@@ -297,6 +297,17 @@ public enum ContinueWidgetSnapshotStore {
         }
     }
 
+    public static func resetLocalFallbackAfterExternalRestore() {
+        UserDefaults.standard.removeObject(forKey: lastTitleDefaultsKey)
+        UserDefaults.standard.removeObject(forKey: lastSnapshotDefaultsKey)
+        publishLock.lock()
+        lastPublishedPaintSignature = nil
+        lastPublishedTransportSignature = nil
+        lastPublishedQueueSignature = nil
+        lastReloadDate = .distantPast
+        publishLock.unlock()
+    }
+
     public static func localFallbackSnapshot() -> ContinueWidgetSnapshot {
         if let data = UserDefaults.standard.data(forKey: lastSnapshotDefaultsKey),
             let snapshot = try? JSONDecoder().decode(ContinueWidgetSnapshot.self, from: data),
