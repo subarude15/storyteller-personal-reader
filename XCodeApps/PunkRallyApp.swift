@@ -34,10 +34,6 @@ public struct PunkRallyTabView: View {
 
     public init() {}
 
-    private var chrome: PunkRallyTheme.Chrome {
-        PunkRallyTheme.Chrome(scheme: colorScheme)
-    }
-
     public var body: some View {
         rootShell
             .inkAmpAppThemed()
@@ -81,52 +77,58 @@ public struct PunkRallyTabView: View {
             }
     }
 
-    /// Tab chrome + book card + scene lifecycle (split from body for the type checker).
+    /// Five-tab host only — kept separate so `rootShell` type-checks.
     @ViewBuilder
-    private var rootShell: some View {
-        ZStack {
-            TabView(selection: $selectedTab) {
-                HomeTabView()
-                    .punkRallyMiniPlayerInset()
-                    .tabItem {
-                        Label(InkAmpPrimaryTab.home.title, systemImage: InkAmpPrimaryTab.home.systemImage)
-                    }
-                    .tag(InkAmpPrimaryTab.home)
+    private var primaryTabView: some View {
+        TabView(selection: $selectedTab) {
+            HomeTabView()
+                .punkRallyMiniPlayerInset()
+                .tabItem {
+                    Label(InkAmpPrimaryTab.home.title, systemImage: InkAmpPrimaryTab.home.systemImage)
+                }
+                .tag(InkAmpPrimaryTab.home)
 
-                LibraryTabView()
-                    .punkRallyMiniPlayerInset()
-                    .tabItem {
-                        Label(InkAmpPrimaryTab.library.title, systemImage: InkAmpPrimaryTab.library.systemImage)
-                    }
-                    .tag(InkAmpPrimaryTab.library)
+            LibraryTabView()
+                .punkRallyMiniPlayerInset()
+                .tabItem {
+                    Label(InkAmpPrimaryTab.library.title, systemImage: InkAmpPrimaryTab.library.systemImage)
+                }
+                .tag(InkAmpPrimaryTab.library)
 
-                ShelfTabView()
-                    .punkRallyMiniPlayerInset()
-                    .tabItem {
-                        Label(InkAmpPrimaryTab.shelf.title, systemImage: InkAmpPrimaryTab.shelf.systemImage)
-                    }
-                    .tag(InkAmpPrimaryTab.shelf)
+            ShelfTabView()
+                .punkRallyMiniPlayerInset()
+                .tabItem {
+                    Label(InkAmpPrimaryTab.shelf.title, systemImage: InkAmpPrimaryTab.shelf.systemImage)
+                }
+                .tag(InkAmpPrimaryTab.shelf)
 
-                PodcastsHomeView()
-                    .punkRallyMiniPlayerInset()
-                    .tabItem {
-                        Label(InkAmpPrimaryTab.podcasts.title, systemImage: InkAmpPrimaryTab.podcasts.systemImage)
-                    }
-                    .tag(InkAmpPrimaryTab.podcasts)
+            PodcastsHomeView()
+                .punkRallyMiniPlayerInset()
+                .tabItem {
+                    Label(InkAmpPrimaryTab.podcasts.title, systemImage: InkAmpPrimaryTab.podcasts.systemImage)
+                }
+                .tag(InkAmpPrimaryTab.podcasts)
 
-                MoreTabView(path: $morePath, showSettings: $showSettings)
-                    .punkRallyMiniPlayerInset()
-                    .tabItem {
-                        Label(InkAmpPrimaryTab.more.title, systemImage: InkAmpPrimaryTab.more.systemImage)
-                    }
-                    .tag(InkAmpPrimaryTab.more)
-                    .badge(moreTabBadge > 0 ? moreTabBadge : 0)
-            }
-            .tint(chrome.accent)
-            .toolbarBackground(chrome.surface2, for: .tabBar)
-            .toolbarBackground(.visible, for: .tabBar)
+            MoreTabView(path: $morePath, showSettings: $showSettings)
+                .punkRallyMiniPlayerInset()
+                .tabItem {
+                    Label(InkAmpPrimaryTab.more.title, systemImage: InkAmpPrimaryTab.more.systemImage)
+                }
+                .tag(InkAmpPrimaryTab.more)
+                .badge(moreTabBadge > 0 ? moreTabBadge : 0)
+        }
+    }
+
+    private var shellBase: some View {
+        primaryTabView
+            .modifier(InkAmpTabChromeModifier())
             .preferredColorScheme(nil) // follow system appearance
             .punkRallySheets(showSettings: $showSettings)
+    }
+
+    /// Notification / scene lifecycle chain — isolated so `rootShell` type-checks.
+    private var shellWithLifecycle: some View {
+        shellBase
             .onReceive(NotificationCenter.default.publisher(for: .inkampShowManualDownloads)) { _ in
                 openMoreDestination(.downloads)
             }
@@ -242,14 +244,21 @@ public struct PunkRallyTabView: View {
                     }
                 }
             }
-            .fullScreenCover(item: PlayerPresenter.shared.cardItemBinding) { wrapper in
-                NavigationStack {
-                    PunkRallyPlayerHost.playerView(
-                        for: wrapper.data,
-                        onFailure: { showShellToast("Can't open yet · try again") }
-                    )
+    }
+
+    /// Book card + tab host (split from body for the type checker).
+    @ViewBuilder
+    private var rootShell: some View {
+        ZStack {
+            shellWithLifecycle
+                .fullScreenCover(item: PlayerPresenter.shared.cardItemBinding) { wrapper in
+                    NavigationStack {
+                        PunkRallyPlayerHost.playerView(
+                            for: wrapper.data,
+                            onFailure: { showShellToast("Can't open yet · try again") }
+                        )
+                    }
                 }
-            }
         }
     }
 
