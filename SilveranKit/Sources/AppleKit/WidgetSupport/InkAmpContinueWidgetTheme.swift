@@ -33,8 +33,10 @@ public enum InkAmpContinueWidgetMetrics: Sendable {
     public static let mediumQueueFraction: CGFloat = 0.42
     /// Gap between Medium current and Up Next columns.
     public static let mediumColumnGap: CGFloat = 11
-    /// Outer padding for the Medium tile.
+    /// Horizontal outer padding for the Medium tile.
     public static let mediumOuterPadding: CGFloat = 12
+    /// Vertical padding is tighter so systemMedium fits the 148 pt canvas on compact iPhones.
+    public static let mediumOuterVerticalPadding: CGFloat = 7
     /// Current cover on Medium (compact; must stay well below Large).
     public static let mediumCoverSize: CGFloat = 54
     /// Up Next thumbnail on Medium.
@@ -49,7 +51,7 @@ public enum InkAmpContinueWidgetMetrics: Sendable {
     public static let mediumCaptionFontSize: CGFloat = 8.5
     /// Representative systemMedium canvas used by constrained previews / budget checks.
     public static let mediumPreviewWidth: CGFloat = 360
-    public static let mediumPreviewHeight: CGFloat = 169
+    public static let mediumPreviewHeight: CGFloat = 148
     /// Compact Medium action-row vertical padding.
     public static let mediumActionVerticalPadding: CGFloat = 6.5
     /// Approximate Medium action-row height (font + vertical padding).
@@ -81,7 +83,7 @@ public enum InkAmpContinueWidgetMetrics: Sendable {
 
     /// Outer padding + column stack spacing + action row + current-column minimum.
     public static func mediumContentMinimumHeight(includeCaption: Bool) -> CGFloat {
-        let verticalPadding = mediumOuterPadding * 2
+        let verticalPadding = mediumOuterVerticalPadding * 2
         let bodySpacing: CGFloat = 8
         return verticalPadding
             + bodySpacing
