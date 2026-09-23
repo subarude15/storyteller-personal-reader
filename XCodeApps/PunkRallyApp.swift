@@ -1267,6 +1267,19 @@ public struct SyncChipView: View {
     }
 }
 
+/// Tab tint + bar surface from InkAmpAppTheme (keeps PunkRallyTabView.rootShell small).
+private struct InkAmpTabChromeModifier: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        let theme = InkAmpAppTheme.resolve(for: colorScheme)
+        content
+            .tint(theme.accent)
+            .toolbarBackground(theme.surfaceElevated, for: .tabBar)
+            .toolbarBackground(.visible, for: .tabBar)
+    }
+}
+
 // MARK: - Shell notification bridges (keep PunkRallyTabView.body type-checkable)
 
 private struct PunkRallyShellToastModifier: ViewModifier {
