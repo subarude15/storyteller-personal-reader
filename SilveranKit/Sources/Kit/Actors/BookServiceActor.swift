@@ -1661,8 +1661,14 @@ public actor BookServiceActor {
     /// restored. Only portable Storyteller records should be supplied; local-folder
     /// security-scoped bookmarks are device-specific and are intentionally excluded.
     public func restorePortableBackupSources(_ restored: [BookSourceRecord]) async throws {
+        await ensureSourceRegistryLoaded()
+        var merged = sourceRecords
+        for record in restored where record.kind == .storyteller {
+            merged.replaceOrAppend(record)
+        }
+
         await closeAllFolderAccess()
-        try await FilesystemActor.shared.saveBookSources(restored)
+        try await FilesystemActor.shared.saveBookSources(merged)
         sourceRecords = []
         sourcesByID = [:]
         sourceRegistryLoaded = false
