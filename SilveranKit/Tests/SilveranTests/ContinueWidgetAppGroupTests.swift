@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import SilveranAppleWidgets
+import SilveranKit
 import Testing
 
 /// Regression coverage for the sideloaded Continue widget's two historical
@@ -52,6 +53,13 @@ struct ContinueWidgetAppGroupTests {
         #expect(SilveranWidgetConstants.appGroupInfoKey == "SILVERAN_WIDGET_APP_GROUP")
     }
 
+    @Test func widgetStateLivesInHiddenBackupExcludedDirectory() {
+        let container = URL(fileURLWithPath: "/tmp/AppGroup", isDirectory: true)
+        let state = SilveranWidgetSnapshotStore.transientStateDirectory(in: container)
+        #expect(state.lastPathComponent == ".InkAmpWidgetState")
+        #expect(state.deletingLastPathComponent().standardizedFileURL == container.standardizedFileURL)
+    }
+
     @Test func fourContinueKindsAreUniqueAndNotLegacy() {
         let kinds = SilveranWidgetConstants.continueWidgetKinds
         #expect(kinds.count == 4)
@@ -93,6 +101,44 @@ struct ContinueWidgetAppGroupTests {
                 "inkamp.continue.dark.medium.v1"
             )
         )
+    }
+}
+
+@Suite("Portable credential backup payload")
+struct PortableCredentialBackupTests {
+    @Test func credentialAllowlistRoundTripsEverySecretKind() throws {
+        let original = AuthenticationActor.PortableBackup(
+            storyteller: [
+                .init(
+                    sourceID: "source-a",
+                    url: "https://story.example",
+                    lanURL: "http://story.local",
+                    username: "reader",
+                    password: "story-secret"
+                )
+            ],
+            legacyStoryteller: .init(
+                url: "https://legacy.example",
+                username: "legacy",
+                password: "legacy-secret"
+            ),
+            hardcoverToken: "hardcover",
+            lazyLibrarianAPIKey: "lazy",
+            prowlarrAPIKey: "prowlarr",
+            jackettAPIKey: "jackett",
+            delugePassword: "deluge",
+            qbittorrentPassword: "qbit",
+            synologyPassword: "synology",
+            torboxAPIKey: "torbox",
+            torboxarrPassword: "torboxarr"
+        )
+
+        let encoded = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(
+            AuthenticationActor.PortableBackup.self,
+            from: encoded
+        )
+        #expect(decoded == original)
     }
 }
 
