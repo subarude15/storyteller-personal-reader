@@ -21,6 +21,8 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Shipped
 
+- [x] **TorBoxarr File Station routing reliability** — persist CopyMove `taskid` on manual jobs, reconcile asynchronously on Downloads refresh (no same-pass eight-poll timeout), duplicate-move prevention, destination-already-present recovery, Retry Move for routing-only failures. Magnet submit / PublicID / library path defaults from #80–#82 unchanged.
+
 - [x] **TorBox → NAS automatic transfer (Phase 2)** — when a TorBox job is Ready: select ebook/audiobook media files, request short-lived TorBox download URLs, have Synology Download Station pull them into the configured NAS destination (phone is not the data pipe), reconcile/idempotent resume, auto or manual Transfer to NAS, Downloads shows Transferring → Complete. Archives not auto-extracted.
 
 - [x] **TorBox torrent provider (Phase 1)** — TorBox as first-class torrent provider beside Deluge/qBittorrent: Keychain API key, Test Connection, provider picker, magnet + `.torrent` submit, Downloads status (Queued / Downloading / Processing / Ready / Failed), retry/remove, polling. Automatic TorBox → NAS transfer intentionally deferred to Phase 2.
