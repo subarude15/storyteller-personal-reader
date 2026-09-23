@@ -168,7 +168,7 @@ struct ManualMagnetBackendTests {
     }
 
     @Test func synologyCompletedFolderStaysHostNamespaced() {
-        #expect(TorBoxarrConnectionSettings.hostCompletedFolder == "/volume1/data/torrents/completed")
+        #expect(TorBoxarrConnectionSettings.hostCompletedFolder == "/volume1/data/torrents/completed/torboxarr")
         #expect(TorBoxarrConnectionSettings.apiCompletedFolder == "/data/completed")
         #expect(TorBoxarrConnectionSettings.completedFolder == TorBoxarrConnectionSettings.hostCompletedFolder)
         #expect(TorBoxarrConnectionSettings.apiDefaultSavePath == TorBoxarrConnectionSettings.apiCompletedFolder)
