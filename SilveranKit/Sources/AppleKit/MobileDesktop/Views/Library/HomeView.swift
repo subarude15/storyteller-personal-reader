@@ -12,6 +12,8 @@ struct HomeView: View {
     let searchText: String
     #endif
     @Environment(MediaViewModel.self) private var mediaViewModel: MediaViewModel
+    @Environment(\.colorScheme) private var colorScheme
+    private var theme: InkAmpAppTheme { .resolve(for: colorScheme) }
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow
     #endif
@@ -97,7 +99,7 @@ struct HomeView: View {
     #if os(macOS)
     #endif
     private let horizontalPadding: CGFloat = 24
-    private let sectionSpacing: CGFloat = 36
+    private let sectionSpacing: CGFloat = InkAmpMetrics.sectionSpacing
     private let headerBottomPadding: CGFloat = 12
 
     #if os(iOS)
@@ -200,7 +202,8 @@ struct HomeView: View {
                             VStack(alignment: .leading, spacing: 12) {
                                 HStack {
                                     Text("Home")
-                                        .font(.storytellerTitle(size: 32))
+                                        .font(.largeTitle.bold())
+                                        .foregroundStyle(theme.primaryText)
                                     Spacer()
                                     #if os(macOS)
                                     viewOptionsButton
@@ -859,7 +862,7 @@ struct HomeView: View {
             ],
             initialNarrationFilterOption: .both,
         )
-        .background(Color(uiColor: .systemBackground))
+        .background(theme.background)
     }
     #endif
 
@@ -1072,6 +1075,9 @@ struct HomeView: View {
 }
 
 private struct HomeSectionRow: View {
+    @Environment(\.colorScheme) private var colorScheme
+    private var theme: InkAmpAppTheme { .resolve(for: colorScheme) }
+
     let sectionIndex: Int
     let section: HomeView.HomeSection
     @Binding var selection: HomeView.Selection?
@@ -1103,7 +1109,8 @@ private struct HomeSectionRow: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 Text(section.title)
-                    .font(.storytellerTitle(size: 22))
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(theme.primaryText)
 
                 #if os(macOS)
                 if !section.items.isEmpty {
@@ -1143,7 +1150,7 @@ private struct HomeSectionRow: View {
                 }
                 .buttonStyle(.plain)
                 .font(.callout.weight(.semibold))
-                .foregroundStyle(.tint)
+                .foregroundStyle(theme.accent)
             }
 
             let metrics = MediaItemCardMetrics.make(
@@ -1156,14 +1163,18 @@ private struct HomeSectionRow: View {
                 VStack {
                     Text("No items currently.")
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryText)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: max(tileWidth * 0.9, 120))
                 .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.secondary.opacity(0.08))
+                    RoundedRectangle(cornerRadius: InkAmpMetrics.cardRadius, style: .continuous)
+                        .fill(theme.surface)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: InkAmpMetrics.cardRadius, style: .continuous)
+                        .strokeBorder(theme.border.opacity(0.8), lineWidth: 1)
                 )
             } else {
                 ScrollViewReader { proxy in
@@ -1280,5 +1291,67 @@ private struct HomeSectionRow: View {
         return metrics.maxCardHeight
     }
 }
+
+
+#if DEBUG && os(iOS)
+private struct HomeThemedPreviewHost: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let theme = InkAmpAppTheme.resolve(for: colorScheme)
+        ScrollView {
+            VStack(alignment: .leading, spacing: InkAmpMetrics.sectionSpacing) {
+                Text("Home")
+                    .font(.largeTitle.bold())
+                    .foregroundStyle(theme.primaryText)
+                InkAmpCard(feature: true) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Continue")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(theme.accent)
+                        Text("Piranesi")
+                            .font(.headline)
+                            .foregroundStyle(theme.primaryText)
+                        Text("Susanna Clarke · Chapter 12")
+                            .font(.subheadline)
+                            .foregroundStyle(theme.secondaryText)
+                        InkAmpProgressBar(progress: 0.62)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 12) {
+                    InkAmpSectionHeader("Up next", actionTitle: "See All", action: {})
+                    HStack(spacing: 14) {
+                        ForEach(0..<3, id: \.self) { idx in
+                            VStack(alignment: .leading, spacing: 8) {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(theme.secondaryAccent.opacity(0.3))
+                                    .frame(width: 96, height: 144)
+                                Text(idx == 0 ? "Left Hand" : idx == 1 ? "Ancillary" : "Hyperion")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(theme.primaryText)
+                                    .frame(width: 96, alignment: .leading)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, InkAmpMetrics.screenInset)
+            .padding(.vertical, 12)
+        }
+        .background(theme.background)
+        .inkAmpAppThemed()
+    }
+}
+
+#Preview("Home · light") {
+    HomeThemedPreviewHost()
+        .preferredColorScheme(.light)
+}
+
+#Preview("Home · dark") {
+    HomeThemedPreviewHost()
+        .preferredColorScheme(.dark)
+}
+#endif
 
 #endif

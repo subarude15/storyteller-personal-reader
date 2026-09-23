@@ -676,6 +676,9 @@ private struct PodcastShelfDownloadRow: View {
 /// searchable cover grid with book-detail navigation destinations wired.
 /// Wrapper around Silveran's internal `BooksContentView`, plus habit-based Ideas.
 public struct PunkRallyLibraryView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    private var theme: InkAmpAppTheme { .resolve(for: colorScheme) }
+
     private enum LibrarySegment: String, CaseIterable, Identifiable {
         case library = "Library"
         case ideas = "Ideas"
@@ -714,8 +717,9 @@ public struct PunkRallyLibraryView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .padding(.horizontal, 16)
+                .padding(.horizontal, InkAmpMetrics.screenInset)
                 .padding(.vertical, 8)
+                .tint(theme.accent)
 
                 Group {
                     switch segment {
@@ -728,6 +732,7 @@ public struct PunkRallyLibraryView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .background(theme.background)
             .iOSLibraryToolbar(
                 showSettings: $showSettings,
                 showOfflineSheet: $showOfflineSheet,

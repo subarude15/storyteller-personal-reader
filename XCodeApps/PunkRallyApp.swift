@@ -40,6 +40,7 @@ public struct PunkRallyTabView: View {
 
     public var body: some View {
         rootShell
+            .inkAmpAppThemed()
             .modifier(PunkRallyShellToastModifier(showToast: { showShellToast($0) }))
             .modifier(
                 PunkRallyPodcastBridgeModifier(
@@ -121,7 +122,9 @@ public struct PunkRallyTabView: View {
                     .tag(InkAmpPrimaryTab.more)
                     .badge(moreTabBadge > 0 ? moreTabBadge : 0)
             }
-            .tint(PunkRallyTheme.Accent.primary)
+            .tint(chrome.accent)
+            .toolbarBackground(chrome.surface2, for: .tabBar)
+            .toolbarBackground(.visible, for: .tabBar)
             .preferredColorScheme(nil) // follow system appearance
             .punkRallySheets(showSettings: $showSettings)
             .onReceive(NotificationCenter.default.publisher(for: .inkampShowManualDownloads)) { _ in
@@ -618,7 +621,7 @@ private struct HomeTabView: View {
                     HStack(spacing: 8) {
                         Text("Continue")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(PunkRallyTheme.Accent.primary)
+                            .foregroundStyle(chrome.accent)
                         if let item {
                             KindBadgeView(kind: item.badge, scheme: colorScheme)
                         }
@@ -637,19 +640,20 @@ private struct HomeTabView: View {
                     if let item, let label = item.finishabilityLabel {
                         Text(label)
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(PunkRallyTheme.Accent.primary)
+                            .foregroundStyle(chrome.accent)
                     }
                 }
                 Spacer(minLength: 0)
             }
         }
         .padding(PunkRallyTheme.Metric.cardPadding)
-        .background(chrome.surface)
-        .clipShape(RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius))
+        .background(chrome.surface2)
+        .clipShape(RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.featureCornerRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius)
+            RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.featureCornerRadius, style: .continuous)
                 .stroke(chrome.border, lineWidth: 1)
         )
+        .shadow(color: colorScheme == .dark ? .clear : .black.opacity(0.06), radius: 8, y: 2)
         .contentShape(Rectangle())
         .onTapGesture {
             Task { await openMixedItem(item) }
@@ -735,8 +739,8 @@ private struct HomeTabView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
-        .background(chrome.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .background(chrome.surface2)
+        .clipShape(RoundedRectangle(cornerRadius: InkAmpMetrics.controlRadius, style: .continuous))
     }
 
     @ViewBuilder
@@ -757,7 +761,7 @@ private struct HomeTabView: View {
                             if let why = item.finishabilityLabel {
                                 Text(why)
                                     .font(.caption.weight(.semibold))
-                                    .foregroundStyle(PunkRallyTheme.Accent.primary)
+                                    .foregroundStyle(chrome.accent)
                             }
                         }
                         Spacer(minLength: 0)
@@ -772,10 +776,10 @@ private struct HomeTabView: View {
                 }
             }
             .padding(PunkRallyTheme.Metric.cardPadding)
-            .background(chrome.surface)
-            .clipShape(RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius))
+            .background(chrome.surface2)
+            .clipShape(RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius)
+                RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius, style: .continuous)
                     .stroke(chrome.border, lineWidth: 1)
             )
             .accessibilityIdentifier("finish-tonight")

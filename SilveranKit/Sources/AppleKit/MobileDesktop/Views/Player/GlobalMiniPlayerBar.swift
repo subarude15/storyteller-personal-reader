@@ -104,6 +104,9 @@ final class AudioSessionMonitor {
 }
 
 struct GlobalMiniPlayerBar: View {
+    @Environment(\.colorScheme) private var colorScheme
+    private var theme: InkAmpAppTheme { .resolve(for: colorScheme) }
+
     private var monitor = AudioSessionMonitor.shared
     private var presenter = PlayerPresenter.shared
     private var podcastPresenter = PodcastPlayerPresenter.shared
@@ -127,47 +130,16 @@ struct GlobalMiniPlayerBar: View {
     }
 
     private func barContent(_ snapshot: AudioSessionSnapshot) -> some View {
-        HStack(spacing: 10) {
-            coverThumb(for: snapshot)
-                .contentShape(Rectangle())
-                .onTapGesture { presenter.expandMiniPlayer() }
-
-            Text(snapshot.title ?? "Now Playing")
-                .font(.subheadline.weight(.medium))
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-                .onTapGesture { presenter.expandMiniPlayer() }
-
-            Button {
+        InkAmpMiniPlayerChrome(
+            title: snapshot.title ?? "Now Playing",
+            isPlaying: snapshot.isPlaying,
+            cover: { coverThumb(for: snapshot) },
+            onExpand: { presenter.expandMiniPlayer() },
+            onTogglePlayPause: {
                 Task { try? await AudioSessionActor.shared.transport(.togglePlayPause) }
-            } label: {
-                Image(systemName: snapshot.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.title3)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-                    .background(Circle().fill(Color.primary.opacity(0.1)))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(snapshot.isPlaying ? "Pause" : "Play")
-
-            Button {
-                presenter.stopSession()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Stop playback")
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .modifier(MiniPlayerGlassModifier())
-        .padding(.horizontal, 8)
-        .padding(.bottom, 4)
+            },
+            onStop: { presenter.stopSession() },
+        )
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: snapshot.isPlaying)
     }
 
@@ -181,12 +153,12 @@ struct GlobalMiniPlayerBar: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         } else {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color(white: 0.12))
+                .fill(theme.surface)
                 .frame(width: 40, height: 40)
                 .overlay(
                     Image(systemName: placeholderIcon(for: snapshot.kind))
                         .font(.body)
-                        .foregroundStyle(Color.white.opacity(0.72))
+                        .foregroundStyle(theme.secondaryText)
                 )
         }
     }
@@ -210,18 +182,97 @@ struct GlobalMiniPlayerBar: View {
     }
 }
 
-private struct MiniPlayerGlassModifier: ViewModifier {
-    private let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+/// Shared visual chrome for the live mini-player and SwiftUI previews.
+struct InkAmpMiniPlayerChrome<Cover: View>: View {
+    @Environment(\.colorScheme) private var colorScheme
+    private var theme: InkAmpAppTheme { .resolve(for: colorScheme) }
 
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.glassEffect(.regular.interactive(), in: shape)
-        } else {
-            content
-                .background(shape.fill(.regularMaterial))
-                .clipShape(shape)
-                .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
+    let title: String
+    let isPlaying: Bool
+    let cover: () -> Cover
+    let onExpand: () -> Void
+    let onTogglePlayPause: () -> Void
+    let onStop: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            cover()
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onExpand)
+
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(theme.primaryText)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onExpand)
+
+            Button(action: onTogglePlayPause) {
+                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                    .font(.title3)
+                    .foregroundStyle(theme.accent)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+                    .background(Circle().fill(theme.accent.opacity(0.14)))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isPlaying ? "Pause" : "Play")
+
+            Button(action: onStop) {
+                Image(systemName: "xmark")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(theme.secondaryText)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Stop playback")
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .inkAmpSurface(elevated: true, radius: InkAmpMetrics.cardRadius)
+        .padding(.horizontal, 8)
+        .padding(.bottom, 4)
     }
 }
+
+#if DEBUG
+#Preview("Mini player · light") {
+    InkAmpMiniPlayerChrome(
+        title: "Piranesi — Susanna Clarke",
+        isPlaying: true,
+        cover: {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.gray.opacity(0.35))
+                .frame(width: 40, height: 40)
+        },
+        onExpand: {},
+        onTogglePlayPause: {},
+        onStop: {},
+    )
+    .padding()
+    .inkAmpAppThemed()
+    .preferredColorScheme(.light)
+}
+
+#Preview("Mini player · dark") {
+    InkAmpMiniPlayerChrome(
+        title: "Piranesi — Susanna Clarke",
+        isPlaying: false,
+        cover: {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.gray.opacity(0.45))
+                .frame(width: 40, height: 40)
+        },
+        onExpand: {},
+        onTogglePlayPause: {},
+        onStop: {},
+    )
+    .padding()
+    .background(InkAmpAppTheme(colorScheme: .dark).background)
+    .inkAmpAppThemed()
+    .preferredColorScheme(.dark)
+}
+#endif
 #endif

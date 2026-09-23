@@ -23,11 +23,12 @@ public enum InkAmpContinueWidgetLayout: String, Sendable, CaseIterable {
 /// Approved hex palette for the four Continue + Next Up widgets.
 ///
 /// Light: Aqua / Blanc / Carmin. Dark: Tangerine / Leaf Green / Sea Grey.
+/// Brand primaries come from `InkAmpBrandPalette` so app chrome stays aligned.
 public enum InkAmpContinueWidgetPalette {
     public enum Light {
-        public static let aqua = "#95D9C0"
-        public static let blanc = "#FFFFFF"
-        public static let carmin = "#D41F26"
+        public static let aqua = InkAmpBrandPalette.aqua
+        public static let blanc = InkAmpBrandPalette.blanc
+        public static let carmin = InkAmpBrandPalette.carmin
         /// Very dark neutral for primary copy on Blanc.
         public static let primaryText = "#1A1A1A"
         /// Muted dark gray for secondary copy.
@@ -35,9 +36,9 @@ public enum InkAmpContinueWidgetPalette {
     }
 
     public enum Dark {
-        public static let tangerine = "#F58F20"
-        public static let leafGreen = "#467434"
-        public static let seaGrey = "#363636"
+        public static let tangerine = InkAmpBrandPalette.tangerine
+        public static let leafGreen = InkAmpBrandPalette.leafGreen
+        public static let seaGrey = InkAmpBrandPalette.seaGrey
         /// Off-white primary on Sea Grey.
         public static let primaryText = "#F5F5F5"
         /// Muted light gray secondary.
