@@ -33,7 +33,7 @@ struct ContinueWidgetLinkTests {
         #expect(SilveranWidgetConstants.continueWidgetKinds.count == 4)
         #expect(
             SilveranWidgetConstants.continueWidgetKind
-                == "inkamp.continue.light.medium.v1"
+                == "inkamp.continue.light.medium.v2"
         )
         #expect(
             SilveranWidgetConstants.legacySideloadContinueWidgetKinds.contains(
