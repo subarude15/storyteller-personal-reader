@@ -128,8 +128,8 @@ public enum NASBackendRouting {
     }
 }
 
-/// `/volume1/media/books/books` is a DSM volume path. File Station wants
-/// `/media/books/books` (share-relative). qBittorrent/Deluge keep the volume path.
+/// `/volume1/data/media/books/books` is a DSM volume path. File Station wants
+/// `/data/media/books/books` (share-relative). qBittorrent/Deluge keep the volume path.
 public struct SynologyFileStationPath: Equatable, Sendable {
     public var volumePath: String
     public var fileStationPath: String

@@ -445,6 +445,12 @@ public struct ManualDownloadStatusRefresh: Sendable {
         var routing = routed(live, job: job, status: .routing)
         routing = await store(routing)
         do {
+            try await fileStation.ensureFolder(
+                baseURL: baseURL,
+                username: username,
+                password: password,
+                volumePath: job.destination,
+            )
             let present = try await fileStation.listFilenames(
                 baseURL: baseURL,
                 username: username,

@@ -408,8 +408,14 @@ struct SettingsSyncTests {
         )
         let edited = try store.recordNASDownloadsChange(settings, at: date(40))
         #expect(edited.schemaVersion == 3)
-        #expect(edited.integrations.nasDownloads.audiobookFolder?.value == "/volume1/media/books/audiobooks")
-        #expect(edited.integrations.nasDownloads.ebookFolder?.value == "/volume1/media/books/books")
+        #expect(
+            edited.integrations.nasDownloads.audiobookFolder?.value
+                == "/volume1/data/media/books/audiobooks"
+        )
+        #expect(
+            edited.integrations.nasDownloads.ebookFolder?.value
+                == "/volume1/data/media/books/books"
+        )
         #expect(edited.integrations.nasDownloads.torrentClient?.value == .qbittorrent)
         #expect(edited.integrations.manualSearch.openInAppBrowser?.modifiedAt == date(10))
 
@@ -426,8 +432,8 @@ struct SettingsSyncTests {
         }
         #expect(decoded.schemaVersion == 3)
         let applied = SettingsSyncApply.nasDownloads(document: decoded)
-        #expect(applied.audiobookFolder == "/volume1/media/books/audiobooks")
-        #expect(applied.ebookFolder == "/volume1/media/books/books")
+        #expect(applied.audiobookFolder == "/volume1/data/media/books/audiobooks")
+        #expect(applied.ebookFolder == "/volume1/data/media/books/books")
         #expect(applied.qbittorrentBaseURL == "http://qb.example:8080")
         #expect(applied.synologyBaseURL == "http://nas.example:5000")
         #expect(applied.synologyUsername == "josh")

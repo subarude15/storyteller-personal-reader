@@ -22,8 +22,8 @@ struct TorBoxarrStatusTests {
     private let magnet = "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Magnet%20Display%20Name"
     private let apiCompleted = TorBoxarrConnectionSettings.apiCompletedFolder
     private let hostCompleted = TorBoxarrConnectionSettings.hostCompletedFolder
-    private let ebook = "/volume1/media/books/books"
-    private let audiobook = "/volume1/media/books/audiobooks"
+    private let ebook = "/volume1/data/media/books/books"
+    private let audiobook = "/volume1/data/media/books/audiobooks"
 
     @Test func statusPollUsesTorBoxarrPublicIDNotMagnetBTIH() async {
         let bridge = BridgeStatusScript()
@@ -192,7 +192,7 @@ struct TorBoxarrStatusTests {
         #expect(movedVolumePaths(nas.movedPaths) == ["/data/torrents/completed/Selected Title"])
         #expect(nas.movedPaths.allSatisfy { $0.contains("/data/torrents/completed/Selected Title") })
         #expect(nas.movedPaths.allSatisfy { !$0.contains("/data/completed/") })
-        #expect(nas.destinations == ["/media/books/books"])
+        #expect(nas.destinations == ["/data/media/books/books"])
         #expect(nas.removeSrc == ["true"])
         #expect(nas.movedPaths.allSatisfy { !$0.contains("Other Book") && !$0.contains("API Name") && !$0.contains("Magnet Display") })
         #expect(bridge.urls.allSatisfy { !$0.path.contains("/torrents/files") })
@@ -211,7 +211,7 @@ struct TorBoxarrStatusTests {
         #expect(movedVolumePaths(landed.moved) == ["/data/torrents/completed/Selected Title"])
         #expect(landed.moved.allSatisfy { $0.contains("/data/torrents/completed/Selected Title") })
         #expect(landed.moved.allSatisfy { !$0.contains("/data/completed/") })
-        #expect(landed.destinations == ["/media/books/books"])
+        #expect(landed.destinations == ["/data/media/books/books"])
         #expect(landed.cloudCalls == 0)
     }
 
@@ -221,7 +221,7 @@ struct TorBoxarrStatusTests {
         #expect(landed.job.destination == audiobook)
         #expect(landed.job.mediaType == .audiobook)
         #expect(landed.routingIndex < landed.completeIndex)
-        #expect(landed.destinations == ["/media/books/audiobooks"])
+        #expect(landed.destinations == ["/data/media/books/audiobooks"])
         #expect(landed.cloudCalls == 0)
     }
 
@@ -249,7 +249,7 @@ struct TorBoxarrStatusTests {
         #expect(movedVolumePaths(nas.movedPaths) == ["/data/torrents/completed/Selected Title"])
         #expect(nas.movedPaths.allSatisfy { $0.contains("/data/torrents/completed/Selected Title") })
         #expect(nas.movedPaths.allSatisfy { !$0.contains("/data/completed/") })
-        #expect(nas.destinations == ["/media/books/audiobooks"])
+        #expect(nas.destinations == ["/data/media/books/audiobooks"])
         #expect(jobs.jobs[0].status == .complete)
         #expect(jobs.jobs[0].destination == audiobook)
         #expect(cloud.calls == 0)

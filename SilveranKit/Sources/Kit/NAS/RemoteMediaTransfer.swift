@@ -23,7 +23,7 @@ public struct RemoteDownloadSource: Equatable, Sendable {
 }
 
 public struct NASTransferDestination: Equatable, Sendable {
-    /// Volume path such as `/volume1/media/books/audiobooks/Author/Title`.
+    /// Volume path such as `/volume1/data/media/books/audiobooks/Author/Title`.
     public var volumePath: String
 
     public init(volumePath: String) {

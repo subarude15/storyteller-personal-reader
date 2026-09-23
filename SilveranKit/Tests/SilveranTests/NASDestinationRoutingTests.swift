@@ -250,8 +250,8 @@ struct NASBackendRoutingTests {
 
     @Test func defaultFoldersAreTheSynologyVolumePaths() {
         let defaults = NASDownloadSettingsSnapshot()
-        #expect(defaults.audiobookFolder == "/volume1/media/books/audiobooks")
-        #expect(defaults.ebookFolder == "/volume1/media/books/books")
+        #expect(defaults.audiobookFolder == "/volume1/data/media/books/audiobooks")
+        #expect(defaults.ebookFolder == "/volume1/data/media/books/books")
         #expect(defaults.delugeIncomingFolder == "/volume1/data/torrents/incoming")
         #expect(defaults.delugeCompletedFolder == "/volume1/data/torrents/completed")
         let epub = ManualAcquisitionCandidate(
@@ -266,11 +266,11 @@ struct NASBackendRoutingTests {
         )
         #expect(
             NASDestinationRouting.destination(for: epub, kind: .ebook, settings: defaults)
-                == .success("/volume1/media/books/books")
+                == .success("/volume1/data/media/books/books")
         )
         #expect(
             NASDestinationRouting.destination(for: m4b, kind: .audiobook, settings: defaults)
-                == .success("/volume1/media/books/audiobooks")
+                == .success("/volume1/data/media/books/audiobooks")
         )
     }
 }
@@ -278,24 +278,28 @@ struct NASBackendRoutingTests {
 @Suite("Synology path mapping")
 struct SynologyPathMappingTests {
     @Test func volumePathBecomesShareRelative() {
-        guard case .success(let mapped) = SynologyPathMapping.resolve("/volume1/media/books/books")
+        guard case .success(let mapped) = SynologyPathMapping.resolve(
+            "/volume1/data/media/books/books"
+        )
         else {
             Issue.record("expected mapping")
             return
         }
-        #expect(mapped.volumePath == "/volume1/media/books/books")
-        #expect(mapped.fileStationPath == "/media/books/books")
-        #expect(mapped.shareName == "media")
+        #expect(mapped.volumePath == "/volume1/data/media/books/books")
+        #expect(mapped.fileStationPath == "/data/media/books/books")
+        #expect(mapped.shareName == "data")
     }
 
     @Test func audiobookVolumePathMaps() {
-        guard case .success(let mapped) = SynologyPathMapping.resolve("/volume1/media/books/audiobooks")
+        guard case .success(let mapped) = SynologyPathMapping.resolve(
+            "/volume1/data/media/books/audiobooks"
+        )
         else {
             Issue.record("expected mapping")
             return
         }
-        #expect(mapped.fileStationPath == "/media/books/audiobooks")
-        #expect(mapped.shareName == "media")
+        #expect(mapped.fileStationPath == "/data/media/books/audiobooks")
+        #expect(mapped.shareName == "data")
     }
 
     @Test func alreadyShareRelativePathIsKept() {

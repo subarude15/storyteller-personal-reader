@@ -51,8 +51,12 @@ public enum NASDownloadBackend: String, Codable, Sendable {
 }
 
 public struct NASDownloadSettingsSnapshot: Equatable, Sendable {
-    public static let defaultAudiobookFolder = "/volume1/media/books/audiobooks"
-    public static let defaultEbookFolder = "/volume1/media/books/books"
+    /// Pre-fix defaults that pointed at a non-existent Synology share layout.
+    public static let legacyDefaultAudiobookFolder = "/volume1/media/books/audiobooks"
+    public static let legacyDefaultEbookFolder = "/volume1/media/books/books"
+    /// Storyteller library roots on the live NAS (`/volume1/data/media/books` → `/media`).
+    public static let defaultAudiobookFolder = "/volume1/data/media/books/audiobooks"
+    public static let defaultEbookFolder = "/volume1/data/media/books/books"
     /// Where Deluge starts downloading before it relocates completed torrents.
     public static let defaultDelugeIncomingFolder = "/volume1/data/torrents/incoming"
     /// Deluge’s completed/staging folder. ink+amp only routes after this path.
@@ -160,6 +164,29 @@ public struct NASDownloadSettingsSnapshot: Equatable, Sendable {
             case .audiobook: trimmedAudiobookFolder
             case .ebook: trimmedEbookFolder
         }
+    }
+
+    /// Remaps only the known incorrect pre-fix library defaults. Custom paths are untouched.
+    public static func migrateLegacyLibraryFolder(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed == legacyDefaultEbookFolder {
+            return defaultEbookFolder
+        }
+        if trimmed == legacyDefaultAudiobookFolder {
+            return defaultAudiobookFolder
+        }
+        return path
+    }
+
+    public mutating func migrateLegacyDefaultLibraryFolders() {
+        audiobookFolder = Self.migrateLegacyLibraryFolder(audiobookFolder)
+        ebookFolder = Self.migrateLegacyLibraryFolder(ebookFolder)
+    }
+
+    public func migratingLegacyDefaultLibraryFolders() -> NASDownloadSettingsSnapshot {
+        var copy = self
+        copy.migrateLegacyDefaultLibraryFolders()
+        return copy
     }
 }
 

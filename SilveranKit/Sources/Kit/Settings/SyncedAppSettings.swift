@@ -389,6 +389,7 @@ public enum SettingsSyncMerge {
         settings: NASDownloadSettingsSnapshot,
         at date: Date,
     ) -> SyncedAppSettings {
+        let settings = settings.migratingLegacyDefaultLibraryFolders()
         var updated = document
         let stamped = SettingsSyncClock.stamp(date)
         var section = updated.integrations.nasDownloads
@@ -406,6 +407,35 @@ public enum SettingsSyncMerge {
         stamp(&section.delugeCompletedFolder, settings.delugeCompletedFolder, at: stamped)
         stamp(&section.startAutomatically, settings.startAutomatically, at: stamped)
         stamp(&section.createTitleAuthorSubfolders, settings.createTitleAuthorSubfolders, at: stamped)
+        updated.integrations.nasDownloads = section
+        return promoteSchemaIfNeeded(updated)
+    }
+
+    /// Rewrites only the known incorrect library defaults in synced NAS folders.
+    /// Custom paths are left alone so sync does not thrash valid user values.
+    public static func migrateLegacyNASLibraryFolders(
+        _ document: SyncedAppSettings,
+        at date: Date = Date(),
+    ) -> SyncedAppSettings {
+        var updated = document
+        var section = updated.integrations.nasDownloads
+        var changed = false
+        let stamped = SettingsSyncClock.stamp(date)
+        if let folder = section.ebookFolder {
+            let migrated = NASDownloadSettingsSnapshot.migrateLegacyLibraryFolder(folder.value)
+            if migrated != folder.value {
+                section.ebookFolder = TimestampedSetting(value: migrated, modifiedAt: stamped)
+                changed = true
+            }
+        }
+        if let folder = section.audiobookFolder {
+            let migrated = NASDownloadSettingsSnapshot.migrateLegacyLibraryFolder(folder.value)
+            if migrated != folder.value {
+                section.audiobookFolder = TimestampedSetting(value: migrated, modifiedAt: stamped)
+                changed = true
+            }
+        }
+        guard changed else { return document }
         updated.integrations.nasDownloads = section
         return promoteSchemaIfNeeded(updated)
     }
@@ -595,8 +625,12 @@ public enum SettingsSyncApply {
             delugeBaseURL: section.delugeBaseURL?.value ?? current.delugeBaseURL,
             synologyBaseURL: section.synologyBaseURL?.value ?? current.synologyBaseURL,
             synologyUsername: section.synologyUsername?.value ?? current.synologyUsername,
-            audiobookFolder: section.audiobookFolder?.value ?? current.audiobookFolder,
-            ebookFolder: section.ebookFolder?.value ?? current.ebookFolder,
+            audiobookFolder: NASDownloadSettingsSnapshot.migrateLegacyLibraryFolder(
+                section.audiobookFolder?.value ?? current.audiobookFolder
+            ),
+            ebookFolder: NASDownloadSettingsSnapshot.migrateLegacyLibraryFolder(
+                section.ebookFolder?.value ?? current.ebookFolder
+            ),
             delugeIncomingFolder: section.delugeIncomingFolder?.value ?? current.delugeIncomingFolder,
             delugeCompletedFolder: section.delugeCompletedFolder?.value ?? current.delugeCompletedFolder,
             startAutomatically: section.startAutomatically?.value ?? current.startAutomatically,
