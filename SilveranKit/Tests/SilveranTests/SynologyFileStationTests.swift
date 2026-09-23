@@ -200,6 +200,37 @@ struct SynologyFileStationTests {
         #expect(statusCalls == 0)
     }
 
+    @Test func moveTaskStatusTreatsDSMErrorsArrayAsFailed() async throws {
+        let transport = SynologyScript()
+        transport.handler = { request, _ in
+            let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let api = items.first { $0.name == "api" }?.value
+            let method = items.first { $0.name == "method" }?.value
+            if request.url?.path.contains("auth.cgi") == true {
+                return SynologyHTTP(
+                    status: 200,
+                    body: Data(#"{"success":true,"data":{"sid":"sid"}}"#.utf8),
+                )
+            }
+            if api == "SYNO.FileStation.CopyMove", method == "status" {
+                return SynologyHTTP(
+                    status: 200,
+                    body: Data(#"{"success":true,"data":{"finished":true,"errors":[{"code":408}]}}"#.utf8),
+                )
+            }
+            return SynologyHTTP(status: 200, body: Data(#"{"success":true}"#.utf8))
+        }
+
+        let client = SynologyFileStationClient(transport: transport)
+        let status = try await client.moveTaskStatus(
+            baseURL: "http://nas.example:5000",
+            username: "josh",
+            password: "secret",
+            taskID: "bad-move",
+        )
+        #expect(status == .failed)
+    }
+
     @Test func moveItemPollsStatusWithDelayNotImmediateBurst() async throws {
         let transport = SynologyScript()
         var statusCalls = 0
