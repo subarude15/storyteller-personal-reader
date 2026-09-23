@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import SilveranAppleWidgets
 import Testing
@@ -56,9 +57,9 @@ struct ContinueWidgetAppGroupTests {
         #expect(kinds.count == 4)
         #expect(Set(kinds).count == 4)
         #expect(kinds == [
-            "inkamp.continue.light.medium.v1",
+            "inkamp.continue.light.medium.v2",
             "inkamp.continue.light.large.v1",
-            "inkamp.continue.dark.medium.v1",
+            "inkamp.continue.dark.medium.v2",
             "inkamp.continue.dark.large.v1",
         ])
         // reloadTimelines() iterates continueWidgetKinds — publish must hit all four.
@@ -80,6 +81,16 @@ struct ContinueWidgetAppGroupTests {
         #expect(
             SilveranWidgetConstants.legacySideloadContinueWidgetKinds.contains(
                 "InkAmpContinueWidget"
+            )
+        )
+        #expect(
+            SilveranWidgetConstants.legacySideloadContinueWidgetKinds.contains(
+                "inkamp.continue.light.medium.v1"
+            )
+        )
+        #expect(
+            SilveranWidgetConstants.legacySideloadContinueWidgetKinds.contains(
+                "inkamp.continue.dark.medium.v1"
             )
         )
     }
@@ -331,5 +342,62 @@ struct ContinueWidgetSnapshotTests {
         #expect(decoded.upNextItems[0].title == "Cold Open")
         #expect(decoded.upNextItems[0].kind == .podcast)
         #expect(decoded.deepLink == InkAmpContinueLink.continueURL.absoluteString)
+    }
+
+    @Test func mediumWidthFractionsSumAndFavorCurrent() {
+        let current = InkAmpContinueWidgetMetrics.mediumCurrentFraction
+        let queue = InkAmpContinueWidgetMetrics.mediumQueueFraction
+        #expect(abs(current + queue - 1) < 0.0001)
+        #expect(current > queue)
+        #expect(current == 0.58)
+        #expect(queue == 0.42)
+
+        let usable: CGFloat = 320
+        let currentWidth = InkAmpContinueWidgetMetrics.mediumCurrentWidth(usableWidth: usable)
+        let queueWidth = InkAmpContinueWidgetMetrics.mediumQueueWidth(usableWidth: usable)
+        #expect(abs(currentWidth + queueWidth - usable) < 0.0001)
+        #expect(currentWidth > queueWidth)
+        #expect(queueWidth != InkAmpContinueWidgetMetrics.deprecatedMediumFixedQueueWidth)
+        #expect(
+            InkAmpContinueWidgetMetrics.mediumQueueWidth(usableWidth: 300)
+                != InkAmpContinueWidgetMetrics.deprecatedMediumFixedQueueWidth
+        )
+    }
+
+    @Test func mediumCoverIsMateriallySmallerThanLargeCover() {
+        #expect(InkAmpContinueWidgetMetrics.mediumCoverSize >= 52)
+        #expect(InkAmpContinueWidgetMetrics.mediumCoverSize <= 56)
+        #expect(InkAmpContinueWidgetMetrics.mediumQueueCoverSize >= 22)
+        #expect(InkAmpContinueWidgetMetrics.mediumQueueCoverSize <= 24)
+        #expect(InkAmpContinueWidgetMetrics.largeCoverSize == 92)
+        #expect(
+            InkAmpContinueWidgetMetrics.mediumCoverSize
+                <= InkAmpContinueWidgetMetrics.largeCoverSize - 30
+        )
+    }
+
+    @Test func mediumAndLargeUpNextLimitsRemainDistinct() {
+        #expect(InkAmpContinueWidgetLayout.medium.upNextLimit == 2)
+        #expect(InkAmpContinueWidgetLayout.large.upNextLimit == 3)
+    }
+
+    @Test func mediumVerticalBudgetFitsSystemMediumPreviewCanvas() {
+        #expect(InkAmpContinueWidgetMetrics.mediumCaptionFontSize >= 8)
+        #expect(InkAmpContinueWidgetMetrics.mediumCaptionFontSize <= 9)
+        #expect(InkAmpContinueWidgetMetrics.mediumProgressHeight < 5)
+        #expect(InkAmpContinueWidgetMetrics.mediumNowColumnSpacing <= 5)
+
+        let withCaption = InkAmpContinueWidgetMetrics.mediumContentMinimumHeight(
+            includeCaption: true
+        )
+        let withoutCaption = InkAmpContinueWidgetMetrics.mediumContentMinimumHeight(
+            includeCaption: false
+        )
+        #expect(withCaption > withoutCaption)
+        #expect(withCaption <= InkAmpContinueWidgetMetrics.mediumPreviewHeight)
+        #expect(
+            InkAmpContinueWidgetMetrics.mediumNowColumnMinimumHeight(includeCaption: true)
+                < InkAmpContinueWidgetMetrics.mediumCoverSize * 2
+        )
     }
 }

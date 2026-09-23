@@ -204,16 +204,170 @@ struct InkAmpContinueWidgetView: View {
     // MARK: Medium
 
     private var mediumBody: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                nowColumn(coverSize: 72, titleFont: .subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                upNextColumn
-                    .frame(width: 148, alignment: .leading)
+        VStack(alignment: .leading, spacing: 8) {
+            GeometryReader { proxy in
+                let gap = InkAmpContinueWidgetMetrics.mediumColumnGap
+                let usableWidth = max(0, proxy.size.width - gap)
+                let currentWidth = InkAmpContinueWidgetMetrics.mediumCurrentWidth(
+                    usableWidth: usableWidth
+                )
+                let queueWidth = InkAmpContinueWidgetMetrics.mediumQueueWidth(
+                    usableWidth: usableWidth
+                )
+
+                HStack(alignment: .top, spacing: gap) {
+                    mediumNowColumn
+                        .frame(width: currentWidth, alignment: .leading)
+                    mediumUpNextColumn
+                        .frame(width: queueWidth, alignment: .leading)
+                }
             }
-            actionRow(continueProminent: false)
+            .frame(maxHeight: .infinity)
+
+            mediumActionRow
         }
-        .padding(14)
+        .padding(.horizontal, InkAmpContinueWidgetMetrics.mediumOuterPadding)
+        .padding(.vertical, InkAmpContinueWidgetMetrics.mediumOuterVerticalPadding)
+    }
+
+    /// Compact Medium current column — chip, then cover beside title, then full-width progress.
+    private var mediumNowColumn: some View {
+        Link(destination: InkAmpContinueWidgetActions.continueURL(for: snapshot)) {
+            VStack(alignment: .leading, spacing: InkAmpContinueWidgetMetrics.mediumNowColumnSpacing) {
+                Text("NOW LISTENING")
+                    .font(.system(size: 8, weight: .bold))
+                    .tracking(0.5)
+                    .foregroundStyle(colors.accent)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(colors.accent.opacity(theme == .light ? 0.14 : 0.18))
+                    )
+
+                HStack(alignment: .top, spacing: InkAmpContinueWidgetMetrics.mediumCoverMetadataGap) {
+                    cover(
+                        filename: snapshot.coverFilename,
+                        kind: snapshot.kind,
+                        size: InkAmpContinueWidgetMetrics.mediumCoverSize,
+                    )
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(snapshot.title ?? "")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(colors.primary)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.85)
+                            .multilineTextAlignment(.leading)
+
+                        if let subtitle = snapshot.subtitle, !subtitle.isEmpty {
+                            Text(subtitle)
+                                .font(.system(size: 10))
+                                .foregroundStyle(colors.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if let progress = snapshot.clampedProgress {
+                    InkAmpThemedProgressBar(
+                        progress: progress,
+                        fill: colors.progress,
+                        track: colors.progressTrack,
+                        height: InkAmpContinueWidgetMetrics.mediumProgressHeight,
+                    )
+                }
+
+                if let caption = snapshot.progressCaption {
+                    Text(caption)
+                        .font(
+                            .system(
+                                size: InkAmpContinueWidgetMetrics.mediumCaptionFontSize,
+                                weight: .medium,
+                                design: .rounded,
+                            )
+                        )
+                        .foregroundStyle(colors.secondary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Continue, \(snapshot.title ?? "")")
+    }
+
+    private var mediumUpNextColumn: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("UP NEXT")
+                .font(.system(size: 9, weight: .bold))
+                .tracking(0.5)
+                .foregroundStyle(colors.secondary)
+
+            if upNext.isEmpty {
+                Text("Queue is clear")
+                    .font(.system(size: 10))
+                    .foregroundStyle(colors.secondary)
+            } else {
+                ForEach(upNext) { item in
+                    mediumUpNextRow(item)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func mediumUpNextRow(_ item: ContinueWidgetQueueItem) -> some View {
+        Link(destination: InkAmpContinueWidgetActions.upNextURL(for: item)) {
+            HStack(spacing: 6) {
+                cover(
+                    filename: item.coverFilename,
+                    kind: item.kind,
+                    size: InkAmpContinueWidgetMetrics.mediumQueueCoverSize,
+                )
+                Text(item.title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(colors.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Up next, \(item.title)")
+    }
+
+    private var mediumActionRow: some View {
+        HStack(spacing: 7) {
+            Link(destination: InkAmpContinueWidgetActions.continueURL(for: snapshot)) {
+                Text("Continue")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(colors.continueLabel)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, InkAmpContinueWidgetMetrics.mediumActionVerticalPadding)
+                    .background(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(colors.continueFill)
+                    )
+            }
+            .buttonStyle(.plain)
+
+            Link(destination: InkAmpContinueWidgetActions.browseQueueURL()) {
+                Text("Browse Queue")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(colors.browseLabel)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, InkAmpContinueWidgetMetrics.mediumActionVerticalPadding)
+                    .background(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(colors.browseFill)
+                    )
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     // MARK: Large
@@ -258,7 +412,7 @@ struct InkAmpContinueWidgetView: View {
                 cover(
                     filename: snapshot.coverFilename,
                     kind: snapshot.kind,
-                    size: 92,
+                    size: InkAmpContinueWidgetMetrics.largeCoverSize,
                 )
 
                 Text(snapshot.title ?? "")
@@ -298,53 +452,6 @@ struct InkAmpContinueWidgetView: View {
         .accessibilityLabel("Continue, \(snapshot.title ?? "")")
     }
 
-    private func nowColumn(coverSize: CGFloat, titleFont: Font) -> some View {
-        Link(destination: InkAmpContinueWidgetActions.continueURL(for: snapshot)) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .top, spacing: 10) {
-                    cover(
-                        filename: snapshot.coverFilename,
-                        kind: snapshot.kind,
-                        size: coverSize,
-                    )
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(layout == .large ? "NOW LISTENING" : "NOW")
-                            .font(.system(size: 10, weight: .bold))
-                            .tracking(0.6)
-                            .foregroundStyle(colors.accent)
-                        Text(snapshot.title ?? "")
-                            .font(titleFont)
-                            .foregroundStyle(colors.primary)
-                            .lineLimit(layout == .large ? 3 : 2)
-                        if let subtitle = snapshot.subtitle, !subtitle.isEmpty {
-                            Text(subtitle)
-                                .font(.caption)
-                                .foregroundStyle(colors.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                }
-                if let progress = snapshot.clampedProgress {
-                    InkAmpThemedProgressBar(
-                        progress: progress,
-                        fill: colors.progress,
-                        track: colors.progressTrack,
-                        height: layout == .large ? 5 : 4,
-                    )
-                }
-                if let caption = snapshot.progressCaption {
-                    Text(caption)
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundStyle(colors.secondary)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Continue, \(snapshot.title ?? "")")
-    }
-
     private var upNextColumn: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("UP NEXT")
@@ -367,10 +474,10 @@ struct InkAmpContinueWidgetView: View {
     private func upNextRow(_ item: ContinueWidgetQueueItem) -> some View {
         Link(destination: InkAmpContinueWidgetActions.upNextURL(for: item)) {
             HStack(spacing: 8) {
-                cover(filename: item.coverFilename, kind: item.kind, size: layout == .large ? 36 : 28)
+                cover(filename: item.coverFilename, kind: item.kind, size: 36)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(item.title)
-                        .font(.system(size: layout == .large ? 12 : 11, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(colors.primary)
                         .lineLimit(2)
                     if let subtitle = item.subtitle, !subtitle.isEmpty {
@@ -630,3 +737,87 @@ extension Image {
         #endif
     }
 }
+
+#if DEBUG
+private enum InkAmpMediumWidgetPreviewData {
+    static var longTitleEntry: InkAmpContinueEntry {
+        InkAmpContinueEntry(
+            date: Date(),
+            snapshot: ContinueWidgetSnapshot(
+                title: "The Southern Book Club's Guide to Slaying Vampires",
+                subtitle: "Grady Hendrix",
+                isPlaying: false,
+                kind: .audiobook,
+                deepLink: InkAmpContinueLink.continueURL.absoluteString,
+                progress: 0.37,
+                elapsedSeconds: 11_880,
+                durationSeconds: 32_400,
+                hasLiveSession: false,
+                rate: 1.25,
+                upNext: [
+                    ContinueWidgetQueueItem(
+                        id: "book:preview/curious-incident",
+                        title: "The Curious Incident of the Dog in the Night-Time",
+                        subtitle: "Mark Haddon",
+                        kind: .ebook,
+                        deepLink: InkAmpContinueLink.queueItemURL(
+                            id: "book:preview/curious-incident"
+                        ).absoluteString,
+                    ),
+                    ContinueWidgetQueueItem(
+                        id: "book:preview/fiends-of-hell",
+                        title: "All the Fiends of Hell",
+                        subtitle: "Adam Nevill",
+                        kind: .audiobook,
+                        deepLink: InkAmpContinueLink.queueItemURL(
+                            id: "book:preview/fiends-of-hell"
+                        ).absoluteString,
+                    ),
+                ],
+            ),
+        )
+    }
+}
+
+/// Constrains Medium chrome to a realistic systemMedium canvas so vertical overflow is visible.
+private struct InkAmpMediumSystemSizedPreview: View {
+    let theme: InkAmpWidgetTheme
+
+    var body: some View {
+        InkAmpContinueWidgetView(
+            entry: InkAmpMediumWidgetPreviewData.longTitleEntry,
+            theme: theme,
+            layout: .medium,
+        )
+        .frame(
+            width: InkAmpContinueWidgetMetrics.mediumPreviewWidth,
+            height: InkAmpContinueWidgetMetrics.mediumPreviewHeight,
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.15), lineWidth: 1)
+        )
+    }
+}
+
+#Preview("Medium systemMedium · light", as: .systemMedium) {
+    InkAmpLightMediumWidget()
+} timeline: {
+    InkAmpMediumWidgetPreviewData.longTitleEntry
+}
+
+#Preview("Medium systemMedium · dark", as: .systemMedium) {
+    InkAmpDarkMediumWidget()
+} timeline: {
+    InkAmpMediumWidgetPreviewData.longTitleEntry
+}
+
+#Preview("Medium fixed canvas · light") {
+    InkAmpMediumSystemSizedPreview(theme: .light)
+}
+
+#Preview("Medium fixed canvas · dark") {
+    InkAmpMediumSystemSizedPreview(theme: .dark)
+}
+#endif
