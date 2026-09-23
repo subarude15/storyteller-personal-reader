@@ -396,7 +396,7 @@ public enum SilveranWidgetSnapshotStore {
             .appendingPathComponent(coversDirectoryName, isDirectory: true)
     }
 
-    private static func prepareTransientState(in container: URL) throws {
+    public static func prepareTransientState(in container: URL) throws {
         let directory = transientStateDirectory(in: container)
         try ensureDirectoryExists(at: directory)
 
@@ -411,9 +411,13 @@ public enum SilveranWidgetSnapshotStore {
     }
 
     private static func removeLegacyTopLevelState(in container: URL) throws {
-        let legacySnapshot = container.appendingPathComponent(snapshotFilename, isDirectory: false)
-        let legacyCovers = container.appendingPathComponent(coversDirectoryName, isDirectory: true)
-        for url in [legacySnapshot, legacyCovers] where FileManager.default.fileExists(atPath: url.path) {
+        let legacyEntries = [
+            container.appendingPathComponent(snapshotFilename, isDirectory: false),
+            container.appendingPathComponent(coversDirectoryName, isDirectory: true),
+            container.appendingPathComponent("continue-now.json", isDirectory: false),
+            container.appendingPathComponent("ContinueCovers", isDirectory: true),
+        ]
+        for url in legacyEntries where FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.removeItem(at: url)
         }
     }
