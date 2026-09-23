@@ -23,6 +23,7 @@ public struct AudiobookPlayerView: View {
     public var body: some View {
         readingSidebarView
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .inkAmpAppThemed()
             #if os(iOS)
         .toolbar(.hidden, for: .tabBar)
             #endif

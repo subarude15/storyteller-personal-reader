@@ -22,7 +22,7 @@ public struct ChaptersButton: View {
         foregroundColor: Color = Color.primary,
         transparency: Double = 1.0,
         showLabel: Bool = true,
-        buttonSize: CGFloat = 38,
+        buttonSize: CGFloat = InkAmpPlayerMetrics.secondaryControlVisualSize,
         showBackground: Bool = true,
     ) {
         self.chapters = chapters
@@ -34,6 +34,11 @@ public struct ChaptersButton: View {
         self.showLabel = showLabel
         self.buttonSize = buttonSize
         self.showBackground = showBackground
+    }
+
+    /// Visual chrome may stay compact; the interactive frame is never below the a11y minimum.
+    private var hitTargetSize: CGFloat {
+        max(buttonSize, InkAmpPlayerMetrics.secondaryControlHitTarget)
     }
 
     public var body: some View {
@@ -78,6 +83,8 @@ public struct ChaptersButton: View {
                     }
                 }
             )
+            .frame(width: hitTargetSize, height: hitTargetSize)
+            .contentShape(Rectangle())
     }
 
     private var chapterSelectionList: some View {
@@ -104,6 +111,7 @@ public struct ChaptersButton: View {
                     }
                 }
         }
+        .inkAmpAppThemed()
         .presentationDetents([.medium, .large])
     }
     #endif

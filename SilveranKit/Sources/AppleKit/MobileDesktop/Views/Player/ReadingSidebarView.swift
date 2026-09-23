@@ -76,6 +76,7 @@ public struct ReadingSidebarView: View {
     @State private var draggedSliderValue: Double = 0.0
     @State private var seekDebounceUntil: Date?
     @AppStorage("showEbookCoverInAudioView") private var showEbookCover = false
+    @Environment(\.colorScheme) private var colorScheme
 
     private let onPrevChapter: () -> Void
     private let onSkipBackward: () -> Void
@@ -130,7 +131,7 @@ public struct ReadingSidebarView: View {
     }
 
     public var body: some View {
-        VStack(spacing: 28) {
+        VStack(spacing: InkAmpMetrics.sectionSpacing) {
             metadataSection
             progressSection
             if mode != .ebook {
@@ -144,6 +145,7 @@ public struct ReadingSidebarView: View {
         .frame(minHeight: 400)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(backgroundColor)
+        .tint(usesSystemChrome ? inkTheme.accent : primaryColor)
         .onGeometryChange(for: CGFloat.self) { proxy in
             proxy.size.height
         } action: { height in
@@ -186,44 +188,73 @@ public struct ReadingSidebarView: View {
     private var metadataSection: some View {
         VStack(spacing: 12) {
             if let coverArt = displayedCover, let scale = coverScale {
-                let cornerRadius = max(8.0, 12.0 * scale)
-                let coverView = Group {
-                    if isSquareCover && !showEbookCover {
-                        coverArt
-                            .resizable()
-                            .aspectRatio(1, contentMode: .fit)
-                            .clipShape(
-                                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            )
-                            .shadow(radius: 8)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                    } else if isSquareCover && showEbookCover {
-                        Color.clear
-                            .aspectRatio(1, contentMode: .fit)
-                            .frame(maxWidth: .infinity)
-                            .overlay {
-                                coverArt
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .clipShape(
-                                        RoundedRectangle(
-                                            cornerRadius: cornerRadius,
-                                            style: .continuous,
-                                        )
+                let coverView = GeometryReader { geo in
+                    let side = min(
+                        geo.size.width * InkAmpPlayerMetrics.coverWidthFraction,
+                        geo.size.width,
+                    )
+                    Group {
+                        if isSquareCover && !showEbookCover {
+                            coverArt
+                                .resizable()
+                                .aspectRatio(1, contentMode: .fit)
+                                .clipShape(
+                                    RoundedRectangle(
+                                        cornerRadius: InkAmpPlayerMetrics.coverCornerRadius,
+                                        style: .continuous,
                                     )
-                                    .shadow(radius: 8)
-                            }
-                    } else {
-                        coverArt
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 180 * scale, height: 180 * scale)
-                            .clipShape(
-                                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            )
-                            .shadow(radius: 8 * scale)
+                                )
+                                .shadow(
+                                    color: colorScheme == .dark ? .clear : .black.opacity(0.08),
+                                    radius: 10,
+                                    y: 3,
+                                )
+                                .frame(width: side, height: side)
+                        } else if isSquareCover && showEbookCover {
+                            Color.clear
+                                .frame(width: side, height: side)
+                                .overlay {
+                                    coverArt
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .clipShape(
+                                            RoundedRectangle(
+                                                cornerRadius: InkAmpPlayerMetrics.coverCornerRadius,
+                                                style: .continuous,
+                                            )
+                                        )
+                                        .shadow(
+                                            color: colorScheme == .dark
+                                                ? .clear : .black.opacity(0.08),
+                                            radius: 10,
+                                            y: 3,
+                                        )
+                                }
+                        } else {
+                            coverArt
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 180 * scale, height: 180 * scale)
+                                .clipShape(
+                                    RoundedRectangle(
+                                        cornerRadius: max(
+                                            8,
+                                            InkAmpPlayerMetrics.coverCornerRadius * scale,
+                                        ),
+                                        style: .continuous,
+                                    )
+                                )
+                                .shadow(
+                                    color: colorScheme == .dark ? .clear : .black.opacity(0.08),
+                                    radius: 8 * scale,
+                                    y: 2,
+                                )
+                        }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                .aspectRatio(1, contentMode: .fit)
+                .frame(maxWidth: .infinity)
 
                 if canToggleCover {
                     coverView
@@ -239,24 +270,31 @@ public struct ReadingSidebarView: View {
             }
 
             VStack(spacing: 8) {
+                if usesSystemChrome {
+                    InkAmpChip("AUDIOBOOK", selected: false)
+                }
+
                 Text(model.title)
                     .font(.title2.weight(.semibold))
                     .foregroundStyle(primaryColor)
                     .multilineTextAlignment(.center)
+                    .lineLimit(2)
                     .frame(maxWidth: .infinity)
 
                 Text(model.author)
-                    .font(.headline)
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(secondaryColor)
                     .multilineTextAlignment(.center)
+                    .lineLimit(1)
 
                 Text(model.chapterTitle)
-                    .font(.subheadline)
+                    .font(.footnote)
                     .foregroundStyle(secondaryColor)
                     .multilineTextAlignment(.center)
+                    .lineLimit(2)
             }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, InkAmpMetrics.screenInset)
     }
 
     private var progressSection: some View {
@@ -315,7 +353,7 @@ public struct ReadingSidebarView: View {
                     }
                 },
             )
-            .tint(primaryColor)
+            .tint(usesSystemChrome ? inkTheme.progress : primaryColor)
 
             HStack {
                 Text(formatOptionalTime(chapterElapsed))
@@ -334,7 +372,54 @@ public struct ReadingSidebarView: View {
         .padding(.horizontal, 20)
     }
 
+    @ViewBuilder
     private var transportControls: some View {
+        if usesSystemChrome {
+            inkAmpTransportControls
+        } else {
+            legacyTransportControls
+        }
+    }
+
+    private var inkAmpTransportControls: some View {
+        HStack(spacing: 10) {
+            InkAmpPlayerSkipButton(
+                systemImage: "backward.end.fill",
+                size: InkAmpPlayerMetrics.chapterButtonSize,
+                help: "Restart chapter / Previous chapter",
+                action: onPrevChapter,
+            )
+
+            InkAmpPlayerSkipButton(
+                systemImage: "arrow.counterclockwise",
+                help: "Skip backward",
+                action: onSkipBackward,
+            )
+
+            InkAmpPlayerPlayPauseButton(
+                isPlaying: model.isPlaying,
+                action: onPlayPause,
+            )
+            .help("Play/pause")
+
+            InkAmpPlayerSkipButton(
+                systemImage: "arrow.clockwise",
+                help: "Skip forward",
+                action: onSkipForward,
+            )
+
+            InkAmpPlayerSkipButton(
+                systemImage: "forward.end.fill",
+                size: InkAmpPlayerMetrics.chapterButtonSize,
+                help: "Next chapter",
+                action: onNextChapter,
+            )
+        }
+        .padding(.horizontal, InkAmpMetrics.screenInset)
+    }
+
+    /// Readaloud overlay keeps the previous chrome so page-theme contrast stays intact.
+    private var legacyTransportControls: some View {
         HStack(spacing: 8) {
             Button(action: onPrevChapter) {
                 Image(systemName: "backward.end.fill")
@@ -409,8 +494,8 @@ public struct ReadingSidebarView: View {
                 PlaybackRateButton(
                     currentRate: model.playbackRate,
                     onRateChange: onPlaybackRateChange,
-                    backgroundColor: secondaryColor,
-                    foregroundColor: primaryColor,
+                    backgroundColor: usesSystemChrome ? inkTheme.accent : secondaryColor,
+                    foregroundColor: usesSystemChrome ? inkTheme.primaryText : primaryColor,
                     transparency: 1.0,
                     showLabel: true,
                 )
@@ -423,8 +508,8 @@ public struct ReadingSidebarView: View {
                         chapters.first(where: { $0.label == label })?.id
                     },
                 onChapterSelected: onChapterSelected,
-                backgroundColor: secondaryColor,
-                foregroundColor: primaryColor,
+                backgroundColor: usesSystemChrome ? inkTheme.secondaryAccent : secondaryColor,
+                foregroundColor: usesSystemChrome ? inkTheme.primaryText : primaryColor,
                 transparency: 1.0,
                 showLabel: true,
             )
@@ -436,11 +521,19 @@ public struct ReadingSidebarView: View {
                         Image(systemName: volumeIcon)
                             .font(.callout.weight(.semibold))
                             .foregroundStyle(primaryColor)
-                            .frame(width: 38, height: 38)
+                            .frame(
+                                width: InkAmpPlayerMetrics.secondaryControlVisualSize,
+                                height: InkAmpPlayerMetrics.secondaryControlVisualSize,
+                            )
                             .background(
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     .fill(secondaryColor.opacity(0.12))
                             )
+                            .frame(
+                                width: InkAmpPlayerMetrics.secondaryControlHitTarget,
+                                height: InkAmpPlayerMetrics.secondaryControlHitTarget,
+                            )
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .popover(isPresented: $showVolumePopover) {
@@ -598,15 +691,25 @@ public struct ReadingSidebarView: View {
                 Image(systemName: model.sleepTimerActive ? "moon.zzz.fill" : "moon.zzz")
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(primaryColor)
-                    .frame(width: 38, height: 38)
+                    .frame(
+                        width: InkAmpPlayerMetrics.secondaryControlVisualSize,
+                        height: InkAmpPlayerMetrics.secondaryControlVisualSize,
+                    )
                     .background(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .fill(
                                 model.sleepTimerActive
-                                    ? Color.accentColor.opacity(0.2)
-                                    : secondaryColor.opacity(0.12)
+                                    ? inkTheme.accent.opacity(0.18)
+                                    : (usesSystemChrome
+                                        ? inkTheme.surface
+                                        : secondaryColor.opacity(0.12))
                             )
                     )
+                    .frame(
+                        width: InkAmpPlayerMetrics.secondaryControlHitTarget,
+                        height: InkAmpPlayerMetrics.secondaryControlHitTarget,
+                    )
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .popover(isPresented: $showSleepTimerPopover) {
@@ -618,11 +721,11 @@ public struct ReadingSidebarView: View {
                 if model.sleepTimerType == .endOfChapter {
                     Text("End Ch.")
                         .font(.footnote)
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(inkTheme.accent)
                 } else {
                     Text(formatSleepTimerRemaining(remaining))
                         .font(.footnote)
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(inkTheme.accent)
                 }
             } else {
                 Text("Sleep")
@@ -705,8 +808,18 @@ public struct ReadingSidebarView: View {
         }
     }
 
+    private var inkTheme: InkAmpAppTheme {
+        .resolve(for: colorScheme)
+    }
+
+    /// Audiobook / system Now Playing uses ink+amp chrome. Readaloud overlay keeps
+    /// the ebook `foregroundColor` so page theme contrast stays correct.
+    private var usesSystemChrome: Bool {
+        foregroundColor == nil
+    }
+
     private var backgroundColor: Color {
-        Color.clear
+        usesSystemChrome ? inkTheme.background : Color.clear
     }
 
     // The sidebar draws over the reader theme background, which follows the user's
@@ -715,11 +828,13 @@ public struct ReadingSidebarView: View {
     // instead or the two can disagree (e.g. white-on-white). Popover content is
     // excluded: popovers render on system backgrounds.
     private var primaryColor: Color {
-        foregroundColor ?? .primary
+        if let foregroundColor { return foregroundColor }
+        return inkTheme.primaryText
     }
 
     private var secondaryColor: Color {
-        foregroundColor?.opacity(0.6) ?? .secondary
+        if let foregroundColor { return foregroundColor.opacity(0.6) }
+        return inkTheme.secondaryText
     }
 
     private var playbackRateDescription: String {
@@ -732,35 +847,50 @@ public struct ReadingSidebarView: View {
 
 }
 
-#Preview("Reading Sidebar") {
-    let model = ReadingSidebarView.Model(
-        title: "Summer Prince",
-        author: "Tracy Weber",
-        chapterTitle: "Chapter 1",
-        coverArt: nil,
-        chapterDuration: (12 * 60) + 27,
-        totalRemaining: (8 * 60 * 60) + (9 * 60),
-        playbackRate: 1.3,
-        isPlaying: true,
-    )
-    let progress = ProgressData(
-        chapterLabel: "Chapter 5",
-        chapterCurrentPage: 4,
-        chapterTotalPages: 18,
-        chapterCurrentSecondsAudio: Double((4 * 60) + 7),
-        chapterTotalSecondsAudio: Double((12 * 60) + 27),
-        bookCurrentSecondsAudio: 3_600,
-        bookTotalSecondsAudio: 28_800,
-        bookCurrentFraction: 0.12,
-    )
-    ReadingSidebarView(
-        bookData: nil,
-        model: model,
-        mode: .readaloud,
-        chapterProgress: .constant(Double((4 * 60) + 7) / Double((12 * 60) + 27)),
-        progressData: progress,
-    )
-    .frame(maxWidth: 420)
+#if DEBUG
+private struct AudiobookNowPlayingPreviewHost: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let model = ReadingSidebarView.Model(
+            title: "Piranesi",
+            author: "Susanna Clarke",
+            chapterTitle: "Part 1 · The House",
+            coverArt: nil,
+            chapterDuration: (12 * 60) + 27,
+            totalRemaining: (8 * 60 * 60) + (9 * 60),
+            playbackRate: 1.25,
+            isPlaying: true,
+        )
+        let progress = ProgressData(
+            chapterLabel: "Part 1 · The House",
+            chapterCurrentSecondsAudio: Double((4 * 60) + 7),
+            chapterTotalSecondsAudio: Double((12 * 60) + 27),
+            bookCurrentSecondsAudio: 3_600,
+            bookTotalSecondsAudio: 28_800,
+            bookCurrentFraction: 0.42,
+        )
+        ReadingSidebarView(
+            bookData: nil,
+            model: model,
+            mode: .audiobook,
+            chapterProgress: .constant(0.42),
+            progressData: progress,
+        )
+        .inkAmpAppThemed()
+        .background(InkAmpAppTheme.resolve(for: colorScheme).background)
+    }
 }
+
+#Preview("Audiobook NP · light") {
+    AudiobookNowPlayingPreviewHost()
+        .preferredColorScheme(.light)
+}
+
+#Preview("Audiobook NP · dark") {
+    AudiobookNowPlayingPreviewHost()
+        .preferredColorScheme(.dark)
+}
+#endif
 
 #endif

@@ -14,6 +14,7 @@ import UIKit
 public struct PodcastPlayerView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
+    private var theme: InkAmpAppTheme { .resolve(for: colorScheme) }
     private let episode: PodcastPlayerPresenter.Episode
     private let onClose: () -> Void
 
@@ -79,6 +80,7 @@ public struct PodcastPlayerView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: videoPresentation.isFullscreen)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .inkAmpAppThemed()
         .background {
             GeometryReader { geo in
                 Color.clear
@@ -179,32 +181,28 @@ public struct PodcastPlayerView: View {
         .statusBarHidden(videoPresentation.isFullscreen)
     }
 
-    /// Existing portrait Now Playing layout (unchanged chrome).
+    /// Portrait Now Playing chrome — ink+amp Phase 2 theme.
     private var portraitPlayerContent: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 20) {
             Spacer(minLength: 0)
 
             artworkBlock
 
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
                 if live.isVideo {
-                    Text("VIDEO")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
-                        .background(Color.secondary.opacity(0.15))
-                        .clipShape(Capsule())
+                    InkAmpChip("VIDEO", selected: true)
                 }
 
                 Text(live.title)
-                    .font(.title3.weight(.semibold))
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(theme.primaryText)
                     .multilineTextAlignment(.center)
+                    .lineLimit(2)
 
                 if let showTitle = live.showTitle {
                     Text(showTitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(theme.secondaryText)
                 }
 
                 if let youtubeURL = effectiveYouTubeURL {
@@ -222,6 +220,7 @@ public struct PodcastPlayerView: View {
                                 }
                             }
                             .buttonStyle(.borderedProminent)
+                            .tint(theme.accent)
                             .disabled(isResolvingYouTube)
                             .accessibilityHint("Resolves a stream and plays in the app")
                         }
@@ -232,6 +231,7 @@ public struct PodcastPlayerView: View {
                                 .font(.subheadline.weight(.semibold))
                         }
                         .buttonStyle(.bordered)
+                        .tint(theme.secondaryAccent)
                         .accessibilityHint("Opens YouTube in Safari or the YouTube app")
                     }
                 } else if showsMatchOnYouTube {
@@ -242,6 +242,7 @@ public struct PodcastPlayerView: View {
                             .font(.subheadline.weight(.semibold))
                     }
                     .buttonStyle(.bordered)
+                    .tint(theme.secondaryAccent)
                     .accessibilityHint("Search YouTube and confirm the matching video")
                 }
             }
@@ -250,7 +251,7 @@ public struct PodcastPlayerView: View {
                 ScrollView {
                     Text(summary)
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.secondaryText)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -265,10 +266,11 @@ public struct PodcastPlayerView: View {
 
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, InkAmpMetrics.screenInset)
         .padding(.vertical, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(uiColor: .systemBackground))
+        .background(theme.background)
+        .tint(theme.accent)
     }
 
     /// Pause only when audio is truly playing — never while opening/buffering.
@@ -306,7 +308,12 @@ public struct PodcastPlayerView: View {
                                 .tint(.white)
                         }
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .clipShape(
+                        RoundedRectangle(
+                            cornerRadius: InkAmpPlayerMetrics.coverCornerRadius,
+                            style: .continuous,
+                        )
+                    )
                     .overlay(alignment: .topTrailing) {
                         Button {
                             videoPresentation.enterFullscreenManually()
@@ -326,36 +333,55 @@ public struct PodcastPlayerView: View {
                 .layoutPriority(1)
                 .accessibilityLabel("Episode video")
         } else {
-            Group {
-                if let cover = monitor.coverImage {
-                    Image(uiImage: cover)
-                        .resizable()
-                        .scaledToFill()
-                } else if let url = live.coverURL {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                            case .success(let image):
-                                image.resizable().scaledToFill()
-                            default:
-                                placeholderArt
+            GeometryReader { geo in
+                let side = min(
+                    geo.size.width * InkAmpPlayerMetrics.coverWidthFraction,
+                    geo.size.height,
+                )
+                Group {
+                    if let cover = monitor.coverImage {
+                        Image(uiImage: cover)
+                            .resizable()
+                            .scaledToFill()
+                    } else if let url = live.coverURL {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                                case .success(let image):
+                                    image.resizable().scaledToFill()
+                                default:
+                                    placeholderArt
+                            }
                         }
+                    } else {
+                        placeholderArt
                     }
-                } else {
-                    placeholderArt
                 }
+                .frame(width: side, height: side)
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: InkAmpPlayerMetrics.coverCornerRadius,
+                        style: .continuous,
+                    )
+                )
+                .shadow(
+                    color: colorScheme == .dark ? .clear : .black.opacity(0.08),
+                    radius: 10,
+                    y: 3,
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(width: 220, height: 220)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+            .aspectRatio(1, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .frame(maxHeight: 280)
         }
     }
 
     private var placeholderArt: some View {
         ZStack {
-            Color(white: 0.12)
+            theme.surface
             Image(systemName: live.isVideo ? "play.rectangle.fill" : "mic.fill")
                 .font(.system(size: 44))
-                .foregroundStyle(Color.white.opacity(0.72))
+                .foregroundStyle(theme.secondaryText)
         }
     }
 
@@ -380,70 +406,56 @@ public struct PodcastPlayerView: View {
                     Task { await AudioSessionActor.shared.seekPlayback(toFraction: target) }
                 }
             }
+            .tint(theme.progress)
+            .accessibilityValue("\(Int((fraction * 100).rounded())) percent")
 
             HStack {
                 Text(GlobalMiniPlayerBar.formatClock(elapsed))
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.secondaryText)
                 Spacer()
                 Text("−\(GlobalMiniPlayerBar.formatClock(remaining))")
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.secondaryText)
             }
         }
     }
 
     private var transportRow: some View {
         VStack(spacing: 16) {
-            HStack(spacing: 40) {
-                Button {
-                    Task {
-                        await AudioSessionActor.shared.skipPlayback(
-                            by: -AudioSessionActor.podcastSkipInterval
-                        )
-                    }
-                } label: {
-                    Image(systemName: "gobackward.15")
-                        .font(.title2)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Back 15 seconds")
-
-                Button {
-                    guard !isOpening else { return }
-                    Task { try? await AudioSessionActor.shared.transport(.togglePlayPause) }
-                } label: {
-                    if isOpening {
-                        VStack(spacing: 6) {
-                            ProgressView()
-                                .controlSize(.large)
-                            Text("Loading…")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+            HStack(spacing: 36) {
+                InkAmpPlayerSkipButton(
+                    systemImage: "gobackward.15",
+                    help: "Back 15 seconds",
+                    action: {
+                        Task {
+                            await AudioSessionActor.shared.skipPlayback(
+                                by: -AudioSessionActor.podcastSkipInterval
+                            )
                         }
-                        .frame(width: 72, height: 72)
-                        .accessibilityLabel("Loading")
-                    } else {
-                        Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 56))
-                    }
-                }
-                .buttonStyle(.plain)
-                .disabled(isOpening)
-                .accessibilityLabel(isOpening ? "Loading" : (isPlaying ? "Pause" : "Play"))
+                    },
+                )
 
-                Button {
-                    Task {
-                        await AudioSessionActor.shared.skipPlayback(
-                            by: AudioSessionActor.podcastSkipInterval
-                        )
-                    }
-                } label: {
-                    Image(systemName: "goforward.15")
-                        .font(.title2)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Forward 15 seconds")
+                InkAmpPlayerPlayPauseButton(
+                    isPlaying: isPlaying,
+                    isLoading: isOpening,
+                    action: {
+                        guard !isOpening else { return }
+                        Task { try? await AudioSessionActor.shared.transport(.togglePlayPause) }
+                    },
+                )
+
+                InkAmpPlayerSkipButton(
+                    systemImage: "goforward.15",
+                    help: "Forward 15 seconds",
+                    action: {
+                        Task {
+                            await AudioSessionActor.shared.skipPlayback(
+                                by: AudioSessionActor.podcastSkipInterval
+                            )
+                        }
+                    },
+                )
             }
 
             // Shared speed control — same component audiobooks use.
@@ -452,8 +464,8 @@ public struct PodcastPlayerView: View {
                 onRateChange: { rate in
                     Task { await AudioSessionActor.shared.setPlaybackRate(rate) }
                 },
-                backgroundColor: Color.secondary,
-                foregroundColor: Color.primary,
+                backgroundColor: theme.accent,
+                foregroundColor: theme.primaryText,
                 transparency: 1.0,
                 showLabel: true,
             )
@@ -515,4 +527,67 @@ public struct PodcastPlayerView: View {
         }
     }
 }
+#if DEBUG
+private struct PodcastPlayerPreviewChrome: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let isVideo: Bool
+
+    var body: some View {
+        let theme = InkAmpAppTheme.resolve(for: colorScheme)
+        VStack(spacing: 20) {
+            RoundedRectangle(cornerRadius: InkAmpPlayerMetrics.coverCornerRadius, style: .continuous)
+                .fill(isVideo ? Color.black : theme.surface)
+                .frame(width: 220, height: isVideo ? 160 : 220)
+                .overlay {
+                    if isVideo {
+                        Image(systemName: "play.rectangle.fill")
+                            .foregroundStyle(.white.opacity(0.7))
+                    } else {
+                        Image(systemName: "mic.fill")
+                            .foregroundStyle(theme.secondaryText)
+                    }
+                }
+            if isVideo { InkAmpChip("VIDEO", selected: true) }
+            Text(isVideo ? "Landscape Special" : "Cold Open")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(theme.primaryText)
+            Text("The Vergecast")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(theme.secondaryText)
+            InkAmpProgressBar(progress: 0.37)
+                .frame(height: 4)
+                .padding(.horizontal, 8)
+            HStack(spacing: 36) {
+                InkAmpPlayerSkipButton(systemImage: "gobackward.15", help: "Back 15", action: {})
+                InkAmpPlayerPlayPauseButton(isPlaying: !isVideo, action: {})
+                InkAmpPlayerSkipButton(systemImage: "goforward.15", help: "Forward 15", action: {})
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(theme.background)
+        .inkAmpAppThemed()
+    }
+}
+
+#Preview("Podcast audio · light") {
+    PodcastPlayerPreviewChrome(isVideo: false)
+        .preferredColorScheme(.light)
+}
+
+#Preview("Podcast audio · dark") {
+    PodcastPlayerPreviewChrome(isVideo: false)
+        .preferredColorScheme(.dark)
+}
+
+#Preview("Podcast video shell · light") {
+    PodcastPlayerPreviewChrome(isVideo: true)
+        .preferredColorScheme(.light)
+}
+
+#Preview("Podcast video shell · dark") {
+    PodcastPlayerPreviewChrome(isVideo: true)
+        .preferredColorScheme(.dark)
+}
+#endif
 #endif
