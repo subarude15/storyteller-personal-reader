@@ -3136,6 +3136,8 @@ private enum InkAmpPortableBackupCoordinator {
         // an external container restore may have injected, then let the normal
         // library refresh publish a fresh snapshot.
         SilveranWidgetSnapshotStore.resetTransientStateAfterExternalRestore()
+        ContinueWidgetSnapshotStore.resetLocalFallbackAfterExternalRestore()
+        await ContinueWidgetSnapshotStore.publishFromLiveSession()
         return payload.credentials.storyteller.count
     }
 }
