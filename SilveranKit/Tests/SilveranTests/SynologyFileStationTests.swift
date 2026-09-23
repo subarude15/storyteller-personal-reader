@@ -103,6 +103,60 @@ struct SynologyFileStationTests {
         )
     }
 
+    @Test func listFilenamesPaginatesPastFirstDSMPage() async throws {
+        let transport = SynologyScript()
+        var listOffsets: [Int] = []
+
+        transport.handler = { request, _ in
+            let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let api = items.first { $0.name == "api" }?.value
+            let method = items.first { $0.name == "method" }?.value
+
+            if request.url?.path.contains("auth.cgi") == true {
+                return SynologyHTTP(
+                    status: 200,
+                    body: Data(#"{"success":true,"data":{"sid":"sid"}}"#.utf8),
+                )
+            }
+
+            if api == "SYNO.FileStation.List", method == "list" {
+                let offset = Int(items.first { $0.name == "offset" }?.value ?? "0") ?? 0
+                let limit = Int(items.first { $0.name == "limit" }?.value ?? "0") ?? 0
+                listOffsets.append(offset)
+                #expect(limit == 200)
+
+                if offset == 0 {
+                    let files = (0..<200).map { #"{"name":"Book #($0)"}"# }.joined(separator: ",")
+                    return SynologyHTTP(
+                        status: 200,
+                        body: Data(#"{"success":true,"data":{"total":201,"files":[#(files)]}}"#.utf8),
+                    )
+                }
+
+                return SynologyHTTP(
+                    status: 200,
+                    body: Data(
+                        #"{"success":true,"data":{"total":201,"files":[{"name":"The Eye of the Bedlam Bride"}]}}"#.utf8
+                    ),
+                )
+            }
+
+            return SynologyHTTP(status: 200, body: Data(#"{"success":true}"#.utf8))
+        }
+
+        let client = SynologyFileStationClient(transport: transport)
+        let names = try await client.listFilenames(
+            baseURL: "http://nas.example:5000",
+            username: "josh",
+            password: "secret",
+            volumeDirectory: "/volume1/data/media/books/audiobooks",
+        )
+
+        #expect(names.count == 201)
+        #expect(names.contains("The Eye of the Bedlam Bride"))
+        #expect(listOffsets == [0, 200])
+    }
+
     @Test func startMoveItemReturnsTaskIDWithoutStatusPolling() async throws {
         let transport = SynologyScript()
         var statusCalls = 0
