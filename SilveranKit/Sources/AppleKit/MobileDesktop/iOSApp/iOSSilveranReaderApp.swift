@@ -329,6 +329,10 @@ private struct iOSRootView: View {
     }
 
     private func handleOpenURL(_ url: URL) {
+        if InkAmpContinueLink.isHomeURL(url) {
+            NotificationCenter.default.post(name: .punkRallyShowHome, object: nil)
+            return
+        }
         if InkAmpContinueLink.isContinueURL(url) {
             if InkAmpContinueLink.wantsToggle(url) {
                 ContinueWidgetBridge.postToggle()

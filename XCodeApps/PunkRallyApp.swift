@@ -166,6 +166,9 @@ public struct PunkRallyTabView: View {
                 selectedTab = .more
                 openPendingRequestActivityIfNeeded()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .punkRallyShowHome)) { _ in
+                selectedTab = .home
+            }
             .onReceive(NotificationCenter.default.publisher(for: .punkRallyOpenContinue)) { note in
                 selectedTab = .home
                 NotificationCenter.default.post(

@@ -9,6 +9,7 @@ struct ContinueWidgetLinkTests {
         let url = InkAmpContinueLink.continueURL
         #expect(InkAmpContinueLink.isContinueURL(url))
         #expect(!InkAmpContinueLink.wantsToggle(url))
+        #expect(!InkAmpContinueLink.isHomeURL(url))
     }
 
     @Test func toggleQueryIsDetected() {
@@ -17,21 +18,33 @@ struct ContinueWidgetLinkTests {
         #expect(InkAmpContinueLink.wantsToggle(url))
     }
 
+    @Test func homeURLOpensQueue() {
+        let url = InkAmpContinueLink.homeURL
+        #expect(url.absoluteString == "punkrally://home")
+        #expect(InkAmpContinueLink.isHomeURL(url))
+        #expect(!InkAmpContinueLink.isContinueURL(url))
+        #expect(InkAmpContinueWidgetActions.browseQueueURL() == url)
+    }
+
     @Test func appGroupFallbackIsPunkRally() {
         #expect(
             SilveranWidgetConstants.fallbackAppGroupIdentifier == "group.com.punkrally.reader"
         )
-        #expect(SilveranWidgetConstants.continueWidgetKind == "inkamp.continue.upnext.v1")
+        #expect(SilveranWidgetConstants.continueWidgetKinds.count == 4)
+        #expect(
+            SilveranWidgetConstants.continueWidgetKind
+                == "inkamp.continue.light.medium.v1"
+        )
         #expect(
             SilveranWidgetConstants.legacySideloadContinueWidgetKinds.contains(
                 "InkAmpContinueWidget"
             )
         )
         #expect(
-            SilveranWidgetConstants.continueWidgetKind
-                != SilveranWidgetConstants.readingWidgetKind
+            SilveranWidgetConstants.legacySideloadContinueWidgetKinds.contains(
+                "inkamp.continue.upnext.v1"
+            )
         )
-        // Old static tiles must never be resurrected by a register/reload call.
         #expect(
             !SilveranWidgetConstants.legacySideloadContinueWidgetKinds.contains(
                 SilveranWidgetConstants.continueWidgetKind
@@ -50,6 +63,7 @@ struct ContinueWidgetLinkTests {
         #expect(empty.title == nil)
         #expect(!empty.hasItem)
         #expect(empty.upNextItems.isEmpty)
+        #expect(InkAmpContinueWidgetActions.showsEmptyState(empty))
         // Widget view falls back to this URL when snapshot.deepLink is nil.
         #expect(InkAmpContinueLink.continueURL.absoluteString == "punkrally://continue")
         #expect(InkAmpContinueLink.queueItemID(from: InkAmpContinueLink.continueURL) == nil)

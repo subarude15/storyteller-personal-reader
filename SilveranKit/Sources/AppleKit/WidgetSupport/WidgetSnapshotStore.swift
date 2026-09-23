@@ -19,17 +19,24 @@ public enum SilveranWidgetConstants {
     /// paid team) — Sideload + ink+amp use group.com.punkrally.reader.
     public static let fallbackAppGroupIdentifier = AppGroupContainer.fallbackAppGroupIdentifier
     public static let readingWidgetKind = "SilveranReadingWidget"
-    /// ink+amp Continue + Up next. A new kind so iOS drops the stale
-    /// Continue-only instance of `InkAmpContinueWidget` (WidgetKit binds an
-    /// installed tile to its kind and will not repaint it under a new layout).
-    public static let continueWidgetKind = "inkamp.continue.upnext.v1"
+    /// Four Continue + Next Up kinds (light/dark × medium/large). New kinds so
+    /// WidgetKit drops stale/blank installs bound to older kind strings.
+    public static let continueWidgetKinds = [
+        "inkamp.continue.light.medium.v1",
+        "inkamp.continue.light.large.v1",
+        "inkamp.continue.dark.medium.v1",
+        "inkamp.continue.dark.large.v1",
+    ]
+    /// Convenience alias — first of `continueWidgetKinds` (light medium).
+    public static let continueWidgetKind = continueWidgetKinds[0]
     /// Retired Continue kinds. Never register or reload these, or a dead tile
-    /// comes back. `InkAmpContinueWidget` is the Continue-only tile this kind
-    /// replaces; v3/v4 were the blank AltStore tiles.
+    /// comes back. Includes the previous single Up-next kind and the blank
+    /// AltStore tiles.
     public static let legacySideloadContinueWidgetKinds = [
         "inkamp.continue.v3",
         "inkamp.continue.v4",
         "InkAmpContinueWidget",
+        "inkamp.continue.upnext.v1",
     ]
 }
 
@@ -436,7 +443,9 @@ public enum SilveranWidgetSnapshotStore {
     private static func reloadWidgetTimelines() {
         #if canImport(WidgetKit) && (os(iOS) || os(macOS))
         WidgetCenter.shared.reloadTimelines(ofKind: SilveranWidgetConstants.readingWidgetKind)
-        WidgetCenter.shared.reloadTimelines(ofKind: SilveranWidgetConstants.continueWidgetKind)
+        for kind in SilveranWidgetConstants.continueWidgetKinds {
+            WidgetCenter.shared.reloadTimelines(ofKind: kind)
+        }
         #endif
     }
 }
