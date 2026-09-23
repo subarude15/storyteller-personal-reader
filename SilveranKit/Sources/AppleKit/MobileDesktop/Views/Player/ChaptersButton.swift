@@ -104,6 +104,7 @@ public struct ChaptersButton: View {
                     }
                 }
         }
+        .inkAmpAppThemed()
         .presentationDetents([.medium, .large])
     }
     #endif

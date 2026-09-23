@@ -95,4 +95,38 @@ struct InkAmpAppThemeTests {
         #expect(InkAmpProgressBar.fillWidth(progress: 1, totalWidth: total) == total)
         #expect(InkAmpProgressBar.fillWidth(progress: 1.5, totalWidth: total) == total)
     }
+
+    @Test func playerAccentResolvesToCarminInLight() {
+        let hex = InkAmpAppPalette.Hex.resolve(for: .light)
+        #expect(hex.accent == InkAmpBrandPalette.carmin)
+        #expect(hex.progress == InkAmpBrandPalette.carmin)
+        #expect(hex.accent == "#D41F26")
+    }
+
+    @Test func playerAccentResolvesToTangerineInDark() {
+        let hex = InkAmpAppPalette.Hex.resolve(for: .dark)
+        #expect(hex.accent == InkAmpBrandPalette.tangerine)
+        #expect(hex.progress == InkAmpBrandPalette.tangerine)
+        #expect(hex.accent == "#F58F20")
+    }
+
+    @Test func playerSecondaryAccentResolvesByScheme() {
+        let light = InkAmpAppPalette.Hex.resolve(for: .light)
+        let dark = InkAmpAppPalette.Hex.resolve(for: .dark)
+        #expect(light.secondaryAccent == InkAmpBrandPalette.aqua)
+        #expect(dark.secondaryAccent == InkAmpBrandPalette.leafGreen)
+        #expect(light.secondaryAccent == "#95D9C0")
+        #expect(dark.secondaryAccent == "#467434")
+    }
+
+    @Test func playerControlMetricsStayTappable() {
+        #expect(InkAmpPlayerMetrics.playButtonSize >= 56)
+        #expect(InkAmpPlayerMetrics.playButtonSize <= 72)
+        #expect(InkAmpPlayerMetrics.skipButtonSize >= 44)
+        #expect(InkAmpPlayerMetrics.chapterButtonSize >= 44)
+        #expect(InkAmpPlayerMetrics.coverWidthFraction >= 0.48)
+        #expect(InkAmpPlayerMetrics.coverWidthFraction <= 0.60)
+        #expect(InkAmpPlayerMetrics.coverCornerRadius > 0)
+        #expect(InkAmpPlayerMetrics.optionCornerRadius == InkAmpMetrics.controlRadius)
+    }
 }

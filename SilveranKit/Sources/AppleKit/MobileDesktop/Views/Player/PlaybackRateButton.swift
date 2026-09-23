@@ -208,6 +208,7 @@ public struct PlaybackRateButton: View {
                 }
             }
         }
+        .inkAmpAppThemed()
         .presentationDetents([.height(180)])
     }
     #endif

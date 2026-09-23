@@ -11,10 +11,13 @@ import SwiftUI
 import SilveranKit
 
 public struct PodcastPlaybackQueueView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
     @State private var store = PodcastPlaybackQueueStore.shared
     @State private var monitor = AudioSessionMonitor.shared
     @State private var editMode: EditMode = .active
+
+    private var theme: InkAmpAppTheme { .resolve(for: colorScheme) }
 
     public init() {}
 
@@ -22,65 +25,56 @@ public struct PodcastPlaybackQueueView: View {
         NavigationStack {
             List {
                 if let snapshot = monitor.snapshot, case .podcast = snapshot.kind {
-                    Section("Now playing") {
-                        HStack(spacing: 12) {
-                            queueArtwork(
-                                url: PodcastPlayerPresenter.shared.artworkURL,
-                                isVideo: false
-                            )
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(snapshot.title ?? "Podcast")
-                                    .font(.subheadline.weight(.semibold))
-                                    .lineLimit(2)
-                                if let author = snapshot.author {
-                                    Text(author)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
+                    Section {
+                        queueRow(
+                            title: snapshot.title ?? "Podcast",
+                            subtitle: snapshot.author,
+                            finishLabel: nil,
+                            artworkURL: PodcastPlayerPresenter.shared.artworkURL,
+                            isVideo: false,
+                        )
+                    } header: {
+                        Text("Now playing")
+                            .foregroundStyle(theme.secondaryText)
                     }
+                    .listRowBackground(theme.surfaceElevated)
                 }
 
                 Section {
                     if store.upcoming.isEmpty {
                         Text("Nothing queued — use Play Next or Play Last on an episode.")
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(theme.secondaryText)
+                            .listRowBackground(theme.surfaceElevated)
                     } else {
                         ForEach(store.upcoming) { item in
-                            HStack(spacing: 12) {
-                                queueArtwork(url: item.coverURL, isVideo: item.isVideo)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(item.title)
-                                        .font(.subheadline.weight(.medium))
-                                        .lineLimit(2)
-                                    if let show = item.showTitle {
-                                        Text(show)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    if let label = PlaybackFinishabilityCopy.label(
-                                        progress: progress(for: item.episodeID),
-                                        durationSeconds: item.durationSeconds
-                                    ) {
-                                        Text(label)
-                                            .font(.caption2)
-                                            .foregroundStyle(.tertiary)
-                                    }
-                                }
-                            }
+                            queueRow(
+                                title: item.title,
+                                subtitle: item.showTitle,
+                                finishLabel: PlaybackFinishabilityCopy.label(
+                                    progress: progress(for: item.episodeID),
+                                    durationSeconds: item.durationSeconds,
+                                ),
+                                artworkURL: item.coverURL,
+                                isVideo: item.isVideo,
+                            )
+                            .listRowBackground(theme.surfaceElevated)
                         }
                         .onDelete { store.remove(at: $0) }
                         .onMove { store.move(fromOffsets: $0, toOffset: $1) }
                     }
                 } header: {
                     Text("Up next")
+                        .foregroundStyle(theme.secondaryText)
                 } footer: {
                     Text("Drag to reorder. Removing a row does not stop the current episode.")
                         .font(.footnote)
+                        .foregroundStyle(theme.tertiaryText)
                 }
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(theme.background)
             .environment(\.editMode, $editMode)
             .navigationTitle("Play queue")
             .navigationBarTitleDisplayMode(.inline)
@@ -101,8 +95,41 @@ public struct PodcastPlaybackQueueView: View {
                     }
                 }
             }
+            .tint(theme.accent)
+            .inkAmpAppThemed()
             .onAppear { monitor.start() }
         }
+    }
+
+    private func queueRow(
+        title: String,
+        subtitle: String?,
+        finishLabel: String?,
+        artworkURL: URL?,
+        isVideo: Bool,
+    ) -> some View {
+        HStack(spacing: 12) {
+            queueArtwork(url: artworkURL, isVideo: isVideo)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(theme.primaryText)
+                    .lineLimit(2)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(theme.secondaryText)
+                        .lineLimit(1)
+                }
+                if let finishLabel {
+                    Text(finishLabel)
+                        .font(.caption2)
+                        .foregroundStyle(theme.tertiaryText)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 2)
     }
 
     private func progress(for episodeID: String) -> Double {
@@ -119,14 +146,20 @@ public struct PodcastPlaybackQueueView: View {
                     image.resizable().scaledToFill()
                 default:
                     ZStack {
-                        Color(white: 0.12)
+                        theme.surface
                         Image(systemName: isVideo ? "play.rectangle.fill" : "mic.fill")
-                            .foregroundStyle(Color.white.opacity(0.72))
+                            .foregroundStyle(theme.secondaryText)
                     }
             }
         }
-        .frame(width: 44, height: 44)
-        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .frame(width: 48, height: 48)
+        .clipShape(
+            RoundedRectangle(cornerRadius: InkAmpMetrics.controlRadius, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: InkAmpMetrics.controlRadius, style: .continuous)
+                .strokeBorder(theme.border.opacity(0.7), lineWidth: 1)
+        )
     }
 }
 #endif
