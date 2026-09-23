@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import SilveranAppleWidgets
 import Testing
@@ -331,5 +332,42 @@ struct ContinueWidgetSnapshotTests {
         #expect(decoded.upNextItems[0].title == "Cold Open")
         #expect(decoded.upNextItems[0].kind == .podcast)
         #expect(decoded.deepLink == InkAmpContinueLink.continueURL.absoluteString)
+    }
+
+    @Test func mediumWidthFractionsSumAndFavorCurrent() {
+        let current = InkAmpContinueWidgetMetrics.mediumCurrentFraction
+        let queue = InkAmpContinueWidgetMetrics.mediumQueueFraction
+        #expect(abs(current + queue - 1) < 0.0001)
+        #expect(current > queue)
+        #expect(current == 0.58)
+        #expect(queue == 0.42)
+
+        let usable: CGFloat = 320
+        let currentWidth = InkAmpContinueWidgetMetrics.mediumCurrentWidth(usableWidth: usable)
+        let queueWidth = InkAmpContinueWidgetMetrics.mediumQueueWidth(usableWidth: usable)
+        #expect(abs(currentWidth + queueWidth - usable) < 0.0001)
+        #expect(currentWidth > queueWidth)
+        #expect(queueWidth != InkAmpContinueWidgetMetrics.deprecatedMediumFixedQueueWidth)
+        #expect(
+            InkAmpContinueWidgetMetrics.mediumQueueWidth(usableWidth: 300)
+                != InkAmpContinueWidgetMetrics.deprecatedMediumFixedQueueWidth
+        )
+    }
+
+    @Test func mediumCoverIsMateriallySmallerThanLargeCover() {
+        #expect(InkAmpContinueWidgetMetrics.mediumCoverSize >= 52)
+        #expect(InkAmpContinueWidgetMetrics.mediumCoverSize <= 56)
+        #expect(InkAmpContinueWidgetMetrics.mediumQueueCoverSize >= 22)
+        #expect(InkAmpContinueWidgetMetrics.mediumQueueCoverSize <= 24)
+        #expect(InkAmpContinueWidgetMetrics.largeCoverSize == 92)
+        #expect(
+            InkAmpContinueWidgetMetrics.mediumCoverSize
+                <= InkAmpContinueWidgetMetrics.largeCoverSize - 30
+        )
+    }
+
+    @Test func mediumAndLargeUpNextLimitsRemainDistinct() {
+        #expect(InkAmpContinueWidgetLayout.medium.upNextLimit == 2)
+        #expect(InkAmpContinueWidgetLayout.large.upNextLimit == 3)
     }
 }

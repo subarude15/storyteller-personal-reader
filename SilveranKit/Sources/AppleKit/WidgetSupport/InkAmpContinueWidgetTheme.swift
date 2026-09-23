@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// Light / dark Continue + Next Up Home Screen tiles.
@@ -17,6 +18,39 @@ public enum InkAmpContinueWidgetLayout: String, Sendable, CaseIterable {
             case .medium: return 2
             case .large: return 3
         }
+    }
+}
+
+/// Deterministic geometry for Continue + Next Up Home Screen tiles.
+///
+/// Medium is a compact two-column layout sized from the live widget width.
+/// Large keeps its validated fractions / cover size — do not retune Medium by
+/// changing Large constants.
+public enum InkAmpContinueWidgetMetrics: Sendable {
+    /// Share of usable Medium width for the current / Now Listening column.
+    public static let mediumCurrentFraction: CGFloat = 0.58
+    /// Share of usable Medium width for the Up Next column.
+    public static let mediumQueueFraction: CGFloat = 0.42
+    /// Gap between Medium current and Up Next columns.
+    public static let mediumColumnGap: CGFloat = 11
+    /// Outer padding for the Medium tile.
+    public static let mediumOuterPadding: CGFloat = 12
+    /// Current cover on Medium (compact; must stay well below Large).
+    public static let mediumCoverSize: CGFloat = 54
+    /// Up Next thumbnail on Medium.
+    public static let mediumQueueCoverSize: CGFloat = 23
+    /// Validated Large current cover — frozen; Medium must stay materially smaller.
+    public static let largeCoverSize: CGFloat = 92
+    /// Historical Medium Up Next fixed width that over-constrained systemMedium.
+    /// Kept only so tests can assert the layout no longer hardcodes it.
+    public static let deprecatedMediumFixedQueueWidth: CGFloat = 148
+
+    public static func mediumCurrentWidth(usableWidth: CGFloat) -> CGFloat {
+        max(0, usableWidth) * mediumCurrentFraction
+    }
+
+    public static func mediumQueueWidth(usableWidth: CGFloat) -> CGFloat {
+        max(0, usableWidth) * mediumQueueFraction
     }
 }
 
