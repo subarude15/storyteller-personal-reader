@@ -488,10 +488,15 @@ public enum ContinueWidgetSnapshotStore {
 
     public static func reloadTimelines() {
         #if canImport(WidgetKit) && (os(iOS) || os(macOS))
-        for kind in SilveranWidgetConstants.continueWidgetKinds {
+        for kind in timelineKindsToReload {
             WidgetCenter.shared.reloadTimelines(ofKind: kind)
         }
         #endif
+    }
+
+    /// Kind identifiers `reloadTimelines()` asks WidgetKit to refresh.
+    public static var timelineKindsToReload: [String] {
+        SilveranWidgetConstants.continueWidgetKinds
     }
 
     // MARK: - Paths

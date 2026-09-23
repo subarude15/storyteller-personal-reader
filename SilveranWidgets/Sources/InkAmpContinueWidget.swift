@@ -518,13 +518,13 @@ private struct InkAmpWidgetColors {
 }
 
 private extension Color {
-    /// Parses `#RRGGBB`. Invalid input falls back to magenta so a bad constant is obvious.
+    /// Parses `#RRGGBB`. Invalid input falls back to a loud red so a bad constant is obvious.
     init(hex: String) {
         let cleaned = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         var value: UInt64 = 0
         Scanner(string: cleaned).scanHexInt64(&value)
         guard cleaned.count == 6 else {
-            self = .magenta
+            self.init(red: 1, green: 0, blue: 1)
             return
         }
         self.init(

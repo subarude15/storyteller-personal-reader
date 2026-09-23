@@ -61,6 +61,11 @@ struct ContinueWidgetAppGroupTests {
             "inkamp.continue.dark.medium.v1",
             "inkamp.continue.dark.large.v1",
         ])
+        // reloadTimelines() iterates continueWidgetKinds — publish must hit all four.
+        #expect(
+            ContinueWidgetSnapshotStore.timelineKindsToReload
+                == SilveranWidgetConstants.continueWidgetKinds
+        )
         for kind in kinds {
             #expect(kind != SilveranWidgetConstants.readingWidgetKind)
             for legacy in SilveranWidgetConstants.legacySideloadContinueWidgetKinds {
