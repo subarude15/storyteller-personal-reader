@@ -156,8 +156,8 @@ while IFS= read -r APPEX; do
 done < <(find "${STAGED_APP}/PlugIns" -maxdepth 1 -name "*.appex" -type d 2>/dev/null || true)
 echo "==> App + extensions stamped with build ${BUILD_NUMBER}"
 
-# Verify the IPA really embeds the NEW widget bundle, not the previous cached
-# Continue + Up next executable. A green compile alone does not prove the final
+# Verify the IPA really embeds the active widget bundle, including the v2
+# Medium identities that invalidate the stuck redacted-placeholder timelines. A green compile alone does not prove the final
 # packaged appex contains the expected WidgetBundle registrations.
 WIDGET_APPEX=""
 while IFS= read -r APPEX; do
@@ -176,7 +176,7 @@ fi
 
 WIDGET_EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${WIDGET_APPEX}/Info.plist")"
 WIDGET_STRINGS="$(strings "${WIDGET_APPEX}/${WIDGET_EXECUTABLE}")"
-for REQUIRED_WIDGET_STRING in     "inkamp.continue.light.medium.v1"     "inkamp.continue.light.large.v1"     "inkamp.continue.dark.medium.v1"     "inkamp.continue.dark.large.v1"     "ink+amp Light Medium"     "ink+amp Light Large"     "ink+amp Dark Medium"     "ink+amp Dark Large"
+for REQUIRED_WIDGET_STRING in     "inkamp.continue.light.medium.v2"     "inkamp.continue.light.large.v1"     "inkamp.continue.dark.medium.v2"     "inkamp.continue.dark.large.v1"     "ink+amp Light Medium"     "ink+amp Light Large"     "ink+amp Dark Medium"     "ink+amp Dark Large"
 do
     if [[ "${WIDGET_STRINGS}" != *"${REQUIRED_WIDGET_STRING}"* ]]; then
         echo "ERROR: packaged widget binary is missing '${REQUIRED_WIDGET_STRING}'."
