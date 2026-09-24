@@ -105,7 +105,7 @@ struct RequestLibraryPresentationTests {
     }
 
     @Test func providerAvailableOnlyIsNotReady() {
-        let item = requestItem(status: .available, formats: [.ebook])
+        let item = requestItem(formats: [.ebook], status: .available)
         let badge = RequestLibraryPresentationIndex.badge(for: item, now: now, includeStaleReady: false)
         #expect(badge?.label == "Available")
         #expect(badge?.kind == .inProgress)
@@ -203,18 +203,18 @@ struct RequestLibraryPresentationTests {
     // MARK: - Summary
 
     @Test func chipCountsIgnoreStaleCompleted() {
-        let active = requestItem(status: .wanted, formats: [.ebook], updatedAt: now)
+        let active = requestItem(formats: [.ebook], status: .wanted, updatedAt: now)
         let attention = requestItem(
             id: "attn",
-            status: .needsAttention,
             formats: [.ebook],
+            status: .needsAttention,
             attention: "stale",
             updatedAt: now,
         )
         let oldReady = requestItem(
             id: "old",
-            status: .availableInLibrary,
             formats: [.ebook],
+            status: .availableInLibrary,
             updatedAt: now.addingTimeInterval(-(10 * 24 * 3600)),
         )
         let index = RequestLibraryPresentationIndex(
@@ -230,8 +230,9 @@ struct RequestLibraryPresentationTests {
     // MARK: - Observability
 
     @Test func storeChangeRefreshesIndex() {
-        let defaults = UserDefaults(suiteName: "request-library-index-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "request-library-index-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let book = libraryBook(uuid: "obs", title: "Dune", authors: ["Frank Herbert"], ebook: true)
         let refresher = RequestLibraryIndexRefresher(

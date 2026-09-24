@@ -84,8 +84,9 @@ struct RequestActivityTests {
     // MARK: - Storage
 
     @Test func storeSavesAndReloadsWithoutSecrets() throws {
-        let defaults = UserDefaults(suiteName: "request-activity-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "request-activity-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let work = CanonicalBookWork(
             workID: "work/1",
@@ -122,8 +123,9 @@ struct RequestActivityTests {
     }
 
     @Test func formatStatesPersistIndependently() {
-        let defaults = UserDefaults(suiteName: "request-activity-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "request-activity-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let work = work(title: "Dune")
         store.recordSubmission(
@@ -247,8 +249,9 @@ struct RequestActivityTests {
     // MARK: - Duplicate prevention
 
     @Test func existingWantedIsNotRequeuedLocally() {
-        let defaults = UserDefaults(suiteName: "request-activity-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "request-activity-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let work = work(title: "Dune")
         store.recordSubmission(
@@ -374,8 +377,9 @@ struct RequestActivityTests {
     }
 
     @Test func shelfarrAcceptedDoesNotInventLifecycle() {
-        let defaults = UserDefaults(suiteName: "request-activity-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "request-activity-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let work = work(title: "Dune")
         store.recordSubmission(
@@ -625,10 +629,11 @@ struct RequestActivityTests {
     // MARK: - Store observability
 
     @Test func storePostsChangeNotificationOnRecordAndRemove() {
-        let defaults = UserDefaults(suiteName: "request-activity-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "request-activity-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
-        let counter = NotificationCounter(name: .requestActivityStoreDidChange)
+        let counter = NotificationCounter(name: .requestActivityStoreDidChange, object: store)
         defer { counter.stop() }
 
         store.recordSubmission(
@@ -652,10 +657,11 @@ struct RequestActivityTests {
     }
 
     @Test func storePostsChangeNotificationOnUpsert() {
-        let defaults = UserDefaults(suiteName: "request-activity-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "request-activity-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
-        let counter = NotificationCounter(name: .requestActivityStoreDidChange)
+        let counter = NotificationCounter(name: .requestActivityStoreDidChange, object: store)
         defer { counter.stop() }
 
         store.upsert(item(id: "up", status: .wanted, updatedAt: Date()))
@@ -664,8 +670,9 @@ struct RequestActivityTests {
     }
 
     @Test func storePostsChangeNotificationOnPruneWhenItemsRemoved() {
-        let defaults = UserDefaults(suiteName: "request-activity-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "request-activity-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let now = Date()
         let staleCompleted = now.addingTimeInterval(
@@ -673,7 +680,7 @@ struct RequestActivityTests {
         )
         store.upsert(item(id: "old", status: .availableInLibrary, updatedAt: staleCompleted))
 
-        let counter = NotificationCounter(name: .requestActivityStoreDidChange)
+        let counter = NotificationCounter(name: .requestActivityStoreDidChange, object: store)
         defer { counter.stop() }
         store.prune(now: now)
         #expect(counter.count == 1)
@@ -681,8 +688,9 @@ struct RequestActivityTests {
     }
 
     @Test func storeChangeNotificationAllowsReentrantReadsWithoutDeadlock() {
-        let defaults = UserDefaults(suiteName: "request-activity-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "request-activity-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
 
         var observedCount = 0
@@ -785,10 +793,10 @@ private final class NotificationCounter: @unchecked Sendable {
         return _count
     }
 
-    init(name: Notification.Name) {
+    init(name: Notification.Name, object: AnyObject? = nil) {
         token = NotificationCenter.default.addObserver(
             forName: name,
-            object: nil,
+            object: object,
             queue: nil,
         ) { [weak self] _ in
             self?.lock.lock()

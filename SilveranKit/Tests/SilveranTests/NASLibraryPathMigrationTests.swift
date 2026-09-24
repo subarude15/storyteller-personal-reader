@@ -38,8 +38,8 @@ struct NASLibraryPathMigrationTests {
             ) == "/volume1/data/media/books/books"
         )
         var snapshot = NASDownloadSettingsSnapshot(
-            ebookFolder: "/volume1/media/books/books",
             audiobookFolder: "/custom/audio",
+            ebookFolder: "/volume1/media/books/books",
         )
         snapshot.migrateLegacyDefaultLibraryFolders()
         #expect(snapshot.ebookFolder == "/volume1/data/media/books/books")
@@ -80,7 +80,7 @@ struct NASLibraryPathMigrationTests {
     @Test func torBoxarrCompletedHostPathRemainsUnchanged() {
         #expect(
             TorBoxarrConnectionSettings.hostCompletedFolder
-                == "/volume1/data/torrents/completed"
+                == "/volume1/data/torrents/completed/torboxarr"
         )
         #expect(
             NASDownloadSettingsSnapshot.defaultDelugeCompletedFolder

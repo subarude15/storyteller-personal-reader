@@ -386,7 +386,14 @@ struct TorBoxClientTests {
             string: "https://api.torbox.app/v1/api/torrents/requestdl?token=super-secret&file_id=1"
         )!
         let redacted = TorBoxClient.redactSensitiveURL(url)
-        #expect(redacted.contains("token=••••••••"))
+        // URLComponents percent-encodes Unicode bullets; either form is fine as long as
+        // the secret is gone.
+        #expect(
+            redacted.contains("token=••••••••")
+                || redacted.contains(
+                    "token=%E2%80%A2%E2%80%A2%E2%80%A2%E2%80%A2%E2%80%A2%E2%80%A2%E2%80%A2%E2%80%A2"
+                )
+        )
         #expect(!redacted.contains("super-secret"))
     }
 

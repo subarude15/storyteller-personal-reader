@@ -61,8 +61,8 @@ struct DelugeManualRoutingTests {
         var settings = NASDownloadSettingsSnapshot(
             torrentClient: .deluge,
             delugeBaseURL: "http://deluge.example:8112",
-            ebookFolder: ebookFinal,
             audiobookFolder: audioFinal,
+            ebookFolder: ebookFinal,
         )
         settings.delugeIncomingFolder = incoming
         settings.delugeCompletedFolder = completed
@@ -103,8 +103,8 @@ struct DelugeManualRoutingTests {
         var settings = NASDownloadSettingsSnapshot(
             torrentClient: .deluge,
             delugeBaseURL: "http://deluge.example:8112",
-            ebookFolder: ebookFinal,
             audiobookFolder: audioFinal,
+            ebookFolder: ebookFinal,
         )
         settings.delugeIncomingFolder = incoming
         settings.delugeCompletedFolder = completed

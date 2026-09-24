@@ -191,8 +191,9 @@ struct RequestActivityActionsTests {
     }
 
     @Test func retryWithNoTargetsReturnsMessage() async {
-        let defaults = UserDefaults(suiteName: "request-retry-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "request-retry-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let item = makeItem(
             provider: .lazyLibrarian,
@@ -207,8 +208,9 @@ struct RequestActivityActionsTests {
     }
 
     @Test func recordSubmissionUpdatesExistingRowRatherThanDuplicating() {
-        let defaults = UserDefaults(suiteName: "request-retry-dup-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "request-retry-dup-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let work = CanonicalBookWork(
             workID: "work/1",
@@ -250,8 +252,9 @@ struct RequestActivityActionsTests {
     }
 
     @Test func successfulRetryClearsStaleLastError() {
-        let defaults = UserDefaults(suiteName: "request-retry-clear-err-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "request-retry-clear-err-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let work = CanonicalBookWork(
             workID: "work/clear-err",
@@ -300,8 +303,9 @@ struct RequestActivityActionsTests {
     }
 
     @Test func successfulAudiobookRetryClearsErrorWhenEbookAlreadyInLibrary() {
-        let defaults = UserDefaults(suiteName: "request-retry-mixed-ok-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "request-retry-mixed-ok-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let work = CanonicalBookWork(
             workID: "work/mixed-ok",
@@ -358,8 +362,9 @@ struct RequestActivityActionsTests {
     }
 
     @Test func partialRetryKeepsLastErrorWhenSiblingStillNeedsAttention() {
-        let defaults = UserDefaults(suiteName: "request-retry-partial-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "request-retry-partial-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let work = CanonicalBookWork(
             workID: "work/partial",
@@ -415,8 +420,9 @@ struct RequestActivityActionsTests {
     }
 
     @Test func failedResubmissionKeepsLastError() {
-        let defaults = UserDefaults(suiteName: "request-retry-fail-again-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "request-retry-fail-again-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let work = CanonicalBookWork(
             workID: "work/fail-again",
@@ -457,8 +463,9 @@ struct RequestActivityActionsTests {
     }
 
     @Test func localDuplicateShortCircuitSkipsWantedAndHave() {
-        let defaults = UserDefaults(suiteName: "request-retry-skip-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "request-retry-skip-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let work = CanonicalBookWork(
             workID: "work/2",

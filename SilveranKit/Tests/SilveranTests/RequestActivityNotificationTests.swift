@@ -3,7 +3,7 @@ import Testing
 
 @testable import SilveranKit
 
-@Suite("Request activity notifications")
+@Suite("Request activity notifications", .serialized)
 struct RequestActivityNotificationTests {
     // MARK: - Available transitions
 
@@ -380,8 +380,9 @@ struct RequestActivityNotificationTests {
     }
 
     @Test func restartWhileStillInAttentionDoesNotDuplicate() {
-        let defaults = UserDefaults(suiteName: "request-notify-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "request-notify-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let recorder = RecordingRequestNotificationScheduler()
         let previousScheduler = RequestActivityNotifier.shared.scheduler
@@ -499,8 +500,9 @@ struct RequestActivityNotificationTests {
     // MARK: - Persistence / store
 
     @Test func reloadAlreadyNotifiedAvailableDoesNotDuplicate() {
-        let defaults = UserDefaults(suiteName: "request-notify-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "request-notify-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let recorder = RecordingRequestNotificationScheduler()
         let previousScheduler = RequestActivityNotifier.shared.scheduler
@@ -621,8 +623,9 @@ struct RequestActivityNotificationTests {
     }
 
     @Test func storeDeliversOutsideLockWithoutDeadlock() {
-        let defaults = UserDefaults(suiteName: "request-notify-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "request-notify-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let recorder = RecordingRequestNotificationScheduler()
         let previousScheduler = RequestActivityNotifier.shared.scheduler

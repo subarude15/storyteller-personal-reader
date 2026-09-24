@@ -111,6 +111,11 @@ let package = Package(
             resources: [
                 .copy("Fixtures"),
             ],
+            // R0 CI gate: host `swift test` under tools 6.2; keep the existing suite
+            // compiling without a wholesale Swift-6 concurrency rewrite of fixtures.
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ],
         ),
     ]
 )

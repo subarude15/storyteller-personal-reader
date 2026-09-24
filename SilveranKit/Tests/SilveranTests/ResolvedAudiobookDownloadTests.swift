@@ -124,7 +124,7 @@ struct ResolvedAudiobookDownloadTests {
         let remote = try #require(book.playbackMetadata())
         let choice = try #require(store.playbackChoice(workID: workID, audiobook: book))
         #expect(choice.isLocal)
-        #expect(choice.metadata.tracks.allSatisfy(\.url.isFileURL))
+        #expect(choice.metadata.tracks.allSatisfy { $0.url.isFileURL })
         #expect(choice.metadata.chapters.map(\.title) == remote.chapters.map(\.title))
         #expect(choice.metadata.chapters.map(\.startTime) == remote.chapters.map(\.startTime))
         #expect(choice.metadata.tracks.map(\.startTime) == remote.tracks.map(\.startTime))
@@ -176,6 +176,8 @@ struct ResolvedAudiobookDownloadTests {
                 fetcher: HangingFetcher(),
             )
             for try await _ in stream {}
+            // Stream may finish without throwing on cancel; surface CancellationError explicitly.
+            try Task.checkCancellation()
         }
         try await Task.sleep(for: .milliseconds(50))
         task.cancel()

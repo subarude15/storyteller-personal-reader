@@ -73,7 +73,7 @@ struct StorytellerBookUploadTests {
         #expect(await coordinator.bookUUID == nil)
         #expect(await transport.accessCount == 1)
         #expect(await transport.uploadedIDs.isEmpty)
-        #expect(await files.stageCount == 0)
+        #expect(files.stageCount == 0)
 
         await transport.setAccess(.needsReconnect)
         let again = await coordinator.upload(
@@ -163,8 +163,10 @@ struct StorytellerBookUploadTests {
         #expect(state == .cancelled(partialOnServer: true))
         #expect(await transport.uploadedIDs == [first.id])
         #expect(await coordinator.completedAssetIDs == [first.id])
-        #expect(await files.removed.count == await files.staged.count)
-        #expect(await files.staged.count == 2)
+        let removedCount = files.removed.count
+        let stagedCount = files.staged.count
+        #expect(removedCount == stagedCount)
+        #expect(stagedCount == 2)
     }
 
     @Test func stagingBalancesSecurityScopeAndLeavesTheOriginal() throws {
@@ -713,12 +715,15 @@ private actor FakeTransport: StorytellerBookUploadTransport {
     }
 }
 
-private actor FakeFileSystem: StorytellerUploadFileSystem {
+private final class FakeFileSystem: StorytellerUploadFileSystem, @unchecked Sendable {
+    private let lock = NSLock()
     private(set) var stageCount = 0
     private(set) var staged: [URL] = []
     private(set) var removed: [URL] = []
 
     func stage(_ url: URL) throws -> URL {
+        lock.lock()
+        defer { lock.unlock() }
         stageCount += 1
         let destination = FileManager.default.temporaryDirectory.appendingPathComponent(
             "storyteller-upload-test-\(stageCount)-\(url.lastPathComponent)"
@@ -728,6 +733,9 @@ private actor FakeFileSystem: StorytellerUploadFileSystem {
     }
 
     func removeStaged(_ url: URL) {
+        lock.lock()
+        defer { lock.unlock() }
         removed.append(url)
+        try? FileManager.default.removeItem(at: url)
     }
 }

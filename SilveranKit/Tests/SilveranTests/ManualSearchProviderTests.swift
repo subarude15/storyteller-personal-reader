@@ -77,6 +77,42 @@ struct ManualSearchProviderTests {
         #expect(resolved.contains { $0.id == "librivox" })
     }
 
+    @Test func rearrangeFromOffsetsMatchesSwiftUISemantics() {
+        // Apple docs for move(fromOffsets:toOffset:) — lowercase letters as source.
+        var letters = Array("ABcDefgHIJKlmNO")
+        let lowercaseOffsets = IndexSet(letters.indices.filter { letters[$0].isLowercase })
+        letters.rearrange(fromOffsets: lowercaseOffsets, toOffset: 2)
+        #expect(String(letters) == "ABcefglmDHIJKNO")
+
+        letters = Array("ABcDefgHIJKlmNO")
+        letters.rearrange(fromOffsets: lowercaseOffsets, toOffset: 15)
+        #expect(String(letters) == "ABDHIJKNOcefglm")
+
+        letters = Array("ABcDefgHIJKlmNO")
+        letters.rearrange(fromOffsets: IndexSet(integer: 2), toOffset: 2)
+        #expect(String(letters) == "ABcDefgHIJKlmNO")
+    }
+
+    @Test @MainActor func settingsStoreMoveReindexesProviderOrder() throws {
+        let store = ManualSearchSettingsStore(journal: try journal())
+        let providers = ManualSearchCatalog.reindex([
+            ManualSearchCatalog.builtIn[0],
+            ManualSearchCatalog.builtIn[1],
+            customProvider,
+        ])
+        store.applySynced(
+            ManualSearchSettingsSnapshot(providers: providers, openInAppBrowser: true)
+        )
+        // Move first provider to the end (onMove destination past last index).
+        store.move(from: IndexSet(integer: 0), to: 3)
+        #expect(store.snapshot.providers.map(\.id) == [
+            ManualSearchCatalog.builtIn[1].id,
+            "custom-anna",
+            ManualSearchCatalog.builtIn[0].id,
+        ])
+        #expect(store.snapshot.providers.map(\.sortOrder) == [0, 1, 2])
+    }
+
     @Test func syncedSerializationRoundTrip() throws {
         var document = SyncedAppSettings()
         document.integrations.manualSearch.providers = TimestampedSetting(

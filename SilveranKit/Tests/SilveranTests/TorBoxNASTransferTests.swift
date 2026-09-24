@@ -66,8 +66,8 @@ struct TorBoxNASTransferTests {
         let settings = NASDownloadSettingsSnapshot(
             torrentClient: .torbox,
             torboxEnabled: true,
-            ebookFolder: "/volume1/media/books/books",
             audiobookFolder: "/volume1/media/books/audiobooks",
+            ebookFolder: "/volume1/media/books/books",
         )
         #expect(settings.folder(for: .ebook) == "/volume1/media/books/books")
         #expect(settings.folder(for: .audiobook) == "/volume1/media/books/audiobooks")
@@ -608,7 +608,9 @@ struct TorBoxNASTransferTests {
         )
         let result = await service.transfer(job: job)
         #expect(result.status == .complete)
-        #expect(transfer.renamedPairs == [("temporary-name.epub", "The Hobbit.epub")])
+        #expect(transfer.renamedPairs.count == 1)
+        #expect(transfer.renamedPairs.first?.from == "temporary-name.epub")
+        #expect(transfer.renamedPairs.first?.to == "The Hobbit.epub")
         #expect(transfer.existingFilenames.contains("cover.jpg"))
         #expect(transfer.existingFilenames.contains("old-book.epub"))
         #expect(transfer.existingFilenames.contains("notes.txt"))
@@ -811,8 +813,8 @@ private func env(auto: Bool) -> StaticNASHandoffEnvironment {
                 torboxAutoTransferToNAS: auto,
                 synologyBaseURL: "http://nas.example:5000",
                 synologyUsername: "josh",
-                ebookFolder: "/volume1/media/books/books",
                 audiobookFolder: "/volume1/media/books/audiobooks",
+                ebookFolder: "/volume1/media/books/books",
             ),
             credentials: NASBackendCredentials(
                 synologyPassword: "pw",

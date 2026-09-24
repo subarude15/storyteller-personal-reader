@@ -60,7 +60,9 @@ public final class ManualSearchSettingsStore {
 
     public func move(from offsets: IndexSet, to destination: Int) {
         var providers = snapshot.providers.sorted { $0.sortOrder < $1.sortOrder }
-        providers.move(fromOffsets: offsets, toOffset: destination)
+        // Foundation-only: SwiftUI's `move(fromOffsets:toOffset:)` is unavailable
+        // when SilveranKit is built under `swift test` without importing SwiftUI.
+        providers.rearrange(fromOffsets: offsets, toOffset: destination)
         replace(ManualSearchSettingsSnapshot(providers: providers, openInAppBrowser: snapshot.openInAppBrowser))
     }
 
@@ -130,5 +132,20 @@ public final class ManualSearchSettingsStore {
     public func setOpenInAppBrowser(_ enabled: Bool) {
         guard snapshot.openInAppBrowser != enabled else { return }
         replace(ManualSearchSettingsSnapshot(providers: snapshot.providers, openInAppBrowser: enabled))
+    }
+}
+
+extension Array {
+    /// Foundation-only stand-in for SwiftUI's `move(fromOffsets:toOffset:)`.
+    /// Preserves relative order of moved elements; `destination` is an insertion
+    /// index in the pre-move array (`0...count`).
+    public mutating func rearrange(fromOffsets offsets: IndexSet, toOffset destination: Int) {
+        guard !offsets.isEmpty else { return }
+        let sorted = offsets.sorted()
+        let moved = sorted.map { self[$0] }
+        for index in sorted.reversed() {
+            remove(at: index)
+        }
+        insert(contentsOf: moved, at: destination - sorted.filter { $0 < destination }.count)
     }
 }

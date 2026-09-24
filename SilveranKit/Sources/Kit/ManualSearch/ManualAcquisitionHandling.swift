@@ -40,6 +40,11 @@ public enum ManualAcquisitionHandoffResult: Equatable, Sendable {
             case .placeholder, .failed: false
         }
     }
+
+    public var isFailed: Bool {
+        if case .failed = self { return true }
+        return false
+    }
 }
 
 /// Implementations live outside the browser. The browser never imports a NAS client.

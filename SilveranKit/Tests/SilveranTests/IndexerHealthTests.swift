@@ -273,7 +273,7 @@ struct IndexerHealthTests {
         #expect(missingKey.isActionableIssue == false)
     }
 
-    @Test func jackettSuccessCountsConfiguredIndexers() async {
+    @Test func jackettSuccessCountsConfiguredIndexers() async throws {
         let transport = jackettTransport(body: jackettIndexersXML())
         let result = await JackettHealthChecker(transport: transport).check(settings: jackettSettings())
         #expect(result.status == .healthy)
@@ -416,7 +416,7 @@ struct IndexerHealthTests {
         #expect(
             ids == [
                 .lazyLibrarian, .shelfarr, .librivox, .storyteller, .prowlarr, .jackett,
-                .bookSearchLAN,
+                .deluge, .bookSearchLAN,
             ]
         )
         #expect(ids == ServiceHealthID.allCases)
@@ -559,6 +559,7 @@ struct IndexerHealthTests {
             FixedHealthChecker(.storyteller, status: .healthy, summary: "Connected"),
             ProwlarrHealthChecker(transport: prowlarr),
             JackettHealthChecker(transport: jackett),
+            FixedHealthChecker(.deluge, status: .disabled, summary: "Not configured"),
             FixedHealthChecker(.bookSearchLAN, status: .localOnly, summary: "Not configured"),
         ]
     }
@@ -569,11 +570,17 @@ struct IndexerHealthTests {
     }
 
     private func resultText(_ result: ServiceHealthResult) -> String {
-        [
-            result.summary, result.detail ?? "", result.lastError ?? "", result.technicalDetail ?? "",
-            result.sanitizedHost ?? "", result.suggestedAction ?? "",
-        ].joined(separator: "\n") + result.metadata.values.joined()
-            + result.indexers.map { "\($0.name) \($0.detail ?? "")" }.joined()
+        let meta = result.metadata.values.joined()
+        let indexers = result.indexers.map { "\($0.name) \($0.detail ?? "")" }.joined()
+        let parts = [
+            result.summary,
+            result.detail ?? "",
+            result.lastError ?? "",
+            result.technicalDetail ?? "",
+            result.sanitizedHost ?? "",
+            result.suggestedAction ?? "",
+        ]
+        return parts.joined(separator: "\n") + meta + indexers
     }
 
     private func assertCacheOmits(_ result: ServiceHealthResult, secret: String) throws {

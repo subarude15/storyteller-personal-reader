@@ -187,7 +187,7 @@ struct DelugeDownloadObservabilityTests {
     @Test func addTorrentFileUsesBase64Filedump() async throws {
         let torrentURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("inkamp-deluge-test-\(UUID().uuidString).torrent")
-        let payload = Data("d8:announce13:http://a.come")
+        let payload = Data("d8:announce13:http://a.come".utf8)
         try payload.write(to: torrentURL)
         defer { try? FileManager.default.removeItem(at: torrentURL) }
 
@@ -367,7 +367,7 @@ struct DelugeDownloadObservabilityTests {
     }
 
     @Test func titleAuthorMatch() {
-        let item = request(title: "Dune", author: "Frank Herbert")
+        let item = request(title: "Dune", author: "Frank Herbert", formats: [.ebook])
         let index = DelugeTorrentIndex(torrents: [
             torrent(id: "1", name: "Dune Frank Herbert", state: "Downloading", progress: 0.2)
         ])
@@ -378,7 +378,7 @@ struct DelugeDownloadObservabilityTests {
     }
 
     @Test func isbnMatch() {
-        let item = request(title: "Pride", author: "Jane Austen", isbn: "9780141439518")
+        let item = request(title: "Pride", author: "Jane Austen", formats: [.ebook], isbn: "9780141439518")
         let index = DelugeTorrentIndex(torrents: [
             torrent(id: "1", name: "book-9780141439518", state: "Downloading", progress: 0.2)
         ])

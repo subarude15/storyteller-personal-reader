@@ -227,8 +227,9 @@ struct LazyLibrarianMatchTests {
     }
 
     @Test func useBestMatchUpdatesTheExistingRequest() async {
-        let defaults = UserDefaults(suiteName: "ll-match-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "ll-match-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let item = attentionItem()
         store.upsert(item)
@@ -264,8 +265,9 @@ struct LazyLibrarianMatchTests {
     }
 
     @Test func choosingACandidateDoesNotCreateAnotherRequest() async {
-        let defaults = UserDefaults(suiteName: "ll-match-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "ll-match-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         var item = attentionItem()
         item.matchCandidates = [

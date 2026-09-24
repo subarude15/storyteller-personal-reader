@@ -104,8 +104,9 @@ struct RequestActivityTimelineTests {
     // MARK: - Fallback
 
     @Test func manualFallbackRecordsOnOriginalAndAlternateRequested() {
-        let defaults = UserDefaults(suiteName: "timeline-manual-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "timeline-manual-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let work = duneWork("/works/OLTimelineManual")
         store.recordSubmission(
@@ -138,8 +139,9 @@ struct RequestActivityTimelineTests {
     }
 
     @Test func automaticFallbackRecordsOnce() {
-        let defaults = UserDefaults(suiteName: "timeline-auto-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "timeline-auto-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let work = duneWork("/works/OLTimelineAuto")
         store.recordSubmission(
@@ -272,8 +274,9 @@ struct RequestActivityTimelineTests {
     }
 
     @Test func storeRecordsTransitionsOnUpsert() {
-        let defaults = UserDefaults(suiteName: "timeline-upsert-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "timeline-upsert-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         var current = item(provider: .lazyLibrarian, statuses: [.ebook: .searching])
         store.upsert(current)

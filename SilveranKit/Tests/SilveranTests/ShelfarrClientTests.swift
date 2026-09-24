@@ -173,7 +173,7 @@ struct ShelfarrClientTests {
     @Test func connectionTestUsesRequestsLimitAndBearerToken() async throws {
         let client = try stubbedClient(status: 200, body: #"{"requests":[]}"#)
         let result = await client.testConnection()
-        #expect(result == .success(()))
+        #expect({ if case .success = result { return true }; return false }())
         let request = try #require(ShelfarrStubURLProtocol.requests.first)
         #expect(request.url?.absoluteString == "https://shelfarr.example.com/api/v1/requests?limit=1")
         #expect(request.url?.absoluteString.contains("/api/v1/status") == false)
@@ -188,7 +188,7 @@ struct ShelfarrClientTests {
             body: #"{"requests":[]}"#,
         )
         let result = await client.testConnection()
-        #expect(result == .success(()))
+        #expect({ if case .success = result { return true }; return false }())
         let request = try #require(ShelfarrStubURLProtocol.requests.first)
         #expect(request.url?.absoluteString == "http://192.168.1.2:5057/api/v1/requests?limit=1")
     }
@@ -196,7 +196,7 @@ struct ShelfarrClientTests {
     @Test func connection401() async throws {
         let client = try stubbedClient(status: 401, body: "")
         let result = await client.testConnection()
-        #expect(result == .failure(.authenticationFailed))
+        #expect({ if case .failure(.authenticationFailed) = result { return true }; return false }())
         #expect(
             failureMessage(result)
                 == "Authentication failed. Check your Shelfarr API token."
@@ -209,7 +209,7 @@ struct ShelfarrClientTests {
             body: #"{"errors":["Missing API scope: requests:read"]}"#,
         )
         let result = await client.testConnection()
-        #expect(result == .failure(.permissionDenied(.readRequests)))
+        #expect({ if case .failure(.permissionDenied(.readRequests)) = result { return true }; return false }())
         #expect(
             failureMessage(result)
                 == "Connected to Shelfarr, but this token does not have permission to read requests."
@@ -219,7 +219,7 @@ struct ShelfarrClientTests {
     @Test func connection404() async throws {
         let client = try stubbedClient(status: 404, body: #"{"errors":["not found"]}"#)
         let result = await client.testConnection()
-        #expect(result == .failure(.endpointNotFound))
+        #expect({ if case .failure(.endpointNotFound) = result { return true }; return false }())
         #expect(
             failureMessage(result)
                 == "Shelfarr responded, but the API endpoint was not found. Check the server URL and Shelfarr version."
@@ -251,7 +251,7 @@ struct ShelfarrClientTests {
             body: "",
         )
         let result = await client.testConnection()
-        #expect(result == .failure(.insecureRedirect))
+        #expect({ if case .failure(.insecureRedirect) = result { return true }; return false }())
         #expect(
             failureMessage(result)
                 == "Shelfarr redirected this HTTPS request to an insecure HTTP URL. Check the Shelfarr/Cloudflare proxy configuration."
@@ -261,7 +261,7 @@ struct ShelfarrClientTests {
     @Test func postedRequestContainsWorkIDAndBearerToken() async throws {
         let client = try stubbedClient(status: 201, body: #"{"requests":[{"id":1}]}"#)
         let result = await client.createRequest(for: idea(id: "ol:/works/OL893415W"), mediums: [.ebook])
-        #expect(result == .success(()))
+        #expect({ if case .success = result { return true }; return false }())
         let request = try #require(ShelfarrStubURLProtocol.requests.first)
         #expect(request.httpMethod == "POST")
         #expect(request.url?.path == "/api/v1/requests")
@@ -277,14 +277,14 @@ struct ShelfarrClientTests {
             body: #"{"errors":["Missing required information"]}"#,
         )
         let result = await client.createRequest(for: idea(id: "OL1W"), mediums: [.audiobook])
-        #expect(result == .failure(.serverError(statusCode: 422, message: "Missing required information")))
+        #expect({ if case .failure(.serverError(statusCode: 422, message: "Missing required information")) = result { return true }; return false }())
         #expect(failureMessage(result) == "Shelfarr rejected the request: Missing required information")
     }
 
     @Test func missingWorkIDDoesNotSendARequest() async throws {
         let client = try stubbedClient(status: 500, body: "")
         let result = await client.createRequest(for: idea(id: "title:dune"), mediums: [.ebook])
-        #expect(result == .failure(.invalidWorkID))
+        #expect({ if case .failure(.invalidWorkID) = result { return true }; return false }())
         #expect(ShelfarrStubURLProtocol.requests.isEmpty)
     }
 

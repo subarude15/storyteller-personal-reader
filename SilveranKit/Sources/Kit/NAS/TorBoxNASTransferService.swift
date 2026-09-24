@@ -14,6 +14,8 @@ public actor TorBoxTransferGate {
     public static let shared = TorBoxTransferGate()
     private var inFlight = Set<String>()
 
+    public init() {}
+
     public func begin(_ jobID: String) -> Bool {
         if inFlight.contains(jobID) { return false }
         inFlight.insert(jobID)
@@ -64,8 +66,14 @@ public struct TorBoxNASTransferService: Sendable {
             return job
         }
         guard await gate.begin(job.id) else { return job }
-        defer { Task { await gate.end(job.id) } }
+        // Await end before returning so a follow-up transfer/reconcile on the same
+        // job id is not rejected by a still-held in-flight gate (fire-and-forget Task races).
+        let result = await transferUnderGate(job: job, force: force)
+        await gate.end(job.id)
+        return result
+    }
 
+    private func transferUnderGate(job: ManualDownloadJob, force: Bool) async -> ManualDownloadJob {
         let context = await environment.load()
         guard context.settings.isSynologyConfigured else {
             return await fail(job, error: .destinationMissing)
@@ -435,7 +443,15 @@ public struct TorBoxNASTransferService: Sendable {
         context: NASHandoffContext,
     ) async -> ManualDownloadJob {
         guard await gate.begin(job.id) else { return job }
-        defer { Task { await gate.end(job.id) } }
+        let result = await pollInFlightUnderGate(job, context: context)
+        await gate.end(job.id)
+        return result
+    }
+
+    private func pollInFlightUnderGate(
+        _ job: ManualDownloadJob,
+        context: NASHandoffContext,
+    ) async -> ManualDownloadJob {
         guard context.settings.isSynologyConfigured else {
             return await fail(job, error: .destinationMissing)
         }
