@@ -139,7 +139,7 @@ extension Array {
     /// Foundation-only stand-in for SwiftUI's `move(fromOffsets:toOffset:)`.
     /// Preserves relative order of moved elements; `destination` is an insertion
     /// index in the pre-move array (`0...count`).
-    mutating func rearrange(fromOffsets offsets: IndexSet, toOffset destination: Int) {
+    public mutating func rearrange(fromOffsets offsets: IndexSet, toOffset destination: Int) {
         guard !offsets.isEmpty else { return }
         let sorted = offsets.sorted()
         let moved = sorted.map { self[$0] }

@@ -526,8 +526,9 @@ struct RequestAutomaticFallbackTests {
     }
 
     @Test func automaticSubmissionRecordsFallbackKind() {
-        let defaults = UserDefaults(suiteName: "auto-fallback-kind-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "auto-fallback-kind-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let work = CanonicalBookWork(
             workID: "/works/OLDune",
@@ -566,8 +567,9 @@ struct RequestAutomaticFallbackTests {
     }
 
     @Test func manualFallbackStillRecordsManualKind() {
-        let defaults = UserDefaults(suiteName: "manual-fallback-kind-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "manual-fallback-kind-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let work = CanonicalBookWork(
             workID: "/works/OLManual",
@@ -611,8 +613,9 @@ struct RequestAutomaticFallbackTests {
     // MARK: - Concurrency
 
     @Test func concurrentEvaluationsSubmitOnce() async {
-        let defaults = UserDefaults(suiteName: "auto-fallback-race-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "auto-fallback-race-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let source = attentionItem(id: "ll-race", provider: .lazyLibrarian, age: 0)
         store.upsert(source)

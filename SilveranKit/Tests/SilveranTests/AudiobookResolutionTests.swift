@@ -162,7 +162,7 @@ struct AudiobookResolutionTests {
     @Test func identifierCanConfirmWhenTitleDiffers() {
         let matched = AudiobookMatcher.match(
             work(title: "Pride & Prejudice", isbn: "978-0-14-143951-8"),
-            item: item(title: "A different catalog label", isbn: "9780141439518", authors: ["Nope"]),
+            item: item(title: "A different catalog label", authors: ["Nope"], isbn: "9780141439518"),
         )
         #expect(matched?.match.confidence == .exact)
     }

@@ -14,6 +14,8 @@ public actor TorBoxTransferGate {
     public static let shared = TorBoxTransferGate()
     private var inFlight = Set<String>()
 
+    public init() {}
+
     public func begin(_ jobID: String) -> Bool {
         if inFlight.contains(jobID) { return false }
         inFlight.insert(jobID)

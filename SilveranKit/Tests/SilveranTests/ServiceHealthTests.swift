@@ -245,8 +245,9 @@ struct ServiceHealthTests {
     @Test func storytellerStatsSyncAgeAloneDoesNotMakeUnhealthy() async {
         // There is no persisted Storyteller library-sync timestamp today. Stats sync
         // age must not be treated as library sync or produce Needs Attention.
-        let defaults = UserDefaults(suiteName: "storyteller-health-stats-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "storyteller-health-stats-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         defaults.set(
             Date().addingTimeInterval(-24 * 3600),
             forKey: InkampStatsSyncDefaults.lastSuccessfulSyncAtKey,
@@ -365,8 +366,9 @@ struct ServiceHealthTests {
     }
 
     @Test func cacheRoundTripOmitsSecrets() throws {
-        let defaults = UserDefaults(suiteName: "service-health-tests-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "service-health-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let cache = ServiceHealthCache(defaults: defaults)
         let result = ServiceHealthResult(
             serviceID: .shelfarr,

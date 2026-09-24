@@ -66,8 +66,8 @@ struct TorBoxNASTransferTests {
         let settings = NASDownloadSettingsSnapshot(
             torrentClient: .torbox,
             torboxEnabled: true,
-            ebookFolder: "/volume1/media/books/books",
             audiobookFolder: "/volume1/media/books/audiobooks",
+            ebookFolder: "/volume1/media/books/books",
         )
         #expect(settings.folder(for: .ebook) == "/volume1/media/books/books")
         #expect(settings.folder(for: .audiobook) == "/volume1/media/books/audiobooks")
@@ -811,8 +811,8 @@ private func env(auto: Bool) -> StaticNASHandoffEnvironment {
                 torboxAutoTransferToNAS: auto,
                 synologyBaseURL: "http://nas.example:5000",
                 synologyUsername: "josh",
-                ebookFolder: "/volume1/media/books/books",
                 audiobookFolder: "/volume1/media/books/audiobooks",
+                ebookFolder: "/volume1/media/books/books",
             ),
             credentials: NASBackendCredentials(
                 synologyPassword: "pw",

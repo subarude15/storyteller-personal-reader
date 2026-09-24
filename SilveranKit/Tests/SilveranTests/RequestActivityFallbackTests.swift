@@ -238,8 +238,9 @@ struct RequestActivityFallbackTests {
     }
 
     @Test func separateProviderRowsStaySeparate() {
-        let defaults = UserDefaults(suiteName: "fallback-rows-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "fallback-rows-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let work = duneWork(id: "/works/OLDune")
         store.recordSubmission(
@@ -270,8 +271,9 @@ struct RequestActivityFallbackTests {
     }
 
     @Test func laterUpdateDoesNotReplaceFallbackLink() {
-        let defaults = UserDefaults(suiteName: "fallback-link-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "fallback-link-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let work = duneWork(id: "/works/OLLink")
         store.recordSubmission(

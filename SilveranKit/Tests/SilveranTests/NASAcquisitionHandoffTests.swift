@@ -383,6 +383,7 @@ struct NASAcquisitionHandoffTests {
         let download = FileDownloadCapture(contents: Data("nope".utf8))
         let upload = UploadCapture()
         let deluge = DelugeCapture()
+        let jobs = RecordingManualDownloadJobStore()
         var settings = synologySettings()
         settings.torrentClient = .deluge
         settings.delugeBaseURL = "http://deluge.example:8112"
@@ -402,6 +403,7 @@ struct NASAcquisitionHandoffTests {
             deluge: DelugeWebClient(transport: deluge),
             downloader: ManualFileDownloader(transport: download),
             uploaderFactory: { _ in upload },
+            jobs: jobs,
         )
         _ = await handler.handle(
             ManualAcquisitionCandidate(

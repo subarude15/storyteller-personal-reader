@@ -25,8 +25,9 @@ struct RequestActivityBookIDRecoveryTests {
             return RecoveryScript.http("OK")
         }
 
-        let defaults = UserDefaults(suiteName: "ll-recovery-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "ll-recovery-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let seed = legacyItem(
             title: "Pride and Prejudice",
@@ -78,8 +79,9 @@ struct RequestActivityBookIDRecoveryTests {
             return RecoveryScript.http("OK")
         }
 
-        let defaults = UserDefaults(suiteName: "ll-recovery-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "ll-recovery-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let seed = legacyItem(
             title: "The Reddening",
@@ -126,8 +128,9 @@ struct RequestActivityBookIDRecoveryTests {
             return RecoveryScript.http("OK")
         }
 
-        let defaults = UserDefaults(suiteName: "ll-recovery-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "ll-recovery-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let seed = legacyItem(
             title: "Pride and Prejudice",
@@ -177,8 +180,9 @@ struct RequestActivityBookIDRecoveryTests {
             return RecoveryScript.http("OK")
         }
 
-        let defaults = UserDefaults(suiteName: "ll-recovery-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "ll-recovery-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let seed = legacyItem(
             title: "Emma",
@@ -216,8 +220,9 @@ struct RequestActivityBookIDRecoveryTests {
         let checkedAt = wantedAt.addingTimeInterval(24 * 3600)
         let script = noMatchScript()
 
-        let defaults = UserDefaults(suiteName: "ll-recovery-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "ll-recovery-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let seed = legacyItem(
             title: "Pride and Prejudice",
@@ -273,8 +278,9 @@ struct RequestActivityBookIDRecoveryTests {
             return RecoveryScript.http("OK")
         }
 
-        let defaults = UserDefaults(suiteName: "ll-recovery-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "ll-recovery-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let seed = legacyItem(
             title: "Emma",
@@ -308,8 +314,9 @@ struct RequestActivityBookIDRecoveryTests {
         let checkedAt = enteredAt.addingTimeInterval(5 * 3600)
         let script = noMatchScript()
 
-        let defaults = UserDefaults(suiteName: "ll-recovery-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "ll-recovery-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let seed = legacyItem(
             title: "Pride and Prejudice",
@@ -344,8 +351,9 @@ struct RequestActivityBookIDRecoveryTests {
         let checkedAt = wantedAt.addingTimeInterval(24 * 3600)
         let script = noMatchScript()
 
-        let defaults = UserDefaults(suiteName: "ll-recovery-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "ll-recovery-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         var seed = legacyItem(
             title: "Pride and Prejudice",
@@ -394,8 +402,9 @@ struct RequestActivityBookIDRecoveryTests {
             return RecoveryScript.http("OK")
         }
 
-        let defaults = UserDefaults(suiteName: "ll-recovery-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "ll-recovery-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let seed = legacyItem(
             title: "Dune",
@@ -490,8 +499,9 @@ struct RequestActivityBookIDRecoveryTests {
 
     @Test func legacyRowRecoversWithoutMigration() async {
         // Existing Request Activity row with missing providerBookID (pre-persistence era).
-        let defaults = UserDefaults(suiteName: "ll-recovery-\(UUID().uuidString)")!
-        defer { defaults.removePersistentDomain(forName: defaults.suiteName!) }
+        let suiteName = "ll-recovery-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = RequestActivityStore(defaults: defaults)
         let seed = legacyItem(
             id: "legacy-1",
