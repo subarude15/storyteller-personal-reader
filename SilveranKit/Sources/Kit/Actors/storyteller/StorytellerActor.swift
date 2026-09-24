@@ -285,16 +285,19 @@ public actor StorytellerActor {
     }
 
     private func canAttemptReconnect() -> Bool {
-        guard networkAvailable else { return false }
-        guard let cooldownUntil = reconnectCooldownUntil else { return true }
-        return cooldownUntil <= Date()
+        StorytellerReconnectPolicy.canAttempt(
+            networkAvailable: networkAvailable,
+            cooldownUntil: reconnectCooldownUntil,
+        )
     }
 
     private func scheduleReconnectBackoff() {
-        reconnectFailureCount += 1
-        let delay = min(60.0, Double(reconnectFailureCount) * 5.0)
-        reconnectCooldownUntil = Date().addingTimeInterval(delay)
-        debugLog("[StorytellerActor] attemptReconnect: backoff \(Int(delay))s")
+        let next = StorytellerReconnectPolicy.nextBackoffState(
+            currentFailureCount: reconnectFailureCount,
+        )
+        reconnectFailureCount = next.failureCount
+        reconnectCooldownUntil = next.cooldownUntil
+        debugLog("[StorytellerActor] attemptReconnect: backoff \(Int(next.delay))s")
     }
 
     private func resetReconnectBackoff() {
