@@ -975,13 +975,7 @@ public final class MediaViewModel {
     }
 
     private func metadataMatchesKind(_ metadata: BookMetadata, kind: MediaKind) -> Bool {
-        switch kind {
-            case .ebook:
-                return metadata.hasAvailableEbook || metadata.hasAvailableReadaloud
-            case .audiobook:
-                return !metadata.hasAvailableEbook && !metadata.hasAvailableReadaloud
-                    && metadata.hasAvailableAudiobook
-        }
+        MediaAvailabilityPresentation.matchesKind(metadata, kind: kind)
     }
 
     private static func creatorGroupingKey(_ creator: BookCreator, unknownKey: String) -> String {
@@ -1006,10 +1000,13 @@ public final class MediaViewModel {
         switch narrationFilter {
             case .both:
                 break
-            case .withAudio:
-                base = base.filter(\.hasAnyAudiobookAsset)
-            case .withoutAudio:
-                base = base.filter { !$0.hasAnyAudiobookAsset }
+            case .withAudio, .withoutAudio:
+                base = base.filter {
+                    MediaAvailabilityPresentation.matchesItemsNarrationFilter(
+                        $0,
+                        filter: narrationFilter,
+                    )
+                }
         }
         if let tagFilter, !tagFilter.isEmpty {
             let target = tagFilter.lowercased()
@@ -1672,60 +1669,6 @@ public final class MediaViewModel {
         return groups
     }
     #endif
-
-    private func shouldIncludeAudiobookOnlyItems(for filter: NarrationFilter) -> Bool {
-        switch filter {
-            case .both, .withAudio:
-                return true
-            case .withoutAudio:
-                return false
-        }
-    }
-
-    private func matchesNarrationFilter(_ item: BookMetadata, filter: NarrationFilter) -> Bool {
-        switch filter {
-            case .both:
-                return true
-            case .withAudio:
-                return item.hasAvailableAudiobook || item.hasAvailableReadaloud
-            case .withoutAudio:
-                return item.isEbookOnly
-        }
-    }
-
-    private func matchesLocationFilter(_ item: BookMetadata, filter: LocationFilter) -> Bool {
-        switch filter {
-            case .all:
-                return true
-            case .downloaded:
-                let hasDownload =
-                    isCategoryDownloaded(.ebook, for: item)
-                    || isCategoryDownloaded(.audio, for: item)
-                    || isCategoryDownloaded(.synced, for: item)
-                return hasDownload && !isLocalStandaloneBook(item.id)
-            case .serverOnly:
-                let hasDownload =
-                    isCategoryDownloaded(.ebook, for: item)
-                    || isCategoryDownloaded(.audio, for: item)
-                    || isCategoryDownloaded(.synced, for: item)
-                return !hasDownload && !isLocalStandaloneBook(item.id)
-            case .localFiles:
-                return isLocalStandaloneBook(item.id)
-        }
-    }
-
-    private func mergeItems(_ primary: [BookMetadata], with supplemental: [BookMetadata])
-        -> [BookMetadata]
-    {
-        guard !supplemental.isEmpty else { return primary }
-        var result = primary
-        var seen = Set(result.map(\.id))
-        for item in supplemental where !seen.contains(item.id) {
-            seen.insert(item.id)
-            result.append(item)
-        }
-        return result
-    }
 
     public func downloadStatus(for item: BookMetadata) -> DownloadProgressState? {
         downloadStatuses[item.id]
