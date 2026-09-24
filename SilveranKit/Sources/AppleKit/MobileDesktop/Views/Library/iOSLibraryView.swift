@@ -770,6 +770,7 @@ struct MoreMenuView: View {
                         .iOSLibraryToolbar(
                             showSettings: $showSettings,
                             showOfflineSheet: $showOfflineSheet,
+                            includeDownloadsShortcut: true,
                         )
                         .searchable(
                             text: $searchText,
@@ -835,6 +836,7 @@ struct MoreMenuView: View {
                         .iOSLibraryToolbar(
                             showSettings: $showSettings,
                             showOfflineSheet: $showOfflineSheet,
+                            includeDownloadsShortcut: true,
                         )
                         .searchable(
                             text: $searchText,
@@ -846,18 +848,21 @@ struct MoreMenuView: View {
                         .iOSLibraryToolbar(
                             showSettings: $showSettings,
                             showOfflineSheet: $showOfflineSheet,
+                            includeDownloadsShortcut: true,
                         )
                 case .manualDownloads:
                     DownloadsView()
                         .iOSLibraryToolbar(
                             showSettings: $showSettings,
                             showOfflineSheet: $showOfflineSheet,
+                            includeDownloadsShortcut: true,
                         )
                 case .addBook:
                     UploadNewBookView()
                         .iOSLibraryToolbar(
                             showSettings: $showSettings,
                             showOfflineSheet: $showOfflineSheet,
+                            includeDownloadsShortcut: true,
                         )
                 case .createReadaloud:
                     ReadaloudGeneratorView()
@@ -867,6 +872,7 @@ struct MoreMenuView: View {
                         .iOSLibraryToolbar(
                             showSettings: $showSettings,
                             showOfflineSheet: $showOfflineSheet,
+                            includeDownloadsShortcut: true,
                         )
             }
         }
@@ -1439,11 +1445,30 @@ extension OfflineStatusSheet.ErrorType {
     }
 }
 
+extension View {
+    func iOSLibraryToolbar(
+        showSettings: Binding<Bool>,
+        showOfflineSheet: Binding<Bool>,
+        includeDownloadsAndSettingsShortcuts: Bool = true,
+        includeDownloadsShortcut: Bool = false,
+    ) -> some View {
+        modifier(
+            IOSLibraryToolbarModifier(
+                showSettings: showSettings,
+                showOfflineSheet: showOfflineSheet,
+                includeDownloadsAndSettingsShortcuts: includeDownloadsAndSettingsShortcuts,
+                includeDownloadsShortcut: includeDownloadsShortcut,
+            )
+        )
+    }
+}
+
 struct IOSLibraryToolbarModifier: ViewModifier {
     @Binding var showSettings: Bool
     @Binding var showOfflineSheet: Bool
     /// When false (ink+amp Home/Library/Shelf), Downloads and Settings live under More.
     var includeDownloadsAndSettingsShortcuts: Bool = true
+    var includeDownloadsShortcut: Bool = false
     @Environment(MediaViewModel.self) private var mediaViewModel
 
     private var hasConnectionError: Bool {
@@ -1469,7 +1494,9 @@ struct IOSLibraryToolbarModifier: ViewModifier {
                                 }
                             }
                             if includeDownloadsAndSettingsShortcuts {
-                                DownloadsToolbarButton()
+                                if includeDownloadsShortcut {
+                                    DownloadsToolbarButton()
+                                }
                                 Button {
                                     showSettings = true
                                 } label: {
@@ -1480,22 +1507,6 @@ struct IOSLibraryToolbarModifier: ViewModifier {
                     }
                 }
             }
-    }
-}
-
-extension View {
-    func iOSLibraryToolbar(
-        showSettings: Binding<Bool>,
-        showOfflineSheet: Binding<Bool>,
-        includeDownloadsAndSettingsShortcuts: Bool = true,
-    ) -> some View {
-        modifier(
-            IOSLibraryToolbarModifier(
-                showSettings: showSettings,
-                showOfflineSheet: showOfflineSheet,
-                includeDownloadsAndSettingsShortcuts: includeDownloadsAndSettingsShortcuts,
-            )
-        )
     }
 }
 
