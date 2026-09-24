@@ -18,6 +18,20 @@ env:
   SILVERAN_IOS_DESTINATION: "generic/platform=iOS Simulator"
 
 jobs:
+  test:
+    name: Swift Tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app || sudo xcode-select -s /Applications/Xcode_26.app || sudo xcode-select -s /Applications/Xcode.app || true
+
+      - name: Run Swift package tests
+        run: ./scripts/test
+
   build:
     name: iOS Simulator Build
     runs-on: macos-15
