@@ -16,7 +16,9 @@ import FoundationNetworking
 /// - retry / back off
 /// - mutate connection state
 /// - own TUS / upload sessions / download delegates
-final class StorytellerHTTPTransport {
+///
+/// `Sendable` via immutable `URLSession` reference only — no `@unchecked Sendable`.
+struct StorytellerHTTPTransport: Sendable {
     enum TransportError: Error, Equatable, Sendable {
         case nonHTTPResponse
     }
