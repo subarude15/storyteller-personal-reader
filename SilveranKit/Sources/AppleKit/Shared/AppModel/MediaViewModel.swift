@@ -974,16 +974,6 @@ public final class MediaViewModel {
         pendingCoverRequests = pendingCoverRequests.filter { validIDs.contains($0.key.id) }
     }
 
-    private func metadataMatchesKind(_ metadata: BookMetadata, kind: MediaKind) -> Bool {
-        switch kind {
-            case .ebook:
-                return metadata.hasAvailableEbook || metadata.hasAvailableReadaloud
-            case .audiobook:
-                return !metadata.hasAvailableEbook && !metadata.hasAvailableReadaloud
-                    && metadata.hasAvailableAudiobook
-        }
-    }
-
     private static func creatorGroupingKey(_ creator: BookCreator, unknownKey: String) -> String {
         let name = (creator.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !name.isEmpty {
@@ -1002,14 +992,19 @@ public final class MediaViewModel {
         -> [BookMetadata]
     {
         let started = CFAbsoluteTimeGetCurrent()
-        var base = library.bookMetaData.filter { metadataMatchesKind($0, kind: kind) }
+        var base = library.bookMetaData.filter {
+            MediaAvailabilityPresentation.matchesKind($0, kind: kind)
+        }
         switch narrationFilter {
             case .both:
                 break
-            case .withAudio:
-                base = base.filter(\.hasAnyAudiobookAsset)
-            case .withoutAudio:
-                base = base.filter { !$0.hasAnyAudiobookAsset }
+            case .withAudio, .withoutAudio:
+                base = base.filter {
+                    MediaAvailabilityPresentation.matchesItemsNarrationFilter(
+                        $0,
+                        filter: narrationFilter,
+                    )
+                }
         }
         if let tagFilter, !tagFilter.isEmpty {
             let target = tagFilter.lowercased()
@@ -1672,60 +1667,6 @@ public final class MediaViewModel {
         return groups
     }
     #endif
-
-    private func shouldIncludeAudiobookOnlyItems(for filter: NarrationFilter) -> Bool {
-        switch filter {
-            case .both, .withAudio:
-                return true
-            case .withoutAudio:
-                return false
-        }
-    }
-
-    private func matchesNarrationFilter(_ item: BookMetadata, filter: NarrationFilter) -> Bool {
-        switch filter {
-            case .both:
-                return true
-            case .withAudio:
-                return item.hasAvailableAudiobook || item.hasAvailableReadaloud
-            case .withoutAudio:
-                return item.isEbookOnly
-        }
-    }
-
-    private func matchesLocationFilter(_ item: BookMetadata, filter: LocationFilter) -> Bool {
-        switch filter {
-            case .all:
-                return true
-            case .downloaded:
-                let hasDownload =
-                    isCategoryDownloaded(.ebook, for: item)
-                    || isCategoryDownloaded(.audio, for: item)
-                    || isCategoryDownloaded(.synced, for: item)
-                return hasDownload && !isLocalStandaloneBook(item.id)
-            case .serverOnly:
-                let hasDownload =
-                    isCategoryDownloaded(.ebook, for: item)
-                    || isCategoryDownloaded(.audio, for: item)
-                    || isCategoryDownloaded(.synced, for: item)
-                return !hasDownload && !isLocalStandaloneBook(item.id)
-            case .localFiles:
-                return isLocalStandaloneBook(item.id)
-        }
-    }
-
-    private func mergeItems(_ primary: [BookMetadata], with supplemental: [BookMetadata])
-        -> [BookMetadata]
-    {
-        guard !supplemental.isEmpty else { return primary }
-        var result = primary
-        var seen = Set(result.map(\.id))
-        for item in supplemental where !seen.contains(item.id) {
-            seen.insert(item.id)
-            result.append(item)
-        }
-        return result
-    }
 
     public func downloadStatus(for item: BookMetadata) -> DownloadProgressState? {
         downloadStatuses[item.id]

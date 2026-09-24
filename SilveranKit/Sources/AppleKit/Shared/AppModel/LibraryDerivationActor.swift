@@ -754,7 +754,7 @@ public actor LibraryDerivationActor {
         for kind: MediaKind,
         contextFilters: MediaGridContextFilters,
     ) -> [BookMetadata] {
-        let base = metadata.filter { metadataMatchesKind($0, kind: kind) }
+        let base = metadata.filter { MediaAvailabilityPresentation.matchesKind($0, kind: kind) }
         return applyContextFilters(contextFilters, to: base)
     }
 
@@ -793,14 +793,7 @@ public actor LibraryDerivationActor {
     private func merge(_ primary: [BookMetadata], with supplemental: [BookMetadata])
         -> [BookMetadata]
     {
-        guard !supplemental.isEmpty else { return primary }
-        var result = primary
-        var seen = Set(result.map(\.id))
-        for item in supplemental where !seen.contains(item.id) {
-            seen.insert(item.id)
-            result.append(item)
-        }
-        return result
+        MediaAvailabilityPresentation.mergeItems(primary, with: supplemental)
     }
 
     private func uniqueItems(_ items: [BookMetadata]) -> [BookMetadata] {
@@ -1115,16 +1108,6 @@ public actor LibraryDerivationActor {
         return unique.values.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
-    private func metadataMatchesKind(_ metadata: BookMetadata, kind: MediaKind) -> Bool {
-        switch kind {
-            case .ebook:
-                return metadata.hasAvailableEbook || metadata.hasAvailableReadaloud
-            case .audiobook:
-                return !metadata.hasAvailableEbook && !metadata.hasAvailableReadaloud
-                    && metadata.hasAvailableAudiobook
-        }
-    }
-
     private struct Context {
         let input: LibraryDerivationInput
         var seriesCountCache: [MediaKind: Int] = [:]
@@ -1207,7 +1190,7 @@ public actor LibraryDerivationActor {
                     return booksForShelf(shelf).count
                 case .downloaded:
                     return input.metadata.filter {
-                        metadataMatchesKind($0, kind: .ebook)
+                        MediaAvailabilityPresentation.matchesKind($0, kind: .ebook)
                             && matchesLocationFilter($0, .downloaded)
                     }.count
             }
@@ -1238,16 +1221,20 @@ public actor LibraryDerivationActor {
                 tagFilter: config.tagFilter,
             )
 
-            if shouldIncludeAudiobookOnlyItems(for: config.narrationFilter) {
+            if MediaAvailabilityPresentation.shouldIncludeAudiobookOnlyItems(
+                for: config.narrationFilter
+            ) {
                 let audioOnlyItems = items(
                     for: .audiobook,
                     narrationFilter: .both,
                     tagFilter: config.tagFilter,
                 )
-                base = mergeItems(base, with: audioOnlyItems)
+                base = MediaAvailabilityPresentation.mergeItems(base, with: audioOnlyItems)
             }
 
-            base = base.filter { matchesNarrationFilter($0, config.narrationFilter) }
+            base = base.filter {
+                MediaAvailabilityPresentation.matchesNarrationFilter($0, filter: config.narrationFilter)
+            }
 
             if let series = config.seriesFilter {
                 base = base.filter { $0.matchesSeries(series) }
@@ -1283,14 +1270,19 @@ public actor LibraryDerivationActor {
             narrationFilter: NarrationFilter,
             tagFilter: String?,
         ) -> [BookMetadata] {
-            var base = input.metadata.filter { metadataMatchesKind($0, kind: kind) }
+            var base = input.metadata.filter {
+                MediaAvailabilityPresentation.matchesKind($0, kind: kind)
+            }
             switch narrationFilter {
                 case .both:
                     break
-                case .withAudio:
-                    base = base.filter(\.hasAnyAudiobookAsset)
-                case .withoutAudio:
-                    base = base.filter { !$0.hasAnyAudiobookAsset }
+                case .withAudio, .withoutAudio:
+                    base = base.filter {
+                        MediaAvailabilityPresentation.matchesItemsNarrationFilter(
+                            $0,
+                            filter: narrationFilter,
+                        )
+                    }
             }
             if let tagFilter, !tagFilter.isEmpty {
                 let target = tagFilter.lowercased()
@@ -1299,38 +1291,6 @@ public actor LibraryDerivationActor {
                 }
             }
             return base
-        }
-
-        private func metadataMatchesKind(_ metadata: BookMetadata, kind: MediaKind) -> Bool {
-            switch kind {
-                case .ebook:
-                    return metadata.hasAvailableEbook || metadata.hasAvailableReadaloud
-                case .audiobook:
-                    return !metadata.hasAvailableEbook && !metadata.hasAvailableReadaloud
-                        && metadata.hasAvailableAudiobook
-            }
-        }
-
-        private func shouldIncludeAudiobookOnlyItems(for filter: NarrationFilter) -> Bool {
-            switch filter {
-                case .both, .withAudio:
-                    return true
-                case .withoutAudio:
-                    return false
-            }
-        }
-
-        private func matchesNarrationFilter(_ item: BookMetadata, _ filter: NarrationFilter)
-            -> Bool
-        {
-            switch filter {
-                case .both:
-                    return true
-                case .withAudio:
-                    return item.hasAvailableAudiobook || item.hasAvailableReadaloud
-                case .withoutAudio:
-                    return item.isEbookOnly
-            }
         }
 
         private func matchesLocationFilter(_ item: BookMetadata, _ filter: LocationFilter) -> Bool {
@@ -1353,22 +1313,9 @@ public actor LibraryDerivationActor {
             return paths.ebookPath != nil || paths.audioPath != nil || paths.syncedPath != nil
         }
 
-        private func mergeItems(_ primary: [BookMetadata], with supplemental: [BookMetadata])
-            -> [BookMetadata]
-        {
-            guard !supplemental.isEmpty else { return primary }
-            var result = primary
-            var seen = Set(result.map(\.id))
-            for item in supplemental where !seen.contains(item.id) {
-                seen.insert(item.id)
-                result.append(item)
-            }
-            return result
-        }
-
         private func seriesGroupCount(_ kind: MediaKind) -> Int {
             var keys = Set<String>()
-            for book in input.metadata where metadataMatchesKind(book, kind: kind) {
+            for book in input.metadata where MediaAvailabilityPresentation.matchesKind(book, kind: kind) {
                 if let seriesList = book.series, !seriesList.isEmpty {
                     for series in seriesList {
                         keys.insert(normalizedCategoryKey(series.name))
@@ -1382,7 +1329,7 @@ public actor LibraryDerivationActor {
 
         private func authorGroupCount(_ kind: MediaKind) -> Int {
             var keys = Set<String>()
-            for book in input.metadata where metadataMatchesKind(book, kind: kind) {
+            for book in input.metadata where MediaAvailabilityPresentation.matchesKind(book, kind: kind) {
                 if let authors = book.authors, !authors.isEmpty {
                     for author in authors {
                         keys.insert(creatorGroupingKey(author, unknownKey: "__unknown__"))
@@ -1396,7 +1343,7 @@ public actor LibraryDerivationActor {
 
         private func collectionGroupCount(_ kind: MediaKind) -> Int {
             var keys = Set<String>()
-            for book in input.metadata where metadataMatchesKind(book, kind: kind) {
+            for book in input.metadata where MediaAvailabilityPresentation.matchesKind(book, kind: kind) {
                 if let collections = book.collections {
                     for collection in collections {
                         keys.insert(normalizedCategoryKey(collection.name))
@@ -1408,7 +1355,7 @@ public actor LibraryDerivationActor {
 
         private func narratorGroupCount(_ kind: MediaKind) -> Int {
             var keys = Set<String>()
-            for book in input.metadata where metadataMatchesKind(book, kind: kind) {
+            for book in input.metadata where MediaAvailabilityPresentation.matchesKind(book, kind: kind) {
                 if let narrators = book.narrators, !narrators.isEmpty {
                     for narrator in narrators {
                         keys.insert(creatorGroupingKey(narrator, unknownKey: "__unknown__"))
@@ -1422,7 +1369,7 @@ public actor LibraryDerivationActor {
 
         private func translatorGroupCount(_ kind: MediaKind) -> Int {
             var keys = Set<String>()
-            for book in input.metadata where metadataMatchesKind(book, kind: kind) {
+            for book in input.metadata where MediaAvailabilityPresentation.matchesKind(book, kind: kind) {
                 let translators = (book.creators ?? []).filter { $0.role == "trl" }
                 if translators.isEmpty {
                     keys.insert("__no_translator__")
@@ -1438,14 +1385,14 @@ public actor LibraryDerivationActor {
         private func publicationYearGroupCount(_ kind: MediaKind) -> Int {
             Set(
                 input.metadata
-                    .filter { metadataMatchesKind($0, kind: kind) }
+                    .filter { MediaAvailabilityPresentation.matchesKind($0, kind: kind) }
                     .map { BookMetadata.publicationYear(from: $0.publicationDate) ?? "Unknown" }
             ).count
         }
 
         private func tagGroupCount(_ kind: MediaKind) -> Int {
             var keys = Set<String>()
-            for book in input.metadata where metadataMatchesKind(book, kind: kind) {
+            for book in input.metadata where MediaAvailabilityPresentation.matchesKind(book, kind: kind) {
                 for tagName in book.tagNames {
                     keys.insert(tagName.lowercased())
                 }
@@ -1456,7 +1403,7 @@ public actor LibraryDerivationActor {
         private func ratingGroupCount(_ kind: MediaKind) -> Int {
             Set(
                 input.metadata
-                    .filter { metadataMatchesKind($0, kind: kind) }
+                    .filter { MediaAvailabilityPresentation.matchesKind($0, kind: kind) }
                     .map { book -> String in
                         if let rating = book.rating, rating > 0 {
                             return "\(Int(rating.rounded()))"
@@ -1469,7 +1416,7 @@ public actor LibraryDerivationActor {
         private func statusGroupCount(_ kind: MediaKind) -> Int {
             Set(
                 input.metadata
-                    .filter { metadataMatchesKind($0, kind: kind) }
+                    .filter { MediaAvailabilityPresentation.matchesKind($0, kind: kind) }
                     .map { $0.status?.name ?? "Unknown" }
             ).count
         }
@@ -1477,7 +1424,7 @@ public actor LibraryDerivationActor {
         private func sourceGroupCount(_ kind: MediaKind) -> Int {
             Set(
                 input.metadata
-                    .filter { metadataMatchesKind($0, kind: kind) }
+                    .filter { MediaAvailabilityPresentation.matchesKind($0, kind: kind) }
                     .map { book -> String in
                         book.source ?? "Unknown"
                     }
