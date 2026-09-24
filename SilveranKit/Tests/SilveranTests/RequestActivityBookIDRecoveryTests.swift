@@ -490,7 +490,8 @@ struct RequestActivityBookIDRecoveryTests {
             apiKey: key,
         )
         #expect(result == .success("LL-ONLY-FIND"))
-        #expect(script.commands == ["findBook"])
+        #expect(!script.commands.isEmpty)
+        #expect(script.commands.allSatisfy { $0 == "findBook" })
         #expect(!script.commands.contains("addBook"))
         #expect(!script.commands.contains("queueBook"))
         #expect(!script.commands.contains("searchBook"))

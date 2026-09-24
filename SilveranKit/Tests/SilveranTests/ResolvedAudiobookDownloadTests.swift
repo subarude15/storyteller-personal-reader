@@ -176,6 +176,8 @@ struct ResolvedAudiobookDownloadTests {
                 fetcher: HangingFetcher(),
             )
             for try await _ in stream {}
+            // Stream may finish without throwing on cancel; surface CancellationError explicitly.
+            try Task.checkCancellation()
         }
         try await Task.sleep(for: .milliseconds(50))
         task.cancel()

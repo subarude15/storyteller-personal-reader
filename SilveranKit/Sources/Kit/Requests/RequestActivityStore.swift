@@ -302,7 +302,9 @@ public final class RequestActivityStore: @unchecked Sendable {
     }
 
     private func notifyDidChange() {
-        NotificationCenter.default.post(name: .requestActivityStoreDidChange, object: nil)
+        // Post with `object: self` so observers can filter to one store; `object: nil`
+        // observers still receive every post.
+        NotificationCenter.default.post(name: .requestActivityStoreDidChange, object: self)
     }
 
     public func librarySummary(now: Date = Date()) -> RequestActivityLibrarySummary {

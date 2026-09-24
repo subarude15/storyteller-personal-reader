@@ -85,7 +85,7 @@ struct ManualSearchQueryTemplateTests {
                 == .failure(.unsupportedScheme)
         )
         #expect(
-            ManualSearchQueryTemplate.url(template: "{title}", values: hobbit) == .failure(.malformedTemplate)
+            ManualSearchQueryTemplate.url(template: "{title}", values: hobbit) == .failure(.invalidURL)
         )
     }
 

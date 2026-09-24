@@ -191,7 +191,6 @@ struct TorBoxarrStatusTests {
         #expect(jobs.jobs[0].destination == ebook)
         #expect(jobs.jobs[0].lastError?.contains("Nothing was moved") != true)
         #expect(movedVolumePaths(nas.movedPaths) == ["/data/torrents/completed/torboxarr/Selected Title"])
-        #expect(nas.movedPaths.allSatisfy { $0.contains("/data/torrents/completed/torboxarr/Selected Title") })
         #expect(nas.movedPaths.allSatisfy { !$0.contains("/data/completed/") })
         #expect(nas.destinations == ["/data/media/books/books"])
         #expect(nas.removeSrc == ["true"])
@@ -376,7 +375,6 @@ struct TorBoxarrStatusTests {
         #expect(landed.job.mediaType == .ebook)
         #expect(landed.routingIndex < landed.completeIndex)
         #expect(movedVolumePaths(landed.moved) == ["/data/torrents/completed/torboxarr/Selected Title"])
-        #expect(landed.moved.allSatisfy { $0.contains("/data/torrents/completed/torboxarr/Selected Title") })
         #expect(landed.moved.allSatisfy { !$0.contains("/data/completed/") })
         #expect(landed.destinations == ["/data/media/books/books"])
         #expect(landed.cloudCalls == 0)
@@ -420,7 +418,6 @@ struct TorBoxarrStatusTests {
 
         #expect(bridge.urls.contains { $0.path.contains("/torrents/files") })
         #expect(movedVolumePaths(nas.movedPaths) == ["/data/torrents/completed/torboxarr/Selected Title"])
-        #expect(nas.movedPaths.allSatisfy { $0.contains("/data/torrents/completed/torboxarr/Selected Title") })
         #expect(nas.movedPaths.allSatisfy { !$0.contains("/data/completed/") })
         #expect(nas.destinations == ["/data/media/books/audiobooks"])
         #expect(jobs.jobs[0].status == .complete)

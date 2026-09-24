@@ -82,13 +82,14 @@ struct PodcastShelfPrunePolicyTests {
     func overCapPrunesOldestEligible() {
         var records: [PodcastDownloadRecord] = []
         // 45 in-progress (≥10%, <95%) — protected from cap
+        // Keep in-progress ages under maxAgeDays so over-cap (not aged-out) is what fires.
         for i in 0..<45 {
             records.append(
                 record(
                     id: "prog-\(i)",
                     progress: 0.40,
-                    ageDays: Double(i),
-                    lastPlayedDaysAgo: Double(i)
+                    ageDays: Double(i % 20),
+                    lastPlayedDaysAgo: Double(i % 20)
                 )
             )
         }

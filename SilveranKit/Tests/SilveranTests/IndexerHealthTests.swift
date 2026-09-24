@@ -416,7 +416,7 @@ struct IndexerHealthTests {
         #expect(
             ids == [
                 .lazyLibrarian, .shelfarr, .librivox, .storyteller, .prowlarr, .jackett,
-                .bookSearchLAN,
+                .deluge, .bookSearchLAN,
             ]
         )
         #expect(ids == ServiceHealthID.allCases)
@@ -559,6 +559,7 @@ struct IndexerHealthTests {
             FixedHealthChecker(.storyteller, status: .healthy, summary: "Connected"),
             ProwlarrHealthChecker(transport: prowlarr),
             JackettHealthChecker(transport: jackett),
+            FixedHealthChecker(.deluge, status: .disabled, summary: "Not configured"),
             FixedHealthChecker(.bookSearchLAN, status: .localOnly, summary: "Not configured"),
         ]
     }

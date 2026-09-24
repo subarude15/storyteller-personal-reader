@@ -3,7 +3,7 @@ import Testing
 
 @testable import SilveranKit
 
-@Suite("Request activity notifications")
+@Suite("Request activity notifications", .serialized)
 struct RequestActivityNotificationTests {
     // MARK: - Available transitions
 

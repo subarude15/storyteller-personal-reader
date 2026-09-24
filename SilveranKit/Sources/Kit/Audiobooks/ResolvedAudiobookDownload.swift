@@ -681,6 +681,9 @@ public actor ResolvedAudiobookDownloads {
                         ),
                     )
                 }
+                // AsyncThrowingStream can finish without throwing when the consumer Task
+                // is cancelled; do not treat that as a successful download.
+                try Task.checkCancellation()
                 await self.record(
                     key,
                     workID: workID,

@@ -3,7 +3,7 @@ import Testing
 
 @testable import SilveranKit
 
-@Suite("Service health diagnostics")
+@Suite("Service health diagnostics", .serialized)
 struct ServiceHealthTests {
     // MARK: - LazyLibrarian
 

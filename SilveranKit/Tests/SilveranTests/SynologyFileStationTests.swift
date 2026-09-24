@@ -36,7 +36,16 @@ struct SynologyFileStationTests {
                 return SynologyHTTP(status: 200, body: Data(#"{"success":true}"#.utf8))
             }
             if url.contains("getinfo") {
-                #expect(url.contains("/media/books/books"))
+                let pathQuery = request.url
+                    .flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }?
+                    .queryItems?
+                    .first(where: { $0.name == "path" })?
+                    .value
+                let paths =
+                    pathQuery.flatMap {
+                        try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String]
+                    } ?? []
+                #expect(paths == ["/media/books/books/The Hobbit.epub"])
                 return SynologyHTTP(
                     status: 200,
                     body: Data(

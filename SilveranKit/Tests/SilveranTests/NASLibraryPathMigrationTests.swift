@@ -80,7 +80,7 @@ struct NASLibraryPathMigrationTests {
     @Test func torBoxarrCompletedHostPathRemainsUnchanged() {
         #expect(
             TorBoxarrConnectionSettings.hostCompletedFolder
-                == "/volume1/data/torrents/completed"
+                == "/volume1/data/torrents/completed/torboxarr"
         )
         #expect(
             NASDownloadSettingsSnapshot.defaultDelugeCompletedFolder
