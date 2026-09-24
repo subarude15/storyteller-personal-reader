@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 
+@testable import SilveranAppleKit
 @testable import SilveranKit
 
 /// Characterization of library media-kind / narration availability matching (R5).

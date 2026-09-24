@@ -974,10 +974,6 @@ public final class MediaViewModel {
         pendingCoverRequests = pendingCoverRequests.filter { validIDs.contains($0.key.id) }
     }
 
-    private func metadataMatchesKind(_ metadata: BookMetadata, kind: MediaKind) -> Bool {
-        MediaAvailabilityPresentation.matchesKind(metadata, kind: kind)
-    }
-
     private static func creatorGroupingKey(_ creator: BookCreator, unknownKey: String) -> String {
         let name = (creator.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !name.isEmpty {
@@ -996,7 +992,9 @@ public final class MediaViewModel {
         -> [BookMetadata]
     {
         let started = CFAbsoluteTimeGetCurrent()
-        var base = library.bookMetaData.filter { metadataMatchesKind($0, kind: kind) }
+        var base = library.bookMetaData.filter {
+            MediaAvailabilityPresentation.matchesKind($0, kind: kind)
+        }
         switch narrationFilter {
             case .both:
                 break
