@@ -213,12 +213,17 @@ public final class MediaViewModel {
             public var isFailed: Bool = false
 
             public var progressFraction: Double? {
-                guard let expected, expected > 0 else { return nil }
-                return min(max(Double(latestReceived) / Double(expected), 0), 1)
+                MediaDownloadPresentation.progressFraction(
+                    received: latestReceived,
+                    expected: expected,
+                )
             }
 
             public var isActive: Bool {
-                !isFinished && !wasSkipped
+                MediaDownloadPresentation.isCategoryActive(
+                    isFinished: isFinished,
+                    wasSkipped: wasSkipped,
+                )
             }
         }
 
@@ -226,30 +231,23 @@ public final class MediaViewModel {
         public var errorDescription: String?
 
         public var totalReceived: Int64 {
-            categories.values.reduce(0) { $0 + $1.latestReceived }
+            MediaDownloadPresentation.totalReceived(categories: categories.values)
         }
 
         public var totalExpected: Int64? {
-            guard !categories.isEmpty else { return nil }
-            var sum: Int64 = 0
-            for state in categories.values {
-                guard let expected = state.expected else { return nil }
-                sum += expected
-            }
-            return sum
+            MediaDownloadPresentation.totalExpected(categories: categories.values)
         }
 
         public var progressFraction: Double? {
-            guard let totalExpected = totalExpected, totalExpected > 0 else { return nil }
-            return min(max(Double(totalReceived) / Double(totalExpected), 0), 1)
+            MediaDownloadPresentation.progressFraction(categories: categories.values)
         }
 
         public var isActive: Bool {
-            categories.values.contains { $0.isActive }
+            MediaDownloadPresentation.isDownloadActive(categories: categories.values)
         }
 
         public var isCompleted: Bool {
-            !categories.isEmpty && categories.values.allSatisfy { $0.isFinished || $0.wasSkipped }
+            MediaDownloadPresentation.isDownloadCompleted(categories: categories.values)
         }
 
         public var hasError: Bool { errorDescription != nil }
@@ -1705,51 +1703,27 @@ public final class MediaViewModel {
 
     public func isCategoryDownloaded(_ category: LocalMediaCategory, for item: BookMetadata) -> Bool
     {
-        guard let paths = cachedBookPaths[item.id] else { return false }
-        switch category {
-            case .ebook:
-                return paths.ebookPath != nil
-            case .audio:
-                return paths.audioPath != nil
-            case .synced:
-                return paths.syncedPath != nil
-        }
+        MediaDownloadPresentation.hasLocalPath(cachedBookPaths[item.id], category: category)
     }
 
     public func hasCachedMedia(_ category: LocalMediaCategory, for item: BookMetadata) -> Bool {
-        guard let paths = removableCachedBookPaths[item.id] else { return false }
-        switch category {
-            case .ebook:
-                return paths.ebookPath != nil
-            case .audio:
-                return paths.audioPath != nil
-            case .synced:
-                return paths.syncedPath != nil
-        }
+        MediaDownloadPresentation.hasLocalPath(
+            removableCachedBookPaths[item.id],
+            category: category,
+        )
     }
 
     public func localMediaPath(for bookID: BookID, category: LocalMediaCategory) -> URL? {
-        guard let paths = cachedBookPaths[bookID] else { return nil }
-        switch category {
-            case .ebook:
-                return paths.ebookPath
-            case .audio:
-                return paths.audioPath
-            case .synced:
-                return paths.syncedPath
-        }
+        MediaDownloadPresentation.localPath(from: cachedBookPaths[bookID], category: category)
     }
 
     public func preferredDownloadedCategory(for item: BookMetadata) -> LocalMediaCategory? {
-        if isCategoryDownloaded(.synced, for: item) { return .synced }
-        let audioDownloaded = isCategoryDownloaded(.audio, for: item)
-        let ebookDownloaded = isCategoryDownloaded(.ebook, for: item)
-        if audioDownloaded && ebookDownloaded {
-            return cachedConfig.library.preferAudioOverEbook ? .audio : .ebook
-        }
-        if audioDownloaded { return .audio }
-        if ebookDownloaded { return .ebook }
-        return nil
+        MediaDownloadPresentation.preferredDownloadedCategory(
+            hasSynced: isCategoryDownloaded(.synced, for: item),
+            hasAudio: isCategoryDownloaded(.audio, for: item),
+            hasEbook: isCategoryDownloaded(.ebook, for: item),
+            preferAudioOverEbook: cachedConfig.library.preferAudioOverEbook,
+        )
     }
 
     // Deep-link opens can run before the in-memory cover cache is warm, so fill any
