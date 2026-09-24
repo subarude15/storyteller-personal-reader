@@ -8,6 +8,16 @@
 //  module-internal types.
 //
 
+import Foundation
+
+extension Notification.Name {
+    /// User tapped a Request Activity local notification — open Request Activity if navigation allows.
+    /// Shared by iOS + macOS (RequestNotificationTapHandler / RequestActivityLibraryEntry).
+    public static let punkRallyShowRequestActivity = Notification.Name(
+        "punkRallyShowRequestActivity"
+    )
+}
+
 #if os(iOS)
 import SilveranKit
 import SwiftUI
@@ -107,10 +117,6 @@ extension Notification.Name {
     public static let punkRallyOpenContinue = Notification.Name("punkRallyOpenContinue")
     /// Continue widget Browse Queue / `punkrally://home` — select Home without starting Continue.
     public static let punkRallyShowHome = Notification.Name("punkRallyShowHome")
-    /// User tapped a Request Activity local notification — open Request Activity if navigation allows.
-    public static let punkRallyShowRequestActivity = Notification.Name(
-        "punkRallyShowRequestActivity"
-    )
     /// Host selected Home after OpenContinue — HomeTabView opens the Continue item.
     public static let punkRallyPerformContinue = Notification.Name("punkRallyPerformContinue")
 }

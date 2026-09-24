@@ -96,13 +96,15 @@ struct SilveranReaderApp: App {
     private var libraryScene: some Scene {
         Window("Library", id: "MyLibrary") {
             libraryViewContent
+                .onReceive(
+                    NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
+                ) { _ in
+                    Task { await SettingsSyncCoordinator.shared.syncPendingOnBackground() }
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .onChange(of: scenePhase) { _, newPhase in
             handleScenePhaseChange(newPhase)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-            Task { await SettingsSyncCoordinator.shared.syncPendingOnBackground() }
         }
         .commands {
             // Most secondary windows (reader, metadata editor, server tools) only make
