@@ -163,8 +163,8 @@ struct StorytellerBookUploadTests {
         #expect(state == .cancelled(partialOnServer: true))
         #expect(await transport.uploadedIDs == [first.id])
         #expect(await coordinator.completedAssetIDs == [first.id])
-        let removedCount = await files.removed.count
-        let stagedCount = await files.staged.count
+        let removedCount = files.removed.count
+        let stagedCount = files.staged.count
         #expect(removedCount == stagedCount)
         #expect(stagedCount == 2)
     }

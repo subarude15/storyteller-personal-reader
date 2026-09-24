@@ -124,7 +124,7 @@ struct ResolvedAudiobookDownloadTests {
         let remote = try #require(book.playbackMetadata())
         let choice = try #require(store.playbackChoice(workID: workID, audiobook: book))
         #expect(choice.isLocal)
-        #expect(choice.metadata.tracks.allSatisfy(\.url.isFileURL))
+        #expect(choice.metadata.tracks.allSatisfy { $0.url.isFileURL })
         #expect(choice.metadata.chapters.map(\.title) == remote.chapters.map(\.title))
         #expect(choice.metadata.chapters.map(\.startTime) == remote.chapters.map(\.startTime))
         #expect(choice.metadata.tracks.map(\.startTime) == remote.tracks.map(\.startTime))

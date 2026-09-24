@@ -386,8 +386,9 @@ import Testing
     let queries = ReadingHabitIdeas.queries(from: [dune, children], now: now)
     let authorQuery = queries.first { $0.kind == .author }
     #expect(authorQuery != nil)
-    #expect((authorQuery?.reason ?? "").hasPrefix("Because you like"))
-    #expect((authorQuery?.reason ?? "").contains("Frank Herbert"))
+    let reason = authorQuery?.reason ?? ""
+    #expect(reason.hasPrefix("Because you like"))
+    #expect(reason.contains("Frank Herbert"))
 }
 
 @Test func readingIdeasDenserListKeepsMoreIdeas() {
