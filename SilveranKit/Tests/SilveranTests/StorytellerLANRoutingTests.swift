@@ -59,37 +59,42 @@ import Testing
     #expect(StorytellerLANRouting.resolveAPIBaseURL(from: trailing) == trailing)
 }
 
-@Test func probeReachabilityTrueOnAnyHTTPResponseIncluding401() async {
-    ProbeStubURLProtocol.reset(mode: .http(401))
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [ProbeStubURLProtocol.self]
-    let session = URLSession(configuration: configuration)
-    defer { session.invalidateAndCancel() }
+/// Shared `URLProtocol` stub mode is process-global; serialize these so parallel
+/// Swift Testing runs cannot clobber each other's `.http` / `.fail` setup.
+@Suite("Storyteller LAN probe stubs", .serialized)
+struct StorytellerLANProbeStubTests {
+    @Test func probeReachabilityTrueOnAnyHTTPResponseIncluding401() async {
+        ProbeStubURLProtocol.reset(mode: .http(401))
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ProbeStubURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
 
-    let reachable = await StorytellerLANRouting.probeReachability(
-        serverURL: URL(string: "http://10.0.0.5:1800")!,
-        session: session,
-    )
-    #expect(reachable)
-    #expect(
-        ProbeStubURLProtocol.requests.contains {
-            $0.url?.absoluteString == "http://10.0.0.5:1800/api/v2/books"
-        }
-    )
-}
+        let reachable = await StorytellerLANRouting.probeReachability(
+            serverURL: URL(string: "http://10.0.0.5:1800")!,
+            session: session,
+        )
+        #expect(reachable)
+        #expect(
+            ProbeStubURLProtocol.requests.contains {
+                $0.url?.absoluteString == "http://10.0.0.5:1800/api/v2/books"
+            }
+        )
+    }
 
-@Test func probeReachabilityFalseOnConnectionError() async {
-    ProbeStubURLProtocol.reset(mode: .fail(URLError(.timedOut)))
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [ProbeStubURLProtocol.self]
-    let session = URLSession(configuration: configuration)
-    defer { session.invalidateAndCancel() }
+    @Test func probeReachabilityFalseOnConnectionError() async {
+        ProbeStubURLProtocol.reset(mode: .fail(URLError(.timedOut)))
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ProbeStubURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
 
-    let reachable = await StorytellerLANRouting.probeReachability(
-        serverURL: URL(string: "http://10.0.0.5:1800")!,
-        session: session,
-    )
-    #expect(!reachable)
+        let reachable = await StorytellerLANRouting.probeReachability(
+            serverURL: URL(string: "http://10.0.0.5:1800")!,
+            session: session,
+        )
+        #expect(!reachable)
+    }
 }
 
 @Test func credentialValidationTriesLANFirstWhenReachable() {
