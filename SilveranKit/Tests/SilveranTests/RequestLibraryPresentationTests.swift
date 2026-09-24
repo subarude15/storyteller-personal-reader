@@ -206,15 +206,15 @@ struct RequestLibraryPresentationTests {
         let active = requestItem(formats: [.ebook], status: .wanted, updatedAt: now)
         let attention = requestItem(
             id: "attn",
-            status: .needsAttention,
             formats: [.ebook],
+            status: .needsAttention,
             attention: "stale",
             updatedAt: now,
         )
         let oldReady = requestItem(
             id: "old",
-            status: .availableInLibrary,
             formats: [.ebook],
+            status: .availableInLibrary,
             updatedAt: now.addingTimeInterval(-(10 * 24 * 3600)),
         )
         let index = RequestLibraryPresentationIndex(

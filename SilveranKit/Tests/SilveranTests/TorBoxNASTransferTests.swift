@@ -608,7 +608,7 @@ struct TorBoxNASTransferTests {
         )
         let result = await service.transfer(job: job)
         #expect(result.status == .complete)
-        #expect(transfer.renamedPairs == [("temporary-name.epub", "The Hobbit.epub")])
+        #expect(transfer.renamedPairs == [(from: "temporary-name.epub", to: "The Hobbit.epub")])
         #expect(transfer.existingFilenames.contains("cover.jpg"))
         #expect(transfer.existingFilenames.contains("old-book.epub"))
         #expect(transfer.existingFilenames.contains("notes.txt"))

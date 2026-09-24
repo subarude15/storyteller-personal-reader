@@ -187,7 +187,7 @@ struct DelugeDownloadObservabilityTests {
     @Test func addTorrentFileUsesBase64Filedump() async throws {
         let torrentURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("inkamp-deluge-test-\(UUID().uuidString).torrent")
-        let payload = Data("d8:announce13:http://a.come")
+        let payload = Data("d8:announce13:http://a.come".utf8)
         try payload.write(to: torrentURL)
         defer { try? FileManager.default.removeItem(at: torrentURL) }
 

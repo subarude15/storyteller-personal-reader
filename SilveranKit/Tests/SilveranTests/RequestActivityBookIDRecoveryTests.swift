@@ -346,7 +346,7 @@ struct RequestActivityBookIDRecoveryTests {
         #expect(updated.status(for: .ebook)?.updatedAt == enteredAt)
     }
 
-    @Test func needsAttentionTimelineUsesTransitionTimestamp() async {
+    @Test func needsAttentionTimelineUsesTransitionTimestamp() async throws {
         let wantedAt = Date(timeIntervalSince1970: 1_700_300_000)
         let checkedAt = wantedAt.addingTimeInterval(24 * 3600)
         let script = noMatchScript()

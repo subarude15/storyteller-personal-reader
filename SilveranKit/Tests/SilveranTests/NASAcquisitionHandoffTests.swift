@@ -270,7 +270,7 @@ struct NASAcquisitionHandoffTests {
             suggestedFilename: "some-book.torrent",
             jobID: "staged-audio",
         )
-        try Data("d8:announce").write(to: staged)
+        try Data("d8:announce".utf8).write(to: staged)
         #expect(ManualDownloadStaging.exists(staged))
         let handler = NASAcquisitionHandler(
             environment: StaticNASHandoffEnvironment(
@@ -312,7 +312,7 @@ struct NASAcquisitionHandoffTests {
             suggestedFilename: "ebook.torrent",
             jobID: "staged-ebook",
         )
-        try Data("d8:announce").write(to: staged)
+        try Data("d8:announce".utf8).write(to: staged)
         let handler = NASAcquisitionHandler(
             environment: StaticNASHandoffEnvironment(
                 context: NASHandoffContext(
@@ -342,7 +342,7 @@ struct NASAcquisitionHandoffTests {
             suggestedFilename: "retry-me.torrent",
             jobID: "staged-retry",
         )
-        let payload = Data("d8:announce13:http://a.com")
+        let payload = Data("d8:announce13:http://a.com".utf8)
         try payload.write(to: staged)
         let handler = NASAcquisitionHandler(
             environment: StaticNASHandoffEnvironment(
@@ -391,7 +391,7 @@ struct NASAcquisitionHandoffTests {
             suggestedFilename: "deluge.torrent",
             jobID: "staged-deluge",
         )
-        let bytes = Data("d8:announce")
+        let bytes = Data("d8:announce".utf8)
         try bytes.write(to: staged)
         let handler = NASAcquisitionHandler(
             environment: StaticNASHandoffEnvironment(

@@ -8,7 +8,7 @@ struct RequestActivityChainsTests {
 
     // MARK: - Basic grouping
 
-    @Test func groupsParentAndFallbackChildIntoOneChain() {
+    @Test func groupsParentAndFallbackChildIntoOneChain() throws {
         let now = Date()
         let root = item(
             id: "ll-1",

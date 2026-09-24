@@ -126,10 +126,10 @@ struct SynologyFileStationTests {
                 #expect(limit == 200)
 
                 if offset == 0 {
-                    let files = (0..<200).map { #"{"name":"Book #($0)"}"# }.joined(separator: ",")
+                    let files = (0..<200).map { "{\"name\":\"Book \($0)\"}" }.joined(separator: ",")
                     return SynologyHTTP(
                         status: 200,
-                        body: Data(#"{"success":true,"data":{"total":201,"files":[#(files)]}}"#.utf8),
+                        body: Data("{\"success\":true,\"data\":{\"total\":201,\"files\":[\(files)]}}".utf8),
                     )
                 }
 
