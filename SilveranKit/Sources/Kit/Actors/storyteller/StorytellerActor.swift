@@ -7,9 +7,6 @@ import CoreFoundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
-#if canImport(Network)
-import Network
-#endif
 
 public enum AlignmentRestartMode: String, Sendable {
     case none = "false"
@@ -86,8 +83,8 @@ public actor StorytellerActor {
     private var networkAvailable = true
     public private(set) var lastNetworkOpSucceeded: Bool? = nil
     #if canImport(Network)
-    private var networkMonitor: NWPathMonitor? = nil
-    private let networkMonitorQueue = DispatchQueue(label: "StorytellerActor.NetworkMonitor")
+    /// Path observation only; connection decisions stay on this actor (R8).
+    private var networkMonitor: StorytellerNetworkMonitor? = nil
     #endif
 
     public init(
@@ -333,29 +330,26 @@ public actor StorytellerActor {
     private func startNetworkMonitoring() {
         #if canImport(Network)
         guard networkMonitor == nil else { return }
-        let monitor = NWPathMonitor()
+        let monitor = StorytellerNetworkMonitor()
         networkMonitor = monitor
-        monitor.pathUpdateHandler = { [weak self] path in
+        monitor.start { [weak self] available in
             guard let self else { return }
-            Task { await self.handleNetworkPathUpdate(path) }
+            Task { await self.handleNetworkPathAvailability(available) }
         }
-        monitor.start(queue: networkMonitorQueue)
         #endif
     }
 
     private func stopNetworkMonitoring() {
         #if canImport(Network)
-        networkMonitor?.cancel()
+        networkMonitor?.stop()
         networkMonitor = nil
         #endif
     }
 
-    #if canImport(Network)
-    private func handleNetworkPathUpdate(_ path: NWPath) async {
-        debugLog("[StorytellerActor] network path update: status=\(path.status)")
-        await networkAvailabilityDidChange(path.status == .satisfied)
+    private func handleNetworkPathAvailability(_ available: Bool) async {
+        debugLog("[StorytellerActor] network path update: available=\(available)")
+        await networkAvailabilityDidChange(available)
     }
-    #endif
 
     public func networkAvailabilityDidChange(_ available: Bool) async {
         networkAvailable = available
