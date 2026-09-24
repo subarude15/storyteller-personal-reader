@@ -378,7 +378,7 @@ struct DelugeDownloadObservabilityTests {
     }
 
     @Test func isbnMatch() {
-        let item = request(title: "Pride", author: "Jane Austen", isbn: "9780141439518", formats: [.ebook])
+        let item = request(title: "Pride", author: "Jane Austen", formats: [.ebook], isbn: "9780141439518")
         let index = DelugeTorrentIndex(torrents: [
             torrent(id: "1", name: "book-9780141439518", state: "Downloading", progress: 0.2)
         ])
