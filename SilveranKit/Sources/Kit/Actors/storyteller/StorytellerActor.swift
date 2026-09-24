@@ -643,35 +643,34 @@ public actor StorytellerActor {
             }
             await beginConnectingIfFresh()
             do {
-                let tokenURL = apiBaseURL.appendingPathComponent("token")
-
-                let response = try await httpPost(
-                    tokenURL.absoluteString,
-                    headers: [
-                        "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
-                        "Accept": "application/json",
-                    ],
-                    formParameters: [
-                        "usernameOrEmail": username,
-                        "password": password,
-                    ],
-                    session: urlSession,
-                    requestTimeout: 10,
+                let request = StorytellerAuthSession.makeTokenRequest(
+                    apiBaseURL: apiBaseURL,
+                    username: username,
+                    password: password,
                 )
-
-                self.accessToken = try decoder.decode(AccessToken.self, from: response.data)
-                resetReconnectBackoff()
-                return true
-            } catch let error as HTTPRequestError {
-                logStorytellerError("authenticate", error: error)
-                switch error {
+                let response = try await httpTransport.send(request)
+                switch StorytellerAuthSession.interpretTokenResponse(response, decoder: decoder) {
+                    case .success(let token):
+                        self.accessToken = token
+                        resetReconnectBackoff()
+                        return true
                     case .unauthorized:
+                        logStorytellerError(
+                            "authenticate",
+                            error: HTTPRequestError.unauthorized,
+                        )
                         await updateConnectionStatus(.error("Invalid credentials"))
-                    default:
+                        scheduleReconnectBackoff()
+                        return false
+                    case .failure:
+                        logStorytellerError(
+                            "authenticate",
+                            error: HTTPRequestError.unexpectedStatus(response.statusCode),
+                        )
                         await updateConnectionStatus(.error("Connection failed"))
+                        scheduleReconnectBackoff()
+                        return false
                 }
-                scheduleReconnectBackoff()
-                return false
             } catch let error as URLError {
                 logStorytellerError("authenticate", error: error)
                 await updateConnectionStatus(.error("Connection failed"))
@@ -1207,10 +1206,7 @@ public actor StorytellerActor {
     }
 
     func authorizationHeaderValue(for token: AccessToken) -> String {
-        if token.tokenType.compare("bearer", options: .caseInsensitive) == .orderedSame {
-            return "Bearer \(token.accessToken)"
-        }
-        return "\(token.tokenType) \(token.accessToken)"
+        StorytellerAuthSession.authorizationHeaderValue(for: token)
     }
 
     private func fallbackFilename(
