@@ -2189,28 +2189,11 @@ public final class MediaViewModel {
     }
 
     public func coverVariant(for item: BookMetadata) -> CoverVariant {
-        if item.hasAvailableEbook {
-            return .standard
-        }
-        if item.hasAvailableAudiobook {
-            return .audioSquare
-        }
-        return .standard
+        MediaCoverVariantSelection.coverVariant(for: item)
     }
 
     public func coverVariant(for item: BookMetadata, preference: CoverPreference) -> CoverVariant {
-        switch preference {
-            case .preferEbook, .storytellerDouble:
-                if item.hasAvailableEbook {
-                    return .standard
-                }
-                return item.hasAvailableAudiobook ? .audioSquare : .standard
-            case .preferAudiobook:
-                if item.hasAvailableAudiobook || item.isAudiobookOnly {
-                    return .audioSquare
-                }
-                return .standard
-        }
+        MediaCoverVariantSelection.coverVariant(for: item, preference: preference)
     }
 
     public func coverImage(for item: BookMetadata, variant overrideVariant: CoverVariant? = nil)
