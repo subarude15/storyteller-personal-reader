@@ -66,6 +66,8 @@ public actor StorytellerActor {
     }
 
     let urlSession: URLSession
+    /// Lowest-level execute-once HTTP against `urlSession` (R10). Not used for TUS/`uploadURLSession`.
+    let httpTransport: StorytellerHTTPTransport
     /// PATCH uploads of large audiobooks. The shared session's resource timeout is too short.
     let uploadURLSession: URLSession
     private let downloadDelegate: StorytellerDownloadDelegate
@@ -113,6 +115,7 @@ public actor StorytellerActor {
             delegate: delegate,
             delegateQueue: nil,
         )
+        httpTransport = StorytellerHTTPTransport(session: urlSession)
         let uploadConfiguration = URLSessionConfiguration.default
         uploadConfiguration.timeoutIntervalForRequest = 120
         uploadConfiguration.timeoutIntervalForResource = 6 * 60 * 60
@@ -1655,16 +1658,11 @@ public actor StorytellerActor {
 
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
-            let (_, response) = try await urlSession.data(for: request)
+            let response = try await httpTransport.send(request)
 
-            guard let httpResponse = response as? HTTPURLResponse else {
-                debugLog("[StorytellerActor] sendProgressToServer: invalid response type")
-                return .failure
-            }
+            debugLog("[StorytellerActor] sendProgressToServer: status=\(response.statusCode)")
 
-            debugLog("[StorytellerActor] sendProgressToServer: status=\(httpResponse.statusCode)")
-
-            switch httpResponse.statusCode {
+            switch response.statusCode {
                 case 204:
                     return .success
                 case 409, 404:
@@ -1673,6 +1671,10 @@ public actor StorytellerActor {
                     return .failure
             }
         } catch {
+            if error is StorytellerHTTPTransport.TransportError {
+                debugLog("[StorytellerActor] sendProgressToServer: invalid response type")
+                return .failure
+            }
             debugLog("[StorytellerActor] sendProgressToServer: request failed - \(error)")
             return .noConnection
         }
