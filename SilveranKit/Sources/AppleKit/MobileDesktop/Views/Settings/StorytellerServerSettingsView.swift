@@ -11,6 +11,8 @@ public struct StorytellerServerSettingsView: View {
     @State private var sourceURLs: [BookSourceID: String] = [:]
     @State private var isLoading = false
     @State private var showingAddServer = false
+    @State private var canScanLibrary = false
+    @State private var libraryScanPhase: StorytellerLibraryScanUIPhase = .idle
     #if os(macOS)
     @State private var editingSource: BookSourceRecord?
     #endif
@@ -78,6 +80,39 @@ public struct StorytellerServerSettingsView: View {
                     Label("Add Book Source", systemImage: "plus")
                 }
             }
+
+            Section {
+                Button {
+                    Task { await runLibraryScan() }
+                } label: {
+                    HStack {
+                        Label(
+                            libraryScanPhase.buttonTitle,
+                            systemImage: "arrow.triangle.2.circlepath",
+                        )
+                        Spacer()
+                        if libraryScanPhase.showsProgressSpinner {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                    }
+                }
+                .disabled(!canScanLibrary || libraryScanPhase.blocksNewScan)
+
+                if let detail = libraryScanPhase.detailText {
+                    Text(detail)
+                        .font(.footnote)
+                        .foregroundStyle(
+                            libraryScanPhase.isError ? Color.red : Color.secondary
+                        )
+                }
+            } header: {
+                Text("Library")
+            } footer: {
+                Text(
+                    "Asks the Storyteller server to scan for newly added books and audiobooks, then refreshes this app’s library."
+                )
+            }
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
@@ -87,6 +122,12 @@ public struct StorytellerServerSettingsView: View {
         .navigationTitle("Book Sources")
         .task {
             await loadSources()
+        }
+        .task(id: libraryScanPhase) {
+            await monitorBackgroundScanIfNeeded()
+        }
+        .onAppear {
+            Task { await reconcileLibraryScanPhaseFromService() }
         }
         .sheet(isPresented: $showingAddServer) {
             NavigationStack {
@@ -123,10 +164,69 @@ public struct StorytellerServerSettingsView: View {
                 urls[source.id] = credentials.url
             }
         }
+        let scanEnabled = await BookServiceActor.shared.canScanStorytellerLibrary()
         await MainActor.run {
             sources = loadedSources
             sourceURLs = urls
+            canScanLibrary = scanEnabled
             isLoading = false
+        }
+        await reconcileLibraryScanPhaseFromService()
+    }
+
+    private func runLibraryScan() async {
+        guard canScanLibrary, !libraryScanPhase.blocksNewScan else { return }
+        await MainActor.run {
+            libraryScanPhase = .inProgress
+        }
+        let outcome = await BookServiceActor.shared.scanStorytellerLibrary()
+        await MainActor.run {
+            libraryScanPhase = StorytellerLibraryScanUIPhase(outcome: outcome)
+        }
+        let scanEnabled = await BookServiceActor.shared.canScanStorytellerLibrary()
+        await MainActor.run {
+            canScanLibrary = scanEnabled
+        }
+    }
+
+    /// Reconcile `.stillScanning` with a lightweight GET.
+    /// `running: false` → completed; `running: true` → stay stillScanning; undetermined → stay stillScanning.
+    private func reconcileLibraryScanPhaseFromService() async {
+        let scanEnabled = await BookServiceActor.shared.canScanStorytellerLibrary()
+        guard libraryScanPhase == .stillScanning else {
+            await MainActor.run {
+                canScanLibrary = scanEnabled
+            }
+            return
+        }
+
+        let nextPhase: StorytellerLibraryScanUIPhase
+        switch await BookServiceActor.shared.fetchStorytellerLibraryScanState() {
+            case .success(let state) where !state.running:
+                nextPhase = .completed
+            case .success:
+                // Server still scanning — never fall through to .idle.
+                nextPhase = .stillScanning
+            case .failure:
+                // Undetermined — conservative; do not claim completion or idle.
+                nextPhase = .stillScanning
+        }
+        await MainActor.run {
+            canScanLibrary = scanEnabled
+            libraryScanPhase = nextPhase
+        }
+    }
+
+    /// Occasional Settings-side probes while `.stillScanning` (cancelled when leaving the screen).
+    /// Not an unbounded BookServiceActor poll loop — the 6-minute watch stays bounded.
+    private func monitorBackgroundScanIfNeeded() async {
+        guard libraryScanPhase == .stillScanning else { return }
+        while !Task.isCancelled {
+            await reconcileLibraryScanPhaseFromService()
+            if libraryScanPhase != .stillScanning {
+                return
+            }
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
         }
     }
 
@@ -171,6 +271,78 @@ public struct StorytellerServerSettingsView: View {
             case .localFolder:
                 return "folder"
         }
+    }
+}
+
+/// Settings-only presentation for manual Storyteller library scan.
+private enum StorytellerLibraryScanUIPhase: Equatable {
+    case idle
+    case inProgress
+    case started
+    case stillScanning
+    case completed
+    case failed(String)
+
+    init(outcome: StorytellerLibraryScan.Outcome) {
+        switch outcome {
+            case .success(.confirmedComplete):
+                self = .completed
+            case .success(.stillRunning):
+                // Foreground poll ended while Storyteller is still scanning; refresh is deferred.
+                self = .stillScanning
+            case .success(.startedUnconfirmed):
+                // POST accepted; do not claim complete when status never finished in budget.
+                self = .started
+            case .failure(.scanAlreadyInProgress):
+                // Service rejected a second tap while a known scan/watch is active.
+                self = .stillScanning
+            case .failure(let failure):
+                self = .failed(failure.userMessage)
+        }
+    }
+
+    var buttonTitle: String {
+        switch self {
+            case .idle, .started, .stillScanning, .completed, .failed:
+                return "Scan Storyteller Library"
+            case .inProgress:
+                return "Scanning…"
+        }
+    }
+
+    var detailText: String? {
+        switch self {
+            case .idle, .inProgress:
+                return nil
+            case .started:
+                return "Storyteller scan started. Your library was refreshed."
+            case .stillScanning:
+                return "Storyteller is still scanning…"
+            case .completed:
+                return "Scan complete. Library refreshed."
+            case .failed(let message):
+                return message
+        }
+    }
+
+    /// Spinner only during the foreground request/poll — not during deferred still-scanning.
+    var showsProgressSpinner: Bool {
+        self == .inProgress
+    }
+
+    /// Blocks another manual scan while foreground work or a known still-running scan is active.
+    var blocksNewScan: Bool {
+        switch self {
+            case .inProgress, .stillScanning:
+                return true
+            case .idle, .started, .completed, .failed:
+                return false
+        }
+    }
+
+    var isError: Bool {
+        if case .failed = self { return true }
+        return false
     }
 }
 

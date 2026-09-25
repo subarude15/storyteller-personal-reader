@@ -1,0 +1,595 @@
+import Foundation
+import Testing
+
+@testable import SilveranKit
+
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+
+@Suite("Storyteller library scan", .serialized)
+struct StorytellerLibraryScanTests {
+
+    // MARK: - Pure helpers
+
+    @Test func parseStateReadsRunningSourceAndProgress() throws {
+        let data = Data(
+            """
+            {"running":true,"source":"manual","startedAt":1700000000000,\
+            "progress":{"processed":3,"total":10},"pendingSources":["watcher"]}
+            """.utf8
+        )
+        let state = try StorytellerLibraryScan.parseState(from: data)
+        #expect(state.running == true)
+        #expect(state.source == "manual")
+        #expect(state.startedAt == 1_700_000_000_000)
+        #expect(state.progress?.processed == 3)
+        #expect(state.progress?.total == 10)
+        #expect(state.pendingSources == ["watcher"])
+    }
+
+    @Test func parseStateRejectsMalformedBody() {
+        #expect(throws: StorytellerLibraryScan.DecodeError.emptyBody) {
+            try StorytellerLibraryScan.parseState(from: Data())
+        }
+        #expect(throws: StorytellerLibraryScan.DecodeError.notObject) {
+            try StorytellerLibraryScan.parseState(from: Data("[]".utf8))
+        }
+        #expect(throws: StorytellerLibraryScan.DecodeError.missingRunning) {
+            try StorytellerLibraryScan.parseState(from: Data(#"{"source":"manual"}"#.utf8))
+        }
+    }
+
+    @Test func completionDistinguishesStartedVersusCompleted() {
+        let idle = StorytellerLibraryScan.State(running: false)
+        let running = StorytellerLibraryScan.State(running: true, source: "manual")
+
+        #expect(
+            StorytellerLibraryScan.completion(afterStates: [running, idle], exhaustedBudget: false)
+                == .confirmedComplete
+        )
+        #expect(
+            StorytellerLibraryScan.completion(afterStates: [idle, idle], exhaustedBudget: true)
+                == .startedUnconfirmed
+        )
+        #expect(
+            StorytellerLibraryScan.completion(afterStates: [running, running], exhaustedBudget: true)
+                == .stillRunning
+        )
+    }
+
+    @Test func postScanRefreshTimingDefersWhileStillRunning() {
+        #expect(
+            StorytellerLibraryScan.postScanRefreshTiming(for: .confirmedComplete)
+                == .refreshImmediately
+        )
+        #expect(
+            StorytellerLibraryScan.postScanRefreshTiming(for: .stillRunning)
+                == .deferUntilScanIdle
+        )
+        #expect(
+            StorytellerLibraryScan.postScanRefreshTiming(for: .startedUnconfirmed)
+                == .refreshWithoutClaimingCompletion
+        )
+    }
+
+    @Test func idleWatchCompletionTreatsIdleAsConfirmed() {
+        let idle = StorytellerLibraryScan.State(running: false)
+        let running = StorytellerLibraryScan.State(running: true, source: "manual")
+
+        #expect(
+            StorytellerLibraryScan.idleWatchCompletion(
+                afterStates: [running, idle],
+                exhaustedBudget: false,
+            ) == .confirmedComplete
+        )
+        #expect(
+            StorytellerLibraryScan.idleWatchCompletion(
+                afterStates: [running, running],
+                exhaustedBudget: true,
+            ) == .stillRunning
+        )
+    }
+
+    @Test func pollingBudgetsAreBoundedAndPositive() {
+        #expect(StorytellerLibraryScan.Polling.default.maxAttempts == 30)
+        #expect(StorytellerLibraryScan.Polling.default.maxAttempts > 0)
+        #expect(StorytellerLibraryScan.Polling.backgroundCompletion.maxAttempts == 72)
+        #expect(StorytellerLibraryScan.Polling.backgroundCompletion.maxAttempts > 0)
+        #expect(
+            StorytellerLibraryScan.Polling.backgroundCompletion.intervalNanoseconds
+                == 5_000_000_000
+        )
+        // Foreground + background caps are finite (no unbounded polls).
+        let foregroundCeiling = StorytellerLibraryScan.Polling.default.maxAttempts
+        let backgroundCeiling = StorytellerLibraryScan.Polling.backgroundCompletion.maxAttempts
+        #expect(foregroundCeiling + backgroundCeiling < 200)
+    }
+
+    // MARK: - Networking
+
+    @Test func successfulScanPostsForceAndReusesBearerAuth() async throws {
+        ScanStubURLProtocol.reset()
+        ScanStubURLProtocol.postStatus = 204
+        ScanStubURLProtocol.stateSequence = [
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+            #"{"running":false,"source":null,"startedAt":null}"#,
+        ]
+        let actor = makeScanActor()
+        let configured = await actor.configureCredentials(
+            baseURL: "https://storyteller.test",
+            lanURL: "",
+            username: "reader",
+            password: "secret",
+        )
+        #expect(configured)
+
+        let outcome = await actor.scanLibraryAndAwaitStatus(
+            force: true,
+            polling: StorytellerLibraryScan.Polling(intervalNanoseconds: 0, maxAttempts: 4),
+        )
+        #expect(outcome == .success(.confirmedComplete))
+
+        let post = try #require(
+            ScanStubURLProtocol.requests.last {
+                $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/books/scan") == true
+            }
+        )
+        #expect(post.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
+        #expect(post.url?.query?.contains("force=true") == true)
+
+        let gets = ScanStubURLProtocol.requests.filter {
+            $0.httpMethod == "GET" && $0.url?.path.hasSuffix("/books/scan") == true
+        }
+        #expect(gets.count >= 2)
+        #expect(gets.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer test-token" })
+        #expect(ScanStubURLProtocol.requests.contains { $0.url?.path.hasSuffix("/token") == true })
+    }
+
+    @Test func foregroundPollBudgetExhaustedWhileRunningRemainsStillRunning() async {
+        ScanStubURLProtocol.reset()
+        ScanStubURLProtocol.postStatus = 204
+        ScanStubURLProtocol.stateSequence = [
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+        ]
+        let actor = makeScanActor()
+        _ = await actor.configureCredentials(
+            baseURL: "https://storyteller.test",
+            lanURL: "",
+            username: "reader",
+            password: "secret",
+        )
+
+        let polling = StorytellerLibraryScan.Polling(intervalNanoseconds: 0, maxAttempts: 3)
+        let outcome = await actor.scanLibraryAndAwaitStatus(force: true, polling: polling)
+        #expect(outcome == .success(.stillRunning))
+
+        let gets = ScanStubURLProtocol.requests.filter {
+            $0.httpMethod == "GET" && $0.url?.path.hasSuffix("/books/scan") == true
+        }
+        #expect(gets.count == polling.maxAttempts)
+    }
+
+    @Test func awaitScanIdleConfirmsWhenRunningBecomesFalse() async {
+        ScanStubURLProtocol.reset()
+        ScanStubURLProtocol.stateSequence = [
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+            #"{"running":false,"source":null,"startedAt":null}"#,
+        ]
+        let actor = makeScanActor()
+        _ = await actor.configureCredentials(
+            baseURL: "https://storyteller.test",
+            lanURL: "",
+            username: "reader",
+            password: "secret",
+        )
+
+        let outcome = await actor.awaitScanIdle(
+            polling: StorytellerLibraryScan.Polling(intervalNanoseconds: 0, maxAttempts: 5),
+        )
+        #expect(outcome == .success(.confirmedComplete))
+
+        let gets = ScanStubURLProtocol.requests.filter {
+            $0.httpMethod == "GET" && $0.url?.path.hasSuffix("/books/scan") == true
+        }
+        #expect(gets.count == 3)
+    }
+
+    @Test func awaitScanIdleCancellationExitsWithoutUnboundedPolling() async {
+        ScanStubURLProtocol.reset()
+        ScanStubURLProtocol.stateSequence = [
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+        ]
+        let actor = makeScanActor()
+        _ = await actor.configureCredentials(
+            baseURL: "https://storyteller.test",
+            lanURL: "",
+            username: "reader",
+            password: "secret",
+        )
+
+        let polling = StorytellerLibraryScan.Polling(
+            intervalNanoseconds: 50_000_000,
+            maxAttempts: 40,
+        )
+        let task = Task {
+            await actor.awaitScanIdle(polling: polling)
+        }
+        // Let the first probe land, then cancel during the inter-attempt sleep.
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        task.cancel()
+        let outcome = await task.value
+        #expect(outcome == .failure(.cancelled))
+
+        let gets = ScanStubURLProtocol.requests.filter {
+            $0.httpMethod == "GET" && $0.url?.path.hasSuffix("/books/scan") == true
+        }
+        #expect(gets.count < polling.maxAttempts)
+        #expect(gets.count <= 2)
+    }
+
+    @Test func non2xxScanMapsToClearFailure() async {
+        ScanStubURLProtocol.reset()
+        ScanStubURLProtocol.postStatus = 403
+        let actor = makeScanActor()
+        _ = await actor.configureCredentials(
+            baseURL: "https://storyteller.test",
+            lanURL: "",
+            username: "reader",
+            password: "secret",
+        )
+
+        let result = await actor.scanLibrary(force: true)
+        guard case .failure(.permissionDenied) = result else {
+            Issue.record("expected permissionDenied, got \(result)")
+            return
+        }
+    }
+
+    @Test func unsupportedScanEndpointMapsToUnsupported() async {
+        ScanStubURLProtocol.reset()
+        ScanStubURLProtocol.postStatus = 404
+        let actor = makeScanActor()
+        _ = await actor.configureCredentials(
+            baseURL: "https://storyteller.test",
+            lanURL: "",
+            username: "reader",
+            password: "secret",
+        )
+
+        let result = await actor.scanLibrary(force: true)
+        guard case .failure(.unsupported) = result else {
+            Issue.record("expected unsupported, got \(result)")
+            return
+        }
+    }
+
+    @Test func malformedScanStateAfterAcceptYieldsStartedUnconfirmed() async {
+        ScanStubURLProtocol.reset()
+        ScanStubURLProtocol.postStatus = 204
+        ScanStubURLProtocol.stateSequence = [#"{"not":"a scan state"}"#]
+        let actor = makeScanActor()
+        _ = await actor.configureCredentials(
+            baseURL: "https://storyteller.test",
+            lanURL: "",
+            username: "reader",
+            password: "secret",
+        )
+
+        let outcome = await actor.scanLibraryAndAwaitStatus(
+            force: true,
+            polling: StorytellerLibraryScan.Polling(intervalNanoseconds: 0, maxAttempts: 2),
+        )
+        #expect(outcome == .success(.startedUnconfirmed))
+    }
+
+    @Test func failureMessagesAreSpecificNotGeneric() {
+        #expect(
+            StorytellerLibraryScan.Failure.authenticationFailed.userMessage
+                .contains("sign-in")
+        )
+        #expect(
+            !StorytellerLibraryScan.Failure.rejected(statusCode: 500).userMessage
+                .localizedCaseInsensitiveContains("request failed")
+        )
+        #expect(
+            StorytellerLibraryScan.Failure.permissionDenied.userMessage
+                .contains("permission")
+        )
+    }
+
+    // MARK: - BookServiceActor overlap / completion watch
+
+    @Test func completionWatchBlocksSecondManualScanUntilIdle() async {
+        ScanStubURLProtocol.reset()
+        ScanStubURLProtocol.postStatus = 204
+        // Foreground (2): still running. Watch continues with more running, then idle.
+        ScanStubURLProtocol.stateSequence = [
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+            #"{"running":false,"source":null,"startedAt":null}"#,
+        ]
+
+        let record = BookSourceRecord(
+            id: "server-overlap",
+            name: "Test",
+            kind: .storyteller,
+            capabilities: .storyteller,
+        )
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ScanStubURLProtocol.self]
+        let storyteller = StorytellerActor(
+            sourceRecord: record,
+            session: URLSession(configuration: configuration),
+        )
+        _ = await storyteller.configureCredentials(
+            baseURL: "https://storyteller.test",
+            lanURL: "",
+            username: "reader",
+            password: "secret",
+        )
+
+        let service = BookServiceActor()
+        await service.installStorytellerActorForTesting(storyteller, record: record)
+
+        let foreground = StorytellerLibraryScan.Polling(intervalNanoseconds: 0, maxAttempts: 2)
+        let background = StorytellerLibraryScan.Polling(
+            intervalNanoseconds: 20_000_000,
+            maxAttempts: 8,
+        )
+
+        let first = await service.scanStorytellerLibrary(
+            force: true,
+            polling: foreground,
+            backgroundCompletionPolling: background,
+        )
+        #expect(first == .success(.stillRunning))
+        #expect(await service.isStorytellerLibraryScanInProgress)
+
+        let postsAfterFirst = ScanStubURLProtocol.requests.filter {
+            $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/books/scan") == true
+        }.count
+        #expect(postsAfterFirst == 1)
+
+        let second = await service.scanStorytellerLibrary(
+            force: true,
+            polling: foreground,
+            backgroundCompletionPolling: background,
+        )
+        #expect(second == .failure(.scanAlreadyInProgress))
+
+        let postsAfterSecond = ScanStubURLProtocol.requests.filter {
+            $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/books/scan") == true
+        }.count
+        #expect(postsAfterSecond == 1)
+
+        // Wait for the deferred watch to observe idle and clear.
+        var waited = 0
+        while await service.isStorytellerLibraryScanInProgress, waited < 100 {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            waited += 1
+        }
+        let blockedAfterWatch = await service.isStorytellerLibraryScanInProgress
+        #expect(!blockedAfterWatch)
+
+        let third = await service.scanStorytellerLibrary(
+            force: true,
+            polling: StorytellerLibraryScan.Polling(intervalNanoseconds: 0, maxAttempts: 2),
+            backgroundCompletionPolling: StorytellerLibraryScan.Polling(
+                intervalNanoseconds: 0,
+                maxAttempts: 2,
+            ),
+        )
+        guard case .success = third else {
+            Issue.record("expected a successful scan after idle, got \(third)")
+            return
+        }
+
+        let postsAfterThird = ScanStubURLProtocol.requests.filter {
+            $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/books/scan") == true
+        }.count
+        #expect(postsAfterThird == 2)
+    }
+
+    @Test func knownRunningLatchBlocksScanAfterWatchBudgetExpires() async {
+        ScanStubURLProtocol.reset()
+        ScanStubURLProtocol.postStatus = 204
+        // Foreground + background budgets both see only running:true — watch Task ends, latch remains.
+        ScanStubURLProtocol.stateSequence = [
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+        ]
+
+        let record = BookSourceRecord(
+            id: "server-known-running",
+            name: "Test",
+            kind: .storyteller,
+            capabilities: .storyteller,
+        )
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ScanStubURLProtocol.self]
+        let storyteller = StorytellerActor(
+            sourceRecord: record,
+            session: URLSession(configuration: configuration),
+        )
+        _ = await storyteller.configureCredentials(
+            baseURL: "https://storyteller.test",
+            lanURL: "",
+            username: "reader",
+            password: "secret",
+        )
+
+        let service = BookServiceActor()
+        await service.installStorytellerActorForTesting(storyteller, record: record)
+
+        let foreground = StorytellerLibraryScan.Polling(intervalNanoseconds: 0, maxAttempts: 2)
+        let background = StorytellerLibraryScan.Polling(intervalNanoseconds: 0, maxAttempts: 3)
+
+        let first = await service.scanStorytellerLibrary(
+            force: true,
+            polling: foreground,
+            backgroundCompletionPolling: background,
+        )
+        #expect(first == .success(.stillRunning))
+
+        // Wait until the bounded watch Task finishes (fg + bg GET budget), latch must remain.
+        let expectedGets = foreground.maxAttempts + background.maxAttempts
+        var waited = 0
+        while waited < 100 {
+            let gets = ScanStubURLProtocol.requests.filter {
+                $0.httpMethod == "GET" && $0.url?.path.hasSuffix("/books/scan") == true
+            }.count
+            if gets >= expectedGets {
+                try? await Task.sleep(nanoseconds: 30_000_000)
+                break
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+            waited += 1
+        }
+
+        #expect(await service.isStorytellerLibraryScanInProgress)
+
+        let second = await service.scanStorytellerLibrary(
+            force: true,
+            polling: foreground,
+            backgroundCompletionPolling: background,
+        )
+        #expect(second == .failure(.scanAlreadyInProgress))
+
+        let postsAfterSecond = ScanStubURLProtocol.requests.filter {
+            $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/books/scan") == true
+        }.count
+        #expect(postsAfterSecond == 1)
+
+        // Later idle probe clears the latch; a future scan is allowed.
+        ScanStubURLProtocol.setStateSequence([
+            #"{"running":false,"source":null,"startedAt":null}"#,
+        ])
+        let probe = await service.fetchStorytellerLibraryScanState()
+        guard case .success(let state) = probe else {
+            Issue.record("expected idle probe success, got \(probe)")
+            return
+        }
+        #expect(!state.running)
+        #expect(await !service.isStorytellerLibraryScanInProgress)
+
+        let third = await service.scanStorytellerLibrary(
+            force: true,
+            polling: StorytellerLibraryScan.Polling(intervalNanoseconds: 0, maxAttempts: 2),
+            backgroundCompletionPolling: StorytellerLibraryScan.Polling(
+                intervalNanoseconds: 0,
+                maxAttempts: 2,
+            ),
+        )
+        guard case .success = third else {
+            Issue.record("expected a successful scan after idle probe, got \(third)")
+            return
+        }
+
+        let postsAfterThird = ScanStubURLProtocol.requests.filter {
+            $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/books/scan") == true
+        }.count
+        #expect(postsAfterThird == 2)
+    }
+}
+
+private func makeScanActor() -> StorytellerActor {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [ScanStubURLProtocol.self]
+    return StorytellerActor(
+        sourceRecord: BookSourceRecord(
+            id: "server",
+            name: "Test",
+            kind: .storyteller,
+            capabilities: .storyteller,
+        ),
+        session: URLSession(configuration: configuration),
+    )
+}
+
+private final class ScanStubURLProtocol: URLProtocol, @unchecked Sendable {
+    private static let lock = NSLock()
+    static var requests: [URLRequest] = []
+    static var postStatus = 204
+    static var stateSequence: [String] = []
+    private static var stateIndex = 0
+
+    static func reset() {
+        lock.lock()
+        requests = []
+        postStatus = 204
+        stateSequence = []
+        stateIndex = 0
+        lock.unlock()
+    }
+
+    static func setStateSequence(_ states: [String]) {
+        lock.lock()
+        stateSequence = states
+        stateIndex = 0
+        lock.unlock()
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        Self.lock.lock()
+        Self.requests.append(request)
+        let path = request.url?.path ?? ""
+        let method = request.httpMethod ?? "GET"
+        let postStatus = Self.postStatus
+        let isScanStatusGet = path.hasSuffix("/books/scan") && method == "GET"
+        let stateBody: String
+        if isScanStatusGet {
+            if Self.stateIndex < Self.stateSequence.count {
+                stateBody = Self.stateSequence[Self.stateIndex]
+                Self.stateIndex += 1
+            } else if let last = Self.stateSequence.last {
+                stateBody = last
+            } else {
+                stateBody = #"{"running":false,"source":null,"startedAt":null}"#
+            }
+        } else {
+            stateBody = #"{"running":false,"source":null,"startedAt":null}"#
+        }
+        Self.lock.unlock()
+
+        let status: Int
+        let data: Data
+        if path.hasSuffix("/token") {
+            status = 200
+            data = Data(
+                #"{"access_token":"test-token","token_type":"Bearer","expires_in":3600}"#.utf8
+            )
+        } else if path.hasSuffix("/books/scan"), method == "POST" {
+            status = postStatus
+            data = Data()
+        } else if isScanStatusGet {
+            status = 200
+            data = Data(stateBody.utf8)
+        } else if path.hasSuffix("/books") {
+            // refresh path may hit books list; keep tests focused on scan.
+            status = 200
+            data = Data("[]".utf8)
+        } else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: status,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"],
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
