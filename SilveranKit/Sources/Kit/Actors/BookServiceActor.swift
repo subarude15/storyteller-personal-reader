@@ -27,6 +27,9 @@ public actor BookServiceActor {
     private var storytellerLibraryScanCompletionWatchTask: Task<Void, Never>?
     /// Bumped on cancel/replace so a superseded watch cannot clear the active handle or refresh.
     private var storytellerLibraryScanCompletionWatchGeneration: UInt64 = 0
+    /// Most recently confirmed Storyteller scan is still running (survives watch-task expiry).
+    /// Cleared only when a later probe sees `running: false`.
+    private var storytellerLibraryScanKnownRunning = false
 
     public init() {
         self.sourceRecords = []
@@ -1490,21 +1493,32 @@ public actor BookServiceActor {
         return await storyteller.connectionStatus == .connected
     }
 
-    /// True during the foreground scan **or** while a deferred completion watch is active
-    /// (Storyteller is known to still be scanning). Settings uses this to keep the button disabled
+    /// True during the foreground scan, while a deferred completion watch Task is active,
+    /// or while the last confirmed Storyteller status was still `running: true` (even after
+    /// the bounded watch Task ended). Settings uses this to keep the button disabled
     /// without showing a permanent spinner.
     public var isStorytellerLibraryScanInProgress: Bool {
-        isStorytellerLibraryScanInFlight || storytellerLibraryScanCompletionWatchTask != nil
+        isStorytellerLibraryScanInFlight
+            || storytellerLibraryScanCompletionWatchTask != nil
+            || storytellerLibraryScanKnownRunning
     }
 
-    /// Lightweight status probe for Settings reconciliation after a deferred watch ends.
+    /// Lightweight status probe. Updates the known-running latch: `running: true` sets it,
+    /// `running: false` clears it; probe failures leave the latch unchanged.
     public func fetchStorytellerLibraryScanState() async -> Result<
         StorytellerLibraryScan.State, StorytellerLibraryScan.Failure
     > {
         guard let storyteller = await primaryStorytellerActor() else {
             return .failure(.notConfigured)
         }
-        return await storyteller.fetchScanState()
+        let result = await storyteller.fetchScanState()
+        switch result {
+            case .success(let state):
+                storytellerLibraryScanKnownRunning = state.running
+            case .failure:
+                break
+        }
+        return result
     }
 
     /// Asks the connected Storyteller server to scan/resync its library, then refreshes
@@ -1514,8 +1528,8 @@ public actor BookServiceActor {
     /// a final refresh and starts a bounded low-frequency watch that refreshes once idle.
     /// On `.startedUnconfirmed`, may refresh without claiming scan completion.
     ///
-    /// Overlapping foreground calls **or** an active completion watch return
-    /// `.failure(.scanAlreadyInProgress)` without cancelling the existing watcher or POSTing again.
+    /// Overlapping foreground calls, an active completion watch, or a known still-running
+    /// server scan return `.failure(.scanAlreadyInProgress)` without POSTing again.
     public func scanStorytellerLibrary(
         force: Bool = StorytellerLibraryScan.defaultForce,
         polling: StorytellerLibraryScan.Polling = .default,
@@ -1530,6 +1544,26 @@ public actor BookServiceActor {
             )
             return .failure(.scanAlreadyInProgress)
         }
+        if storytellerLibraryScanKnownRunning {
+            // Bounded watch may have ended; re-probe once before rejecting.
+            switch await fetchStorytellerLibraryScanState() {
+                case .success(let state) where !state.running:
+                    debugLog(
+                        "[BookServiceActor] Storyteller scan known-running cleared by idle probe; allowing new scan"
+                    )
+                case .success:
+                    debugLog(
+                        "[BookServiceActor] Storyteller library scan rejected; server still running"
+                    )
+                    return .failure(.scanAlreadyInProgress)
+                case .failure:
+                    debugLog(
+                        "[BookServiceActor] Storyteller library scan rejected; known-running and status undetermined"
+                    )
+                    return .failure(.scanAlreadyInProgress)
+            }
+        }
+
         isStorytellerLibraryScanInFlight = true
         defer { isStorytellerLibraryScanInFlight = false }
 
@@ -1550,6 +1584,7 @@ public actor BookServiceActor {
             case .success(let completion):
                 switch StorytellerLibraryScan.postScanRefreshTiming(for: completion) {
                     case .refreshImmediately:
+                        storytellerLibraryScanKnownRunning = false
                         debugLog(
                             "[BookServiceActor] Storyteller scan confirmed complete; refreshing local library"
                         )
@@ -1563,6 +1598,7 @@ public actor BookServiceActor {
                         )
                         await refreshLibraryFromSources()
                     case .deferUntilScanIdle:
+                        storytellerLibraryScanKnownRunning = true
                         debugLog(
                             "[BookServiceActor] Storyteller still scanning after foreground poll; deferring library refresh to completion watch"
                         )
@@ -1611,6 +1647,7 @@ public actor BookServiceActor {
         storytellerLibraryScanCompletionWatchTask = nil
         switch outcome {
             case .success(.confirmedComplete):
+                storytellerLibraryScanKnownRunning = false
                 debugLog(
                     "[BookServiceActor] Storyteller scan idle after deferred watch; refreshing local library"
                 )
@@ -1619,12 +1656,14 @@ public actor BookServiceActor {
                     "[BookServiceActor] Storyteller library refresh after deferred scan completion triggered"
                 )
             case .success(.stillRunning):
+                // Watch Task ends; keep known-running so we do not POST again until idle is confirmed.
+                storytellerLibraryScanKnownRunning = true
                 debugLog(
-                    "[BookServiceActor] Storyteller still scanning after deferred watch budget; skipping final refresh"
+                    "[BookServiceActor] Storyteller still scanning after deferred watch budget; keeping known-running latch"
                 )
             case .success(.startedUnconfirmed):
                 debugLog(
-                    "[BookServiceActor] Storyteller deferred watch ended unconfirmed; skipping refresh claim"
+                    "[BookServiceActor] Storyteller deferred watch ended unconfirmed; keeping known-running latch"
                 )
             case .failure(.cancelled):
                 debugLog("[BookServiceActor] Storyteller deferred scan completion watch cancelled")
@@ -1645,6 +1684,7 @@ public actor BookServiceActor {
         sourceRegistryLoaded = true
         cancelStorytellerLibraryScanCompletionWatch()
         isStorytellerLibraryScanInFlight = false
+        storytellerLibraryScanKnownRunning = false
     }
 
     // MARK: - ink+amp Stats sync (first Storyteller source)

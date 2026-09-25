@@ -189,13 +189,11 @@ public struct StorytellerServerSettingsView: View {
         }
     }
 
-    /// Re-enable the scan button once the deferred completion watch (or foreground scan) ends.
-    /// Uses a single lightweight GET when leaving `.stillScanning` so we don't claim completion
-    /// if the server is still running after our watch budget.
+    /// Reconcile `.stillScanning` with a lightweight GET.
+    /// `running: false` → completed; `running: true` → stay stillScanning; undetermined → stay stillScanning.
     private func reconcileLibraryScanPhaseFromService() async {
-        let blocked = await BookServiceActor.shared.isStorytellerLibraryScanInProgress
         let scanEnabled = await BookServiceActor.shared.canScanStorytellerLibrary()
-        guard libraryScanPhase == .stillScanning, !blocked else {
+        guard libraryScanPhase == .stillScanning else {
             await MainActor.run {
                 canScanLibrary = scanEnabled
             }
@@ -206,9 +204,12 @@ public struct StorytellerServerSettingsView: View {
         switch await BookServiceActor.shared.fetchStorytellerLibraryScanState() {
             case .success(let state) where !state.running:
                 nextPhase = .completed
-            default:
-                // Watch ended without a confirmed idle claim — unblock without lying.
-                nextPhase = .idle
+            case .success:
+                // Server still scanning — never fall through to .idle.
+                nextPhase = .stillScanning
+            case .failure:
+                // Undetermined — conservative; do not claim completion or idle.
+                nextPhase = .stillScanning
         }
         await MainActor.run {
             canScanLibrary = scanEnabled
@@ -216,15 +217,16 @@ public struct StorytellerServerSettingsView: View {
         }
     }
 
+    /// Occasional Settings-side probes while `.stillScanning` (cancelled when leaving the screen).
+    /// Not an unbounded BookServiceActor poll loop — the 6-minute watch stays bounded.
     private func monitorBackgroundScanIfNeeded() async {
         guard libraryScanPhase == .stillScanning else { return }
         while !Task.isCancelled {
-            let blocked = await BookServiceActor.shared.isStorytellerLibraryScanInProgress
-            if !blocked {
-                await reconcileLibraryScanPhaseFromService()
+            await reconcileLibraryScanPhaseFromService()
+            if libraryScanPhase != .stillScanning {
                 return
             }
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
         }
     }
 

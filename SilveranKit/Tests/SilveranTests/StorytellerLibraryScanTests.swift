@@ -394,6 +394,106 @@ struct StorytellerLibraryScanTests {
         }.count
         #expect(postsAfterThird == 2)
     }
+
+    @Test func knownRunningLatchBlocksScanAfterWatchBudgetExpires() async {
+        ScanStubURLProtocol.reset()
+        ScanStubURLProtocol.postStatus = 204
+        // Foreground + background budgets both see only running:true — watch Task ends, latch remains.
+        ScanStubURLProtocol.stateSequence = [
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+        ]
+
+        let record = BookSourceRecord(
+            id: "server-known-running",
+            name: "Test",
+            kind: .storyteller,
+            capabilities: .storyteller,
+        )
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ScanStubURLProtocol.self]
+        let storyteller = StorytellerActor(
+            sourceRecord: record,
+            session: URLSession(configuration: configuration),
+        )
+        _ = await storyteller.configureCredentials(
+            baseURL: "https://storyteller.test",
+            lanURL: "",
+            username: "reader",
+            password: "secret",
+        )
+
+        let service = BookServiceActor()
+        await service.installStorytellerActorForTesting(storyteller, record: record)
+
+        let foreground = StorytellerLibraryScan.Polling(intervalNanoseconds: 0, maxAttempts: 2)
+        let background = StorytellerLibraryScan.Polling(intervalNanoseconds: 0, maxAttempts: 3)
+
+        let first = await service.scanStorytellerLibrary(
+            force: true,
+            polling: foreground,
+            backgroundCompletionPolling: background,
+        )
+        #expect(first == .success(.stillRunning))
+
+        // Wait until the bounded watch Task finishes (fg + bg GET budget), latch must remain.
+        let expectedGets = foreground.maxAttempts + background.maxAttempts
+        var waited = 0
+        while waited < 100 {
+            let gets = ScanStubURLProtocol.requests.filter {
+                $0.httpMethod == "GET" && $0.url?.path.hasSuffix("/books/scan") == true
+            }.count
+            if gets >= expectedGets {
+                try? await Task.sleep(nanoseconds: 30_000_000)
+                break
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+            waited += 1
+        }
+
+        #expect(await service.isStorytellerLibraryScanInProgress)
+
+        let second = await service.scanStorytellerLibrary(
+            force: true,
+            polling: foreground,
+            backgroundCompletionPolling: background,
+        )
+        #expect(second == .failure(.scanAlreadyInProgress))
+
+        let postsAfterSecond = ScanStubURLProtocol.requests.filter {
+            $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/books/scan") == true
+        }.count
+        #expect(postsAfterSecond == 1)
+
+        // Later idle probe clears the latch; a future scan is allowed.
+        ScanStubURLProtocol.setStateSequence([
+            #"{"running":false,"source":null,"startedAt":null}"#,
+        ])
+        let probe = await service.fetchStorytellerLibraryScanState()
+        guard case .success(let state) = probe else {
+            Issue.record("expected idle probe success, got \(probe)")
+            return
+        }
+        #expect(!state.running)
+        #expect(await !service.isStorytellerLibraryScanInProgress)
+
+        let third = await service.scanStorytellerLibrary(
+            force: true,
+            polling: StorytellerLibraryScan.Polling(intervalNanoseconds: 0, maxAttempts: 2),
+            backgroundCompletionPolling: StorytellerLibraryScan.Polling(
+                intervalNanoseconds: 0,
+                maxAttempts: 2,
+            ),
+        )
+        guard case .success = third else {
+            Issue.record("expected a successful scan after idle probe, got \(third)")
+            return
+        }
+
+        let postsAfterThird = ScanStubURLProtocol.requests.filter {
+            $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/books/scan") == true
+        }.count
+        #expect(postsAfterThird == 2)
+    }
 }
 
 private func makeScanActor() -> StorytellerActor {
@@ -422,6 +522,13 @@ private final class ScanStubURLProtocol: URLProtocol, @unchecked Sendable {
         requests = []
         postStatus = 204
         stateSequence = []
+        stateIndex = 0
+        lock.unlock()
+    }
+
+    static func setStateSequence(_ states: [String]) {
+        lock.lock()
+        stateSequence = states
         stateIndex = 0
         lock.unlock()
     }
