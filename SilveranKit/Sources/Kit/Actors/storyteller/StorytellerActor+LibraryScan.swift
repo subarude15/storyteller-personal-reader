@@ -168,6 +168,35 @@ extension StorytellerActor {
             return .failure(.cancelled)
         }
 
+        return await pollScanStatus(
+            polling: polling,
+            mode: .postAccept,
+        )
+    }
+
+    /// Continues polling `GET /books/scan` until Storyteller reports idle, the bounded
+    /// budget is exhausted, or the task is cancelled. Used after `.stillRunning` so the
+    /// post-scan library refresh is not performed too early.
+    public func awaitScanIdle(
+        polling: StorytellerLibraryScan.Polling = .backgroundCompletion,
+    ) async -> StorytellerLibraryScan.Outcome {
+        await pollScanStatus(
+            polling: polling,
+            mode: .idleWatch,
+        )
+    }
+
+    private enum ScanPollMode {
+        /// After POST: distinguish confirmedComplete / stillRunning / startedUnconfirmed.
+        case postAccept
+        /// Mid-scan watch: already know Storyteller was running; idle → confirmedComplete.
+        case idleWatch
+    }
+
+    private func pollScanStatus(
+        polling: StorytellerLibraryScan.Polling,
+        mode: ScanPollMode,
+    ) async -> StorytellerLibraryScan.Outcome {
         var observed: [StorytellerLibraryScan.State] = []
         for attempt in 0..<polling.maxAttempts {
             if Task.isCancelled {
@@ -182,29 +211,57 @@ extension StorytellerActor {
 
             switch await fetchScanState() {
                 case .failure(let failure):
-                    // Status probe failed after accept — still an accepted start.
-                    debugLog(
-                        "[StorytellerActor] scanLibraryAndAwaitStatus status probe failed: \(failure)"
-                    )
-                    let completion = StorytellerLibraryScan.completion(
-                        afterStates: observed,
-                        exhaustedBudget: true,
-                    )
-                    return .success(completion)
+                    switch mode {
+                        case .postAccept:
+                            // Status probe failed after accept — still an accepted start.
+                            debugLog(
+                                "[StorytellerActor] scanLibraryAndAwaitStatus status probe failed: \(failure)"
+                            )
+                            let completion = StorytellerLibraryScan.completion(
+                                afterStates: observed,
+                                exhaustedBudget: true,
+                            )
+                            return .success(completion)
+                        case .idleWatch:
+                            // Transient probe failure during a long watch — keep trying.
+                            debugLog(
+                                "[StorytellerActor] awaitScanIdle status probe failed (continuing): \(failure)"
+                            )
+                            continue
+                    }
                 case .success(let state):
                     observed.append(state)
-                    if observed.contains(where: \.running) && !state.running {
-                        return .success(.confirmedComplete)
+                    switch mode {
+                        case .postAccept:
+                            if observed.contains(where: \.running) && !state.running {
+                                return .success(.confirmedComplete)
+                            }
+                        case .idleWatch:
+                            if !state.running {
+                                debugLog(
+                                    "[StorytellerActor] awaitScanIdle observed idle after \(observed.count) probe(s)"
+                                )
+                                return .success(.confirmedComplete)
+                            }
                     }
             }
         }
 
-        let completion = StorytellerLibraryScan.completion(
-            afterStates: observed,
-            exhaustedBudget: true,
-        )
+        let completion: StorytellerLibraryScan.Completion
+        switch mode {
+            case .postAccept:
+                completion = StorytellerLibraryScan.completion(
+                    afterStates: observed,
+                    exhaustedBudget: true,
+                )
+            case .idleWatch:
+                completion = StorytellerLibraryScan.idleWatchCompletion(
+                    afterStates: observed,
+                    exhaustedBudget: true,
+                )
+        }
         debugLog(
-            "[StorytellerActor] scanLibraryAndAwaitStatus finished polling completion=\(completion)"
+            "[StorytellerActor] pollScanStatus finished polling completion=\(completion) probes=\(observed.count)"
         )
         return .success(completion)
     }

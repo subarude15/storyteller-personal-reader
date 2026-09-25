@@ -22,6 +22,10 @@ public actor BookServiceActor {
     private var periodicRefreshUsesProgressSyncInterval = true
     /// Prevents overlapping manual Storyteller library scans from Settings taps.
     private var isStorytellerLibraryScanInFlight = false
+    /// At most one low-frequency watch after `.stillRunning`; cancelled when a new scan starts.
+    private var storytellerLibraryScanCompletionWatchTask: Task<Void, Never>?
+    /// Bumped on cancel/replace so a superseded watch cannot clear the active handle or refresh.
+    private var storytellerLibraryScanCompletionWatchGeneration: UInt64 = 0
 
     public init() {
         self.sourceRecords = []
@@ -1490,17 +1494,25 @@ public actor BookServiceActor {
     }
 
     /// Asks the connected Storyteller server to scan/resync its library, then refreshes
-    /// ink+amp’s catalogue via `refreshLibraryFromSources()`.
+    /// ink+amp’s catalogue via `refreshLibraryFromSources()` when appropriate.
     ///
-    /// Overlapping calls return `.failure(.scanAlreadyInProgress)`.
+    /// On `.confirmedComplete`, refreshes immediately. On `.stillRunning`, returns without
+    /// a final refresh and starts a bounded low-frequency watch that refreshes once idle.
+    /// On `.startedUnconfirmed`, may refresh without claiming scan completion.
+    ///
+    /// Overlapping foreground calls return `.failure(.scanAlreadyInProgress)`.
+    /// Starting a new scan cancels any prior completion watch (at most one watcher).
     public func scanStorytellerLibrary(
         force: Bool = StorytellerLibraryScan.defaultForce,
         polling: StorytellerLibraryScan.Polling = .default,
+        backgroundCompletionPolling: StorytellerLibraryScan.Polling = .backgroundCompletion,
     ) async -> StorytellerLibraryScan.Outcome {
         guard !isStorytellerLibraryScanInFlight else {
             return .failure(.scanAlreadyInProgress)
         }
         isStorytellerLibraryScanInFlight = true
+        // A new scan supersedes any deferred post-scan refresh watch.
+        cancelStorytellerLibraryScanCompletionWatch()
         defer { isStorytellerLibraryScanInFlight = false }
 
         guard let storyteller = await primaryStorytellerActor() else {
@@ -1518,15 +1530,91 @@ public actor BookServiceActor {
 
         switch outcome {
             case .success(let completion):
-                debugLog(
-                    "[BookServiceActor] Storyteller library scan accepted completion=\(completion); refreshing local library"
-                )
-                await refreshLibraryFromSources()
-                debugLog("[BookServiceActor] Storyteller library refresh after scan triggered")
+                switch StorytellerLibraryScan.postScanRefreshTiming(for: completion) {
+                    case .refreshImmediately:
+                        debugLog(
+                            "[BookServiceActor] Storyteller scan confirmed complete; refreshing local library"
+                        )
+                        await refreshLibraryFromSources()
+                        debugLog(
+                            "[BookServiceActor] Storyteller library refresh after scan triggered"
+                        )
+                    case .refreshWithoutClaimingCompletion:
+                        debugLog(
+                            "[BookServiceActor] Storyteller scan started (unconfirmed); refreshing local library without claiming completion"
+                        )
+                        await refreshLibraryFromSources()
+                    case .deferUntilScanIdle:
+                        debugLog(
+                            "[BookServiceActor] Storyteller still scanning after foreground poll; deferring library refresh to completion watch"
+                        )
+                        startStorytellerLibraryScanCompletionWatch(
+                            storyteller: storyteller,
+                            polling: backgroundCompletionPolling,
+                        )
+                }
             case .failure(let failure):
                 debugLog("[BookServiceActor] Storyteller library scan failed: \(failure)")
         }
         return outcome
+    }
+
+    private func cancelStorytellerLibraryScanCompletionWatch() {
+        storytellerLibraryScanCompletionWatchTask?.cancel()
+        storytellerLibraryScanCompletionWatchTask = nil
+        storytellerLibraryScanCompletionWatchGeneration &+= 1
+    }
+
+    /// Bounded watch: poll until Storyteller is idle, then `refreshLibraryFromSources()`.
+    /// Cancels any existing watcher first so at most one runs.
+    private func startStorytellerLibraryScanCompletionWatch(
+        storyteller: StorytellerActor,
+        polling: StorytellerLibraryScan.Polling,
+    ) {
+        cancelStorytellerLibraryScanCompletionWatch()
+        let generation = storytellerLibraryScanCompletionWatchGeneration
+        storytellerLibraryScanCompletionWatchTask = Task {
+            let watchOutcome = await storyteller.awaitScanIdle(polling: polling)
+            await self.finishStorytellerLibraryScanCompletionWatch(
+                outcome: watchOutcome,
+                generation: generation,
+            )
+        }
+    }
+
+    private func finishStorytellerLibraryScanCompletionWatch(
+        outcome: StorytellerLibraryScan.Outcome,
+        generation: UInt64,
+    ) async {
+        guard generation == storytellerLibraryScanCompletionWatchGeneration else {
+            // Superseded by a newer scan or watch — do not refresh or clear its handle.
+            return
+        }
+        storytellerLibraryScanCompletionWatchTask = nil
+        switch outcome {
+            case .success(.confirmedComplete):
+                debugLog(
+                    "[BookServiceActor] Storyteller scan idle after deferred watch; refreshing local library"
+                )
+                await refreshLibraryFromSources()
+                debugLog(
+                    "[BookServiceActor] Storyteller library refresh after deferred scan completion triggered"
+                )
+            case .success(.stillRunning):
+                debugLog(
+                    "[BookServiceActor] Storyteller still scanning after deferred watch budget; skipping final refresh"
+                )
+            case .success(.startedUnconfirmed):
+                debugLog(
+                    "[BookServiceActor] Storyteller deferred watch ended unconfirmed; skipping refresh claim"
+                )
+            case .failure(.cancelled):
+                debugLog("[BookServiceActor] Storyteller deferred scan completion watch cancelled")
+            case .failure(let failure):
+                debugLog(
+                    "[BookServiceActor] Storyteller deferred scan completion watch failed: \(failure)"
+                )
+        }
     }
 
     // MARK: - ink+amp Stats sync (first Storyteller source)

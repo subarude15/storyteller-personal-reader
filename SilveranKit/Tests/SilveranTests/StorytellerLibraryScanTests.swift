@@ -58,6 +58,54 @@ struct StorytellerLibraryScanTests {
         )
     }
 
+    @Test func postScanRefreshTimingDefersWhileStillRunning() {
+        #expect(
+            StorytellerLibraryScan.postScanRefreshTiming(for: .confirmedComplete)
+                == .refreshImmediately
+        )
+        #expect(
+            StorytellerLibraryScan.postScanRefreshTiming(for: .stillRunning)
+                == .deferUntilScanIdle
+        )
+        #expect(
+            StorytellerLibraryScan.postScanRefreshTiming(for: .startedUnconfirmed)
+                == .refreshWithoutClaimingCompletion
+        )
+    }
+
+    @Test func idleWatchCompletionTreatsIdleAsConfirmed() {
+        let idle = StorytellerLibraryScan.State(running: false)
+        let running = StorytellerLibraryScan.State(running: true, source: "manual")
+
+        #expect(
+            StorytellerLibraryScan.idleWatchCompletion(
+                afterStates: [running, idle],
+                exhaustedBudget: false,
+            ) == .confirmedComplete
+        )
+        #expect(
+            StorytellerLibraryScan.idleWatchCompletion(
+                afterStates: [running, running],
+                exhaustedBudget: true,
+            ) == .stillRunning
+        )
+    }
+
+    @Test func pollingBudgetsAreBoundedAndPositive() {
+        #expect(StorytellerLibraryScan.Polling.default.maxAttempts == 30)
+        #expect(StorytellerLibraryScan.Polling.default.maxAttempts > 0)
+        #expect(StorytellerLibraryScan.Polling.backgroundCompletion.maxAttempts == 72)
+        #expect(StorytellerLibraryScan.Polling.backgroundCompletion.maxAttempts > 0)
+        #expect(
+            StorytellerLibraryScan.Polling.backgroundCompletion.intervalNanoseconds
+                == 5_000_000_000
+        )
+        // Foreground + background caps are finite (no unbounded polls).
+        let foregroundCeiling = StorytellerLibraryScan.Polling.default.maxAttempts
+        let backgroundCeiling = StorytellerLibraryScan.Polling.backgroundCompletion.maxAttempts
+        #expect(foregroundCeiling + backgroundCeiling < 200)
+    }
+
     // MARK: - Networking
 
     @Test func successfulScanPostsForceAndReusesBearerAuth() async throws {
@@ -96,6 +144,89 @@ struct StorytellerLibraryScanTests {
         #expect(gets.count >= 2)
         #expect(gets.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer test-token" })
         #expect(ScanStubURLProtocol.requests.contains { $0.url?.path.hasSuffix("/token") == true })
+    }
+
+    @Test func foregroundPollBudgetExhaustedWhileRunningRemainsStillRunning() async {
+        ScanStubURLProtocol.reset()
+        ScanStubURLProtocol.postStatus = 204
+        ScanStubURLProtocol.stateSequence = [
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+        ]
+        let actor = makeScanActor()
+        _ = await actor.configureCredentials(
+            baseURL: "https://storyteller.test",
+            lanURL: "",
+            username: "reader",
+            password: "secret",
+        )
+
+        let polling = StorytellerLibraryScan.Polling(intervalNanoseconds: 0, maxAttempts: 3)
+        let outcome = await actor.scanLibraryAndAwaitStatus(force: true, polling: polling)
+        #expect(outcome == .success(.stillRunning))
+
+        let gets = ScanStubURLProtocol.requests.filter {
+            $0.httpMethod == "GET" && $0.url?.path.hasSuffix("/books/scan") == true
+        }
+        #expect(gets.count == polling.maxAttempts)
+    }
+
+    @Test func awaitScanIdleConfirmsWhenRunningBecomesFalse() async {
+        ScanStubURLProtocol.reset()
+        ScanStubURLProtocol.stateSequence = [
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+            #"{"running":false,"source":null,"startedAt":null}"#,
+        ]
+        let actor = makeScanActor()
+        _ = await actor.configureCredentials(
+            baseURL: "https://storyteller.test",
+            lanURL: "",
+            username: "reader",
+            password: "secret",
+        )
+
+        let outcome = await actor.awaitScanIdle(
+            polling: StorytellerLibraryScan.Polling(intervalNanoseconds: 0, maxAttempts: 5),
+        )
+        #expect(outcome == .success(.confirmedComplete))
+
+        let gets = ScanStubURLProtocol.requests.filter {
+            $0.httpMethod == "GET" && $0.url?.path.hasSuffix("/books/scan") == true
+        }
+        #expect(gets.count == 3)
+    }
+
+    @Test func awaitScanIdleCancellationExitsWithoutUnboundedPolling() async {
+        ScanStubURLProtocol.reset()
+        ScanStubURLProtocol.stateSequence = [
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+        ]
+        let actor = makeScanActor()
+        _ = await actor.configureCredentials(
+            baseURL: "https://storyteller.test",
+            lanURL: "",
+            username: "reader",
+            password: "secret",
+        )
+
+        let polling = StorytellerLibraryScan.Polling(
+            intervalNanoseconds: 50_000_000,
+            maxAttempts: 40,
+        )
+        let task = Task {
+            await actor.awaitScanIdle(polling: polling)
+        }
+        // Let the first probe land, then cancel during the inter-attempt sleep.
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        task.cancel()
+        let outcome = await task.value
+        #expect(outcome == .failure(.cancelled))
+
+        let gets = ScanStubURLProtocol.requests.filter {
+            $0.httpMethod == "GET" && $0.url?.path.hasSuffix("/books/scan") == true
+        }
+        #expect(gets.count < polling.maxAttempts)
+        #expect(gets.count <= 2)
     }
 
     @Test func non2xxScanMapsToClearFailure() async {

@@ -101,6 +101,7 @@ public enum StorytellerLibraryScan {
         public var maxAttempts: Int
 
         public init(intervalNanoseconds: UInt64, maxAttempts: Int) {
+            precondition(maxAttempts > 0, "Polling.maxAttempts must be positive (no unbounded loops)")
             self.intervalNanoseconds = intervalNanoseconds
             self.maxAttempts = maxAttempts
         }
@@ -111,6 +112,36 @@ public enum StorytellerLibraryScan {
             intervalNanoseconds: 1_500_000_000,
             maxAttempts: 30,
         )
+
+        /// Low-frequency completion watch after the foreground budget ends while
+        /// Storyteller is still scanning (~6 minutes at 5s). Bounded; not infinite.
+        public static let backgroundCompletion = Polling(
+            intervalNanoseconds: 5_000_000_000,
+            maxAttempts: 72,
+        )
+    }
+
+    /// When ink+amp should run `refreshLibraryFromSources()` relative to scan status.
+    public enum PostScanRefreshTiming: Equatable, Sendable {
+        /// Saw running → idle; refresh catalogue now so newly scanned media appears.
+        case refreshImmediately
+        /// Still `running: true` after the foreground poll — do not treat the current
+        /// refresh as the final post-scan refresh; watch until idle, then refresh.
+        case deferUntilScanIdle
+        /// POST accepted but status never confirmed; a normal refresh is fine without
+        /// claiming newly scanned content was discovered.
+        case refreshWithoutClaimingCompletion
+    }
+
+    public static func postScanRefreshTiming(for completion: Completion) -> PostScanRefreshTiming {
+        switch completion {
+            case .confirmedComplete:
+                return .refreshImmediately
+            case .stillRunning:
+                return .deferUntilScanIdle
+            case .startedUnconfirmed:
+                return .refreshWithoutClaimingCompletion
+        }
     }
 
     /// Pure status-poll reducer used by the actor after POST acceptance.
@@ -127,6 +158,21 @@ public enum StorytellerLibraryScan {
             return .stillRunning
         }
         return .startedUnconfirmed
+    }
+
+    /// Reducer for a mid-scan idle watch (caller already observed `running: true`).
+    /// Idle on any poll → confirmed complete; budget exhausted while still running → stillRunning.
+    public static func idleWatchCompletion(
+        afterStates states: [State],
+        exhaustedBudget: Bool,
+    ) -> Completion {
+        if states.contains(where: { !$0.running }) {
+            return .confirmedComplete
+        }
+        if exhaustedBudget {
+            return .stillRunning
+        }
+        return .stillRunning
     }
 
     public static func parseState(from data: Data) throws -> State {

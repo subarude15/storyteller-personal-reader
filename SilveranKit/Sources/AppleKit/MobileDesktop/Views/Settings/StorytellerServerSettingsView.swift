@@ -231,6 +231,7 @@ private enum StorytellerLibraryScanUIPhase: Equatable {
     case idle
     case inProgress
     case started
+    case stillScanning
     case completed
     case failed(String)
 
@@ -238,7 +239,10 @@ private enum StorytellerLibraryScanUIPhase: Equatable {
         switch outcome {
             case .success(.confirmedComplete):
                 self = .completed
-            case .success(.startedUnconfirmed), .success(.stillRunning):
+            case .success(.stillRunning):
+                // Foreground poll ended while Storyteller is still scanning; refresh is deferred.
+                self = .stillScanning
+            case .success(.startedUnconfirmed):
                 // POST accepted; do not claim complete when status never finished in budget.
                 self = .started
             case .failure(let failure):
@@ -248,7 +252,7 @@ private enum StorytellerLibraryScanUIPhase: Equatable {
 
     var buttonTitle: String {
         switch self {
-            case .idle, .started, .completed, .failed:
+            case .idle, .started, .stillScanning, .completed, .failed:
                 return "Scan Storyteller Library"
             case .inProgress:
                 return "Scanning…"
@@ -261,6 +265,8 @@ private enum StorytellerLibraryScanUIPhase: Equatable {
                 return nil
             case .started:
                 return "Storyteller scan started. Your library was refreshed."
+            case .stillScanning:
+                return "Storyteller is still scanning…"
             case .completed:
                 return "Scan complete. Library refreshed."
             case .failed(let message):
@@ -269,6 +275,8 @@ private enum StorytellerLibraryScanUIPhase: Equatable {
     }
 
     var isBusy: Bool {
+        // Only block the button during the foreground scan; deferred completion watch
+        // must not keep Settings busy for several minutes.
         self == .inProgress
     }
 
