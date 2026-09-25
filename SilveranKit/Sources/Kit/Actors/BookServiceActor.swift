@@ -22,7 +22,8 @@ public actor BookServiceActor {
     private var periodicRefreshUsesProgressSyncInterval = true
     /// Prevents overlapping manual Storyteller library scans from Settings taps.
     private var isStorytellerLibraryScanInFlight = false
-    /// At most one low-frequency watch after `.stillRunning`; cancelled when a new scan starts.
+    /// At most one low-frequency watch after `.stillRunning`.
+    /// While set, another manual scan is rejected (does not cancel-and-restart).
     private var storytellerLibraryScanCompletionWatchTask: Task<Void, Never>?
     /// Bumped on cancel/replace so a superseded watch cannot clear the active handle or refresh.
     private var storytellerLibraryScanCompletionWatchGeneration: UInt64 = 0
@@ -1489,8 +1490,21 @@ public actor BookServiceActor {
         return await storyteller.connectionStatus == .connected
     }
 
+    /// True during the foreground scan **or** while a deferred completion watch is active
+    /// (Storyteller is known to still be scanning). Settings uses this to keep the button disabled
+    /// without showing a permanent spinner.
     public var isStorytellerLibraryScanInProgress: Bool {
-        isStorytellerLibraryScanInFlight
+        isStorytellerLibraryScanInFlight || storytellerLibraryScanCompletionWatchTask != nil
+    }
+
+    /// Lightweight status probe for Settings reconciliation after a deferred watch ends.
+    public func fetchStorytellerLibraryScanState() async -> Result<
+        StorytellerLibraryScan.State, StorytellerLibraryScan.Failure
+    > {
+        guard let storyteller = await primaryStorytellerActor() else {
+            return .failure(.notConfigured)
+        }
+        return await storyteller.fetchScanState()
     }
 
     /// Asks the connected Storyteller server to scan/resync its library, then refreshes
@@ -1500,8 +1514,8 @@ public actor BookServiceActor {
     /// a final refresh and starts a bounded low-frequency watch that refreshes once idle.
     /// On `.startedUnconfirmed`, may refresh without claiming scan completion.
     ///
-    /// Overlapping foreground calls return `.failure(.scanAlreadyInProgress)`.
-    /// Starting a new scan cancels any prior completion watch (at most one watcher).
+    /// Overlapping foreground calls **or** an active completion watch return
+    /// `.failure(.scanAlreadyInProgress)` without cancelling the existing watcher or POSTing again.
     public func scanStorytellerLibrary(
         force: Bool = StorytellerLibraryScan.defaultForce,
         polling: StorytellerLibraryScan.Polling = .default,
@@ -1510,9 +1524,13 @@ public actor BookServiceActor {
         guard !isStorytellerLibraryScanInFlight else {
             return .failure(.scanAlreadyInProgress)
         }
+        guard storytellerLibraryScanCompletionWatchTask == nil else {
+            debugLog(
+                "[BookServiceActor] Storyteller library scan rejected; completion watch still active"
+            )
+            return .failure(.scanAlreadyInProgress)
+        }
         isStorytellerLibraryScanInFlight = true
-        // A new scan supersedes any deferred post-scan refresh watch.
-        cancelStorytellerLibraryScanCompletionWatch()
         defer { isStorytellerLibraryScanInFlight = false }
 
         guard let storyteller = await primaryStorytellerActor() else {
@@ -1615,6 +1633,18 @@ public actor BookServiceActor {
                     "[BookServiceActor] Storyteller deferred scan completion watch failed: \(failure)"
                 )
         }
+    }
+
+    /// Package-test hook: wire a preconfigured Storyteller actor without Keychain/disk I/O.
+    func installStorytellerActorForTesting(
+        _ actor: StorytellerActor,
+        record: BookSourceRecord,
+    ) {
+        sourceRecords = [record]
+        sourcesByID = [record.id: actor]
+        sourceRegistryLoaded = true
+        cancelStorytellerLibraryScanCompletionWatch()
+        isStorytellerLibraryScanInFlight = false
     }
 
     // MARK: - ink+amp Stats sync (first Storyteller source)

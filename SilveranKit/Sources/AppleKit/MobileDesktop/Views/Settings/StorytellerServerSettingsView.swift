@@ -91,13 +91,13 @@ public struct StorytellerServerSettingsView: View {
                             systemImage: "arrow.triangle.2.circlepath",
                         )
                         Spacer()
-                        if libraryScanPhase.isBusy {
+                        if libraryScanPhase.showsProgressSpinner {
                             ProgressView()
                                 .controlSize(.small)
                         }
                     }
                 }
-                .disabled(!canScanLibrary || libraryScanPhase.isBusy)
+                .disabled(!canScanLibrary || libraryScanPhase.blocksNewScan)
 
                 if let detail = libraryScanPhase.detailText {
                     Text(detail)
@@ -122,6 +122,12 @@ public struct StorytellerServerSettingsView: View {
         .navigationTitle("Book Sources")
         .task {
             await loadSources()
+        }
+        .task(id: libraryScanPhase) {
+            await monitorBackgroundScanIfNeeded()
+        }
+        .onAppear {
+            Task { await reconcileLibraryScanPhaseFromService() }
         }
         .sheet(isPresented: $showingAddServer) {
             NavigationStack {
@@ -165,10 +171,11 @@ public struct StorytellerServerSettingsView: View {
             canScanLibrary = scanEnabled
             isLoading = false
         }
+        await reconcileLibraryScanPhaseFromService()
     }
 
     private func runLibraryScan() async {
-        guard canScanLibrary, !libraryScanPhase.isBusy else { return }
+        guard canScanLibrary, !libraryScanPhase.blocksNewScan else { return }
         await MainActor.run {
             libraryScanPhase = .inProgress
         }
@@ -179,6 +186,45 @@ public struct StorytellerServerSettingsView: View {
         let scanEnabled = await BookServiceActor.shared.canScanStorytellerLibrary()
         await MainActor.run {
             canScanLibrary = scanEnabled
+        }
+    }
+
+    /// Re-enable the scan button once the deferred completion watch (or foreground scan) ends.
+    /// Uses a single lightweight GET when leaving `.stillScanning` so we don't claim completion
+    /// if the server is still running after our watch budget.
+    private func reconcileLibraryScanPhaseFromService() async {
+        let blocked = await BookServiceActor.shared.isStorytellerLibraryScanInProgress
+        let scanEnabled = await BookServiceActor.shared.canScanStorytellerLibrary()
+        guard libraryScanPhase == .stillScanning, !blocked else {
+            await MainActor.run {
+                canScanLibrary = scanEnabled
+            }
+            return
+        }
+
+        let nextPhase: StorytellerLibraryScanUIPhase
+        switch await BookServiceActor.shared.fetchStorytellerLibraryScanState() {
+            case .success(let state) where !state.running:
+                nextPhase = .completed
+            default:
+                // Watch ended without a confirmed idle claim — unblock without lying.
+                nextPhase = .idle
+        }
+        await MainActor.run {
+            canScanLibrary = scanEnabled
+            libraryScanPhase = nextPhase
+        }
+    }
+
+    private func monitorBackgroundScanIfNeeded() async {
+        guard libraryScanPhase == .stillScanning else { return }
+        while !Task.isCancelled {
+            let blocked = await BookServiceActor.shared.isStorytellerLibraryScanInProgress
+            if !blocked {
+                await reconcileLibraryScanPhaseFromService()
+                return
+            }
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
         }
     }
 
@@ -245,6 +291,9 @@ private enum StorytellerLibraryScanUIPhase: Equatable {
             case .success(.startedUnconfirmed):
                 // POST accepted; do not claim complete when status never finished in budget.
                 self = .started
+            case .failure(.scanAlreadyInProgress):
+                // Service rejected a second tap while a known scan/watch is active.
+                self = .stillScanning
             case .failure(let failure):
                 self = .failed(failure.userMessage)
         }
@@ -274,10 +323,19 @@ private enum StorytellerLibraryScanUIPhase: Equatable {
         }
     }
 
-    var isBusy: Bool {
-        // Only block the button during the foreground scan; deferred completion watch
-        // must not keep Settings busy for several minutes.
+    /// Spinner only during the foreground request/poll — not during deferred still-scanning.
+    var showsProgressSpinner: Bool {
         self == .inProgress
+    }
+
+    /// Blocks another manual scan while foreground work or a known still-running scan is active.
+    var blocksNewScan: Bool {
+        switch self {
+            case .inProgress, .stillScanning:
+                return true
+            case .idle, .started, .completed, .failed:
+                return false
+        }
     }
 
     var isError: Bool {

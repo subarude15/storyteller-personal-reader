@@ -298,6 +298,102 @@ struct StorytellerLibraryScanTests {
                 .contains("permission")
         )
     }
+
+    // MARK: - BookServiceActor overlap / completion watch
+
+    @Test func completionWatchBlocksSecondManualScanUntilIdle() async {
+        ScanStubURLProtocol.reset()
+        ScanStubURLProtocol.postStatus = 204
+        // Foreground (2): still running. Watch continues with more running, then idle.
+        ScanStubURLProtocol.stateSequence = [
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+            #"{"running":true,"source":"manual","startedAt":1}"#,
+            #"{"running":false,"source":null,"startedAt":null}"#,
+        ]
+
+        let record = BookSourceRecord(
+            id: "server-overlap",
+            name: "Test",
+            kind: .storyteller,
+            capabilities: .storyteller,
+        )
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ScanStubURLProtocol.self]
+        let storyteller = StorytellerActor(
+            sourceRecord: record,
+            session: URLSession(configuration: configuration),
+        )
+        _ = await storyteller.configureCredentials(
+            baseURL: "https://storyteller.test",
+            lanURL: "",
+            username: "reader",
+            password: "secret",
+        )
+
+        let service = BookServiceActor()
+        await service.installStorytellerActorForTesting(storyteller, record: record)
+
+        let foreground = StorytellerLibraryScan.Polling(intervalNanoseconds: 0, maxAttempts: 2)
+        let background = StorytellerLibraryScan.Polling(
+            intervalNanoseconds: 20_000_000,
+            maxAttempts: 8,
+        )
+
+        let first = await service.scanStorytellerLibrary(
+            force: true,
+            polling: foreground,
+            backgroundCompletionPolling: background,
+        )
+        #expect(first == .success(.stillRunning))
+        #expect(await service.isStorytellerLibraryScanInProgress)
+
+        let postsAfterFirst = ScanStubURLProtocol.requests.filter {
+            $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/books/scan") == true
+        }.count
+        #expect(postsAfterFirst == 1)
+
+        let second = await service.scanStorytellerLibrary(
+            force: true,
+            polling: foreground,
+            backgroundCompletionPolling: background,
+        )
+        #expect(second == .failure(.scanAlreadyInProgress))
+
+        let postsAfterSecond = ScanStubURLProtocol.requests.filter {
+            $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/books/scan") == true
+        }.count
+        #expect(postsAfterSecond == 1)
+
+        // Wait for the deferred watch to observe idle and clear.
+        var waited = 0
+        while await service.isStorytellerLibraryScanInProgress, waited < 100 {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            waited += 1
+        }
+        let blockedAfterWatch = await service.isStorytellerLibraryScanInProgress
+        #expect(!blockedAfterWatch)
+
+        let third = await service.scanStorytellerLibrary(
+            force: true,
+            polling: StorytellerLibraryScan.Polling(intervalNanoseconds: 0, maxAttempts: 2),
+            backgroundCompletionPolling: StorytellerLibraryScan.Polling(
+                intervalNanoseconds: 0,
+                maxAttempts: 2,
+            ),
+        )
+        guard case .success = third else {
+            Issue.record("expected a successful scan after idle, got \(third)")
+            return
+        }
+
+        let postsAfterThird = ScanStubURLProtocol.requests.filter {
+            $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/books/scan") == true
+        }.count
+        #expect(postsAfterThird == 2)
+    }
 }
 
 private func makeScanActor() -> StorytellerActor {
