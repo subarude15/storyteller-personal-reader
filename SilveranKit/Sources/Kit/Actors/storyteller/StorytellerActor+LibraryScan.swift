@@ -64,7 +64,6 @@ extension StorytellerActor {
                 context: "library scan",
             ) {
                 case .success:
-                    await recordNetworkSuccess()
                     debugLog(
                         "[StorytellerActor] scanLibrary accepted (server-side scan started/queued)"
                     )
@@ -130,7 +129,6 @@ extension StorytellerActor {
                 case .success:
                     do {
                         let state = try StorytellerLibraryScan.parseState(from: response.data)
-                        await recordNetworkSuccess()
                         debugLog(
                             "[StorytellerActor] fetchScanState running=\(state.running) source=\(state.source ?? "nil")"
                         )

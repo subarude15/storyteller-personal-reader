@@ -56,7 +56,7 @@ public enum StorytellerLibraryScan {
         case stillRunning
     }
 
-    public enum Failure: Equatable, Sendable {
+    public enum Failure: Error, Equatable, Sendable {
         case notConfigured
         case notConnected
         case authenticationFailed
@@ -70,19 +70,19 @@ public enum StorytellerLibraryScan {
         public var userMessage: String {
             switch self {
                 case .notConfigured:
-                    return "Storyteller isn’t configured."
+                    return "Storyteller isn't configured."
                 case .notConnected:
-                    return "Storyteller isn’t connected."
+                    return "Storyteller isn't connected."
                 case .authenticationFailed:
                     return "Storyteller sign-in failed. Check your credentials."
                 case .permissionDenied:
-                    return "This account can’t start a library scan (needs book process permission)."
+                    return "This account can't start a library scan (needs book process permission)."
                 case .unsupported:
-                    return "This Storyteller version doesn’t expose library scan."
+                    return "This Storyteller version doesn't expose library scan."
                 case .rejected(let statusCode):
                     return "Storyteller rejected the scan (HTTP \(statusCode))."
                 case .transport(let detail):
-                    return "Couldn’t reach Storyteller (\(detail))."
+                    return "Couldn't reach Storyteller (\(detail))."
                 case .scanAlreadyInProgress:
                     return "A library scan is already in progress."
                 case .cancelled:
