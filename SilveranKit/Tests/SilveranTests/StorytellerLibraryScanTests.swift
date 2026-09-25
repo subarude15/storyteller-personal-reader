@@ -208,12 +208,17 @@ private final class ScanStubURLProtocol: URLProtocol, @unchecked Sendable {
         let path = request.url?.path ?? ""
         let method = request.httpMethod ?? "GET"
         let postStatus = Self.postStatus
+        let isScanStatusGet = path.hasSuffix("/books/scan") && method == "GET"
         let stateBody: String
-        if Self.stateIndex < Self.stateSequence.count {
-            stateBody = Self.stateSequence[Self.stateIndex]
-            Self.stateIndex += 1
-        } else if let last = Self.stateSequence.last {
-            stateBody = last
+        if isScanStatusGet {
+            if Self.stateIndex < Self.stateSequence.count {
+                stateBody = Self.stateSequence[Self.stateIndex]
+                Self.stateIndex += 1
+            } else if let last = Self.stateSequence.last {
+                stateBody = last
+            } else {
+                stateBody = #"{"running":false,"source":null,"startedAt":null}"#
+            }
         } else {
             stateBody = #"{"running":false,"source":null,"startedAt":null}"#
         }
@@ -229,7 +234,7 @@ private final class ScanStubURLProtocol: URLProtocol, @unchecked Sendable {
         } else if path.hasSuffix("/books/scan"), method == "POST" {
             status = postStatus
             data = Data()
-        } else if path.hasSuffix("/books/scan"), method == "GET" {
+        } else if isScanStatusGet {
             status = 200
             data = Data(stateBody.utf8)
         } else if path.hasSuffix("/books") {
