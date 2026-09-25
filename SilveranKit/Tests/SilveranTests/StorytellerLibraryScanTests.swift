@@ -110,7 +110,10 @@ struct StorytellerLibraryScanTests {
         )
 
         let result = await actor.scanLibrary(force: true)
-        #expect(result == .failure(.permissionDenied))
+        guard case .failure(.permissionDenied) = result else {
+            Issue.record("expected permissionDenied, got \(result)")
+            return
+        }
     }
 
     @Test func unsupportedScanEndpointMapsToUnsupported() async {
@@ -125,7 +128,10 @@ struct StorytellerLibraryScanTests {
         )
 
         let result = await actor.scanLibrary(force: true)
-        #expect(result == .failure(.unsupported))
+        guard case .failure(.unsupported) = result else {
+            Issue.record("expected unsupported, got \(result)")
+            return
+        }
     }
 
     @Test func malformedScanStateAfterAcceptYieldsStartedUnconfirmed() async {
