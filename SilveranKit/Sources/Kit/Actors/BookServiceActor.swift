@@ -20,6 +20,8 @@ public actor BookServiceActor {
     private var networkAvailable: Bool?
     private var periodicLibraryRefreshTask: Task<Void, Never>?
     private var periodicRefreshUsesProgressSyncInterval = true
+    /// Prevents overlapping manual Storyteller library scans from Settings taps.
+    private var isStorytellerLibraryScanInFlight = false
 
     public init() {
         self.sourceRecords = []
@@ -1472,6 +1474,59 @@ public actor BookServiceActor {
     public func fetchCollections(sourceID: BookSourceID) async -> [StorytellerCollection]? {
         guard let storyteller = await storytellerActor(for: sourceID) else { return nil }
         return await storyteller.fetchCollections()
+    }
+
+    // MARK: - Storyteller library scan
+
+    /// Whether a Storyteller source is configured and currently connected (Settings gate).
+    public func canScanStorytellerLibrary() async -> Bool {
+        guard let storyteller = await primaryStorytellerActor() else { return false }
+        guard await storyteller.isConfigured else { return false }
+        return await storyteller.connectionStatus == .connected
+    }
+
+    public var isStorytellerLibraryScanInProgress: Bool {
+        isStorytellerLibraryScanInFlight
+    }
+
+    /// Asks the connected Storyteller server to scan/resync its library, then refreshes
+    /// ink+amp’s catalogue via `refreshLibraryFromSources()`.
+    ///
+    /// Overlapping calls return `.failure(.scanAlreadyInProgress)`.
+    public func scanStorytellerLibrary(
+        force: Bool = StorytellerLibraryScan.defaultForce,
+        polling: StorytellerLibraryScan.Polling = .default,
+    ) async -> StorytellerLibraryScan.Outcome {
+        guard !isStorytellerLibraryScanInFlight else {
+            return .failure(.scanAlreadyInProgress)
+        }
+        isStorytellerLibraryScanInFlight = true
+        defer { isStorytellerLibraryScanInFlight = false }
+
+        guard let storyteller = await primaryStorytellerActor() else {
+            return .failure(.notConfigured)
+        }
+        guard await storyteller.isConfigured else {
+            return .failure(.notConfigured)
+        }
+
+        debugLog("[BookServiceActor] Storyteller library scan starting force=\(force)")
+        let outcome = await storyteller.scanLibraryAndAwaitStatus(
+            force: force,
+            polling: polling,
+        )
+
+        switch outcome {
+            case .success(let completion):
+                debugLog(
+                    "[BookServiceActor] Storyteller library scan accepted completion=\(completion); refreshing local library"
+                )
+                await refreshLibraryFromSources()
+                debugLog("[BookServiceActor] Storyteller library refresh after scan triggered")
+            case .failure(let failure):
+                debugLog("[BookServiceActor] Storyteller library scan failed: \(failure)")
+        }
+        return outcome
     }
 
     // MARK: - ink+amp Stats sync (first Storyteller source)

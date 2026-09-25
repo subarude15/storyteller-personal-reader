@@ -11,6 +11,8 @@ public struct StorytellerServerSettingsView: View {
     @State private var sourceURLs: [BookSourceID: String] = [:]
     @State private var isLoading = false
     @State private var showingAddServer = false
+    @State private var canScanLibrary = false
+    @State private var libraryScanPhase: StorytellerLibraryScanUIPhase = .idle
     #if os(macOS)
     @State private var editingSource: BookSourceRecord?
     #endif
@@ -78,6 +80,39 @@ public struct StorytellerServerSettingsView: View {
                     Label("Add Book Source", systemImage: "plus")
                 }
             }
+
+            Section {
+                Button {
+                    Task { await runLibraryScan() }
+                } label: {
+                    HStack {
+                        Label(
+                            libraryScanPhase.buttonTitle,
+                            systemImage: "arrow.triangle.2.circlepath",
+                        )
+                        Spacer()
+                        if libraryScanPhase.isBusy {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                    }
+                }
+                .disabled(!canScanLibrary || libraryScanPhase.isBusy)
+
+                if let detail = libraryScanPhase.detailText {
+                    Text(detail)
+                        .font(.footnote)
+                        .foregroundStyle(
+                            libraryScanPhase.isError ? Color.red : Color.secondary
+                        )
+                }
+            } header: {
+                Text("Library")
+            } footer: {
+                Text(
+                    "Asks the Storyteller server to scan for newly added books and audiobooks, then refreshes this app’s library."
+                )
+            }
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
@@ -123,10 +158,27 @@ public struct StorytellerServerSettingsView: View {
                 urls[source.id] = credentials.url
             }
         }
+        let scanEnabled = await BookServiceActor.shared.canScanStorytellerLibrary()
         await MainActor.run {
             sources = loadedSources
             sourceURLs = urls
+            canScanLibrary = scanEnabled
             isLoading = false
+        }
+    }
+
+    private func runLibraryScan() async {
+        guard canScanLibrary, !libraryScanPhase.isBusy else { return }
+        await MainActor.run {
+            libraryScanPhase = .inProgress
+        }
+        let outcome = await BookServiceActor.shared.scanStorytellerLibrary()
+        await MainActor.run {
+            libraryScanPhase = StorytellerLibraryScanUIPhase(outcome: outcome)
+        }
+        let scanEnabled = await BookServiceActor.shared.canScanStorytellerLibrary()
+        await MainActor.run {
+            canScanLibrary = scanEnabled
         }
     }
 
@@ -171,6 +223,58 @@ public struct StorytellerServerSettingsView: View {
             case .localFolder:
                 return "folder"
         }
+    }
+}
+
+/// Settings-only presentation for manual Storyteller library scan.
+private enum StorytellerLibraryScanUIPhase: Equatable {
+    case idle
+    case inProgress
+    case started
+    case completed
+    case failed(String)
+
+    init(outcome: StorytellerLibraryScan.Outcome) {
+        switch outcome {
+            case .success(.confirmedComplete):
+                self = .completed
+            case .success(.startedUnconfirmed), .success(.stillRunning):
+                // POST accepted; do not claim complete when status never finished in budget.
+                self = .started
+            case .failure(let failure):
+                self = .failed(failure.userMessage)
+        }
+    }
+
+    var buttonTitle: String {
+        switch self {
+            case .idle, .started, .completed, .failed:
+                return "Scan Storyteller Library"
+            case .inProgress:
+                return "Scanning…"
+        }
+    }
+
+    var detailText: String? {
+        switch self {
+            case .idle, .inProgress:
+                return nil
+            case .started:
+                return "Storyteller scan started. Your library was refreshed."
+            case .completed:
+                return "Scan complete. Library refreshed."
+            case .failed(let message):
+                return message
+        }
+    }
+
+    var isBusy: Bool {
+        self == .inProgress
+    }
+
+    var isError: Bool {
+        if case .failed = self { return true }
+        return false
     }
 }
 
