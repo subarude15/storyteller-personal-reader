@@ -21,6 +21,9 @@
         height: 100%;
         width: 100%;
         overflow: hidden;
+        /* Opaque default so WKWebView snapshots never sample clear→black gutters.
+           FoliateManager overwrites with the reader paper color when styles apply. */
+        background-color: #f7f3ea;
     }
     body {
         font-family: system-ui, sans-serif;
@@ -28,11 +31,13 @@
     #reader-container {
         width: 100%;
         height: 100%;
+        background-color: #f7f3ea;
     }
     foliate-view {
         display: block;
         width: 100%;
         height: 100%;
+        background-color: #f7f3ea;
     }
 </style>
 

@@ -518,6 +518,10 @@ assert(
   lastSnapshotRequest && lastSnapshotRequest.requestId === reqId,
   "JS posts RequestPageSnapshot with requestId",
 );
+assert(
+  typeof lastSnapshotRequest.fillColor === "string" && lastSnapshotRequest.fillColor.length > 0,
+  "JS posts fillColor so native can composite transparent gutters",
+);
 assert(snapAnimator.pendingSnapshotRequestId === reqId, "pending id tracked");
 
 // Stale reply must be ignored.
@@ -656,6 +660,10 @@ const peelOverlay = document.getElementById("inkamp-page-curl-overlay");
 assert(childByClass(peelOverlay, "inkamp-curl-underlay"), "underlay mounted for drag cover");
 assert(childByClass(peelOverlay, "inkamp-curl-shapes"), "SVG fold shapes mounted");
 const peelSheet = childByClass(peelOverlay, "inkamp-curl-sheet");
+assert(
+  !peelSheet.style.backgroundColor || peelSheet.style.backgroundColor === "transparent",
+  "curl sheet has no opaque dark canvas fill",
+);
 // begin() applies progress 0 synchronously.
 assert(
   peelSheet.style.clipPath === peelVisualState(0, W, H, true).clipPath,

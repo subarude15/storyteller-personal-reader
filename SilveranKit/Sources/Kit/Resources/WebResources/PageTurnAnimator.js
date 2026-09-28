@@ -901,7 +901,12 @@ export default class PageTurnAnimator {
     }
 
     try {
-      handler.postMessage({ requestId: id });
+      // fillColor lets native composite transparent gutters onto paper before JPEG
+      // (JPEG has no alpha — clear pixels otherwise become black bars).
+      handler.postMessage({
+        requestId: id,
+        fillColor: this.#paperColor(this.#gesture?.doc),
+      });
     } catch (error) {
       this.#snapshotFailed = true;
       debugLog("PageTurnAnimator", "curl fallback: snapshot request failed", error);
@@ -1009,6 +1014,7 @@ export default class PageTurnAnimator {
         pointer-events: none;
         overflow: hidden;
         contain: layout style paint;
+        background: transparent;
       }
       #${OVERLAY_ID} .inkamp-curl-underlay {
         position: absolute;
@@ -1026,6 +1032,7 @@ export default class PageTurnAnimator {
         background-size: 100% 100%;
         background-repeat: no-repeat;
         background-position: left top;
+        background-color: transparent;
         transform: none;
       }
       #${OVERLAY_ID} .inkamp-curl-shapes {
@@ -1036,6 +1043,7 @@ export default class PageTurnAnimator {
         height: 100%;
         overflow: hidden;
         pointer-events: none;
+        background: transparent;
       }
       #${OVERLAY_ID} .inkamp-curl-back {
         opacity: 0;
@@ -1071,7 +1079,9 @@ export default class PageTurnAnimator {
     sheet.className = "inkamp-curl-sheet";
     sheet.style.width = `${width}px`;
     sheet.style.height = `${height}px`;
-    sheet.style.backgroundColor = this.#mountedPaperColor;
+    // Paper lives on the underlay; sheet image is the page. Keep sheet fill
+    // transparent so any residual letterbox never paints a dark canvas.
+    sheet.style.backgroundColor = "transparent";
     sheet.style.backgroundImage = `url("${sourceUrl}")`;
     sheet.style.transform = "none";
 
@@ -1080,6 +1090,9 @@ export default class PageTurnAnimator {
     svg.setAttribute("width", String(width));
     svg.setAttribute("height", String(height));
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    // Explicitly avoid the UA default black/canvas backdrop on some WebKits.
+    svg.style.background = "transparent";
+    svg.setAttribute("style", "background:transparent");
 
     const defs = this.#svgEl("defs");
 
