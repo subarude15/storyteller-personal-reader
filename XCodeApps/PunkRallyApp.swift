@@ -625,6 +625,9 @@ private struct HomeTabView: View {
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 HomeMixedCoverView(item: item, width: 72, height: 108, chrome: chrome)
+                    // Key off media artwork identity so book→book swaps cannot
+                    // reuse the prior item's @State image (Up next uses ForEach ids).
+                    .id(item?.coverPresentation.artworkIdentity ?? "continue-empty")
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
                         Text("Continue")
@@ -1121,6 +1124,8 @@ private struct HomeMixedCoverView: View {
     let chrome: PunkRallyTheme.Chrome
     @Environment(MediaViewModel.self) private var mediaViewModel: MediaViewModel?
     @State private var bookImage: Image?
+    /// Book id the current `bookImage` belongs to — blocks painting a prior cover.
+    @State private var loadedBookID: BookID?
 
     var body: some View {
         ZStack {
@@ -1142,34 +1147,53 @@ private struct HomeMixedCoverView: View {
 
     @ViewBuilder
     private func bookCover(_ book: BookMetadata) -> some View {
-        if let bookImage {
-            bookImage
-                .resizable()
-                .scaledToFill()
-                .frame(width: width, height: height)
-                .clipped()
-        } else {
-            Image(systemName: "book.closed.fill")
-                .foregroundStyle(Color.white.opacity(0.72))
-                .task(id: book.id) {
-                    await loadBookCover(book)
-                }
+        // Only show cached pixels when they belong to this book — never a prior Continue item.
+        Group {
+            if let bookImage, loadedBookID == book.id {
+                bookImage
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: width, height: height)
+                    .clipped()
+            } else {
+                Image(systemName: "book.closed.fill")
+                    .foregroundStyle(Color.white.opacity(0.72))
+            }
+        }
+        // Always attach the load task (not only when image is nil) so book→book
+        // transitions reload instead of retaining stale @State artwork.
+        .task(id: book.id) {
+            await loadBookCover(book)
         }
     }
 
     private func loadBookCover(_ book: BookMetadata) async {
         guard let vm = mediaViewModel else { return }
+        // Drop prior book's pixels immediately when Continue identity changes.
+        if loadedBookID != book.id {
+            bookImage = nil
+            loadedBookID = book.id
+        }
         vm.ensureCoverLoaded(for: book, debugSource: "HomeMixed")
         vm.ensureCoverLoaded(for: book, variant: .audioSquare, debugSource: "HomeMixed")
         for _ in 0..<25 {
+            if Task.isCancelled { return }
+            // Stale request guard: a newer Continue item cancelled/replaced this load.
+            if loadedBookID != book.id { return }
             if let image = vm.coverImage(for: book)
                 ?? vm.coverImage(for: book, variant: .audioSquare)
                 ?? vm.coverImage(for: book, variant: .standard)
             {
+                if Task.isCancelled || loadedBookID != book.id { return }
                 bookImage = image
+                loadedBookID = book.id
                 return
             }
-            try? await Task.sleep(for: .milliseconds(200))
+            do {
+                try await Task.sleep(for: .milliseconds(200))
+            } catch {
+                return
+            }
         }
     }
 
@@ -1184,6 +1208,13 @@ private struct HomeMixedCoverView: View {
                         podcastArtPlaceholder
                 }
             }
+            .id(
+                HomeContinueCoverPresentation.podcast(
+                    episodeID: entry.episodeID,
+                    title: entry.title,
+                    coverURL: entry.coverURL
+                ).artworkIdentity
+            )
             .frame(width: width, height: height)
             .clipped()
         } else {

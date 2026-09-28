@@ -74,6 +74,20 @@ public enum HomeMixedItem: Identifiable, Equatable, Sendable {
             case .podcast: return .podcast
         }
     }
+
+    /// Cover identity for Continue / Up next image views (book id or podcast art URL).
+    public var coverPresentation: HomeContinueCoverPresentation {
+        switch self {
+            case .book(let book, _, _, _):
+                return .book(id: book.id, title: book.title)
+            case .podcast(let entry):
+                return .podcast(
+                    episodeID: entry.episodeID,
+                    title: entry.title,
+                    coverURL: entry.coverURL
+                )
+        }
+    }
 }
 
 public enum HomeMixedQueue {
