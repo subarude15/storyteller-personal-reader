@@ -2,11 +2,18 @@
  * Tiny assert-based check for PageTurnAnimator (no test framework).
  * Run: node scripts/page-turn-animator-selfcheck.mjs
  */
-import PageTurnAnimator from "../SilveranKit/Sources/Kit/Resources/WebResources/PageTurnAnimator.js";
+import PageTurnAnimator, {
+  docFromTouchEvent,
+  visibleOffsetInDoc,
+} from "../SilveranKit/Sources/Kit/Resources/WebResources/PageTurnAnimator.js";
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);
 }
+
+/** Controllable prefers-reduced-motion media query for runtime transition tests. */
+let motionMatches = false;
+const motionListeners = new Set();
 
 // Minimal DOM stubs so curl overlay mount/cleanup can run under Node.
 function installDomStubs() {
@@ -168,17 +175,77 @@ function installDomStubs() {
   globalThis.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 0);
   globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
   globalThis.performance = { now: () => Date.now() };
-  globalThis.matchMedia = () => ({
-    matches: false,
-    addEventListener() {},
-    removeEventListener() {},
-  });
+  globalThis.matchMedia = (query) => {
+    if (String(query).includes("prefers-reduced-motion")) {
+      return {
+        get matches() {
+          return motionMatches;
+        },
+        addEventListener(_type, fn) {
+          motionListeners.add(fn);
+        },
+        removeEventListener(_type, fn) {
+          motionListeners.delete(fn);
+        },
+      };
+    }
+    return {
+      matches: false,
+      addEventListener() {},
+      removeEventListener() {},
+    };
+  };
   globalThis.getComputedStyle = () => ({ position: "relative", backgroundColor: "#fff" });
   globalThis.addEventListener = () => {};
   globalThis.removeEventListener = () => {};
   globalThis.window = globalThis;
 
   return { host };
+}
+
+function fireMotionChange(matches) {
+  motionMatches = matches;
+  for (const fn of motionListeners) fn({ matches });
+}
+
+function makeSectionDoc(id, iframeLeft, iframeWidth = 2000) {
+  const iframe = {
+    offsetWidth: iframeWidth,
+    getBoundingClientRect() {
+      return {
+        left: iframeLeft,
+        width: iframeWidth,
+        top: 0,
+        height: 800,
+        right: iframeLeft + iframeWidth,
+        bottom: 800,
+      };
+    },
+  };
+  const doc = {
+    nodeType: 9,
+    id,
+    documentElement: {
+      cloneNode() {
+        return {
+          querySelectorAll() {
+            return [];
+          },
+          setAttribute() {},
+        };
+      },
+      scrollWidth: iframeWidth,
+    },
+    defaultView: {
+      frameElement: iframe,
+      getComputedStyle() {
+        return { backgroundColor: "#fffef8" };
+      },
+    },
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  return doc;
 }
 
 function makeRenderer(animated) {
@@ -348,6 +415,28 @@ assert(
 );
 animator.setReduceMotion(false);
 
+// Reduce Motion runtime transitions follow the media query both ways
+animator.detach();
+motionMatches = false;
+motionListeners.clear();
+const motionAnimator = new PageTurnAnimator();
+motionAnimator.setStyle("curl");
+motionAnimator.attach(makeRenderer(false), host);
+assert(motionAnimator.reduceMotion === false, "reduce motion starts false");
+assert(motionAnimator.canCurl === true, "curl allowed before reduce motion");
+fireMotionChange(true);
+assert(motionAnimator.reduceMotion === true, "reduce motion false→true");
+assert(motionAnimator.effectiveStyle === "instant", "effective instant when reduce on");
+assert(motionAnimator.canCurl === false, "curl blocked when reduce on");
+fireMotionChange(false);
+assert(motionAnimator.reduceMotion === false, "reduce motion true→false resets");
+assert(motionAnimator.effectiveStyle === "curl", "curl restored after reduce off");
+assert(motionAnimator.canCurl === true, "curl allowed after reduce off");
+motionAnimator.detach();
+animator.attach(renderer, host);
+animator.setStyle("curl");
+animator.setReduceMotion(false);
+
 // Failed visual creation (no host geometry / detached host)
 animator.detach();
 const orphan = new PageTurnAnimator();
@@ -374,5 +463,80 @@ await sleep(30);
 assert(live.phase === "idle" || live.phase === "cancelling", "read-aloud cancels active curl");
 await sleep(50);
 assert(!document.getElementById("inkamp-page-curl-overlay"), "read-aloud cancel cleans overlay");
+
+// --- Touched document + section-local snapshot offset -----------------------
+const sectionA = makeSectionDoc("section-A", -400);
+const sectionB = makeSectionDoc("section-B", -800);
+const rootDoc = globalThis.document;
+
+assert(
+  docFromTouchEvent({ currentTarget: sectionA, target: {} }, rootDoc) === sectionA,
+  "touch from section A uses section A document",
+);
+assert(
+  docFromTouchEvent({ currentTarget: sectionB, target: {} }, rootDoc) === sectionB,
+  "touch from section B uses section B document",
+);
+assert(
+  docFromTouchEvent(
+    { currentTarget: { ownerDocument: sectionA }, target: { ownerDocument: sectionB } },
+    rootDoc,
+  ) === sectionA,
+  "currentTarget ownerDocument wins over target when listener is on an element",
+);
+assert(
+  docFromTouchEvent({ currentTarget: rootDoc.body, target: rootDoc.body }, rootDoc) === null,
+  "reader chrome touch does not pretend to be an EPUB section doc",
+);
+
+// Geometry: iframe scrolled left by 400, visible frame at 0 → local offset 400.
+// Paginator-global start of 9999 must NOT be used as the snapshot X.
+const hostRect = { left: 0, width: 400 };
+assert(
+  visibleOffsetInDoc(sectionA, hostRect, 400) === 400,
+  "section-local offset from iframe geometry (not renderer.start)",
+);
+assert(
+  visibleOffsetInDoc(sectionB, hostRect, 400) === 800,
+  "different section iframe yields its own local offset",
+);
+
+const noFrameDoc = {
+  defaultView: { frameElement: null },
+};
+assert(
+  visibleOffsetInDoc(noFrameDoc, hostRect, 400) === null,
+  "missing iframe → null offset (safe paper fallback, not global start)",
+);
+
+// begin() with a doc but no visibleOffset must not invent a global X offset;
+// it still mounts a paper curl sheet.
+const snapAnimator = new PageTurnAnimator();
+snapAnimator.setStyle("curl");
+snapAnimator.attach(makeRenderer(false), host);
+assert(
+  snapAnimator.begin({
+    width: 400,
+    height: 800,
+    doc: sectionA,
+    startOffset: 9999, // paginator-global — must not be used as snapshot X
+    // visibleOffset intentionally omitted
+    allowPaperFallback: true,
+  }) === true,
+  "begin without section-local offset still curls via paper fallback",
+);
+snapAnimator.cancel({ durationMs: 0 });
+
+assert(
+  snapAnimator.begin({
+    width: 400,
+    height: 800,
+    doc: sectionA,
+    visibleOffset: visibleOffsetInDoc(sectionA, hostRect, 400),
+    allowPaperFallback: true,
+  }) === true,
+  "begin with section-local offset succeeds",
+);
+snapAnimator.cancel({ durationMs: 0 });
 
 console.log("PageTurnAnimator.selfcheck: ok");

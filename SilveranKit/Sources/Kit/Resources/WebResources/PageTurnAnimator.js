@@ -34,6 +34,70 @@ const mapProgress = (t) => {
   return p * p * (3 - 2 * p);
 };
 
+/**
+ * Document that originated a touch. Prefer the section document the listener
+ * was attached to (event.currentTarget) over getContents()[0], which can lag
+ * around section boundaries.
+ *
+ * @param {Event} event
+ * @param {Document} [rootDocument] reader chrome document (not an EPUB section)
+ * @returns {Document|null}
+ */
+export function docFromTouchEvent(event, rootDocument = globalThis.document) {
+  const current = event?.currentTarget;
+  // observeDocument attaches listeners directly on the section Document.
+  if (current?.nodeType === 9) return current;
+  const fromCurrent = current?.ownerDocument;
+  if (fromCurrent && fromCurrent !== rootDocument) return fromCurrent;
+  const fromTarget = event?.target?.ownerDocument;
+  if (fromTarget && fromTarget !== rootDocument) return fromTarget;
+  return null;
+}
+
+/**
+ * Horizontal offset into a section document's iframe that matches what is
+ * currently visible. Derived from iframe vs visible-frame geometry so it stays
+ * in the cloned document's coordinate space — not paginator-global scroll.
+ *
+ * Returns null when geometry is unavailable; callers should paper-fallback
+ * rather than apply a known-wrong global offset.
+ *
+ * @param {Document} doc
+ * @param {{ left: number, width?: number }} visibleFrameRect
+ * @param {number} viewportWidth
+ * @returns {number|null}
+ */
+export function visibleOffsetInDoc(doc, visibleFrameRect, viewportWidth) {
+  try {
+    const iframe = doc?.defaultView?.frameElement;
+    if (!iframe || !visibleFrameRect) return null;
+    const iframeRect = iframe.getBoundingClientRect?.();
+    if (!iframeRect || !Number.isFinite(iframeRect.left)) return null;
+
+    const frameLeft = visibleFrameRect.left;
+    if (!Number.isFinite(frameLeft)) return null;
+
+    // Foliate centers the iframe in a wider view element (blank page on each
+    // side). The visible reading column is ~viewportWidth wide inside the host;
+    // approximate the clip's left edge when only the host rect is available.
+    const hostWidth = visibleFrameRect.width;
+    const clipLeft = Number.isFinite(hostWidth) && viewportWidth > 0 && hostWidth > viewportWidth
+      ? frameLeft + (hostWidth - viewportWidth) / 2
+      : frameLeft;
+
+    const localX = clipLeft - iframeRect.left;
+    if (!Number.isFinite(localX)) return null;
+
+    const iframeWidth = iframe.offsetWidth || iframeRect.width || 0;
+    if (iframeWidth <= 0) return null;
+
+    const max = Math.max(0, iframeWidth - (viewportWidth || 0));
+    return Math.max(0, Math.min(max, localX));
+  } catch {
+    return null;
+  }
+}
+
 export default class PageTurnAnimator {
   #style = "slide";
   #reduceMotion = false;
@@ -65,7 +129,7 @@ export default class PageTurnAnimator {
   #onRelocate = (event) => this.#handleRelocate(event);
   #onOrientation = () => this.#handleOrientationChange();
   #onReduceMotionChange = (event) => {
-    if (event?.matches) this.setReduceMotion(true);
+    this.setReduceMotion(!!event?.matches);
   };
 
   setStyle(style) {
@@ -181,7 +245,7 @@ export default class PageTurnAnimator {
 
     const motionQuery = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)");
     if (motionQuery) {
-      if (motionQuery.matches) this.#reduceMotion = true;
+      this.#reduceMotion = !!motionQuery.matches;
       motionQuery.addEventListener?.("change", this.#onReduceMotionChange);
       this.#motionQuery = motionQuery;
     }
@@ -250,7 +314,15 @@ export default class PageTurnAnimator {
     let sourceUrl = context.sourceUrl ?? null;
 
     if (!sourceUrl && context.doc) {
-      sourceUrl = this.#captureVisiblePage(context.doc, width, height, context.startOffset ?? 0);
+      // visibleOffset must be section-local (iframe coordinates). Never fall
+      // back to paginator-global renderer.start — that can show the wrong page.
+      const localOffset = context.visibleOffset;
+      if (localOffset == null || !Number.isFinite(localOffset)) {
+        debugLog("PageTurnAnimator", "curl snapshot skipped: no section-local offset");
+        sourceUrl = null;
+      } else {
+        sourceUrl = this.#captureVisiblePage(context.doc, width, height, localOffset);
+      }
     }
 
     try {
@@ -350,6 +422,10 @@ export default class PageTurnAnimator {
     const renderer = this.#renderer;
     if (!renderer || renderer.scrolled) return;
 
+    // Prefer the EPUB section document that actually received the touch.
+    // getContents()[0] can disagree near loaded adjacent sections.
+    const touchedDoc = docFromTouchEvent(event) || this.#currentDoc();
+
     this.#fallbackThisGesture = false;
     this.#pageFlipSeen = false;
     this.#awaitingSnap = false;
@@ -357,13 +433,13 @@ export default class PageTurnAnimator {
     this.#gesture = {
       startX: touch.screenX ?? touch.clientX,
       startY: touch.screenY ?? touch.clientY,
-      startOffset: renderer.start,
+      startOffset: renderer.start, // paginator scroll — progress only, not snapshot X
       fromRight: true,
       rtl: renderer.getAttribute?.("dir") === "rtl",
       width: renderer.size,
       height: this.#host?.clientHeight || renderer.getBoundingClientRect?.().height || 0,
       moved: false,
-      doc: this.#currentDoc(),
+      doc: touchedDoc,
     };
   }
 
@@ -392,14 +468,21 @@ export default class PageTurnAnimator {
       gesture.width = renderer.size;
       gesture.height = this.#host?.clientHeight || gesture.height;
 
+      const doc = gesture.doc || this.#currentDoc();
+      const hostRect = renderer.getBoundingClientRect?.();
+      const visibleOffset = doc
+        ? visibleOffsetInDoc(doc, hostRect, gesture.width)
+        : null;
+
       const started = this.begin({
         fromRight: gesture.fromRight,
         rtl: gesture.rtl,
         width: gesture.width,
         height: gesture.height,
         startOffset: gesture.startOffset,
-        doc: gesture.doc || this.#currentDoc(),
-        paperColor: this.#paperColor(),
+        visibleOffset,
+        doc,
+        paperColor: this.#paperColor(doc),
         allowPaperFallback: true,
       });
       if (!started) {
@@ -703,10 +786,10 @@ export default class PageTurnAnimator {
     }
   }
 
-  #paperColor() {
+  #paperColor(doc = null) {
     try {
-      const doc = this.#currentDoc();
-      const bg = doc?.defaultView?.getComputedStyle?.(doc.documentElement)?.backgroundColor;
+      const source = doc || this.#gesture?.doc || this.#currentDoc();
+      const bg = source?.defaultView?.getComputedStyle?.(source.documentElement)?.backgroundColor;
       if (bg && bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent") return bg;
     } catch {
       /* ignore */
@@ -717,11 +800,14 @@ export default class PageTurnAnimator {
   /**
    * Capture the currently visible page into a data-URL for the curl sheet.
    * Uses SVG foreignObject of the section document, clipped to the visible
-   * column window. Returns null on failure (caller falls back).
+   * column window. `localOffset` must be in that document/iframe's coordinates.
+   * Returns null on failure (caller falls back to paper).
    */
-  #captureVisiblePage(doc, width, height, startOffset) {
+  #captureVisiblePage(doc, width, height, localOffset) {
     try {
       if (!doc?.documentElement || typeof XMLSerializer === "undefined") return null;
+      if (localOffset == null || !Number.isFinite(localOffset)) return null;
+
       const win = doc.defaultView;
       const iframe = win?.frameElement;
       const iframeWidth = Math.max(
@@ -742,7 +828,7 @@ export default class PageTurnAnimator {
       });
 
       const serialized = new XMLSerializer().serializeToString(clone);
-      const srcX = Math.max(0, Math.round(startOffset || 0));
+      const srcX = Math.max(0, Math.round(localOffset));
       const svg =
         `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">`
         + `<foreignObject width="${iframeWidth}" height="${iframeHeight}" x="${-srcX}" y="0">`
