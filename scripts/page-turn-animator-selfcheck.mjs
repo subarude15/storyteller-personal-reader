@@ -586,30 +586,41 @@ const at0 = peelVisualState(0, W, true);
 assert(at0.remain === 1, "progress 0 → full current-page remain");
 assert(at0.edgeX === W, "progress 0 → free edge at right");
 assert(at0.peeledPct === 0, "progress 0 → nothing peeled");
-assert(at0.clipPath === "inset(0 0% 0 0)", "progress 0 → full clip visibility");
+assert(
+  at0.clipPath === "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)",
+  "progress 0 → full clip visibility",
+);
 assert(at0.sheetRotateY === 0 && at0.sheetSkewY === 0 && at0.sheetScaleX === 1, "sheet undistorted at 0");
 assert(at0.sheetTranslateX === 0, "sheet not translated at 0");
 
 const atHalf = peelVisualState(0.5, W, true);
 assert(atHalf.remain === 0.5, "progress 0.5 → half remain");
 assert(atHalf.edgeX === W * 0.5, "progress 0.5 → edge at mid");
-assert(atHalf.clipPath === "inset(0 50% 0 0)", "progress 0.5 → clipped from free edge");
-assert(atHalf.foldWidth / W >= 0.08 && atHalf.foldWidth / W <= 0.18, "fold width 8–18%");
+assert(atHalf.clipPath.includes("50%"), "progress 0.5 → free edge near mid");
+assert(atHalf.bowPct > 0 && atHalf.tipPct > 0, "progress 0.5 → mild curved edge");
+assert(atHalf.foldWidth / W >= 0.08 && atHalf.foldWidth / W <= 0.14, "fold width 8–14%");
+assert(atHalf.foldWidth / W <= 0.12, "phone-width fold stays ≤12%");
 assert(atHalf.foldOpacity > 0, "progress 0.5 → fold visible");
+assert(atHalf.shadowOpacity <= 0.22, "shadow stays soft (no heavy black band)");
 assert(atHalf.sheetRotateY === 0 && atHalf.sheetSkewY === 0, "no full-page skew/rotate at 0.5");
-assert(Math.abs(atHalf.foldRotateY) <= 16, "fold-only rotation stays modest");
+assert(Math.abs(atHalf.foldRotateY) <= 12, "fold-only rotation stays modest");
 
 const at1 = peelVisualState(1, W, true);
 assert(at1.remain === 0, "progress 1 → foreground fully peeled");
 assert(at1.edgeX === 0, "progress 1 → edge at spine");
-assert(at1.clipPath === "inset(0 100% 0 0)", "progress 1 → sheet fully clipped away");
 assert(at1.foldOpacity === 0, "progress 1 → fold gone");
+assert(at1.bowPct === 0, "progress 1 → no bow");
 
 const leftHalf = peelVisualState(0.5, W, false);
 assert(leftHalf.edgeX === W * 0.5, "opposite direction edge mirrors to mid");
-assert(leftHalf.clipPath === "inset(0 0 0 50%)", "opposite direction clips from left");
-assert(leftHalf.foldRotateY === -atHalf.foldRotateY || leftHalf.foldRotateY * atHalf.foldRotateY < 0,
-  "opposite direction mirrors fold rotation sign");
+assert(leftHalf.clipPath.includes("50%"), "opposite direction clips from left mid");
+assert(
+  leftHalf.foldRotateY === -atHalf.foldRotateY || leftHalf.foldRotateY * atHalf.foldRotateY < 0,
+  "opposite direction mirrors fold rotation sign",
+);
+
+const wideHalf = peelVisualState(0.5, 900, true);
+assert(wideHalf.foldWidth / 900 <= 0.14, "wide viewport fold stays ≤14%");
 
 // Live overlay applies peel state (clip, no full-page transform)
 const peelAnimator = new PageTurnAnimator();
@@ -622,17 +633,26 @@ const peelOverlay = document.getElementById("inkamp-page-curl-overlay");
 assert(childByClass(peelOverlay, "inkamp-curl-underlay"), "underlay mounted for drag cover");
 const peelSheet = childByClass(peelOverlay, "inkamp-curl-sheet");
 // begin() applies progress 0 synchronously.
-assert(peelSheet.style.clipPath === "inset(0 0% 0 0)", "applied progress 0 → full page");
+assert(
+  peelSheet.style.clipPath === peelVisualState(0, W, true).clipPath,
+  "applied progress 0 → full page",
+);
 assert(!peelSheet.style.transform || peelSheet.style.transform === "none", "sheet transform none at 0");
 peelAnimator.update({ progress: 0.5 });
 await sleep(20);
-assert(peelSheet.style.clipPath === "inset(0 50% 0 0)", "applied progress 0.5 → half clip");
+assert(
+  peelSheet.style.clipPath === peelVisualState(0.5, W, true).clipPath,
+  "applied progress 0.5 → curved half clip",
+);
 assert(peelSheet.style.transform === "none", "sheet stays flat at 0.5");
 const peelFold = childByClass(peelOverlay, "inkamp-curl-fold");
 assert(Number(peelFold.style.opacity) > 0, "fold visible at mid peel");
 peelAnimator.update({ progress: 1 });
 await sleep(20);
-assert(peelSheet.style.clipPath === "inset(0 100% 0 0)", "applied progress 1 → sheet hidden");
+assert(
+  peelSheet.style.clipPath === peelVisualState(1, W, true).clipPath,
+  "applied progress 1 → sheet hidden",
+);
 
 // Cancellation restores full page then removes overlay
 peelAnimator.update({ progress: 0.4 });

@@ -29,11 +29,16 @@ const COMPLETE_MS = 180;
 const CANCEL_MS = 200;
 /** How long to wait for a native snapshot before giving up on curl. */
 const SNAPSHOT_TIMEOUT_MS = 220;
-/** Fold strip as a fraction of viewport width (clamped 8–18%). */
-const FOLD_FRAC_MIN = 0.08;
-const FOLD_FRAC_MAX = 0.18;
-
 const clamp01 = (value) => Math.max(0, Math.min(1, value));
+
+/** Narrow fold band: ~8–12% on phones, up to 14% on wider viewports. */
+function foldFractionFor(progress, width) {
+  const p = clamp01(progress);
+  const phone = width < 500;
+  const min = phone ? 0.08 : 0.09;
+  const max = phone ? 0.12 : 0.14;
+  return min + p * (max - min);
+}
 
 /**
  * Document that originated a touch. Prefer the section document the listener
@@ -70,39 +75,69 @@ export function peelVisualState(progress, width, fromRight = true) {
   const remain = 1 - p;
   // Free edge x from the left: RTL/backward mirrors via fromRight=false.
   const edgeX = fromRight ? w * remain : w * p;
-  const foldFrac = Math.min(FOLD_FRAC_MAX, Math.max(FOLD_FRAC_MIN, FOLD_FRAC_MIN + p * 0.1));
+  const foldFrac = foldFractionFor(p, w);
   const foldWidth = w * foldFrac;
   const peeledPct = p * 100;
-  // inset(top, right, bottom, left) — peel away from the free edge.
-  const clipPath = fromRight
-    ? `inset(0 ${peeledPct}% 0 0)`
-    : `inset(0 0 0 ${peeledPct}%)`;
+  const edgePct = (edgeX / w) * 100;
+
+  // Mild paper curve on the free edge only (bow + top/bottom tuck).
+  // Does not skew/scale the flat page text — clip outline only.
+  const tipPct = p <= 0 || p >= 1 ? 0 : Math.min(1.6, 0.3 + p * 1.2);
+  const bowPct = p <= 0 || p >= 1 ? 0 : Math.min(2.2, 0.4 + p * 1.6);
+
+  let clipPath;
+  if (p <= 0) {
+    clipPath = "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)";
+  } else if (p >= 1) {
+    // Fully peeled — degenerate clip on the spine side.
+    clipPath = fromRight
+      ? "polygon(0% 0%, 0% 0%, 0% 100%, 0% 100%)"
+      : "polygon(100% 0%, 100% 0%, 100% 100%, 100% 100%)";
+  } else if (fromRight) {
+    clipPath =
+      `polygon(0% 0%, ${edgePct}% ${tipPct}%, ${edgePct + bowPct}% 50%, `
+      + `${edgePct}% ${100 - tipPct}%, 0% 100%)`;
+  } else {
+    const bowX = Math.max(0, edgePct - bowPct);
+    clipPath =
+      `polygon(${edgePct}% ${tipPct}%, 100% 0%, 100% 100%, `
+      + `${edgePct}% ${100 - tipPct}%, ${bowX}% 50%)`;
+  }
 
   const foldLeft = fromRight ? Math.max(0, edgeX - foldWidth) : edgeX;
-  const backWidth = foldWidth * 0.55;
+  const backWidth = foldWidth * 0.42;
   const backLeft = fromRight ? edgeX : Math.max(0, edgeX - backWidth);
-  const shadowWidth = foldWidth * 0.75;
-  const shadowLeft = fromRight ? Math.max(0, edgeX - shadowWidth * 0.15) : Math.max(0, edgeX - shadowWidth * 0.85);
+  const shadowWidth = foldWidth * 0.5;
+  const shadowLeft = fromRight
+    ? Math.max(0, edgeX - shadowWidth * 0.25)
+    : Math.max(0, edgeX - shadowWidth * 0.75);
 
   // Local fold-only rotation — kept small so text in the flat region stays readable.
-  const foldRotateY = (fromRight ? -1 : 1) * (5 + p * 9);
+  const foldRotateY = (fromRight ? -1 : 1) * (3 + p * 7);
   const foldVisible = p > 0.02 && p < 0.98;
-  const foldOpacity = foldVisible ? Math.min(0.95, 0.35 + p * 0.45) : 0;
-  const backOpacity = foldVisible ? Math.min(0.55, 0.12 + p * 0.4) : 0;
-  const shadowOpacity = foldVisible ? Math.min(0.45, 0.1 + p * 0.35) : 0;
+  const foldOpacity = foldVisible ? Math.min(0.72, 0.2 + p * 0.35) : 0;
+  const backOpacity = foldVisible ? Math.min(0.26, 0.06 + p * 0.16) : 0;
+  const shadowOpacity = foldVisible ? Math.min(0.2, 0.05 + p * 0.12) : 0;
+  // Taper the fold strip so the edge does not read as a hard vertical bar.
+  const foldClipPath =
+    `polygon(0% ${tipPct}%, 100% 0%, 100% 100%, 0% ${100 - tipPct}%)`;
 
   return {
     progress: p,
     remain,
     edgeX,
     peeledPct,
+    edgePct,
+    tipPct,
+    bowPct,
     clipPath,
     foldWidth,
     foldLeft,
     foldRotateY,
     foldOrigin: fromRight ? "right center" : "left center",
-    foldTransform: `perspective(1100px) rotateY(${foldRotateY}deg)`,
+    foldTransform: `perspective(1400px) rotateY(${foldRotateY}deg)`,
     foldOpacity,
+    foldClipPath,
     backWidth,
     backLeft,
     backOpacity,
@@ -777,7 +812,7 @@ export default class PageTurnAnimator {
         z-index: 4;
         pointer-events: none;
         opacity: 0;
-        filter: blur(5px);
+        filter: blur(8px);
       }
     `;
     document.head.appendChild(style);
@@ -806,23 +841,24 @@ export default class PageTurnAnimator {
     sheet.style.backgroundImage = `url("${sourceUrl}")`;
     sheet.style.transform = "none";
 
+    // Soft ambient paper shading — no solid black bands.
     const back = document.createElement("div");
     back.className = "inkamp-curl-back";
     back.style.background = fromRight
-      ? `linear-gradient(270deg, ${paperColor}, rgba(0,0,0,0.14) 55%, rgba(0,0,0,0.05))`
-      : `linear-gradient(90deg, ${paperColor}, rgba(0,0,0,0.14) 55%, rgba(0,0,0,0.05))`;
+      ? `linear-gradient(270deg, ${paperColor}, rgba(60,55,50,0.10) 60%, rgba(60,55,50,0.03))`
+      : `linear-gradient(90deg, ${paperColor}, rgba(60,55,50,0.10) 60%, rgba(60,55,50,0.03))`;
 
     const fold = document.createElement("div");
     fold.className = "inkamp-curl-fold";
     fold.style.background = fromRight
-      ? "linear-gradient(270deg, rgba(255,255,255,0.0), rgba(255,255,255,0.28) 45%, rgba(0,0,0,0.10))"
-      : "linear-gradient(90deg, rgba(255,255,255,0.0), rgba(255,255,255,0.28) 45%, rgba(0,0,0,0.10))";
+      ? "linear-gradient(270deg, rgba(255,255,255,0.0), rgba(255,255,255,0.18) 50%, rgba(80,75,70,0.08))"
+      : "linear-gradient(90deg, rgba(255,255,255,0.0), rgba(255,255,255,0.18) 50%, rgba(80,75,70,0.08))";
 
     const shadow = document.createElement("div");
     shadow.className = "inkamp-curl-shadow";
     shadow.style.background = fromRight
-      ? "linear-gradient(270deg, rgba(0,0,0,0.28), rgba(0,0,0,0))"
-      : "linear-gradient(90deg, rgba(0,0,0,0.28), rgba(0,0,0,0))";
+      ? "linear-gradient(270deg, rgba(40,36,32,0.16), rgba(40,36,32,0))"
+      : "linear-gradient(90deg, rgba(40,36,32,0.16), rgba(40,36,32,0))";
 
     overlay.append(underlay, sheet, back, fold, shadow);
 
@@ -873,12 +909,14 @@ export default class PageTurnAnimator {
       this.#fold.style.opacity = String(state.foldOpacity);
       this.#fold.style.transformOrigin = state.foldOrigin;
       this.#fold.style.transform = state.foldTransform;
+      this.#fold.style.clipPath = state.foldClipPath;
     }
     if (this.#back) {
       this.#back.style.left = `${state.backLeft}px`;
       this.#back.style.width = `${state.backWidth}px`;
       this.#back.style.right = "auto";
       this.#back.style.opacity = String(state.backOpacity);
+      this.#back.style.clipPath = state.foldClipPath;
     }
     if (this.#shadow) {
       this.#shadow.style.left = `${state.shadowLeft}px`;
@@ -886,6 +924,7 @@ export default class PageTurnAnimator {
       this.#shadow.style.right = "auto";
       this.#shadow.style.opacity = String(state.shadowOpacity);
       this.#shadow.style.transform = "none";
+      this.#shadow.style.clipPath = state.foldClipPath;
     }
   }
 
