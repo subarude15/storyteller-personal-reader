@@ -31,7 +31,10 @@ public final class ReaderMessageRouter {
                 onReaderReady?()
                 return true
 
-            case "SelectionDefine", "SelectionShare", "SelectionCopy", "FileAccessDiagnostic":
+            case "SelectionDefine", "SelectionShare", "SelectionCopy", "FileAccessDiagnostic",
+                "RequestPageSnapshot":
+                // Platform-local: dictionary/share/copy UI, diagnostics, and
+                // WKWebView page-curl snapshots are handled by the host WebView.
                 return false
 
             default:

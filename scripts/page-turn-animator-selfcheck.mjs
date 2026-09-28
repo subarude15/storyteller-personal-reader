@@ -4,7 +4,6 @@
  */
 import PageTurnAnimator, {
   docFromTouchEvent,
-  visibleOffsetInDoc,
 } from "../SilveranKit/Sources/Kit/Resources/WebResources/PageTurnAnimator.js";
 
 function assert(cond, msg) {
@@ -14,6 +13,11 @@ function assert(cond, msg) {
 /** Controllable prefers-reduced-motion media query for runtime transition tests. */
 let motionMatches = false;
 const motionListeners = new Set();
+
+/** Captures RequestPageSnapshot posts from the animator. */
+let lastSnapshotRequest = null;
+const FAKE_SNAPSHOT =
+  "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAGcP//EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAQUCf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQMBAT8Bf//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQIBAT8Bf//EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEABj8Cf//EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAT8hf//Z";
 
 // Minimal DOM stubs so curl overlay mount/cleanup can run under Node.
 function installDomStubs() {
@@ -199,6 +203,15 @@ function installDomStubs() {
   globalThis.addEventListener = () => {};
   globalThis.removeEventListener = () => {};
   globalThis.window = globalThis;
+  globalThis.window.webkit = {
+    messageHandlers: {
+      RequestPageSnapshot: {
+        postMessage(body) {
+          lastSnapshotRequest = body;
+        },
+      },
+    },
+  };
 
   return { host };
 }
@@ -208,36 +221,12 @@ function fireMotionChange(matches) {
   for (const fn of motionListeners) fn({ matches });
 }
 
-function makeSectionDoc(id, iframeLeft, iframeWidth = 2000) {
-  const iframe = {
-    offsetWidth: iframeWidth,
-    getBoundingClientRect() {
-      return {
-        left: iframeLeft,
-        width: iframeWidth,
-        top: 0,
-        height: 800,
-        right: iframeLeft + iframeWidth,
-        bottom: 800,
-      };
-    },
-  };
-  const doc = {
+function makeSectionDoc(id) {
+  return {
     nodeType: 9,
     id,
-    documentElement: {
-      cloneNode() {
-        return {
-          querySelectorAll() {
-            return [];
-          },
-          setAttribute() {},
-        };
-      },
-      scrollWidth: iframeWidth,
-    },
+    documentElement: {},
     defaultView: {
-      frameElement: iframe,
       getComputedStyle() {
         return { backgroundColor: "#fffef8" };
       },
@@ -245,10 +234,9 @@ function makeSectionDoc(id, iframeLeft, iframeWidth = 2000) {
     addEventListener() {},
     removeEventListener() {},
   };
-  return doc;
 }
 
-function makeRenderer(animated) {
+function makeRenderer(animated, dir = "ltr") {
   const attrs = new Set(animated ? ["animated"] : []);
   return {
     scrolled: false,
@@ -264,7 +252,7 @@ function makeRenderer(animated) {
       return attrs.has(name);
     },
     getAttribute(name) {
-      if (name === "dir") return "ltr";
+      if (name === "dir") return dir;
       return attrs.has(name) ? "" : null;
     },
     addEventListener() {},
@@ -344,12 +332,24 @@ assert(
   "slide does not force animated after instant",
 );
 
-// --- Curl lifecycle -------------------------------------------------------
+// --- Curl lifecycle (with explicit snapshot image; no blank paper) ----------
 const renderer = makeRenderer(false);
 animator.setStyle("curl");
 animator.setReduceMotion(false);
 animator.setReadAloudActive(false);
 animator.attach(renderer, host);
+
+assert(
+  animator.begin({
+    width: 400,
+    height: 800,
+    fromRight: true,
+    rtl: false,
+    startOffset: 400,
+    paperColor: "#faf6ee",
+  }) === false,
+  "begin without snapshot image refuses blank paper fallback",
+);
 
 const began = animator.begin({
   width: 400,
@@ -358,8 +358,7 @@ const began = animator.begin({
   rtl: false,
   startOffset: 400,
   paperColor: "#faf6ee",
-  allowPaperFallback: true,
-  sourceUrl: null,
+  sourceUrl: FAKE_SNAPSHOT,
 });
 assert(began === true, "curl begin during normal ebook mode");
 assert(animator.phase === "curling", "phase curling after begin");
@@ -381,7 +380,7 @@ assert(
     width: 400,
     height: 800,
     fromRight: false,
-    allowPaperFallback: true,
+    sourceUrl: FAKE_SNAPSHOT,
   }) === true,
   "begin again after cancel",
 );
@@ -393,7 +392,7 @@ assert(!document.getElementById("inkamp-page-curl-overlay"), "completion removes
 // Read-aloud bypass
 animator.setReadAloudActive(true);
 assert(
-  animator.begin({ width: 400, height: 800, allowPaperFallback: true }) === false,
+  animator.begin({ width: 400, height: 800, sourceUrl: FAKE_SNAPSHOT }) === false,
   "curl bypass during read-aloud",
 );
 assert(animator.phase === "idle", "no phase change on read-aloud bypass");
@@ -402,7 +401,7 @@ animator.setReadAloudActive(false);
 // Scrolling mode bypass
 renderer.scrolled = true;
 assert(
-  animator.begin({ width: 400, height: 800, allowPaperFallback: true }) === false,
+  animator.begin({ width: 400, height: 800, sourceUrl: FAKE_SNAPSHOT }) === false,
   "curl bypass in scrolling mode",
 );
 renderer.scrolled = false;
@@ -410,7 +409,7 @@ renderer.scrolled = false;
 // Reduce Motion bypass
 animator.setReduceMotion(true);
 assert(
-  animator.begin({ width: 400, height: 800, allowPaperFallback: true }) === false,
+  animator.begin({ width: 400, height: 800, sourceUrl: FAKE_SNAPSHOT }) === false,
   "Reduce Motion bypasses curl",
 );
 animator.setReduceMotion(false);
@@ -442,7 +441,7 @@ animator.detach();
 const orphan = new PageTurnAnimator();
 orphan.setStyle("curl");
 assert(
-  orphan.begin({ width: 0, height: 0, allowPaperFallback: true }) === false,
+  orphan.begin({ width: 0, height: 0, sourceUrl: FAKE_SNAPSHOT }) === false,
   "failed visual creation falls back safely",
 );
 
@@ -457,16 +456,16 @@ assert(slideAnimator.effectiveStyle === "instant", "instant remains unaffected")
 const live = new PageTurnAnimator();
 live.setStyle("curl");
 live.attach(makeRenderer(false), host);
-assert(live.begin({ width: 400, height: 800, allowPaperFallback: true }) === true);
+assert(live.begin({ width: 400, height: 800, sourceUrl: FAKE_SNAPSHOT }) === true);
 live.setReadAloudActive(true);
 await sleep(30);
 assert(live.phase === "idle" || live.phase === "cancelling", "read-aloud cancels active curl");
 await sleep(50);
 assert(!document.getElementById("inkamp-page-curl-overlay"), "read-aloud cancel cleans overlay");
 
-// --- Touched document + section-local snapshot offset -----------------------
-const sectionA = makeSectionDoc("section-A", -400);
-const sectionB = makeSectionDoc("section-B", -800);
+// --- Native snapshot request / stale rejection / RTL ------------------------
+const sectionA = makeSectionDoc("section-A");
+const sectionB = makeSectionDoc("section-B");
 const rootDoc = globalThis.document;
 
 assert(
@@ -489,54 +488,87 @@ assert(
   "reader chrome touch does not pretend to be an EPUB section doc",
 );
 
-// Geometry: iframe scrolled left by 400, visible frame at 0 → local offset 400.
-// Paginator-global start of 9999 must NOT be used as the snapshot X.
-const hostRect = { left: 0, width: 400 };
-assert(
-  visibleOffsetInDoc(sectionA, hostRect, 400) === 400,
-  "section-local offset from iframe geometry (not renderer.start)",
-);
-assert(
-  visibleOffsetInDoc(sectionB, hostRect, 400) === 800,
-  "different section iframe yields its own local offset",
-);
-
-const noFrameDoc = {
-  defaultView: { frameElement: null },
-};
-assert(
-  visibleOffsetInDoc(noFrameDoc, hostRect, 400) === null,
-  "missing iframe → null offset (safe paper fallback, not global start)",
-);
-
-// begin() with a doc but no visibleOffset must not invent a global X offset;
-// it still mounts a paper curl sheet.
 const snapAnimator = new PageTurnAnimator();
 snapAnimator.setStyle("curl");
 snapAnimator.attach(makeRenderer(false), host);
+
+lastSnapshotRequest = null;
+const reqId = snapAnimator.beginSnapshotRequest();
+assert(reqId > 0, "beginSnapshotRequest returns id");
+assert(
+  lastSnapshotRequest && lastSnapshotRequest.requestId === reqId,
+  "JS posts RequestPageSnapshot with requestId",
+);
+assert(snapAnimator.pendingSnapshotRequestId === reqId, "pending id tracked");
+
+// Stale reply must be ignored.
+snapAnimator.receiveNativeSnapshot(reqId - 1, FAKE_SNAPSHOT);
 assert(
   snapAnimator.begin({
     width: 400,
     height: 800,
-    doc: sectionA,
-    startOffset: 9999, // paginator-global — must not be used as snapshot X
-    // visibleOffset intentionally omitted
-    allowPaperFallback: true,
+  }) === false,
+  "stale snapshot does not unlock blank-free begin",
+);
+
+// Fresh reply stores the image for begin().
+snapAnimator.receiveNativeSnapshot(reqId, FAKE_SNAPSHOT);
+assert(
+  snapAnimator.begin({
+    width: 400,
+    height: 800,
+    fromRight: true,
   }) === true,
-  "begin without section-local offset still curls via paper fallback",
+  "accepted native snapshot enables curl begin",
+);
+assert(
+  document.getElementById("inkamp-page-curl-overlay")?.children?.[0]?.style?.backgroundImage
+    ?.includes("data:image/jpeg"),
+  "curl sheet uses JPEG data-URL background",
+);
+snapAnimator.cancel({ durationMs: 0 });
+assert(snapAnimator.pendingSnapshotRequestId === 0, "cancel clears pending snapshot request");
+
+// Null / failed reply must not paint a blank sheet.
+const failId = snapAnimator.beginSnapshotRequest();
+snapAnimator.receiveNativeSnapshot(failId, null);
+assert(
+  snapAnimator.begin({ width: 400, height: 800 }) === false,
+  "failed native snapshot refuses blank paper fallback",
+);
+
+// After reset, a late reply for the old id is rejected.
+const idA = snapAnimator.beginSnapshotRequest();
+snapAnimator.cancel({ durationMs: 0 });
+const idB = snapAnimator.beginSnapshotRequest();
+assert(idB !== idA, "new gesture gets a new snapshot request id");
+snapAnimator.receiveNativeSnapshot(idA, FAKE_SNAPSHOT);
+assert(
+  snapAnimator.begin({ width: 400, height: 800 }) === false,
+  "late reply for superseded request id is rejected",
+);
+snapAnimator.receiveNativeSnapshot(idB, FAKE_SNAPSHOT);
+assert(
+  snapAnimator.begin({ width: 400, height: 800, rtl: true, fromRight: false }) === true,
+  "RTL curl begin uses accepted snapshot (fromLeft)",
 );
 snapAnimator.cancel({ durationMs: 0 });
 
+// RTL direction lock from renderer dir (forward scroll ⇒ curl from left in RTL).
+const rtlRenderer = makeRenderer(false, "rtl");
+const rtlAnimator = new PageTurnAnimator();
+rtlAnimator.setStyle("curl");
+rtlAnimator.attach(rtlRenderer, host);
 assert(
-  snapAnimator.begin({
+  rtlAnimator.begin({
     width: 400,
     height: 800,
-    doc: sectionA,
-    visibleOffset: visibleOffsetInDoc(sectionA, hostRect, 400),
-    allowPaperFallback: true,
+    fromRight: false,
+    rtl: true,
+    sourceUrl: FAKE_SNAPSHOT,
   }) === true,
-  "begin with section-local offset succeeds",
+  "RTL curl mounts with fromRight=false",
 );
-snapAnimator.cancel({ durationMs: 0 });
+rtlAnimator.cancel({ durationMs: 0 });
 
 console.log("PageTurnAnimator.selfcheck: ok");

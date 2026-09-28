@@ -199,6 +199,16 @@ class FoliateManager {
     this.#pageTurnAnimator.applyToRenderer(renderer);
   }
 
+  /**
+   * Native WKWebView snapshot reply for page-curl. Stale request ids are
+   * rejected inside PageTurnAnimator.
+   * @param {number} requestId
+   * @param {string|null} dataUrl
+   */
+  receivePageSnapshot(requestId, dataUrl) {
+    this.#pageTurnAnimator.receiveNativeSnapshot(requestId, dataUrl);
+  }
+
   #attachEventListeners() {
     this.#view.addEventListener("relocate", ({ detail }) => {
       this.#reportRelocate(detail);

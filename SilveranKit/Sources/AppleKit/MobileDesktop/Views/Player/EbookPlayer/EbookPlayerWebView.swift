@@ -4,8 +4,10 @@ import WebKit
 
 #if os(macOS)
 import AppKit
+private typealias PlatformSnapshotImage = NSImage
 #else
 import UIKit
+private typealias PlatformSnapshotImage = UIImage
 #endif
 
 /// EbookPlayerWebView - WebView integration for ebook reading
@@ -138,6 +140,8 @@ private class WebViewCoordinator2: NSObject, WKNavigationDelegate, WKScriptMessa
     }
     var onContentPurged: (() -> Void)?
     var onReaderReady: (() -> Void)?
+    /// Latest page-curl snapshot request id; older in-flight captures are dropped.
+    var latestPageSnapshotRequestId: Int = 0
 
     init(onNavigationFinished: @escaping () -> Void) {
         self.onNavigationFinished = onNavigationFinished
@@ -169,6 +173,16 @@ private class WebViewCoordinator2: NSObject, WKNavigationDelegate, WKScriptMessa
 
         do {
             switch message.name {
+                case "RequestPageSnapshot":
+                    let requestId = Self.pageSnapshotRequestId(from: message.body)
+                    guard let requestId, let webView = message.webView else {
+                        debugLog(
+                            "[EbookPlayerWebView] RequestPageSnapshot missing requestId or webView"
+                        )
+                        return
+                    }
+                    capturePageSnapshot(webView: webView, requestId: requestId)
+
                 case "SelectionDefine":
                     let data = try JSONSerialization.data(withJSONObject: message.body)
                     let msg = try decoder.decode(SelectionTextActionMessage.self, from: data)
@@ -217,6 +231,97 @@ private class WebViewCoordinator2: NSObject, WKNavigationDelegate, WKScriptMessa
         } catch {
             debugLog("[EbookPlayerWebView] Failed to decode message '\(message.name)': \(error)")
         }
+    }
+
+    private static func pageSnapshotRequestId(from body: Any) -> Int? {
+        if let dict = body as? [String: Any] {
+            if let id = dict["requestId"] as? Int { return id }
+            if let id = dict["requestId"] as? Double { return Int(id) }
+            if let id = dict["requestId"] as? NSNumber { return id.intValue }
+        }
+        return nil
+    }
+
+    /// Capture the live WKWebView pixels for the curl sheet and deliver a JPEG data-URL to JS.
+    private func capturePageSnapshot(webView: WKWebView, requestId: Int) {
+        latestPageSnapshotRequestId = requestId
+        let bounds = webView.bounds
+        guard bounds.width > 1, bounds.height > 1 else {
+            debugLog("[EbookPlayerWebView] Page snapshot skipped: empty bounds")
+            deliverPageSnapshot(webView: webView, requestId: requestId, dataURL: nil)
+            return
+        }
+
+        let config = WKSnapshotConfiguration()
+        config.rect = bounds
+        // Match CSS pixel width so the sheet maps 1:1 onto the reader viewport.
+        config.snapshotWidth = NSNumber(value: Double(bounds.width))
+
+        webView.takeSnapshot(with: config) { [weak self, weak webView] image, error in
+            Task { @MainActor in
+                guard let self, let webView else { return }
+                // Drop stale captures when a newer touchstart already superseded this one.
+                guard requestId == self.latestPageSnapshotRequestId else {
+                    debugLog(
+                        "[EbookPlayerWebView] Dropping stale page snapshot requestId=\(requestId) latest=\(self.latestPageSnapshotRequestId)"
+                    )
+                    return
+                }
+                if let error {
+                    debugLog("[EbookPlayerWebView] Page snapshot failed: \(error)")
+                    self.deliverPageSnapshot(webView: webView, requestId: requestId, dataURL: nil)
+                    return
+                }
+                guard let image else {
+                    debugLog("[EbookPlayerWebView] Page snapshot returned nil image")
+                    self.deliverPageSnapshot(webView: webView, requestId: requestId, dataURL: nil)
+                    return
+                }
+                guard let dataURL = Self.jpegDataURL(from: image) else {
+                    debugLog("[EbookPlayerWebView] Page snapshot JPEG encode failed")
+                    self.deliverPageSnapshot(webView: webView, requestId: requestId, dataURL: nil)
+                    return
+                }
+                debugLog(
+                    "[EbookPlayerWebView] Page snapshot ready requestId=\(requestId) chars=\(dataURL.count)"
+                )
+                self.deliverPageSnapshot(webView: webView, requestId: requestId, dataURL: dataURL)
+            }
+        }
+    }
+
+    private func deliverPageSnapshot(webView: WKWebView, requestId: Int, dataURL: String?) {
+        guard requestId == latestPageSnapshotRequestId else { return }
+        let payload: String
+        if let dataURL {
+            payload = javaScriptStringLiteral(dataURL)
+        } else {
+            payload = "null"
+        }
+        let script = "window.foliateManager?.receivePageSnapshot?.(\(requestId), \(payload))"
+        Task { @MainActor in
+            do {
+                _ = try await webView.evaluateJavaScript(script)
+            } catch {
+                debugLog("[EbookPlayerWebView] Failed to deliver page snapshot: \(error)")
+            }
+        }
+    }
+
+    private static func jpegDataURL(from image: PlatformSnapshotImage) -> String? {
+        #if os(iOS)
+        guard let data = image.jpegData(compressionQuality: 0.88) else { return nil }
+        #else
+        guard
+            let tiff = image.tiffRepresentation,
+            let rep = NSBitmapImageRep(data: tiff),
+            let data = rep.representation(
+                using: .jpeg,
+                properties: [.compressionFactor: NSNumber(value: 0.88)],
+            )
+        else { return nil }
+        #endif
+        return "data:image/jpeg;base64," + data.base64EncodedString()
     }
 
     static func copyToPasteboard(_ text: String) {
@@ -428,6 +533,7 @@ private func makeWebViewConfiguration2(
     contentController.add(coordinator, name: "HighlightEdit")
     contentController.add(coordinator, name: "FileAccessDiagnostic")
     contentController.add(coordinator, name: "ReaderReady")
+    contentController.add(coordinator, name: "RequestPageSnapshot")
 
     contentController.addUserScript(consoleOverrideScript)
     contentController.addUserScript(makeBookOpenScript(ebookPath: ebookPath))
