@@ -328,6 +328,7 @@ public final class ReaderCommsBridge {
         enableMarginClickNavigation: Bool,
         userHighlightMode: String,
         readaloudHighlightMode: String,
+        reduceMotion: Bool = false,
     ) async throws {
         guard let js else {
             throw ReaderCommsBridgeError.jsNotAvailable
@@ -352,6 +353,7 @@ public final class ReaderCommsBridge {
             "enableMarginClickNavigation": enableMarginClickNavigation,
             "userHighlightMode": userHighlightMode,
             "readaloudHighlightMode": readaloudHighlightMode,
+            "reduceMotion": reduceMotion,
         ]
 
         styles["backgroundColor"] = backgroundColor ?? NSNull()

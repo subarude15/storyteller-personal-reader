@@ -1,6 +1,12 @@
 import Foundation
 import Observation
 
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
+
 @SilveranUIActor
 @Observable
 public final class ReaderStyleManager {
@@ -144,6 +150,17 @@ public final class ReaderStyleManager {
             enableMarginClickNavigation: settingsVM.enableMarginClickNavigation,
             userHighlightMode: settingsVM.userHighlightMode,
             readaloudHighlightMode: settingsVM.readaloudHighlightMode,
+            reduceMotion: Self.systemReduceMotionEnabled,
         )
+    }
+
+    private static var systemReduceMotionEnabled: Bool {
+        #if canImport(UIKit)
+        UIAccessibility.isReduceMotionEnabled
+        #elseif canImport(AppKit)
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        #else
+        false
+        #endif
     }
 }

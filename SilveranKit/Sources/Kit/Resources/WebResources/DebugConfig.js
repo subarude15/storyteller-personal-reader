@@ -4,6 +4,7 @@ export const DEBUG_CATEGORIES = {
   FoliateManager: true,
   BookmarkManager: true,
   WebViewCommsBridge: true,
+  PageTurnAnimator: true,
 
   trace: false,
   overlay: false,
