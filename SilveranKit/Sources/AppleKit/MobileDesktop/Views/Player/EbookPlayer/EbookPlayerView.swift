@@ -503,28 +503,40 @@ public struct EbookPlayerView: View {
 
             #if os(iOS)
             let alwaysShowMini = viewModel.settingsVM.alwaysShowMiniPlayer
-            let shouldShowStatsOverlay =
-                !viewModel.showAudioSidebar && !viewModel.isTopBarVisible
+            let overlayBookFraction = viewModel.progressManager?.bookFraction
+            let overlayBookTimeRemaining = viewModel.mediaOverlayManager?.bookTimeRemaining
+            let overlayChapterTimeRemaining = viewModel.mediaOverlayManager?.chapterTimeRemaining
+            let overlayCurrentPage = viewModel.progressManager?.chapterCurrentPage
+            let overlayTotalPages = viewModel.progressManager?.chapterTotalPages
+            let overlayIsPlaying = viewModel.mediaOverlayManager?.isPlaying ?? false
 
-            if shouldShowStatsOverlay {
+            // Immersive ebook reading: no persistent bottom % / page footer.
+            // Read-aloud / narration still gets its bottom time + transport chrome.
+            let shouldShowImmersiveAudioChrome =
+                viewModel.hasAudioNarration
+                && !viewModel.showAudioSidebar
+                && !viewModel.isTopBarVisible
+
+            if shouldShowImmersiveAudioChrome {
                 EbookOverlayIos(
-                    showProgress: viewModel.settingsVM.showProgress,
+                    showProgress: false,
                     showTimeRemainingInBook: viewModel.settingsVM.showTimeRemainingInBook,
                     showTimeRemainingInChapter: viewModel.settingsVM.showTimeRemainingInChapter,
-                    showPageNumber: viewModel.settingsVM.showPageNumber,
+                    showPageNumber: false,
                     showSkipBackward: viewModel.settingsVM.showOverlaySkipBackward,
                     showSkipForward: viewModel.settingsVM.showOverlaySkipForward,
                     showPlayPause: viewModel.settingsVM.showOverlayPlayPause,
                     overlayTransparency: viewModel.settingsVM.overlayTransparency,
-                    bookFraction: viewModel.progressManager?.bookFraction,
-                    bookTimeRemaining: viewModel.mediaOverlayManager?.bookTimeRemaining,
-                    chapterTimeRemaining: viewModel.mediaOverlayManager?.chapterTimeRemaining,
-                    currentPage: viewModel.progressManager?.chapterCurrentPage,
-                    totalPages: viewModel.progressManager?.chapterTotalPages,
-                    isPlaying: viewModel.mediaOverlayManager?.isPlaying ?? false,
-                    hasAudioNarration: viewModel.hasAudioNarration,
+                    bookFraction: overlayBookFraction,
+                    bookTimeRemaining: overlayBookTimeRemaining,
+                    chapterTimeRemaining: overlayChapterTimeRemaining,
+                    currentPage: overlayCurrentPage,
+                    totalPages: overlayTotalPages,
+                    isPlaying: overlayIsPlaying,
+                    hasAudioNarration: true,
                     backgroundColor: readerBackgroundColor,
                     positionAtTop: alwaysShowMini,
+                    showsBackdrop: true,
                     onSkipBackward: {
                         viewModel.handlePrevSentence()
                     },
@@ -534,6 +546,36 @@ public struct EbookPlayerView: View {
                     onSkipForward: {
                         viewModel.handleNextSentence()
                     },
+                )
+                .transition(.opacity)
+            }
+
+            // Tap-revealed chrome: floating progress/page (no solid footer band).
+            if viewModel.isTopBarVisible && !viewModel.showAudioSidebar {
+                EbookOverlayIos(
+                    showProgress: viewModel.settingsVM.showProgress,
+                    showTimeRemainingInBook: viewModel.hasAudioNarration
+                        && viewModel.settingsVM.showTimeRemainingInBook,
+                    showTimeRemainingInChapter: viewModel.hasAudioNarration
+                        && viewModel.settingsVM.showTimeRemainingInChapter,
+                    showPageNumber: viewModel.settingsVM.showPageNumber,
+                    showSkipBackward: false,
+                    showSkipForward: false,
+                    showPlayPause: false,
+                    overlayTransparency: viewModel.settingsVM.overlayTransparency,
+                    bookFraction: overlayBookFraction,
+                    bookTimeRemaining: overlayBookTimeRemaining,
+                    chapterTimeRemaining: overlayChapterTimeRemaining,
+                    currentPage: overlayCurrentPage,
+                    totalPages: overlayTotalPages,
+                    isPlaying: overlayIsPlaying,
+                    hasAudioNarration: viewModel.hasAudioNarration,
+                    backgroundColor: readerBackgroundColor,
+                    positionAtTop: false,
+                    showsBackdrop: false,
+                    onSkipBackward: {},
+                    onTogglePlaying: {},
+                    onSkipForward: {},
                 )
                 .transition(.opacity)
             }
@@ -577,7 +619,11 @@ public struct EbookPlayerView: View {
                 draggableAudioCard
             }
 
-            playbackProgressBar
+            // Thin bottom scrub indicator is for narration/audio; keep ebook pages
+            // full-bleed without a permanent progress strip.
+            if viewModel.hasAudioNarration {
+                playbackProgressBar
+            }
             #else
             let shouldShowBar = viewModel.settingsVM.enableReadingBar && !viewModel.showAudioSidebar
 

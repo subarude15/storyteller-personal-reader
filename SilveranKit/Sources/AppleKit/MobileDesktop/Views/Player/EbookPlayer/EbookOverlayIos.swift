@@ -21,9 +21,57 @@ struct EbookOverlayIos: View {
     let hasAudioNarration: Bool
     let backgroundColor: Color
     let positionAtTop: Bool
+    /// When false, stats float without painting a solid bottom/top band over the page.
+    let showsBackdrop: Bool
     let onSkipBackward: () -> Void
     let onTogglePlaying: () -> Void
     let onSkipForward: () -> Void
+
+    init(
+        showProgress: Bool,
+        showTimeRemainingInBook: Bool,
+        showTimeRemainingInChapter: Bool,
+        showPageNumber: Bool,
+        showSkipBackward: Bool,
+        showSkipForward: Bool,
+        showPlayPause: Bool,
+        overlayTransparency: Double,
+        bookFraction: Double?,
+        bookTimeRemaining: TimeInterval?,
+        chapterTimeRemaining: TimeInterval?,
+        currentPage: Int?,
+        totalPages: Int?,
+        isPlaying: Bool,
+        hasAudioNarration: Bool,
+        backgroundColor: Color,
+        positionAtTop: Bool,
+        showsBackdrop: Bool = true,
+        onSkipBackward: @escaping () -> Void,
+        onTogglePlaying: @escaping () -> Void,
+        onSkipForward: @escaping () -> Void,
+    ) {
+        self.showProgress = showProgress
+        self.showTimeRemainingInBook = showTimeRemainingInBook
+        self.showTimeRemainingInChapter = showTimeRemainingInChapter
+        self.showPageNumber = showPageNumber
+        self.showSkipBackward = showSkipBackward
+        self.showSkipForward = showSkipForward
+        self.showPlayPause = showPlayPause
+        self.overlayTransparency = overlayTransparency
+        self.bookFraction = bookFraction
+        self.bookTimeRemaining = bookTimeRemaining
+        self.chapterTimeRemaining = chapterTimeRemaining
+        self.currentPage = currentPage
+        self.totalPages = totalPages
+        self.isPlaying = isPlaying
+        self.hasAudioNarration = hasAudioNarration
+        self.backgroundColor = backgroundColor
+        self.positionAtTop = positionAtTop
+        self.showsBackdrop = showsBackdrop
+        self.onSkipBackward = onSkipBackward
+        self.onTogglePlaying = onTogglePlaying
+        self.onSkipForward = onSkipForward
+    }
 
     private var hasTimeStatsToDisplay: Bool {
         hasAudioNarration && (showTimeRemainingInBook || showTimeRemainingInChapter)
@@ -70,7 +118,7 @@ struct EbookOverlayIos: View {
             .padding(.bottom, 8)
             .frame(maxWidth: .infinity)
             .background(alignment: .top) {
-                if hasStatsToDisplay {
+                if showsBackdrop && hasStatsToDisplay {
                     backgroundColor.ignoresSafeArea(edges: .top)
                 }
             }
@@ -151,7 +199,7 @@ struct EbookOverlayIos: View {
             .padding(.top, 8)
             .frame(maxWidth: .infinity)
             .background(alignment: .bottom) {
-                if hasOverlayContent {
+                if showsBackdrop && hasOverlayContent {
                     backgroundColor.ignoresSafeArea(edges: .bottom)
                 }
             }

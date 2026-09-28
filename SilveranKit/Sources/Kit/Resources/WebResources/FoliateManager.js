@@ -224,13 +224,33 @@ class FoliateManager {
       const { doc, index } = detail;
       if (doc) {
         let isDragging = false;
+        // iOS synthesizes click after touchend; mouse-only isDragging misses swipes,
+        // so a page-turn was toggling reader chrome (progress/footer) mid-gesture.
+        let touchMoved = false;
+        let touchStartX = 0;
+        let touchStartY = 0;
+
+        doc.addEventListener("touchstart", (event) => {
+          touchMoved = false;
+          const t = event.touches?.[0];
+          if (t) {
+            touchStartX = t.clientX;
+            touchStartY = t.clientY;
+          }
+        }, { passive: true });
 
         doc.addEventListener("touchmove", (event) => {
           const selection = doc.getSelection?.();
           if (selection && !selection.isCollapsed) {
             event.stopPropagation();
           }
-        }, { capture: true });
+          const t = event.touches?.[0];
+          if (t) {
+            const dx = t.clientX - touchStartX;
+            const dy = t.clientY - touchStartY;
+            if (dx * dx + dy * dy > 25) touchMoved = true;
+          }
+        }, { capture: true, passive: true });
 
         doc.addEventListener("keydown", (event) => {
           this.#handleKeyDown(event);
@@ -253,8 +273,14 @@ class FoliateManager {
             return;
           }
 
-          if (isDragging) {
+          if (isDragging || touchMoved) {
             isDragging = false;
+            touchMoved = false;
+            return;
+          }
+
+          // Curl gesture owns the interaction — never reveal chrome mid-turn.
+          if (this.#pageTurnAnimator.phase !== "idle") {
             return;
           }
 
@@ -265,6 +291,7 @@ class FoliateManager {
 
           clickTimer = setTimeout(() => {
             clickTimer = null;
+            if (this.#pageTurnAnimator.phase !== "idle") return;
             const selectionNow = doc.getSelection?.();
             if (selectionNow && !selectionNow.isCollapsed) {
               return;
@@ -461,7 +488,25 @@ class FoliateManager {
   }
 
   #reportOverlayToggle() {
+    // Page-turn gestures must not reveal reader chrome.
+    if (this.#pageTurnAnimator.phase !== "idle") return;
     window.webkit?.messageHandlers?.OverlayToggled?.postMessage({});
+  }
+
+  /** Keep wrap/html host opaque with the reader paper color. */
+  #applyHostPaperBackground() {
+    const color = this.#backgroundColor;
+    if (!color || typeof document === "undefined") return;
+    try {
+      document.documentElement.style.backgroundColor = color;
+      document.body.style.backgroundColor = color;
+      const host = document.getElementById("reader-container");
+      if (host) host.style.backgroundColor = color;
+      const view = this.#view;
+      if (view?.style) view.style.backgroundColor = color;
+    } catch {
+      /* ignore */
+    }
   }
 
   #handleSingleClick(event) {
@@ -759,6 +804,10 @@ class FoliateManager {
         customCSS: this.#customCSS,
       }),
     );
+
+    // Paint the host document (outside section iframes) so WKWebView snapshots
+    // do not capture transparent Foliate gutters that JPEG encodes as black.
+    this.#applyHostPaperBackground();
 
     const flow = this.#scrollingMode ? "scrolled" : "paginated";
     this.#view.renderer.setAttribute("flow", flow);

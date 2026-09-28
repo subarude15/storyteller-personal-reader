@@ -181,7 +181,12 @@ private class WebViewCoordinator2: NSObject, WKNavigationDelegate, WKScriptMessa
                         )
                         return
                     }
-                    capturePageSnapshot(webView: webView, requestId: requestId)
+                    let fillColor = Self.pageSnapshotFillColor(from: message.body)
+                    capturePageSnapshot(
+                        webView: webView,
+                        requestId: requestId,
+                        fillColor: fillColor,
+                    )
 
                 case "SelectionDefine":
                     let data = try JSONSerialization.data(withJSONObject: message.body)
@@ -242,8 +247,23 @@ private class WebViewCoordinator2: NSObject, WKNavigationDelegate, WKScriptMessa
         return nil
     }
 
+    /// Optional CSS paper color from JS (`fillColor`) so transparent gutters do not
+    /// become black when encoded as JPEG (JPEG has no alpha).
+    private static func pageSnapshotFillColor(from body: Any) -> String? {
+        guard let dict = body as? [String: Any] else { return nil }
+        if let s = dict["fillColor"] as? String {
+            let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        return nil
+    }
+
     /// Capture the live WKWebView pixels for the curl sheet and deliver a JPEG data-URL to JS.
-    private func capturePageSnapshot(webView: WKWebView, requestId: Int) {
+    private func capturePageSnapshot(
+        webView: WKWebView,
+        requestId: Int,
+        fillColor: String?,
+    ) {
         latestPageSnapshotRequestId = requestId
         let bounds = webView.bounds
         guard bounds.width > 1, bounds.height > 1 else {
@@ -277,7 +297,11 @@ private class WebViewCoordinator2: NSObject, WKNavigationDelegate, WKScriptMessa
                     self.deliverPageSnapshot(webView: webView, requestId: requestId, dataURL: nil)
                     return
                 }
-                guard let dataURL = Self.jpegDataURL(from: image) else {
+                // Foliate page margins / clear WKWebView pixels are transparent in the
+                // snapshot. JPEG has no alpha → those pixels become black bars unless
+                // we composite onto the reader paper color first.
+                let opaque = Self.compositedOpaqueImage(image, fillCSS: fillColor) ?? image
+                guard let dataURL = Self.jpegDataURL(from: opaque) else {
                     debugLog("[EbookPlayerWebView] Page snapshot JPEG encode failed")
                     self.deliverPageSnapshot(webView: webView, requestId: requestId, dataURL: nil)
                     return
@@ -322,6 +346,95 @@ private class WebViewCoordinator2: NSObject, WKNavigationDelegate, WKScriptMessa
         else { return nil }
         #endif
         return "data:image/jpeg;base64," + data.base64EncodedString()
+    }
+
+    /// Draw `image` over an opaque paper fill so transparent snapshot regions
+    /// (Foliate margins, clear webview) never encode as black JPEG bars.
+    private static func compositedOpaqueImage(
+        _ image: PlatformSnapshotImage,
+        fillCSS: String?,
+    ) -> PlatformSnapshotImage? {
+        #if os(iOS)
+        let size = image.size
+        guard size.width > 1, size.height > 1 else { return nil }
+        let format = UIGraphicsImageRendererFormat.default()
+        format.opaque = true
+        format.scale = image.scale
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        return renderer.image { ctx in
+            Self.uiColor(fromCSS: fillCSS).setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+        #else
+        let size = image.size
+        guard size.width > 1, size.height > 1 else { return nil }
+        let result = NSImage(size: size)
+        result.lockFocus()
+        Self.nsColor(fromCSS: fillCSS).setFill()
+        NSRect(origin: .zero, size: size).fill()
+        image.draw(
+            in: NSRect(origin: .zero, size: size),
+            from: .zero,
+            operation: .sourceOver,
+            fraction: 1.0,
+        )
+        result.unlockFocus()
+        return result
+        #endif
+    }
+
+    #if os(iOS)
+    private static func uiColor(fromCSS css: String?) -> UIColor {
+        guard let css, let color = parseCSSColor(css) else {
+            return UIColor(red: 0.969, green: 0.953, blue: 0.918, alpha: 1) // #f7f3ea
+        }
+        return UIColor(red: color.r, green: color.g, blue: color.b, alpha: 1)
+    }
+    #else
+    private static func nsColor(fromCSS css: String?) -> NSColor {
+        guard let css, let color = parseCSSColor(css) else {
+            return NSColor(red: 0.969, green: 0.953, blue: 0.918, alpha: 1)
+        }
+        return NSColor(red: color.r, green: color.g, blue: color.b, alpha: 1)
+    }
+    #endif
+
+    private static func parseCSSColor(_ css: String) -> (r: CGFloat, g: CGFloat, b: CGFloat)? {
+        let s = css.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if s.hasPrefix("#") {
+            let hex = String(s.dropFirst()).filter(\.isHexDigit)
+            func channel(_ pair: Substring) -> CGFloat {
+                CGFloat(Int(pair, radix: 16) ?? 0) / 255
+            }
+            if hex.count == 3 {
+                let chars = Array(hex)
+                func nibble(_ c: Character) -> CGFloat {
+                    CGFloat(Int(String(c), radix: 16) ?? 0) / 15
+                }
+                return (nibble(chars[0]), nibble(chars[1]), nibble(chars[2]))
+            }
+            if hex.count >= 6 {
+                return (
+                    channel(hex.prefix(2)),
+                    channel(hex.dropFirst(2).prefix(2)),
+                    channel(hex.dropFirst(4).prefix(2)),
+                )
+            }
+        }
+        // getComputedStyle returns rgb(r, g, b) with 0–255 channels.
+        if s.hasPrefix("rgb") {
+            let nums = s.split(whereSeparator: { !$0.isNumber && $0 != "." && $0 != "-" })
+                .compactMap { Double($0) }
+            if nums.count >= 3 {
+                return (
+                    CGFloat(min(max(nums[0] / 255, 0), 1)),
+                    CGFloat(min(max(nums[1] / 255, 0), 1)),
+                    CGFloat(min(max(nums[2] / 255, 0), 1)),
+                )
+            }
+        }
+        return nil
     }
 
     static func copyToPasteboard(_ text: String) {
