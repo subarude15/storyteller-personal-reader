@@ -4,7 +4,12 @@
  */
 import PageTurnAnimator, {
   docFromTouchEvent,
+  peelVisualState,
 } from "../SilveranKit/Sources/Kit/Resources/WebResources/PageTurnAnimator.js";
+
+function childByClass(parent, className) {
+  return parent?.children?.find?.((c) => c.className === className) || null;
+}
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);
@@ -521,11 +526,15 @@ assert(
   }) === true,
   "accepted native snapshot enables curl begin",
 );
-assert(
-  document.getElementById("inkamp-page-curl-overlay")?.children?.[0]?.style?.backgroundImage
-    ?.includes("data:image/jpeg"),
-  "curl sheet uses JPEG data-URL background",
-);
+{
+  const overlay = document.getElementById("inkamp-page-curl-overlay");
+  assert(childByClass(overlay, "inkamp-curl-underlay"), "underlay covers live EPUB during curl");
+  const sheet = childByClass(overlay, "inkamp-curl-sheet");
+  assert(
+    sheet?.style?.backgroundImage?.includes("data:image/jpeg"),
+    "curl sheet uses JPEG data-URL background",
+  );
+}
 snapAnimator.cancel({ durationMs: 0 });
 assert(snapAnimator.pendingSnapshotRequestId === 0, "cancel clears pending snapshot request");
 
@@ -570,5 +579,83 @@ assert(
   "RTL curl mounts with fromRight=false",
 );
 rtlAnimator.cancel({ durationMs: 0 });
+
+// --- Restrained peel geometry ----------------------------------------------
+const W = 400;
+const at0 = peelVisualState(0, W, true);
+assert(at0.remain === 1, "progress 0 → full current-page remain");
+assert(at0.edgeX === W, "progress 0 → free edge at right");
+assert(at0.peeledPct === 0, "progress 0 → nothing peeled");
+assert(at0.clipPath === "inset(0 0% 0 0)", "progress 0 → full clip visibility");
+assert(at0.sheetRotateY === 0 && at0.sheetSkewY === 0 && at0.sheetScaleX === 1, "sheet undistorted at 0");
+assert(at0.sheetTranslateX === 0, "sheet not translated at 0");
+
+const atHalf = peelVisualState(0.5, W, true);
+assert(atHalf.remain === 0.5, "progress 0.5 → half remain");
+assert(atHalf.edgeX === W * 0.5, "progress 0.5 → edge at mid");
+assert(atHalf.clipPath === "inset(0 50% 0 0)", "progress 0.5 → clipped from free edge");
+assert(atHalf.foldWidth / W >= 0.08 && atHalf.foldWidth / W <= 0.18, "fold width 8–18%");
+assert(atHalf.foldOpacity > 0, "progress 0.5 → fold visible");
+assert(atHalf.sheetRotateY === 0 && atHalf.sheetSkewY === 0, "no full-page skew/rotate at 0.5");
+assert(Math.abs(atHalf.foldRotateY) <= 16, "fold-only rotation stays modest");
+
+const at1 = peelVisualState(1, W, true);
+assert(at1.remain === 0, "progress 1 → foreground fully peeled");
+assert(at1.edgeX === 0, "progress 1 → edge at spine");
+assert(at1.clipPath === "inset(0 100% 0 0)", "progress 1 → sheet fully clipped away");
+assert(at1.foldOpacity === 0, "progress 1 → fold gone");
+
+const leftHalf = peelVisualState(0.5, W, false);
+assert(leftHalf.edgeX === W * 0.5, "opposite direction edge mirrors to mid");
+assert(leftHalf.clipPath === "inset(0 0 0 50%)", "opposite direction clips from left");
+assert(leftHalf.foldRotateY === -atHalf.foldRotateY || leftHalf.foldRotateY * atHalf.foldRotateY < 0,
+  "opposite direction mirrors fold rotation sign");
+
+// Live overlay applies peel state (clip, no full-page transform)
+const peelAnimator = new PageTurnAnimator();
+peelAnimator.setStyle("curl");
+peelAnimator.attach(makeRenderer(false), host);
+assert(
+  peelAnimator.begin({ width: W, height: 800, fromRight: true, sourceUrl: FAKE_SNAPSHOT }) === true,
+);
+const peelOverlay = document.getElementById("inkamp-page-curl-overlay");
+assert(childByClass(peelOverlay, "inkamp-curl-underlay"), "underlay mounted for drag cover");
+const peelSheet = childByClass(peelOverlay, "inkamp-curl-sheet");
+// begin() applies progress 0 synchronously.
+assert(peelSheet.style.clipPath === "inset(0 0% 0 0)", "applied progress 0 → full page");
+assert(!peelSheet.style.transform || peelSheet.style.transform === "none", "sheet transform none at 0");
+peelAnimator.update({ progress: 0.5 });
+await sleep(20);
+assert(peelSheet.style.clipPath === "inset(0 50% 0 0)", "applied progress 0.5 → half clip");
+assert(peelSheet.style.transform === "none", "sheet stays flat at 0.5");
+const peelFold = childByClass(peelOverlay, "inkamp-curl-fold");
+assert(Number(peelFold.style.opacity) > 0, "fold visible at mid peel");
+peelAnimator.update({ progress: 1 });
+await sleep(20);
+assert(peelSheet.style.clipPath === "inset(0 100% 0 0)", "applied progress 1 → sheet hidden");
+
+// Cancellation restores full page then removes overlay
+peelAnimator.update({ progress: 0.4 });
+await sleep(20);
+peelAnimator.cancel({ durationMs: 0 });
+assert(peelAnimator.phase === "idle", "cancel restores idle");
+assert(!document.getElementById("inkamp-page-curl-overlay"), "cancel removes overlay");
+
+// Completion removes overlay after peel finishes
+assert(
+  peelAnimator.begin({ width: W, height: 800, fromRight: true, sourceUrl: FAKE_SNAPSHOT }) === true,
+);
+peelAnimator.update({ progress: 0.6 });
+await sleep(20);
+peelAnimator.complete({ durationMs: 0 });
+assert(peelAnimator.phase === "idle", "complete cleans phase");
+assert(!document.getElementById("inkamp-page-curl-overlay"), "complete removes overlay");
+
+// Missing snapshot still never mounts
+assert(
+  peelAnimator.begin({ width: W, height: 800 }) === false,
+  "missing snapshot never mounts overlay",
+);
+assert(!document.getElementById("inkamp-page-curl-overlay"), "no overlay without snapshot");
 
 console.log("PageTurnAnimator.selfcheck: ok");

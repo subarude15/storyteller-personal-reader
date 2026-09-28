@@ -2,11 +2,11 @@
  * Owns page-turn *appearance* only. Foliate's paginator still owns which page
  * is shown and fires PageFlipped / Relocated. Do not put navigation logic here.
  *
- * Phase 2 + native snapshot correction:
- * - slide: current behavior (Foliate `animated` left unset / restored)
- * - curl: interactive visual curl for *manual* paginated swipes only, using a
- *   native WKWebView snapshot of the already-rendered page (not a JS clone)
- * - instant: ensure no Foliate sliding transition (`animated` removed)
+ * Curl visual model (restrained peel):
+ * - native WKWebView snapshot as a mostly-flat foreground layer
+ * - clip-path reveals less of that snapshot as the finger moves
+ * - solid underlay hides Foliate's intermediate scroll during the drag
+ * - narrow fold/shadow strip at the free edge (not a full-page 3D card spin)
  *
  * Curl is bypassed when:
  * - Reduce Motion is effective
@@ -29,14 +29,11 @@ const COMPLETE_MS = 180;
 const CANCEL_MS = 200;
 /** How long to wait for a native snapshot before giving up on curl. */
 const SNAPSHOT_TIMEOUT_MS = 220;
+/** Fold strip as a fraction of viewport width (clamped 8–18%). */
+const FOLD_FRAC_MIN = 0.08;
+const FOLD_FRAC_MAX = 0.18;
 
 const clamp01 = (value) => Math.max(0, Math.min(1, value));
-
-/** Ease-in so the curl stays subtle near the edge, then deepens. */
-const mapProgress = (t) => {
-  const p = clamp01(t);
-  return p * p * (3 - 2 * p);
-};
 
 /**
  * Document that originated a touch. Prefer the section document the listener
@@ -58,6 +55,68 @@ export function docFromTouchEvent(event, rootDocument = globalThis.document) {
   return null;
 }
 
+/**
+ * Pure peel geometry for the restrained page-curl visual.
+ * Progress maps linearly to the free-edge position so the clip tracks the finger.
+ * The snapshot sheet itself is never rotated/skewed — only clipped.
+ *
+ * @param {number} progress 0..1
+ * @param {number} width viewport width in CSS px
+ * @param {boolean} [fromRight=true] free edge on the right (LTR forward)
+ */
+export function peelVisualState(progress, width, fromRight = true) {
+  const p = clamp01(progress);
+  const w = Math.max(1, width || 1);
+  const remain = 1 - p;
+  // Free edge x from the left: RTL/backward mirrors via fromRight=false.
+  const edgeX = fromRight ? w * remain : w * p;
+  const foldFrac = Math.min(FOLD_FRAC_MAX, Math.max(FOLD_FRAC_MIN, FOLD_FRAC_MIN + p * 0.1));
+  const foldWidth = w * foldFrac;
+  const peeledPct = p * 100;
+  // inset(top, right, bottom, left) — peel away from the free edge.
+  const clipPath = fromRight
+    ? `inset(0 ${peeledPct}% 0 0)`
+    : `inset(0 0 0 ${peeledPct}%)`;
+
+  const foldLeft = fromRight ? Math.max(0, edgeX - foldWidth) : edgeX;
+  const backWidth = foldWidth * 0.55;
+  const backLeft = fromRight ? edgeX : Math.max(0, edgeX - backWidth);
+  const shadowWidth = foldWidth * 0.75;
+  const shadowLeft = fromRight ? Math.max(0, edgeX - shadowWidth * 0.15) : Math.max(0, edgeX - shadowWidth * 0.85);
+
+  // Local fold-only rotation — kept small so text in the flat region stays readable.
+  const foldRotateY = (fromRight ? -1 : 1) * (5 + p * 9);
+  const foldVisible = p > 0.02 && p < 0.98;
+  const foldOpacity = foldVisible ? Math.min(0.95, 0.35 + p * 0.45) : 0;
+  const backOpacity = foldVisible ? Math.min(0.55, 0.12 + p * 0.4) : 0;
+  const shadowOpacity = foldVisible ? Math.min(0.45, 0.1 + p * 0.35) : 0;
+
+  return {
+    progress: p,
+    remain,
+    edgeX,
+    peeledPct,
+    clipPath,
+    foldWidth,
+    foldLeft,
+    foldRotateY,
+    foldOrigin: fromRight ? "right center" : "left center",
+    foldTransform: `perspective(1100px) rotateY(${foldRotateY}deg)`,
+    foldOpacity,
+    backWidth,
+    backLeft,
+    backOpacity,
+    shadowWidth,
+    shadowLeft,
+    shadowOpacity,
+    // Contract for tests / callers: the flat sheet must stay undistorted.
+    sheetTranslateX: 0,
+    sheetRotateY: 0,
+    sheetSkewY: 0,
+    sheetScaleX: 1,
+  };
+}
+
 export default class PageTurnAnimator {
   #style = "slide";
   #reduceMotion = false;
@@ -69,6 +128,7 @@ export default class PageTurnAnimator {
   #phase = "idle"; // idle | pending | curling | completing | cancelling
   #gesture = null;
   #overlay = null;
+  #underlay = null;
   #sheet = null;
   #shadow = null;
   #fold = null;
@@ -658,7 +718,7 @@ export default class PageTurnAnimator {
     }
   }
 
-  // --- Visual layer --------------------------------------------------------
+  // --- Visual layer (restrained peel) --------------------------------------
 
   #ensureStyles() {
     if (typeof document === "undefined") return;
@@ -674,42 +734,50 @@ export default class PageTurnAnimator {
         overflow: hidden;
         contain: layout style paint;
       }
+      #${OVERLAY_ID} .inkamp-curl-underlay {
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+      }
       #${OVERLAY_ID} .inkamp-curl-sheet {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        width: 100%;
+        height: 100%;
+        will-change: clip-path;
+        background-size: 100% 100%;
+        background-repeat: no-repeat;
+        background-position: left top;
+        transform: none;
+      }
+      #${OVERLAY_ID} .inkamp-curl-back {
         position: absolute;
         top: 0;
         bottom: 0;
-        width: 100%;
-        height: 100%;
-        transform-style: preserve-3d;
-        will-change: transform;
-        background-size: 100% 100%;
-        background-repeat: no-repeat;
-        background-position: center;
-        box-shadow: 0 0 0 rgba(0,0,0,0);
+        z-index: 2;
+        pointer-events: none;
+        opacity: 0;
       }
       #${OVERLAY_ID} .inkamp-curl-fold {
         position: absolute;
         top: 0;
         bottom: 0;
-        width: 28%;
+        z-index: 3;
         pointer-events: none;
         opacity: 0;
-      }
-      #${OVERLAY_ID} .inkamp-curl-back {
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
-        opacity: 0;
-        background: linear-gradient(90deg, rgba(0,0,0,0.12), rgba(0,0,0,0.03) 45%, rgba(255,255,255,0.04));
+        transform-style: preserve-3d;
+        will-change: transform, left, opacity;
       }
       #${OVERLAY_ID} .inkamp-curl-shadow {
         position: absolute;
         top: 0;
         bottom: 0;
-        width: 18%;
+        z-index: 4;
         pointer-events: none;
         opacity: 0;
-        filter: blur(6px);
+        filter: blur(5px);
       }
     `;
     document.head.appendChild(style);
@@ -724,35 +792,39 @@ export default class PageTurnAnimator {
     const overlay = document.createElement("div");
     overlay.id = OVERLAY_ID;
 
+    // Solid theme-colored cover so Foliate's intermediate scroll never shows
+    // through the peel during the interactive drag.
+    const underlay = document.createElement("div");
+    underlay.className = "inkamp-curl-underlay";
+    underlay.style.backgroundColor = paperColor;
+
     const sheet = document.createElement("div");
     sheet.className = "inkamp-curl-sheet";
     sheet.style.width = `${width}px`;
     sheet.style.height = `${height}px`;
-    sheet.style.left = fromRight ? "auto" : "0";
-    sheet.style.right = fromRight ? "0" : "auto";
     sheet.style.backgroundColor = paperColor;
     sheet.style.backgroundImage = `url("${sourceUrl}")`;
-
-    const fold = document.createElement("div");
-    fold.className = "inkamp-curl-fold";
-    // Highlight sits on the free (dragged) edge.
-    fold.style[fromRight ? "right" : "left"] = "0";
-    fold.style.background = fromRight
-      ? "linear-gradient(270deg, rgba(255,255,255,0.0), rgba(255,255,255,0.22) 40%, rgba(0,0,0,0.08))"
-      : "linear-gradient(90deg, rgba(255,255,255,0.0), rgba(255,255,255,0.22) 40%, rgba(0,0,0,0.08))";
+    sheet.style.transform = "none";
 
     const back = document.createElement("div");
     back.className = "inkamp-curl-back";
+    back.style.background = fromRight
+      ? `linear-gradient(270deg, ${paperColor}, rgba(0,0,0,0.14) 55%, rgba(0,0,0,0.05))`
+      : `linear-gradient(90deg, ${paperColor}, rgba(0,0,0,0.14) 55%, rgba(0,0,0,0.05))`;
+
+    const fold = document.createElement("div");
+    fold.className = "inkamp-curl-fold";
+    fold.style.background = fromRight
+      ? "linear-gradient(270deg, rgba(255,255,255,0.0), rgba(255,255,255,0.28) 45%, rgba(0,0,0,0.10))"
+      : "linear-gradient(90deg, rgba(255,255,255,0.0), rgba(255,255,255,0.28) 45%, rgba(0,0,0,0.10))";
 
     const shadow = document.createElement("div");
     shadow.className = "inkamp-curl-shadow";
-    shadow.style[fromRight ? "right" : "left"] = "0";
     shadow.style.background = fromRight
-      ? "linear-gradient(270deg, rgba(0,0,0,0.22), rgba(0,0,0,0))"
-      : "linear-gradient(90deg, rgba(0,0,0,0.22), rgba(0,0,0,0))";
+      ? "linear-gradient(270deg, rgba(0,0,0,0.28), rgba(0,0,0,0))"
+      : "linear-gradient(90deg, rgba(0,0,0,0.28), rgba(0,0,0,0))";
 
-    sheet.append(fold, back, shadow);
-    overlay.appendChild(sheet);
+    overlay.append(underlay, sheet, back, fold, shadow);
 
     const hostStyle = globalThis.getComputedStyle?.(host);
     if (hostStyle && hostStyle.position === "static") {
@@ -761,6 +833,7 @@ export default class PageTurnAnimator {
     host.appendChild(overlay);
 
     this.#overlay = overlay;
+    this.#underlay = underlay;
     this.#sheet = sheet;
     this.#fold = fold;
     this.#back = back;
@@ -784,40 +857,35 @@ export default class PageTurnAnimator {
     const gesture = this.#gesture;
     if (!sheet || !gesture) return;
 
-    const p = mapProgress(progress);
     const width = gesture.width || sheet.clientWidth || 1;
     const fromRight = gesture.fromRight !== false;
+    // Linear progress so the free edge tracks the finger; no full-page 3D.
+    const state = peelVisualState(progress, width, fromRight);
 
-    // Keep the free edge near the finger: translate roughly with drag distance,
-    // deepen rotateY / skew so it reads as a peel rather than a flat card spin.
-    const pull = p * width * 0.92;
-    const translateX = fromRight ? -pull : pull;
-    const rotateY = (fromRight ? -1 : 1) * (p * 78);
-    const skewY = (fromRight ? 1 : -1) * p * 5;
-    const scaleX = 1 - p * 0.06;
+    sheet.style.transform = "none";
+    sheet.style.transformOrigin = "left top";
+    sheet.style.clipPath = state.clipPath;
 
-    // Spine on the side opposite the free edge so the dragged edge tracks the finger.
-    sheet.style.transformOrigin = fromRight ? "left center" : "right center";
-    sheet.style.transform =
-      `perspective(2200px) translate3d(${translateX}px, 0, 0) `
-      + `rotateY(${rotateY}deg) skewY(${skewY}deg) scaleX(${scaleX})`;
-
-    if (this.#fold) this.#fold.style.opacity = String(Math.min(0.85, 0.15 + p * 0.7));
-    if (this.#back) this.#back.style.opacity = String(Math.min(0.55, p * 0.55));
-    if (this.#shadow) {
-      this.#shadow.style.opacity = String(Math.min(0.5, 0.08 + p * 0.42));
-      // Keep the drop shadow near the moving free edge.
-      this.#shadow.style.transform = `translateX(${fromRight ? -pull * 0.15 : pull * 0.15}px)`;
-      this.#shadow.style[fromRight ? "right" : "left"] = "0";
-      this.#shadow.style[fromRight ? "left" : "right"] = "auto";
+    if (this.#fold) {
+      this.#fold.style.left = `${state.foldLeft}px`;
+      this.#fold.style.width = `${state.foldWidth}px`;
+      this.#fold.style.right = "auto";
+      this.#fold.style.opacity = String(state.foldOpacity);
+      this.#fold.style.transformOrigin = state.foldOrigin;
+      this.#fold.style.transform = state.foldTransform;
     }
-
-    // Soft clip so the peeled edge looks slightly curved.
-    const inset = Math.round(p * 4);
-    if (fromRight) {
-      sheet.style.clipPath = `polygon(0% 0%, 100% ${inset}%, 100% ${100 - inset}%, 0% 100%)`;
-    } else {
-      sheet.style.clipPath = `polygon(0% ${inset}%, 100% 0%, 100% 100%, 0% ${100 - inset}%)`;
+    if (this.#back) {
+      this.#back.style.left = `${state.backLeft}px`;
+      this.#back.style.width = `${state.backWidth}px`;
+      this.#back.style.right = "auto";
+      this.#back.style.opacity = String(state.backOpacity);
+    }
+    if (this.#shadow) {
+      this.#shadow.style.left = `${state.shadowLeft}px`;
+      this.#shadow.style.width = `${state.shadowWidth}px`;
+      this.#shadow.style.right = "auto";
+      this.#shadow.style.opacity = String(state.shadowOpacity);
+      this.#shadow.style.transform = "none";
     }
   }
 
@@ -862,9 +930,12 @@ export default class PageTurnAnimator {
       this.#sheet.style.willChange = "auto";
       // Release background image bitmap (native JPEG data-URL).
       this.#sheet.style.backgroundImage = "";
+      this.#sheet.style.clipPath = "";
     }
+    if (this.#fold) this.#fold.style.willChange = "auto";
     this.#overlay?.remove();
     this.#overlay = null;
+    this.#underlay = null;
     this.#sheet = null;
     this.#fold = null;
     this.#back = null;
