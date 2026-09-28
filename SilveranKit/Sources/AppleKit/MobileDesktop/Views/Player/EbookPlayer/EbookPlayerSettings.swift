@@ -116,6 +116,28 @@ struct EbookPlayerSettings: View {
                     settingsVM.save()
                 }
 
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Page Turn")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Picker("Page Turn", selection: $settingsVM.pageTurnStyle) {
+                    ForEach(PageTurnStyle.allCases) { style in
+                        Text(style.label).tag(style)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .disabled(settingsVM.scrollingMode)
+                .onChange(of: settingsVM.pageTurnStyle) { _, _ in
+                    settingsVM.save()
+                }
+                if settingsVM.scrollingMode {
+                    Text("Page turn style applies in paginated mode.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
             Toggle("Margin Tap to Turn Pages", isOn: $settingsVM.enableMarginClickNavigation)
                 .onChange(of: settingsVM.enableMarginClickNavigation) { _, _ in
                     settingsVM.save()
@@ -268,6 +290,7 @@ struct EbookPlayerSettings: View {
         settingsVM.textAlignment = kDefaultTextAlignment
         settingsVM.enableMarginClickNavigation = kDefaultEnableMarginClickNavigation
         settingsVM.scrollingMode = kDefaultScrollingMode
+        settingsVM.pageTurnStyle = kDefaultPageTurnStyle
         settingsVM.enableReadingBar = kDefaultReadingBarEnabled
         settingsVM.showProgressBar = kDefaultShowProgressBar
         settingsVM.showProgress = kDefaultShowProgress

@@ -92,6 +92,7 @@ final class AndroidReaderSettings: ReaderSettingsReading {
     var customCSS: String? = nil
     var singleColumnMode: Bool = kDefaultSingleColumnMode
     var scrollingMode: Bool = kDefaultScrollingMode
+    var pageTurnStyle: PageTurnStyle = kDefaultPageTurnStyle
     var enableMarginClickNavigation: Bool = kDefaultEnableMarginClickNavigation
     var userHighlightMode: String = kDefaultUserHighlightMode
     var readaloudHighlightMode: String = kDefaultReadaloudHighlightMode
@@ -115,6 +116,7 @@ final class AndroidReaderSettings: ReaderSettingsReading {
         var customCSS: String?
         var singleColumnMode: Bool?
         var scrollingMode: Bool?
+        var pageTurnStyle: String?
         var enableMarginClickNavigation: Bool?
         var userHighlightMode: String?
         var readaloudHighlightMode: String?
@@ -138,6 +140,9 @@ final class AndroidReaderSettings: ReaderSettingsReading {
         if let value = update.customCSS { customCSS = value.isEmpty ? nil : value }
         if let value = update.singleColumnMode { singleColumnMode = value }
         if let value = update.scrollingMode { scrollingMode = value }
+        if let value = update.pageTurnStyle {
+            pageTurnStyle = PageTurnStyle.resolved(from: value)
+        }
         if let value = update.enableMarginClickNavigation { enableMarginClickNavigation = value }
         if let value = update.userHighlightMode { userHighlightMode = value }
         if let value = update.readaloudHighlightMode { readaloudHighlightMode = value }
@@ -224,6 +229,7 @@ final class AndroidReaderSession {
         settings.textAlignment = config.reading.textAlignment
         settings.singleColumnMode = config.reading.singleColumnMode
         settings.scrollingMode = config.reading.scrollingMode
+        settings.pageTurnStyle = config.reading.pageTurnStyle
         settings.enableMarginClickNavigation = config.reading.enableMarginClickNavigation
         settings.lockViewToAudio = config.playback.lockViewToAudio
         overlayOptions.showProgress = config.readingBar.showProgress
@@ -871,6 +877,7 @@ final class AndroidReaderSession {
         settings.textAlignment = kDefaultTextAlignment
         settings.singleColumnMode = kDefaultSingleColumnMode
         settings.scrollingMode = kDefaultScrollingMode
+        settings.pageTurnStyle = kDefaultPageTurnStyle
         settings.enableMarginClickNavigation = kDefaultEnableMarginClickNavigation
     }
 
@@ -916,6 +923,7 @@ final class AndroidReaderSession {
             enableMarginClickNavigation: settings.enableMarginClickNavigation,
             singleColumnMode: settings.singleColumnMode,
             scrollingMode: settings.scrollingMode,
+            pageTurnStyle: settings.pageTurnStyle,
             lockViewToAudio: settings.lockViewToAudio,
         )
     }
@@ -1131,6 +1139,7 @@ final class AndroidReaderSession {
             let textAlignment: String
             let singleColumnMode: Bool
             let scrollingMode: Bool
+            let pageTurnStyle: String
             let enableMarginClickNavigation: Bool
             let lockViewToAudio: Bool
         }
@@ -1263,6 +1272,7 @@ final class AndroidReaderSession {
                 textAlignment: settings.textAlignment,
                 singleColumnMode: settings.singleColumnMode,
                 scrollingMode: settings.scrollingMode,
+                pageTurnStyle: settings.pageTurnStyle.rawValue,
                 enableMarginClickNavigation: settings.enableMarginClickNavigation,
                 lockViewToAudio: settings.lockViewToAudio,
             ),

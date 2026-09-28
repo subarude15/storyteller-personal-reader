@@ -96,6 +96,7 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
         public var enableMarginClickNavigation: Bool
         public var singleColumnMode: Bool
         public var scrollingMode: Bool
+        public var pageTurnStyle: PageTurnStyle
         public var userHighlightColor1: String
         public var userHighlightColor2: String
         public var userHighlightColor3: String
@@ -130,6 +131,7 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
             enableMarginClickNavigation: Bool = kDefaultEnableMarginClickNavigation,
             singleColumnMode: Bool? = nil,
             scrollingMode: Bool = kDefaultScrollingMode,
+            pageTurnStyle: PageTurnStyle = kDefaultPageTurnStyle,
             userHighlightColor1: String = kDefaultUserHighlightColor1,
             userHighlightColor2: String = kDefaultUserHighlightColor2,
             userHighlightColor3: String = kDefaultUserHighlightColor3,
@@ -167,6 +169,7 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
             self.customCSS = customCSS
             self.enableMarginClickNavigation = enableMarginClickNavigation
             self.scrollingMode = scrollingMode
+            self.pageTurnStyle = pageTurnStyle
             self.userHighlightColor1 = userHighlightColor1
             self.userHighlightColor2 = userHighlightColor2
             self.userHighlightColor3 = userHighlightColor3
@@ -237,6 +240,9 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
                 (try? container?.decode(Bool.self, forKey: .scrollingMode))
                 ?? (try? legacyContainer?.decode(Bool.self, forKey: .readaloudScrollingMode))
                 ?? kDefaultScrollingMode
+            pageTurnStyle = PageTurnStyle.resolved(
+                from: try? container?.decode(String.self, forKey: .pageTurnStyle)
+            )
             userHighlightColor1 =
                 (try? container?.decode(String.self, forKey: .userHighlightColor1))
                 ?? kDefaultUserHighlightColor1
@@ -308,7 +314,7 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
             case wordSpacing, letterSpacing, textAlignment, highlightColor, highlightThickness
             case backgroundColor, foregroundColor
             case customCSS, enableMarginClickNavigation, singleColumnMode
-            case scrollingMode
+            case scrollingMode, pageTurnStyle
             case userHighlightColor1, userHighlightColor2, userHighlightColor3
             case userHighlightColor4, userHighlightColor5, userHighlightColor6
             case userHighlightLabel1, userHighlightLabel2, userHighlightLabel3
@@ -725,6 +731,7 @@ public actor SettingsActor {
         enableMarginClickNavigation: Bool? = nil,
         singleColumnMode: Bool? = nil,
         scrollingMode: Bool? = nil,
+        pageTurnStyle: PageTurnStyle? = nil,
         defaultPlaybackSpeed: Double? = nil,
         defaultVolume: Double? = nil,
         statsExpanded: Bool? = nil,
@@ -812,6 +819,7 @@ public actor SettingsActor {
         if let scrollingMode {
             updated.reading.scrollingMode = scrollingMode
         }
+        if let pageTurnStyle { updated.reading.pageTurnStyle = pageTurnStyle }
         if let defaultPlaybackSpeed { updated.playback.defaultPlaybackSpeed = defaultPlaybackSpeed }
         if let defaultVolume { updated.playback.defaultVolume = defaultVolume }
         if let statsExpanded { updated.playback.statsExpanded = statsExpanded }
