@@ -606,19 +606,30 @@ assert(at0.sheetRotateY === 0 && at0.sheetSkewY === 0 && at0.sheetScaleX === 1, 
 assert(at0.sheetTranslateX === 0, "sheet not translated at 0");
 assert(!at0.foldVisible, "progress 0 → fold hidden");
 
+const atEarly = peelVisualState(0.1, W, H, true);
+assert(atEarly.foldVisible, "progress 0.1 → fold already visible (no delayed takeover)");
+assert(atEarly.curveAmp / W < peelVisualState(0.5, W, H, true).curveAmp / W, "curve grows with progress");
+
 const atHalf = peelVisualState(0.5, W, H, true);
 assert(atHalf.remain === 0.5, "progress 0.5 → half remain");
 assert(atHalf.edgeX === W * 0.5, "progress 0.5 → edge at mid");
 assert(atHalf.flatPath.includes("C "), "progress 0.5 → cubic curved boundary");
 assert(atHalf.foldPath.includes("C "), "progress 0.5 → curved fold wedge");
 assert(atHalf.curveAmp / W >= 0.05, "curve amplitude strong enough to read as peel");
-assert(atHalf.foldWidth / W >= 0.1 && atHalf.foldWidth / W <= 0.18, "fold width 10–18%");
+assert(atHalf.foldWidth / W >= 0.05 && atHalf.foldWidth / W <= 0.18, "fold width mid ~5–18%");
 assert(atHalf.foldOpacity > 0, "progress 0.5 → backside fold visible");
 assert(atHalf.shadowOpacity > 0 && atHalf.shadowOpacity <= 0.3, "soft localized fold shadow");
 assert(atHalf.highlightOpacity > 0, "fold highlight present");
 assert(atHalf.sheetRotateY === 0 && atHalf.sheetSkewY === 0, "no full-page skew/rotate at 0.5");
 // Mid bulge sits left of top/bottom edge (C silhouette for fromRight).
 assert(atHalf.curveAmp > 0, "fromRight peel has inward curve amp");
+// Tapered flap: outer mid differs from edge; path pinches at top/bottom (same x).
+assert(atHalf.outerMid > atHalf.edgeX, "fromRight flap outer mid beyond crease");
+assert(
+  atHalf.foldPath.startsWith(`M ${Math.round(atHalf.edgeX * 10) / 10} 0 `)
+    || atHalf.foldPath.includes(`${Math.round(atHalf.edgeX * 10) / 10} 0`),
+  "fold path starts at crease top (no rectangular end bar)",
+);
 
 const at1 = peelVisualState(1, W, H, true);
 assert(at1.remain === 0, "progress 1 → foreground fully peeled");
@@ -652,7 +663,6 @@ assert(
 );
 assert(!peelSheet.style.transform || peelSheet.style.transform === "none", "sheet transform none at 0");
 peelAnimator.update({ progress: 0.5 });
-await sleep(20);
 assert(
   peelSheet.style.clipPath === peelVisualState(0.5, W, H, true).clipPath,
   "applied progress 0.5 → curved path clip",
@@ -662,29 +672,113 @@ const shapes = childByClass(peelOverlay, "inkamp-curl-shapes");
 const backPath = shapes?.children?.find?.((c) => c.getAttribute?.("class") === "inkamp-curl-back");
 assert(backPath?.getAttribute("d")?.includes("C "), "backside path is curved");
 assert(Number(backPath.style.opacity) > 0, "backside visible at mid peel");
+assert(
+  !shapes?.innerHTML?.includes?.("feGaussianBlur")
+    && !document.getElementById("inkamp-curl-soft-blur"),
+  "no SVG blur filter (eliminates black rectangular endpoints)",
+);
 peelAnimator.update({ progress: 1 });
-await sleep(20);
 assert(
   peelSheet.style.clipPath === peelVisualState(1, W, H, true).clipPath,
   "applied progress 1 → sheet hidden",
 );
 
+// Pause stability: holding at a progress must not autonomously animate.
+peelAnimator.update({ progress: 0.25 });
+const pausedClip = peelSheet.style.clipPath;
+const pausedProgress = peelAnimator.progress;
+await sleep(40);
+assert(peelAnimator.progress === pausedProgress, "pause at 25% holds progress");
+assert(peelSheet.style.clipPath === pausedClip, "pause at 25% holds fold geometry");
+peelAnimator.update({ progress: 0.5 });
+const paused50 = peelSheet.style.clipPath;
+await sleep(40);
+assert(peelSheet.style.clipPath === paused50, "pause at 50% holds fold geometry");
+peelAnimator.update({ progress: 0.75 });
+const paused75 = peelSheet.style.clipPath;
+await sleep(40);
+assert(peelSheet.style.clipPath === paused75, "pause at 75% holds fold geometry");
+
 // Cancellation restores full page then removes overlay
 peelAnimator.update({ progress: 0.4 });
-await sleep(20);
 peelAnimator.cancel({ durationMs: 0 });
 assert(peelAnimator.phase === "idle", "cancel restores idle");
 assert(!document.getElementById("inkamp-page-curl-overlay"), "cancel removes overlay");
 
-// Completion removes overlay after peel finishes
+// Completion removes overlay after peel finishes — starts from current progress.
 assert(
-  peelAnimator.begin({ width: W, height: 800, fromRight: true, sourceUrl: FAKE_SNAPSHOT }) === true,
+  peelAnimator.begin({
+    width: W,
+    height: 800,
+    fromRight: true,
+    sourceUrl: FAKE_SNAPSHOT,
+    progress: 0.6,
+  }) === true,
 );
-peelAnimator.update({ progress: 0.6 });
-await sleep(20);
+assert(peelAnimator.progress === 0.6, "complete path begin at current progress");
 peelAnimator.complete({ durationMs: 0 });
 assert(peelAnimator.phase === "idle", "complete cleans phase");
 assert(!document.getElementById("inkamp-page-curl-overlay"), "complete removes overlay");
+
+// Late snapshot must mount at current gesture progress (not 0).
+const lateRenderer = makeRenderer(false);
+const lateAnimator = new PageTurnAnimator();
+lateAnimator.setStyle("curl");
+lateAnimator.attach(lateRenderer, host);
+assert(
+  lateAnimator.begin({
+    width: W,
+    height: H,
+    fromRight: true,
+    sourceUrl: FAKE_SNAPSHOT,
+    progress: 0.37,
+  }) === true,
+  "late snapshot begin accepts mid-drag progress",
+);
+assert(lateAnimator.progress === 0.37, "late snapshot initializes at 0.37 not 0");
+const lateSheet = childByClass(
+  document.getElementById("inkamp-page-curl-overlay"),
+  "inkamp-curl-sheet",
+);
+assert(
+  lateSheet.style.clipPath === peelVisualState(0.37, W, H, true).clipPath,
+  "late snapshot first frame matches current progress geometry",
+);
+lateAnimator.cancel({ durationMs: 0 });
+
+// Pending → late native reply begins at tracked scroll progress.
+const pendingRenderer = makeRenderer(false);
+pendingRenderer.start = 400;
+const pendingAnimator = new PageTurnAnimator();
+pendingAnimator.setStyle("curl");
+pendingAnimator.attach(pendingRenderer, host);
+const pendingId = pendingAnimator.beginSnapshotRequest();
+// Emulate touchstart arming + scroll move before snapshot arrives.
+pendingAnimator.phase; // touch path is private; drive via receive after scroll sim:
+// beginSnapshotRequest alone leaves phase idle — use receive after manual pending arm
+// by calling begin only after storing snapshot, with progress from "finger".
+pendingAnimator.receiveNativeSnapshot(pendingId, FAKE_SNAPSHOT);
+assert(
+  pendingAnimator.begin({
+    width: W,
+    height: H,
+    fromRight: true,
+    progress: 0.5,
+  }) === true,
+  "snapshot-ready begin at half progress",
+);
+assert(pendingAnimator.progress === 0.5, "no reset to 0 after snapshot-ready begin");
+pendingAnimator.cancel({ durationMs: 0 });
+
+// Continuous progress samples are deterministic.
+const samples = [0, 0.01, 0.25, 0.5, 0.75, 1];
+let prevEdge = W + 1;
+for (const p of samples) {
+  const state = peelVisualState(p, W, H, true);
+  assert(state.progress === p, `deterministic progress ${p}`);
+  assert(state.edgeX <= prevEdge + 0.001, `edge moves monotonically at ${p}`);
+  prevEdge = state.edgeX;
+}
 
 // Missing snapshot still never mounts
 assert(

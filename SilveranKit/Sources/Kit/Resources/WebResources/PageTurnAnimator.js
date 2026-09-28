@@ -56,6 +56,7 @@ export function docFromTouchEvent(event, rootDocument = globalThis.document) {
 /**
  * Cubic C-curve for a page-fold silhouette.
  * Midpoint bows into the remaining page (classic peel outline).
+ * Top/bottom terminate at `edge` so the crease meets the viewport cleanly.
  */
 function foldBoundaryPath(edge, amp, h, fromRight) {
   const xTB = px(edge);
@@ -66,7 +67,6 @@ function foldBoundaryPath(edge, amp, h, fromRight) {
   const y3 = px(h * 0.62);
   const y4 = px(h * 0.78);
   const yH = px(h);
-  // Two cubics: top → mid → bottom.
   return (
     `${xTB} 0 `
     + `C ${xTB} ${y1}, ${xMid} ${y2}, ${xMid} ${yMid} `
@@ -83,7 +83,6 @@ function reverseFoldBoundaryPath(edge, amp, h, fromRight) {
   const y3 = px(h * 0.62);
   const y4 = px(h * 0.78);
   const yH = px(h);
-  // Bottom → mid → top (reverse traversal for closed shapes).
   return (
     `${xTB} ${yH} `
     + `C ${xTB} ${y4}, ${xMid} ${y3}, ${xMid} ${yMid} `
@@ -92,9 +91,45 @@ function reverseFoldBoundaryPath(edge, amp, h, fromRight) {
 }
 
 /**
- * Curved page-peel geometry.
+ * Outer flap edge that pinches to `edge` at top/bottom (zero-width caps)
+ * and reaches `outerMid` only at mid-height. Prevents rectangular end bars.
+ */
+function taperedFlapOuterPath(edge, outerMid, h) {
+  const xTB = px(edge);
+  const xMid = px(outerMid);
+  const y1 = px(h * 0.16);
+  const y2 = px(h * 0.34);
+  const yMid = px(h * 0.5);
+  const y3 = px(h * 0.66);
+  const y4 = px(h * 0.84);
+  const yH = px(h);
+  return (
+    `${xTB} 0 `
+    + `C ${xTB} ${y1}, ${xMid} ${y2}, ${xMid} ${yMid} `
+    + `C ${xMid} ${y3}, ${xTB} ${y4}, ${xTB} ${yH}`
+  );
+}
+
+function reverseTaperedFlapOuterPath(edge, outerMid, h) {
+  const xTB = px(edge);
+  const xMid = px(outerMid);
+  const y1 = px(h * 0.16);
+  const y2 = px(h * 0.34);
+  const yMid = px(h * 0.5);
+  const y3 = px(h * 0.66);
+  const y4 = px(h * 0.84);
+  const yH = px(h);
+  return (
+    `${xTB} ${yH} `
+    + `C ${xTB} ${y4}, ${xMid} ${y3}, ${xMid} ${yMid} `
+    + `C ${xMid} ${y2}, ${xTB} ${y1}, ${xTB} 0`
+  );
+}
+
+/**
+ * Curved page-peel geometry — one continuous function of progress.
  * The snapshot sheet itself is never rotated/skewed — only clipped by a curve.
- * Fold backside / shadow / highlight are separate curved wedges.
+ * Fold backside / shadow / highlight are tapered wedges attached to that curve.
  *
  * @param {number} progress 0..1
  * @param {number} width CSS px
@@ -114,20 +149,22 @@ export function peelVisualState(progress, width, height = 0, fromRight = true) {
   const remain = 1 - p;
   const edgeX = fromRight ? w * remain : w * p;
 
-  // Fold flap 10–18% of width; curve amplitude strong enough to read as paper.
-  const foldWidth = w * (0.1 + p * 0.08);
-  const curveAmp = w * (0.055 + p * 0.065); // ~5.5–12%
+  // Progress-responsive fold: tiny early, pronounced mid, taper near end.
+  // sin(πp) peaks at p=0.5 so slow/fast swipes share one continuous curve.
+  const peelEnvelope = Math.sin(p * Math.PI);
+  const foldWidth = w * (0.055 + 0.11 * peelEnvelope); // ~5.5–16.5% mid
+  const curveAmp = w * (0.018 + 0.1 * peelEnvelope); // ~1.8–11.8%
 
-  const foldVisible = p > 0.02 && p < 0.985;
+  // Fold appears as soon as there is meaningful peel — no delayed takeover.
+  const foldVisible = p > 0.008 && p < 0.992;
   const amp = foldVisible ? curveAmp : 0;
   const flap = foldVisible ? foldWidth : 0;
 
-  // Outer edge of the backside flap (into the peeled / revealed zone).
-  const outerEdge = fromRight
+  // Mid-height outer tip of the backside flap (into the revealed zone).
+  // Top/bottom pinch to edgeX — no parallel rectangular caps.
+  const outerMid = fromRight
     ? Math.min(w, edgeX + flap)
     : Math.max(0, edgeX - flap);
-  // Slightly tighter mid outer so the flap also curves.
-  const outerAmp = amp * 0.55;
 
   let flatPath;
   let foldPath = "";
@@ -143,40 +180,32 @@ export function peelVisualState(progress, width, height = 0, fromRight = true) {
   } else if (fromRight) {
     const boundary = foldBoundaryPath(edgeX, amp, h, true);
     flatPath = `M 0 0 L ${boundary} L 0 ${px(h)} Z`;
-    const outer = reverseFoldBoundaryPath(outerEdge, outerAmp, h, true);
     const inner = foldBoundaryPath(edgeX, amp, h, true);
+    const outer = reverseTaperedFlapOuterPath(edgeX, outerMid, h);
     foldPath = `M ${inner} L ${outer} Z`;
-    // Soft shadow band hugging the fold — offset slightly into the flap.
-    const shadowOuter = reverseFoldBoundaryPath(
-      Math.min(w, edgeX + flap * 0.55),
-      amp * 0.35,
-      h,
-      true,
-    );
-    shadowPath = `M ${inner} L ${shadowOuter} Z`;
-    // Highlight on the flat-page side of the crease.
-    const hiInner = foldBoundaryPath(Math.max(0, edgeX - Math.min(amp * 0.35, w * 0.02)), amp * 0.9, h, true);
+    // Shadow hugs the crease — narrower tapered band into the flap.
+    const shadowMid = Math.min(w, edgeX + flap * 0.45);
+    shadowPath = `M ${inner} L ${reverseTaperedFlapOuterPath(edgeX, shadowMid, h)} Z`;
+    // Soft highlight on the readable-page side of the crease.
+    const hiInset = Math.min(amp * 0.4, w * 0.018);
+    const hiInner = foldBoundaryPath(Math.max(0, edgeX - hiInset), amp * 0.85, h, true);
     highlightPath = `M ${hiInner} L ${reverseFoldBoundaryPath(edgeX, amp, h, true)} Z`;
   } else {
     const boundary = foldBoundaryPath(edgeX, amp, h, false);
     flatPath = `M ${px(w)} 0 L ${boundary} L ${px(w)} ${px(h)} Z`;
-    const outer = reverseFoldBoundaryPath(outerEdge, outerAmp, h, false);
     const inner = foldBoundaryPath(edgeX, amp, h, false);
+    const outer = reverseTaperedFlapOuterPath(edgeX, outerMid, h);
     foldPath = `M ${inner} L ${outer} Z`;
-    const shadowOuter = reverseFoldBoundaryPath(
-      Math.max(0, edgeX - flap * 0.55),
-      amp * 0.35,
-      h,
-      false,
-    );
-    shadowPath = `M ${inner} L ${shadowOuter} Z`;
-    const hiInner = foldBoundaryPath(Math.min(w, edgeX + Math.min(amp * 0.35, w * 0.02)), amp * 0.9, h, false);
+    const shadowMid = Math.max(0, edgeX - flap * 0.45);
+    shadowPath = `M ${inner} L ${reverseTaperedFlapOuterPath(edgeX, shadowMid, h)} Z`;
+    const hiInset = Math.min(amp * 0.4, w * 0.018);
+    const hiInner = foldBoundaryPath(Math.min(w, edgeX + hiInset), amp * 0.85, h, false);
     highlightPath = `M ${hiInner} L ${reverseFoldBoundaryPath(edgeX, amp, h, false)} Z`;
   }
 
-  const foldOpacity = foldVisible ? Math.min(0.96, 0.55 + p * 0.35) : 0;
-  const shadowOpacity = foldVisible ? Math.min(0.28, 0.1 + p * 0.16) : 0;
-  const highlightOpacity = foldVisible ? Math.min(0.35, 0.12 + p * 0.18) : 0;
+  const foldOpacity = foldVisible ? Math.min(0.96, 0.5 + p * 0.4) : 0;
+  const shadowOpacity = foldVisible ? Math.min(0.22, 0.08 + peelEnvelope * 0.14) : 0;
+  const highlightOpacity = foldVisible ? Math.min(0.32, 0.1 + peelEnvelope * 0.18) : 0;
 
   return {
     progress: p,
@@ -186,6 +215,7 @@ export function peelVisualState(progress, width, height = 0, fromRight = true) {
     width: w,
     foldWidth: flap,
     curveAmp: amp,
+    outerMid,
     flatPath,
     foldPath,
     shadowPath,
@@ -202,15 +232,6 @@ export function peelVisualState(progress, width, height = 0, fromRight = true) {
     sheetSkewY: 0,
     sheetScaleX: 1,
   };
-}
-
-/** Derive a paper-backside fill from the page color (never pure black). */
-export function paperBacksideFill(paperColor, fromRight) {
-  const base = paperColor && paperColor !== "transparent" ? paperColor : "#f3eee4";
-  // Soft gray wash toward the crease; warm paper toward the free edge.
-  return fromRight
-    ? `linear-gradient(270deg, ${base} 0%, #e7e0d4 42%, #d9d2c6 100%)`
-    : `linear-gradient(90deg, ${base} 0%, #e7e0d4 42%, #d9d2c6 100%)`;
 }
 
 export default class PageTurnAnimator {
@@ -231,10 +252,10 @@ export default class PageTurnAnimator {
   #shadowPath = null;
   #highlightPath = null;
   #backGrad = null;
+  #shadowGrad = null;
   #mountedPaperColor = "#f3eee4";
   #progress = 0;
   #raf = 0;
-  #pendingProgress = null;
   #animToken = 0;
   #fallbackThisGesture = false;
   #pageFlipSeen = false;
@@ -252,6 +273,7 @@ export default class PageTurnAnimator {
   #snapshotTimer = 0;
 
   #onTouchStart = (event) => this.#handleTouchStart(event);
+  #onTouchMove = (event) => this.#handleTouchMove(event);
   #onTouchEnd = (event) => this.#handleTouchEnd(event);
   #onScroll = () => this.#handleScroll();
   #onPageFlip = () => this.#handlePageFlip();
@@ -372,6 +394,7 @@ export default class PageTurnAnimator {
     renderer.addEventListener("page-flip", this.#onPageFlip);
     renderer.addEventListener("relocate", this.#onRelocate);
     renderer.addEventListener("touchstart", this.#onTouchStart, { passive: true });
+    renderer.addEventListener("touchmove", this.#onTouchMove, { passive: true });
     renderer.addEventListener("touchend", this.#onTouchEnd, { passive: true });
     renderer.addEventListener("touchcancel", this.#onTouchEnd, { passive: true });
     window.addEventListener("orientationchange", this.#onOrientation);
@@ -394,6 +417,7 @@ export default class PageTurnAnimator {
   observeDocument(doc) {
     if (!doc?.addEventListener) return;
     doc.addEventListener("touchstart", this.#onTouchStart, { passive: true });
+    doc.addEventListener("touchmove", this.#onTouchMove, { passive: true });
     doc.addEventListener("touchend", this.#onTouchEnd, { passive: true });
     doc.addEventListener("touchcancel", this.#onTouchEnd, { passive: true });
   }
@@ -404,6 +428,7 @@ export default class PageTurnAnimator {
       this.#renderer.removeEventListener("page-flip", this.#onPageFlip);
       this.#renderer.removeEventListener("relocate", this.#onRelocate);
       this.#renderer.removeEventListener("touchstart", this.#onTouchStart);
+      this.#renderer.removeEventListener("touchmove", this.#onTouchMove);
       this.#renderer.removeEventListener("touchend", this.#onTouchEnd);
       this.#renderer.removeEventListener("touchcancel", this.#onTouchEnd);
     }
@@ -527,8 +552,12 @@ export default class PageTurnAnimator {
       return false;
     }
 
+    // Mount at the caller's current gesture progress — never flash progress 0
+    // when the finger is already mid-drag (late snapshot arrival).
+    const initialProgress = clamp01(context.progress ?? 0);
+    const prior = this.#gesture;
     this.#phase = "curling";
-    this.#progress = 0;
+    this.#progress = initialProgress;
     this.#pageFlipSeen = false;
     this.#awaitingSnap = false;
     this.#fallbackThisGesture = false;
@@ -537,11 +566,23 @@ export default class PageTurnAnimator {
       rtl,
       width,
       height,
-      startOffset: context.startOffset ?? this.#renderer?.start ?? 0,
+      startOffset: context.startOffset ?? prior?.startOffset ?? this.#renderer?.start ?? 0,
+      startX: context.startX ?? prior?.startX,
+      startY: context.startY ?? prior?.startY,
+      lastX: context.lastX ?? prior?.lastX,
+      fingerProgress: initialProgress,
+      directionLocked: true,
       moved: true,
+      doc: context.doc ?? prior?.doc,
     };
-    this.#applyVisual(0);
-    debugLog("PageTurnAnimator", "curl begin", { fromRight, rtl, width, height });
+    this.#applyVisual(initialProgress);
+    debugLog("PageTurnAnimator", "curl begin", {
+      fromRight,
+      rtl,
+      width,
+      height,
+      progress: initialProgress,
+    });
     return true;
   }
 
@@ -551,7 +592,10 @@ export default class PageTurnAnimator {
       context.progress ?? this.#progressFromOffset(context.offset),
     );
     this.#progress = progress;
-    this.#scheduleVisual(progress);
+    if (this.#gesture) this.#gesture.fingerProgress = progress;
+    // Interactive drag is synchronous so the fold stays on the finger.
+    // Completion / cancel keep using #animateProgress (time-based) after release.
+    this.#applyVisual(progress);
   }
 
   complete(context = {}) {
@@ -607,22 +651,90 @@ export default class PageTurnAnimator {
     this.#fallbackThisGesture = false;
     this.#pageFlipSeen = false;
     this.#awaitingSnap = false;
+    this.#progress = 0;
     // Arm the gesture before requesting so a fast native reply is not rejected.
     this.#phase = "pending";
+    const startX = touch.screenX ?? touch.clientX;
+    const startY = touch.screenY ?? touch.clientY;
     this.#gesture = {
-      startX: touch.screenX ?? touch.clientX,
-      startY: touch.screenY ?? touch.clientY,
-      startOffset: renderer.start, // paginator scroll — progress only
+      startX,
+      startY,
+      lastX: startX,
+      startOffset: renderer.start, // paginator scroll — fallback progress only
       fromRight: true,
       rtl: renderer.getAttribute?.("dir") === "rtl",
       width: renderer.size,
       height: this.#host?.clientHeight || renderer.getBoundingClientRect?.().height || 0,
       moved: false,
+      directionLocked: false,
+      fingerProgress: 0,
       // Touched section doc kept for paperColor under the snapshot only.
       doc: docFromTouchEvent(event) || this.#currentDoc(),
     };
     // Capture the current rendered page before the paginator scrolls.
     this.#requestNativeSnapshot();
+  }
+
+  /**
+   * Finger-driven visual progress. Foliate still owns snap / page selection;
+   * this only updates the peel geometry so the fold tracks the finger.
+   */
+  #handleTouchMove(event) {
+    if (this.#phase !== "pending" && this.#phase !== "curling") return;
+    if (this.#fallbackThisGesture) return;
+    const gesture = this.#gesture;
+    const renderer = this.#renderer;
+    if (!gesture || !renderer || renderer.scrolled) return;
+
+    const touch = event.touches?.[0] ?? event.changedTouches?.[0];
+    if (!touch) return;
+
+    const x = touch.screenX ?? touch.clientX;
+    gesture.lastX = x;
+    gesture.width = renderer.size || gesture.width;
+    gesture.height = this.#host?.clientHeight || gesture.height;
+
+    const dx = x - gesture.startX;
+    if (!gesture.moved) {
+      if (Math.abs(dx) < 2) return;
+      this.#lockDirectionFromDelta(dx > 0 ? 1 : -1, /* fromFinger */ true);
+      if (!gesture.moved) return;
+
+      if (this.#snapshotFailed) {
+        debugLog("PageTurnAnimator", "curl fallback: snapshot unavailable at drag start");
+        this.#fallbackThisGesture = true;
+        this.#phase = "idle";
+        this.#gesture = null;
+        return;
+      }
+
+      const firstProgress = this.#progressFromFinger(x);
+      gesture.fingerProgress = firstProgress;
+      this.#progress = firstProgress;
+
+      if (!this.#pendingSnapshotUrl) {
+        // Keep tracking finger progress; mount when the snapshot arrives.
+        debugLog("PageTurnAnimator", "curl waiting for native snapshot");
+        return;
+      }
+
+      this.#beginFromPendingGesture();
+      if (this.#phase !== "curling") return;
+    } else if (!gesture.directionLocked) {
+      this.#lockDirectionFromDelta(dx > 0 ? 1 : -1, /* fromFinger */ true);
+    }
+
+    const progress = this.#progressFromFinger(x);
+    gesture.fingerProgress = progress;
+    this.#progress = progress;
+
+    if (this.#phase === "pending" && !this.#overlay) {
+      // Snapshot still pending — progress is tracked for late mount.
+      return;
+    }
+    if (this.#phase === "curling") {
+      this.update({ progress });
+    }
   }
 
   #handleScroll() {
@@ -639,14 +751,8 @@ export default class PageTurnAnimator {
     const delta = renderer.start - gesture.startOffset;
     if (!gesture.moved) {
       if (Math.abs(delta) < 1) return;
-      gesture.moved = true;
-      // Lock curl direction from the paginator's scroll delta.
-      // Higher start ⇒ higher page index (forward in reading order) for both LTR and RTL.
-      const goingForward = delta > 0;
-      const rtl = renderer.getAttribute?.("dir") === "rtl";
-      // LTR forward: curl from right; RTL forward: curl from left.
-      gesture.fromRight = rtl ? !goingForward : goingForward;
-      gesture.rtl = rtl;
+      // Prefer Foliate scroll for direction when touchmove has not locked yet.
+      this.#lockDirectionFromDelta(delta, /* fromFinger */ false);
       gesture.width = renderer.size;
       gesture.height = this.#host?.clientHeight || gesture.height;
 
@@ -659,7 +765,10 @@ export default class PageTurnAnimator {
       }
 
       if (!this.#pendingSnapshotUrl) {
-        // Snapshot still in flight — stay pending; receiveNativeSnapshot will begin.
+        // Track scroll-based progress until the native snapshot arrives.
+        const progress = clamp01(Math.abs(delta) / Math.max(1, renderer.size));
+        gesture.fingerProgress = progress;
+        this.#progress = progress;
         debugLog("PageTurnAnimator", "curl waiting for native snapshot");
         return;
       }
@@ -668,10 +777,53 @@ export default class PageTurnAnimator {
       if (this.#phase !== "curling") return;
     }
 
-    if (this.#phase === "curling") {
+    // Finger position is authoritative while curling; scroll only fills gaps
+    // when touchmove has not yet reported (e.g. synthetic scroll tests).
+    if (this.#phase === "curling" && gesture.lastX == null) {
       const progress = clamp01(Math.abs(delta) / Math.max(1, renderer.size));
       this.update({ progress });
+    } else if (this.#phase === "pending" && !this.#overlay) {
+      const progress = clamp01(Math.abs(delta) / Math.max(1, renderer.size));
+      // Keep the later of finger vs scroll so a late snapshot mounts correctly.
+      if (progress > (gesture.fingerProgress ?? 0)) {
+        gesture.fingerProgress = progress;
+        this.#progress = progress;
+      }
     }
+  }
+
+  /**
+   * Lock peel direction once per gesture.
+   * @param {number} signedDelta positive ⇒ increasing page index / finger right
+   * @param {boolean} fromFinger when true, delta is finger dx (right positive)
+   */
+  #lockDirectionFromDelta(signedDelta, fromFinger) {
+    const gesture = this.#gesture;
+    const renderer = this.#renderer;
+    if (!gesture || gesture.directionLocked) {
+      if (gesture && !gesture.moved && Math.abs(signedDelta) >= 1) gesture.moved = true;
+      return;
+    }
+    const rtl = renderer?.getAttribute?.("dir") === "rtl" || !!gesture.rtl;
+    // Foliate: higher start ⇒ forward in reading order.
+    // Finger: LTR forward is drag left (dx < 0); RTL forward is drag right.
+    const goingForward = fromFinger
+      ? (rtl ? signedDelta > 0 : signedDelta < 0)
+      : signedDelta > 0;
+    gesture.fromRight = rtl ? !goingForward : goingForward;
+    gesture.rtl = rtl;
+    gesture.directionLocked = true;
+    gesture.moved = true;
+  }
+
+  #progressFromFinger(fingerX) {
+    const gesture = this.#gesture;
+    if (!gesture || gesture.startX == null) return this.#progress;
+    const width = Math.max(1, gesture.width || this.#renderer?.size || 1);
+    const dx = fingerX - gesture.startX;
+    // fromRight peel: drag left increases progress; fromLeft: drag right.
+    const raw = gesture.fromRight !== false ? -dx / width : dx / width;
+    return clamp01(raw);
   }
 
   #handleTouchEnd() {
@@ -775,14 +927,21 @@ export default class PageTurnAnimator {
     const sourceUrl = this.#pendingSnapshotUrl;
     if (!gesture || !sourceUrl) return;
 
+    // Always mount at the live gesture progress — never restart at 0 mid-drag.
+    const progress = this.#currentGestureProgress();
     const started = this.begin({
       fromRight: gesture.fromRight,
       rtl: gesture.rtl,
       width: gesture.width,
       height: gesture.height,
       startOffset: gesture.startOffset,
+      startX: gesture.startX,
+      startY: gesture.startY,
+      lastX: gesture.lastX,
+      progress,
       sourceUrl,
       paperColor: this.#paperColor(gesture.doc),
+      doc: gesture.doc,
     });
     if (!started) {
       this.#fallbackThisGesture = true;
@@ -790,14 +949,25 @@ export default class PageTurnAnimator {
       this.#gesture = null;
       return;
     }
+  }
 
+  /** Best-known progress for the active gesture (finger preferred, else scroll). */
+  #currentGestureProgress() {
+    const gesture = this.#gesture;
+    if (!gesture) return 0;
+    if (gesture.fingerProgress != null && gesture.moved) {
+      return clamp01(gesture.fingerProgress);
+    }
+    if (gesture.lastX != null && gesture.startX != null && gesture.directionLocked) {
+      return this.#progressFromFinger(gesture.lastX);
+    }
     const renderer = this.#renderer;
-    if (renderer) {
-      const progress = clamp01(
+    if (renderer && gesture.startOffset != null) {
+      return clamp01(
         Math.abs(renderer.start - gesture.startOffset) / Math.max(1, renderer.size || 1),
       );
-      this.update({ progress });
     }
+    return clamp01(this.#progress);
   }
 
   #invalidateSnapshot(reason) {
@@ -864,7 +1034,7 @@ export default class PageTurnAnimator {
         z-index: 2;
         width: 100%;
         height: 100%;
-        overflow: visible;
+        overflow: hidden;
         pointer-events: none;
       }
       #${OVERLAY_ID} .inkamp-curl-back {
@@ -872,7 +1042,6 @@ export default class PageTurnAnimator {
       }
       #${OVERLAY_ID} .inkamp-curl-shadow {
         opacity: 0;
-        filter: url(#inkamp-curl-soft-blur);
       }
       #${OVERLAY_ID} .inkamp-curl-highlight {
         opacity: 0;
@@ -913,15 +1082,6 @@ export default class PageTurnAnimator {
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
 
     const defs = this.#svgEl("defs");
-    const filter = this.#svgEl("filter");
-    filter.setAttribute("id", "inkamp-curl-soft-blur");
-    filter.setAttribute("x", "-20%");
-    filter.setAttribute("y", "-20%");
-    filter.setAttribute("width", "140%");
-    filter.setAttribute("height", "140%");
-    const blur = this.#svgEl("feGaussianBlur");
-    blur.setAttribute("stdDeviation", "3.5");
-    filter.appendChild(blur);
 
     const grad = this.#svgEl("linearGradient");
     grad.setAttribute("id", "inkamp-curl-back-grad");
@@ -937,7 +1097,26 @@ export default class PageTurnAnimator {
     stopC.setAttribute("offset", "100%");
     stopC.setAttribute("stop-color", "#d5cec2");
     grad.append(stopA, stopB, stopC);
-    defs.append(filter, grad);
+
+    // Soft fold shadow via gradient (no feGaussianBlur — blur filter bounds
+    // were painting black rectangular bars at the overlay top/bottom).
+    const shadowGrad = this.#svgEl("linearGradient");
+    shadowGrad.setAttribute("id", "inkamp-curl-shadow-grad");
+    shadowGrad.setAttribute("gradientUnits", "userSpaceOnUse");
+    const s0 = this.#svgEl("stop");
+    s0.setAttribute("offset", "0%");
+    s0.setAttribute("stop-color", "rgb(55, 48, 40)");
+    s0.setAttribute("stop-opacity", "0.28");
+    const s1 = this.#svgEl("stop");
+    s1.setAttribute("offset", "55%");
+    s1.setAttribute("stop-color", "rgb(55, 48, 40)");
+    s1.setAttribute("stop-opacity", "0.1");
+    const s2 = this.#svgEl("stop");
+    s2.setAttribute("offset", "100%");
+    s2.setAttribute("stop-color", "rgb(55, 48, 40)");
+    s2.setAttribute("stop-opacity", "0");
+    shadowGrad.append(s0, s1, s2);
+    defs.append(grad, shadowGrad);
 
     const backPath = this.#svgEl("path");
     backPath.setAttribute("class", "inkamp-curl-back");
@@ -945,7 +1124,7 @@ export default class PageTurnAnimator {
 
     const shadowPath = this.#svgEl("path");
     shadowPath.setAttribute("class", "inkamp-curl-shadow");
-    shadowPath.setAttribute("fill", "rgba(55, 48, 40, 0.22)");
+    shadowPath.setAttribute("fill", "url(#inkamp-curl-shadow-grad)");
 
     const highlightPath = this.#svgEl("path");
     highlightPath.setAttribute("class", "inkamp-curl-highlight");
@@ -968,18 +1147,7 @@ export default class PageTurnAnimator {
     this.#shadowPath = shadowPath;
     this.#highlightPath = highlightPath;
     this.#backGrad = grad;
-  }
-
-  #scheduleVisual(progress) {
-    this.#pendingProgress = progress;
-    if (this.#raf) return;
-    this.#raf = requestAnimationFrame(() => {
-      this.#raf = 0;
-      if (this.#pendingProgress == null) return;
-      const p = this.#pendingProgress;
-      this.#pendingProgress = null;
-      this.#applyVisual(p);
-    });
+    this.#shadowGrad = shadowGrad;
   }
 
   #applyVisual(progress) {
@@ -1008,14 +1176,24 @@ export default class PageTurnAnimator {
 
     if (this.#backGrad) {
       // Gradient across the fold flap, crease → free edge.
-      const x1 = fromRight ? state.edgeX : state.edgeX;
+      const x1 = state.edgeX;
       const x2 = fromRight
-        ? state.edgeX + state.foldWidth
-        : state.edgeX - state.foldWidth;
+        ? state.outerMid ?? (state.edgeX + state.foldWidth)
+        : state.outerMid ?? (state.edgeX - state.foldWidth);
       this.#backGrad.setAttribute("x1", String(px(x1)));
       this.#backGrad.setAttribute("y1", "0");
       this.#backGrad.setAttribute("x2", String(px(x2)));
       this.#backGrad.setAttribute("y2", "0");
+    }
+    if (this.#shadowGrad) {
+      const x1 = state.edgeX;
+      const x2 = fromRight
+        ? state.edgeX + state.foldWidth * 0.45
+        : state.edgeX - state.foldWidth * 0.45;
+      this.#shadowGrad.setAttribute("x1", String(px(x1)));
+      this.#shadowGrad.setAttribute("y1", "0");
+      this.#shadowGrad.setAttribute("x2", String(px(x2)));
+      this.#shadowGrad.setAttribute("y2", "0");
     }
 
     if (this.#backPath) {
@@ -1067,7 +1245,6 @@ export default class PageTurnAnimator {
       cancelAnimationFrame(this.#raf);
       this.#raf = 0;
     }
-    this.#pendingProgress = null;
     const hadOverlay = !!this.#overlay;
     if (this.#sheet) {
       this.#sheet.style.willChange = "auto";
@@ -1087,6 +1264,7 @@ export default class PageTurnAnimator {
     this.#shadowPath = null;
     this.#highlightPath = null;
     this.#backGrad = null;
+    this.#shadowGrad = null;
     if (hadOverlay) debugLog("PageTurnAnimator", "visual-layer cleanup");
   }
 
