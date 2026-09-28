@@ -2,11 +2,11 @@
  * Owns page-turn *appearance* only. Foliate's paginator still owns which page
  * is shown and fires PageFlipped / Relocated. Do not put navigation logic here.
  *
- * Curl visual model (restrained peel):
- * - native WKWebView snapshot as a mostly-flat foreground layer
- * - clip-path reveals less of that snapshot as the finger moves
+ * Curl visual model (curved paper peel):
+ * - native WKWebView snapshot stays flat and readable (no full-page 3D)
+ * - cubic curved clip boundary (not a straight vertical wipe)
+ * - narrow backside fold wedge + soft curved shadow/highlight
  * - solid underlay hides Foliate's intermediate scroll during the drag
- * - narrow fold/shadow strip at the free edge (not a full-page 3D card spin)
  *
  * Curl is bypassed when:
  * - Reduce Motion is effective
@@ -25,20 +25,13 @@ import { debugLog } from "./DebugConfig.js";
 const VALID_STYLES = new Set(["slide", "curl", "instant"]);
 const OVERLAY_ID = "inkamp-page-curl-overlay";
 const STYLE_ID = "inkamp-page-curl-styles";
+const SVG_NS = "http://www.w3.org/2000/svg";
 const COMPLETE_MS = 180;
 const CANCEL_MS = 200;
 /** How long to wait for a native snapshot before giving up on curl. */
 const SNAPSHOT_TIMEOUT_MS = 220;
 const clamp01 = (value) => Math.max(0, Math.min(1, value));
-
-/** Narrow fold band: ~8–12% on phones, up to 14% on wider viewports. */
-function foldFractionFor(progress, width) {
-  const p = clamp01(progress);
-  const phone = width < 500;
-  const min = phone ? 0.08 : 0.09;
-  const max = phone ? 0.12 : 0.14;
-  return min + p * (max - min);
-}
+const px = (n) => Math.round(n * 10) / 10;
 
 /**
  * Document that originated a touch. Prefer the section document the listener
@@ -61,95 +54,163 @@ export function docFromTouchEvent(event, rootDocument = globalThis.document) {
 }
 
 /**
- * Pure peel geometry for the restrained page-curl visual.
- * Progress maps linearly to the free-edge position so the clip tracks the finger.
- * The snapshot sheet itself is never rotated/skewed — only clipped.
+ * Cubic C-curve for a page-fold silhouette.
+ * Midpoint bows into the remaining page (classic peel outline).
+ */
+function foldBoundaryPath(edge, amp, h, fromRight) {
+  const xTB = px(edge);
+  const xMid = px(fromRight ? edge - amp : edge + amp);
+  const y1 = px(h * 0.22);
+  const y2 = px(h * 0.38);
+  const yMid = px(h * 0.5);
+  const y3 = px(h * 0.62);
+  const y4 = px(h * 0.78);
+  const yH = px(h);
+  // Two cubics: top → mid → bottom.
+  return (
+    `${xTB} 0 `
+    + `C ${xTB} ${y1}, ${xMid} ${y2}, ${xMid} ${yMid} `
+    + `C ${xMid} ${y3}, ${xTB} ${y4}, ${xTB} ${yH}`
+  );
+}
+
+function reverseFoldBoundaryPath(edge, amp, h, fromRight) {
+  const xTB = px(edge);
+  const xMid = px(fromRight ? edge - amp : edge + amp);
+  const y1 = px(h * 0.22);
+  const y2 = px(h * 0.38);
+  const yMid = px(h * 0.5);
+  const y3 = px(h * 0.62);
+  const y4 = px(h * 0.78);
+  const yH = px(h);
+  // Bottom → mid → top (reverse traversal for closed shapes).
+  return (
+    `${xTB} ${yH} `
+    + `C ${xTB} ${y4}, ${xMid} ${y3}, ${xMid} ${yMid} `
+    + `C ${xMid} ${y2}, ${xTB} ${y1}, ${xTB} 0`
+  );
+}
+
+/**
+ * Curved page-peel geometry.
+ * The snapshot sheet itself is never rotated/skewed — only clipped by a curve.
+ * Fold backside / shadow / highlight are separate curved wedges.
  *
  * @param {number} progress 0..1
- * @param {number} width viewport width in CSS px
- * @param {boolean} [fromRight=true] free edge on the right (LTR forward)
+ * @param {number} width CSS px
+ * @param {number} [height=0] CSS px (defaults to a tall phone-like ratio)
+ * @param {boolean} [fromRight=true]
  */
-export function peelVisualState(progress, width, fromRight = true) {
-  const p = clamp01(progress);
-  const w = Math.max(1, width || 1);
-  const remain = 1 - p;
-  // Free edge x from the left: RTL/backward mirrors via fromRight=false.
-  const edgeX = fromRight ? w * remain : w * p;
-  const foldFrac = foldFractionFor(p, w);
-  const foldWidth = w * foldFrac;
-  const peeledPct = p * 100;
-  const edgePct = (edgeX / w) * 100;
-
-  // Mild paper curve on the free edge only (bow + top/bottom tuck).
-  // Does not skew/scale the flat page text — clip outline only.
-  const tipPct = p <= 0 || p >= 1 ? 0 : Math.min(1.6, 0.3 + p * 1.2);
-  const bowPct = p <= 0 || p >= 1 ? 0 : Math.min(2.2, 0.4 + p * 1.6);
-
-  let clipPath;
-  if (p <= 0) {
-    clipPath = "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)";
-  } else if (p >= 1) {
-    // Fully peeled — degenerate clip on the spine side.
-    clipPath = fromRight
-      ? "polygon(0% 0%, 0% 0%, 0% 100%, 0% 100%)"
-      : "polygon(100% 0%, 100% 0%, 100% 100%, 100% 100%)";
-  } else if (fromRight) {
-    clipPath =
-      `polygon(0% 0%, ${edgePct}% ${tipPct}%, ${edgePct + bowPct}% 50%, `
-      + `${edgePct}% ${100 - tipPct}%, 0% 100%)`;
-  } else {
-    const bowX = Math.max(0, edgePct - bowPct);
-    clipPath =
-      `polygon(${edgePct}% ${tipPct}%, 100% 0%, 100% 100%, `
-      + `${edgePct}% ${100 - tipPct}%, ${bowX}% 50%)`;
+export function peelVisualState(progress, width, height = 0, fromRight = true) {
+  // Back-compat: peelVisualState(p, w, fromRightBoolean)
+  if (typeof height === "boolean") {
+    fromRight = height;
+    height = 0;
   }
 
-  const foldLeft = fromRight ? Math.max(0, edgeX - foldWidth) : edgeX;
-  const backWidth = foldWidth * 0.42;
-  const backLeft = fromRight ? edgeX : Math.max(0, edgeX - backWidth);
-  const shadowWidth = foldWidth * 0.5;
-  const shadowLeft = fromRight
-    ? Math.max(0, edgeX - shadowWidth * 0.25)
-    : Math.max(0, edgeX - shadowWidth * 0.75);
+  const p = clamp01(progress);
+  const w = Math.max(1, width || 1);
+  const h = Math.max(1, height || w * 1.9);
+  const remain = 1 - p;
+  const edgeX = fromRight ? w * remain : w * p;
 
-  // Local fold-only rotation — kept small so text in the flat region stays readable.
-  const foldRotateY = (fromRight ? -1 : 1) * (3 + p * 7);
-  const foldVisible = p > 0.02 && p < 0.98;
-  const foldOpacity = foldVisible ? Math.min(0.72, 0.2 + p * 0.35) : 0;
-  const backOpacity = foldVisible ? Math.min(0.26, 0.06 + p * 0.16) : 0;
-  const shadowOpacity = foldVisible ? Math.min(0.2, 0.05 + p * 0.12) : 0;
-  // Taper the fold strip so the edge does not read as a hard vertical bar.
-  const foldClipPath =
-    `polygon(0% ${tipPct}%, 100% 0%, 100% 100%, 0% ${100 - tipPct}%)`;
+  // Fold flap 10–18% of width; curve amplitude strong enough to read as paper.
+  const foldWidth = w * (0.1 + p * 0.08);
+  const curveAmp = w * (0.055 + p * 0.065); // ~5.5–12%
+
+  const foldVisible = p > 0.02 && p < 0.985;
+  const amp = foldVisible ? curveAmp : 0;
+  const flap = foldVisible ? foldWidth : 0;
+
+  // Outer edge of the backside flap (into the peeled / revealed zone).
+  const outerEdge = fromRight
+    ? Math.min(w, edgeX + flap)
+    : Math.max(0, edgeX - flap);
+  // Slightly tighter mid outer so the flap also curves.
+  const outerAmp = amp * 0.55;
+
+  let flatPath;
+  let foldPath = "";
+  let shadowPath = "";
+  let highlightPath = "";
+
+  if (p <= 0) {
+    flatPath = `M 0 0 L ${px(w)} 0 L ${px(w)} ${px(h)} L 0 ${px(h)} Z`;
+  } else if (p >= 1) {
+    flatPath = fromRight
+      ? `M 0 0 L 0 0 L 0 ${px(h)} L 0 ${px(h)} Z`
+      : `M ${px(w)} 0 L ${px(w)} 0 L ${px(w)} ${px(h)} L ${px(w)} ${px(h)} Z`;
+  } else if (fromRight) {
+    const boundary = foldBoundaryPath(edgeX, amp, h, true);
+    flatPath = `M 0 0 L ${boundary} L 0 ${px(h)} Z`;
+    const outer = reverseFoldBoundaryPath(outerEdge, outerAmp, h, true);
+    const inner = foldBoundaryPath(edgeX, amp, h, true);
+    foldPath = `M ${inner} L ${outer} Z`;
+    // Soft shadow band hugging the fold — offset slightly into the flap.
+    const shadowOuter = reverseFoldBoundaryPath(
+      Math.min(w, edgeX + flap * 0.55),
+      amp * 0.35,
+      h,
+      true,
+    );
+    shadowPath = `M ${inner} L ${shadowOuter} Z`;
+    // Highlight on the flat-page side of the crease.
+    const hiInner = foldBoundaryPath(Math.max(0, edgeX - Math.min(amp * 0.35, w * 0.02)), amp * 0.9, h, true);
+    highlightPath = `M ${hiInner} L ${reverseFoldBoundaryPath(edgeX, amp, h, true)} Z`;
+  } else {
+    const boundary = foldBoundaryPath(edgeX, amp, h, false);
+    flatPath = `M ${px(w)} 0 L ${boundary} L ${px(w)} ${px(h)} Z`;
+    const outer = reverseFoldBoundaryPath(outerEdge, outerAmp, h, false);
+    const inner = foldBoundaryPath(edgeX, amp, h, false);
+    foldPath = `M ${inner} L ${outer} Z`;
+    const shadowOuter = reverseFoldBoundaryPath(
+      Math.max(0, edgeX - flap * 0.55),
+      amp * 0.35,
+      h,
+      false,
+    );
+    shadowPath = `M ${inner} L ${shadowOuter} Z`;
+    const hiInner = foldBoundaryPath(Math.min(w, edgeX + Math.min(amp * 0.35, w * 0.02)), amp * 0.9, h, false);
+    highlightPath = `M ${hiInner} L ${reverseFoldBoundaryPath(edgeX, amp, h, false)} Z`;
+  }
+
+  const foldOpacity = foldVisible ? Math.min(0.96, 0.55 + p * 0.35) : 0;
+  const shadowOpacity = foldVisible ? Math.min(0.28, 0.1 + p * 0.16) : 0;
+  const highlightOpacity = foldVisible ? Math.min(0.35, 0.12 + p * 0.18) : 0;
 
   return {
     progress: p,
     remain,
     edgeX,
-    peeledPct,
-    edgePct,
-    tipPct,
-    bowPct,
-    clipPath,
-    foldWidth,
-    foldLeft,
-    foldRotateY,
-    foldOrigin: fromRight ? "right center" : "left center",
-    foldTransform: `perspective(1400px) rotateY(${foldRotateY}deg)`,
+    height: h,
+    width: w,
+    foldWidth: flap,
+    curveAmp: amp,
+    flatPath,
+    foldPath,
+    shadowPath,
+    highlightPath,
+    /** CSS clip-path value for the flat snapshot layer. */
+    clipPath: `path("${flatPath}")`,
     foldOpacity,
-    foldClipPath,
-    backWidth,
-    backLeft,
-    backOpacity,
-    shadowWidth,
-    shadowLeft,
     shadowOpacity,
-    // Contract for tests / callers: the flat sheet must stay undistorted.
+    highlightOpacity,
+    foldVisible,
+    // Contract: the flat sheet must stay undistorted.
     sheetTranslateX: 0,
     sheetRotateY: 0,
     sheetSkewY: 0,
     sheetScaleX: 1,
   };
+}
+
+/** Derive a paper-backside fill from the page color (never pure black). */
+export function paperBacksideFill(paperColor, fromRight) {
+  const base = paperColor && paperColor !== "transparent" ? paperColor : "#f3eee4";
+  // Soft gray wash toward the crease; warm paper toward the free edge.
+  return fromRight
+    ? `linear-gradient(270deg, ${base} 0%, #e7e0d4 42%, #d9d2c6 100%)`
+    : `linear-gradient(90deg, ${base} 0%, #e7e0d4 42%, #d9d2c6 100%)`;
 }
 
 export default class PageTurnAnimator {
@@ -165,9 +226,12 @@ export default class PageTurnAnimator {
   #overlay = null;
   #underlay = null;
   #sheet = null;
-  #shadow = null;
-  #fold = null;
-  #back = null;
+  #shapesSvg = null;
+  #backPath = null;
+  #shadowPath = null;
+  #highlightPath = null;
+  #backGrad = null;
+  #mountedPaperColor = "#f3eee4";
   #progress = 0;
   #raf = 0;
   #pendingProgress = null;
@@ -753,7 +817,14 @@ export default class PageTurnAnimator {
     }
   }
 
-  // --- Visual layer (restrained peel) --------------------------------------
+  // --- Visual layer (curved paper peel) ------------------------------------
+
+  #svgEl(tag) {
+    if (typeof document.createElementNS === "function") {
+      return document.createElementNS(SVG_NS, tag);
+    }
+    return document.createElement(tag);
+  }
 
   #ensureStyles() {
     if (typeof document === "undefined") return;
@@ -787,32 +858,24 @@ export default class PageTurnAnimator {
         background-position: left top;
         transform: none;
       }
-      #${OVERLAY_ID} .inkamp-curl-back {
+      #${OVERLAY_ID} .inkamp-curl-shapes {
         position: absolute;
-        top: 0;
-        bottom: 0;
+        inset: 0;
         z-index: 2;
+        width: 100%;
+        height: 100%;
+        overflow: visible;
         pointer-events: none;
-        opacity: 0;
       }
-      #${OVERLAY_ID} .inkamp-curl-fold {
-        position: absolute;
-        top: 0;
-        bottom: 0;
-        z-index: 3;
-        pointer-events: none;
+      #${OVERLAY_ID} .inkamp-curl-back {
         opacity: 0;
-        transform-style: preserve-3d;
-        will-change: transform, left, opacity;
       }
       #${OVERLAY_ID} .inkamp-curl-shadow {
-        position: absolute;
-        top: 0;
-        bottom: 0;
-        z-index: 4;
-        pointer-events: none;
         opacity: 0;
-        filter: blur(8px);
+        filter: url(#inkamp-curl-soft-blur);
+      }
+      #${OVERLAY_ID} .inkamp-curl-highlight {
+        opacity: 0;
       }
     `;
     document.head.appendChild(style);
@@ -824,43 +887,72 @@ export default class PageTurnAnimator {
     if (!host) throw new Error("no host");
     if (!sourceUrl) throw new Error("no snapshot");
 
+    this.#mountedPaperColor = paperColor || "#f3eee4";
+
     const overlay = document.createElement("div");
     overlay.id = OVERLAY_ID;
 
-    // Solid theme-colored cover so Foliate's intermediate scroll never shows
-    // through the peel during the interactive drag.
+    // Temporary cover so Foliate's intermediate scroll never shows through.
     const underlay = document.createElement("div");
     underlay.className = "inkamp-curl-underlay";
-    underlay.style.backgroundColor = paperColor;
+    underlay.style.backgroundColor = this.#mountedPaperColor;
 
+    // Flat current-page snapshot — curved clip only; never full-page 3D.
     const sheet = document.createElement("div");
     sheet.className = "inkamp-curl-sheet";
     sheet.style.width = `${width}px`;
     sheet.style.height = `${height}px`;
-    sheet.style.backgroundColor = paperColor;
+    sheet.style.backgroundColor = this.#mountedPaperColor;
     sheet.style.backgroundImage = `url("${sourceUrl}")`;
     sheet.style.transform = "none";
 
-    // Soft ambient paper shading — no solid black bands.
-    const back = document.createElement("div");
-    back.className = "inkamp-curl-back";
-    back.style.background = fromRight
-      ? `linear-gradient(270deg, ${paperColor}, rgba(60,55,50,0.10) 60%, rgba(60,55,50,0.03))`
-      : `linear-gradient(90deg, ${paperColor}, rgba(60,55,50,0.10) 60%, rgba(60,55,50,0.03))`;
+    const svg = this.#svgEl("svg");
+    svg.setAttribute("class", "inkamp-curl-shapes");
+    svg.setAttribute("width", String(width));
+    svg.setAttribute("height", String(height));
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
 
-    const fold = document.createElement("div");
-    fold.className = "inkamp-curl-fold";
-    fold.style.background = fromRight
-      ? "linear-gradient(270deg, rgba(255,255,255,0.0), rgba(255,255,255,0.18) 50%, rgba(80,75,70,0.08))"
-      : "linear-gradient(90deg, rgba(255,255,255,0.0), rgba(255,255,255,0.18) 50%, rgba(80,75,70,0.08))";
+    const defs = this.#svgEl("defs");
+    const filter = this.#svgEl("filter");
+    filter.setAttribute("id", "inkamp-curl-soft-blur");
+    filter.setAttribute("x", "-20%");
+    filter.setAttribute("y", "-20%");
+    filter.setAttribute("width", "140%");
+    filter.setAttribute("height", "140%");
+    const blur = this.#svgEl("feGaussianBlur");
+    blur.setAttribute("stdDeviation", "3.5");
+    filter.appendChild(blur);
 
-    const shadow = document.createElement("div");
-    shadow.className = "inkamp-curl-shadow";
-    shadow.style.background = fromRight
-      ? "linear-gradient(270deg, rgba(40,36,32,0.16), rgba(40,36,32,0))"
-      : "linear-gradient(90deg, rgba(40,36,32,0.16), rgba(40,36,32,0))";
+    const grad = this.#svgEl("linearGradient");
+    grad.setAttribute("id", "inkamp-curl-back-grad");
+    grad.setAttribute("gradientUnits", "userSpaceOnUse");
+    // Updated each frame in #applyVisual for direction/position.
+    const stopA = this.#svgEl("stop");
+    stopA.setAttribute("offset", "0%");
+    stopA.setAttribute("stop-color", "#f7f2e8");
+    const stopB = this.#svgEl("stop");
+    stopB.setAttribute("offset", "55%");
+    stopB.setAttribute("stop-color", "#e8e1d5");
+    const stopC = this.#svgEl("stop");
+    stopC.setAttribute("offset", "100%");
+    stopC.setAttribute("stop-color", "#d5cec2");
+    grad.append(stopA, stopB, stopC);
+    defs.append(filter, grad);
 
-    overlay.append(underlay, sheet, back, fold, shadow);
+    const backPath = this.#svgEl("path");
+    backPath.setAttribute("class", "inkamp-curl-back");
+    backPath.setAttribute("fill", "url(#inkamp-curl-back-grad)");
+
+    const shadowPath = this.#svgEl("path");
+    shadowPath.setAttribute("class", "inkamp-curl-shadow");
+    shadowPath.setAttribute("fill", "rgba(55, 48, 40, 0.22)");
+
+    const highlightPath = this.#svgEl("path");
+    highlightPath.setAttribute("class", "inkamp-curl-highlight");
+    highlightPath.setAttribute("fill", "rgba(255, 255, 255, 0.28)");
+
+    svg.append(defs, backPath, shadowPath, highlightPath);
+    overlay.append(underlay, sheet, svg);
 
     const hostStyle = globalThis.getComputedStyle?.(host);
     if (hostStyle && hostStyle.position === "static") {
@@ -871,9 +963,11 @@ export default class PageTurnAnimator {
     this.#overlay = overlay;
     this.#underlay = underlay;
     this.#sheet = sheet;
-    this.#fold = fold;
-    this.#back = back;
-    this.#shadow = shadow;
+    this.#shapesSvg = svg;
+    this.#backPath = backPath;
+    this.#shadowPath = shadowPath;
+    this.#highlightPath = highlightPath;
+    this.#backGrad = grad;
   }
 
   #scheduleVisual(progress) {
@@ -894,37 +988,47 @@ export default class PageTurnAnimator {
     if (!sheet || !gesture) return;
 
     const width = gesture.width || sheet.clientWidth || 1;
+    const height = gesture.height || sheet.clientHeight || width * 1.9;
     const fromRight = gesture.fromRight !== false;
-    // Linear progress so the free edge tracks the finger; no full-page 3D.
-    const state = peelVisualState(progress, width, fromRight);
+    const state = peelVisualState(progress, width, height, fromRight);
 
+    // Flat readable page — curved clip only.
     sheet.style.transform = "none";
     sheet.style.transformOrigin = "left top";
     sheet.style.clipPath = state.clipPath;
+    if (sheet.style.webkitClipPath !== undefined) {
+      sheet.style.webkitClipPath = state.clipPath;
+    }
 
-    if (this.#fold) {
-      this.#fold.style.left = `${state.foldLeft}px`;
-      this.#fold.style.width = `${state.foldWidth}px`;
-      this.#fold.style.right = "auto";
-      this.#fold.style.opacity = String(state.foldOpacity);
-      this.#fold.style.transformOrigin = state.foldOrigin;
-      this.#fold.style.transform = state.foldTransform;
-      this.#fold.style.clipPath = state.foldClipPath;
+    if (this.#shapesSvg) {
+      this.#shapesSvg.setAttribute("width", String(width));
+      this.#shapesSvg.setAttribute("height", String(height));
+      this.#shapesSvg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     }
-    if (this.#back) {
-      this.#back.style.left = `${state.backLeft}px`;
-      this.#back.style.width = `${state.backWidth}px`;
-      this.#back.style.right = "auto";
-      this.#back.style.opacity = String(state.backOpacity);
-      this.#back.style.clipPath = state.foldClipPath;
+
+    if (this.#backGrad) {
+      // Gradient across the fold flap, crease → free edge.
+      const x1 = fromRight ? state.edgeX : state.edgeX;
+      const x2 = fromRight
+        ? state.edgeX + state.foldWidth
+        : state.edgeX - state.foldWidth;
+      this.#backGrad.setAttribute("x1", String(px(x1)));
+      this.#backGrad.setAttribute("y1", "0");
+      this.#backGrad.setAttribute("x2", String(px(x2)));
+      this.#backGrad.setAttribute("y2", "0");
     }
-    if (this.#shadow) {
-      this.#shadow.style.left = `${state.shadowLeft}px`;
-      this.#shadow.style.width = `${state.shadowWidth}px`;
-      this.#shadow.style.right = "auto";
-      this.#shadow.style.opacity = String(state.shadowOpacity);
-      this.#shadow.style.transform = "none";
-      this.#shadow.style.clipPath = state.foldClipPath;
+
+    if (this.#backPath) {
+      this.#backPath.setAttribute("d", state.foldPath || "M0 0");
+      this.#backPath.style.opacity = String(state.foldOpacity);
+    }
+    if (this.#shadowPath) {
+      this.#shadowPath.setAttribute("d", state.shadowPath || "M0 0");
+      this.#shadowPath.style.opacity = String(state.shadowOpacity);
+    }
+    if (this.#highlightPath) {
+      this.#highlightPath.setAttribute("d", state.highlightPath || "M0 0");
+      this.#highlightPath.style.opacity = String(state.highlightOpacity);
     }
   }
 
@@ -970,15 +1074,19 @@ export default class PageTurnAnimator {
       // Release background image bitmap (native JPEG data-URL).
       this.#sheet.style.backgroundImage = "";
       this.#sheet.style.clipPath = "";
+      if (this.#sheet.style.webkitClipPath !== undefined) {
+        this.#sheet.style.webkitClipPath = "";
+      }
     }
-    if (this.#fold) this.#fold.style.willChange = "auto";
     this.#overlay?.remove();
     this.#overlay = null;
     this.#underlay = null;
     this.#sheet = null;
-    this.#fold = null;
-    this.#back = null;
-    this.#shadow = null;
+    this.#shapesSvg = null;
+    this.#backPath = null;
+    this.#shadowPath = null;
+    this.#highlightPath = null;
+    this.#backGrad = null;
     if (hadOverlay) debugLog("PageTurnAnimator", "visual-layer cleanup");
   }
 

@@ -8,7 +8,11 @@ import PageTurnAnimator, {
 } from "../SilveranKit/Sources/Kit/Resources/WebResources/PageTurnAnimator.js";
 
 function childByClass(parent, className) {
-  return parent?.children?.find?.((c) => c.className === className) || null;
+  return (
+    parent?.children?.find?.(
+      (c) => c.className === className || c.getAttribute?.("class") === className,
+    ) || null
+  );
 }
 
 function assert(cond, msg) {
@@ -124,6 +128,7 @@ function installDomStubs() {
       this.parent = null;
       this.clientHeight = 800;
       this.clientWidth = 400;
+      this._attrs = new Map();
     }
     append(...nodes) {
       for (const n of nodes) {
@@ -143,14 +148,20 @@ function installDomStubs() {
     }
     addEventListener() {}
     removeEventListener() {}
-    setAttribute() {}
-    getAttribute() {
-      return null;
+    setAttribute(key, value) {
+      this._attrs.set(String(key), String(value));
+      if (key === "class" || key === "className") this.className = String(value);
+      if (key === "id") this.id = String(value);
     }
-    hasAttribute() {
-      return false;
+    getAttribute(key) {
+      return this._attrs.has(String(key)) ? this._attrs.get(String(key)) : null;
     }
-    removeAttribute() {}
+    hasAttribute(key) {
+      return this._attrs.has(String(key));
+    }
+    removeAttribute(key) {
+      this._attrs.delete(String(key));
+    }
     getBoundingClientRect() {
       return { width: 400, height: 800, left: 0, top: 0, right: 400, bottom: 800 };
     }
@@ -179,6 +190,9 @@ function installDomStubs() {
           return true;
         },
       });
+    },
+    createElementNS(_ns, tag) {
+      return this.createElement(tag);
     },
   };
   globalThis.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 0);
@@ -580,77 +594,78 @@ assert(
 );
 rtlAnimator.cancel({ durationMs: 0 });
 
-// --- Restrained peel geometry ----------------------------------------------
+// --- Curved peel geometry -------------------------------------------------
 const W = 400;
-const at0 = peelVisualState(0, W, true);
+const H = 800;
+const at0 = peelVisualState(0, W, H, true);
 assert(at0.remain === 1, "progress 0 → full current-page remain");
 assert(at0.edgeX === W, "progress 0 → free edge at right");
-assert(at0.peeledPct === 0, "progress 0 → nothing peeled");
-assert(
-  at0.clipPath === "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)",
-  "progress 0 → full clip visibility",
-);
+assert(at0.flatPath.includes("L"), "progress 0 → full rect path");
+assert(at0.clipPath.startsWith("path("), "progress 0 → CSS path() clip");
 assert(at0.sheetRotateY === 0 && at0.sheetSkewY === 0 && at0.sheetScaleX === 1, "sheet undistorted at 0");
 assert(at0.sheetTranslateX === 0, "sheet not translated at 0");
+assert(!at0.foldVisible, "progress 0 → fold hidden");
 
-const atHalf = peelVisualState(0.5, W, true);
+const atHalf = peelVisualState(0.5, W, H, true);
 assert(atHalf.remain === 0.5, "progress 0.5 → half remain");
 assert(atHalf.edgeX === W * 0.5, "progress 0.5 → edge at mid");
-assert(atHalf.clipPath.includes("50%"), "progress 0.5 → free edge near mid");
-assert(atHalf.bowPct > 0 && atHalf.tipPct > 0, "progress 0.5 → mild curved edge");
-assert(atHalf.foldWidth / W >= 0.08 && atHalf.foldWidth / W <= 0.14, "fold width 8–14%");
-assert(atHalf.foldWidth / W <= 0.12, "phone-width fold stays ≤12%");
-assert(atHalf.foldOpacity > 0, "progress 0.5 → fold visible");
-assert(atHalf.shadowOpacity <= 0.22, "shadow stays soft (no heavy black band)");
+assert(atHalf.flatPath.includes("C "), "progress 0.5 → cubic curved boundary");
+assert(atHalf.foldPath.includes("C "), "progress 0.5 → curved fold wedge");
+assert(atHalf.curveAmp / W >= 0.05, "curve amplitude strong enough to read as peel");
+assert(atHalf.foldWidth / W >= 0.1 && atHalf.foldWidth / W <= 0.18, "fold width 10–18%");
+assert(atHalf.foldOpacity > 0, "progress 0.5 → backside fold visible");
+assert(atHalf.shadowOpacity > 0 && atHalf.shadowOpacity <= 0.3, "soft localized fold shadow");
+assert(atHalf.highlightOpacity > 0, "fold highlight present");
 assert(atHalf.sheetRotateY === 0 && atHalf.sheetSkewY === 0, "no full-page skew/rotate at 0.5");
-assert(Math.abs(atHalf.foldRotateY) <= 12, "fold-only rotation stays modest");
+// Mid bulge sits left of top/bottom edge (C silhouette for fromRight).
+assert(atHalf.curveAmp > 0, "fromRight peel has inward curve amp");
 
-const at1 = peelVisualState(1, W, true);
+const at1 = peelVisualState(1, W, H, true);
 assert(at1.remain === 0, "progress 1 → foreground fully peeled");
 assert(at1.edgeX === 0, "progress 1 → edge at spine");
 assert(at1.foldOpacity === 0, "progress 1 → fold gone");
-assert(at1.bowPct === 0, "progress 1 → no bow");
+assert(!at1.foldVisible, "progress 1 → fold not visible");
 
-const leftHalf = peelVisualState(0.5, W, false);
+const leftHalf = peelVisualState(0.5, W, H, false);
 assert(leftHalf.edgeX === W * 0.5, "opposite direction edge mirrors to mid");
-assert(leftHalf.clipPath.includes("50%"), "opposite direction clips from left mid");
-assert(
-  leftHalf.foldRotateY === -atHalf.foldRotateY || leftHalf.foldRotateY * atHalf.foldRotateY < 0,
-  "opposite direction mirrors fold rotation sign",
-);
+assert(leftHalf.flatPath.includes("C "), "opposite direction uses curved boundary");
+assert(leftHalf.foldPath.includes("C "), "opposite direction has fold wedge");
 
-const wideHalf = peelVisualState(0.5, 900, true);
-assert(wideHalf.foldWidth / 900 <= 0.14, "wide viewport fold stays ≤14%");
+const wideHalf = peelVisualState(0.5, 900, 1200, true);
+assert(wideHalf.foldWidth / 900 <= 0.18, "wide viewport fold stays ≤18%");
 
 // Live overlay applies peel state (clip, no full-page transform)
 const peelAnimator = new PageTurnAnimator();
 peelAnimator.setStyle("curl");
 peelAnimator.attach(makeRenderer(false), host);
 assert(
-  peelAnimator.begin({ width: W, height: 800, fromRight: true, sourceUrl: FAKE_SNAPSHOT }) === true,
+  peelAnimator.begin({ width: W, height: H, fromRight: true, sourceUrl: FAKE_SNAPSHOT }) === true,
 );
 const peelOverlay = document.getElementById("inkamp-page-curl-overlay");
 assert(childByClass(peelOverlay, "inkamp-curl-underlay"), "underlay mounted for drag cover");
+assert(childByClass(peelOverlay, "inkamp-curl-shapes"), "SVG fold shapes mounted");
 const peelSheet = childByClass(peelOverlay, "inkamp-curl-sheet");
 // begin() applies progress 0 synchronously.
 assert(
-  peelSheet.style.clipPath === peelVisualState(0, W, true).clipPath,
+  peelSheet.style.clipPath === peelVisualState(0, W, H, true).clipPath,
   "applied progress 0 → full page",
 );
 assert(!peelSheet.style.transform || peelSheet.style.transform === "none", "sheet transform none at 0");
 peelAnimator.update({ progress: 0.5 });
 await sleep(20);
 assert(
-  peelSheet.style.clipPath === peelVisualState(0.5, W, true).clipPath,
-  "applied progress 0.5 → curved half clip",
+  peelSheet.style.clipPath === peelVisualState(0.5, W, H, true).clipPath,
+  "applied progress 0.5 → curved path clip",
 );
 assert(peelSheet.style.transform === "none", "sheet stays flat at 0.5");
-const peelFold = childByClass(peelOverlay, "inkamp-curl-fold");
-assert(Number(peelFold.style.opacity) > 0, "fold visible at mid peel");
+const shapes = childByClass(peelOverlay, "inkamp-curl-shapes");
+const backPath = shapes?.children?.find?.((c) => c.getAttribute?.("class") === "inkamp-curl-back");
+assert(backPath?.getAttribute("d")?.includes("C "), "backside path is curved");
+assert(Number(backPath.style.opacity) > 0, "backside visible at mid peel");
 peelAnimator.update({ progress: 1 });
 await sleep(20);
 assert(
-  peelSheet.style.clipPath === peelVisualState(1, W, true).clipPath,
+  peelSheet.style.clipPath === peelVisualState(1, W, H, true).clipPath,
   "applied progress 1 → sheet hidden",
 );
 
