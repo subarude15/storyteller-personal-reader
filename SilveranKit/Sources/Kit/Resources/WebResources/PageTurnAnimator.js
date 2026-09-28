@@ -2,16 +2,18 @@
  * Owns page-turn *appearance* only. Foliate's paginator still owns which page
  * is shown and fires PageFlipped / Relocated. Do not put navigation logic here.
  *
- * Phase 2:
+ * Phase 2 + native snapshot correction:
  * - slide: current behavior (Foliate `animated` left unset / restored)
- * - curl: interactive visual curl for *manual* paginated swipes only
+ * - curl: interactive visual curl for *manual* paginated swipes only, using a
+ *   native WKWebView snapshot of the already-rendered page (not a JS clone)
  * - instant: ensure no Foliate sliding transition (`animated` removed)
  *
  * Curl is bypassed when:
  * - Reduce Motion is effective
  * - scrolling mode is active
  * - read-aloud / page-follow is active
- * - visual-layer creation fails (falls back to slide for that gesture)
+ * - native snapshot is unavailable / late / failed (falls back to slide for
+ *   that gesture — never paints an opaque blank sheet)
  *
  * Instant may temporarily strip `animated`. Slide restores whatever the
  * renderer had before this animator first managed it. Curl also strips
@@ -25,6 +27,8 @@ const OVERLAY_ID = "inkamp-page-curl-overlay";
 const STYLE_ID = "inkamp-page-curl-styles";
 const COMPLETE_MS = 180;
 const CANCEL_MS = 200;
+/** How long to wait for a native snapshot before giving up on curl. */
+const SNAPSHOT_TIMEOUT_MS = 220;
 
 const clamp01 = (value) => Math.max(0, Math.min(1, value));
 
@@ -54,50 +58,6 @@ export function docFromTouchEvent(event, rootDocument = globalThis.document) {
   return null;
 }
 
-/**
- * Horizontal offset into a section document's iframe that matches what is
- * currently visible. Derived from iframe vs visible-frame geometry so it stays
- * in the cloned document's coordinate space — not paginator-global scroll.
- *
- * Returns null when geometry is unavailable; callers should paper-fallback
- * rather than apply a known-wrong global offset.
- *
- * @param {Document} doc
- * @param {{ left: number, width?: number }} visibleFrameRect
- * @param {number} viewportWidth
- * @returns {number|null}
- */
-export function visibleOffsetInDoc(doc, visibleFrameRect, viewportWidth) {
-  try {
-    const iframe = doc?.defaultView?.frameElement;
-    if (!iframe || !visibleFrameRect) return null;
-    const iframeRect = iframe.getBoundingClientRect?.();
-    if (!iframeRect || !Number.isFinite(iframeRect.left)) return null;
-
-    const frameLeft = visibleFrameRect.left;
-    if (!Number.isFinite(frameLeft)) return null;
-
-    // Foliate centers the iframe in a wider view element (blank page on each
-    // side). The visible reading column is ~viewportWidth wide inside the host;
-    // approximate the clip's left edge when only the host rect is available.
-    const hostWidth = visibleFrameRect.width;
-    const clipLeft = Number.isFinite(hostWidth) && viewportWidth > 0 && hostWidth > viewportWidth
-      ? frameLeft + (hostWidth - viewportWidth) / 2
-      : frameLeft;
-
-    const localX = clipLeft - iframeRect.left;
-    if (!Number.isFinite(localX)) return null;
-
-    const iframeWidth = iframe.offsetWidth || iframeRect.width || 0;
-    if (iframeWidth <= 0) return null;
-
-    const max = Math.max(0, iframeWidth - (viewportWidth || 0));
-    return Math.max(0, Math.min(max, localX));
-  } catch {
-    return null;
-  }
-}
-
 export default class PageTurnAnimator {
   #style = "slide";
   #reduceMotion = false;
@@ -121,6 +81,16 @@ export default class PageTurnAnimator {
   #pageFlipSeen = false;
   #awaitingSnap = false;
   #bound = false;
+
+  /** Monotonic id for native snapshot requests; bumped to invalidate in-flight. */
+  #snapshotRequestId = 0;
+  /** Request id we currently expect a reply for (0 = none). */
+  #pendingSnapshotRequestId = 0;
+  /** data: URL from the latest accepted native snapshot, or null. */
+  #pendingSnapshotUrl = null;
+  /** True when the current request failed, timed out, or bridge is missing. */
+  #snapshotFailed = false;
+  #snapshotTimer = 0;
 
   #onTouchStart = (event) => this.#handleTouchStart(event);
   #onTouchEnd = (event) => this.#handleTouchEnd(event);
@@ -175,6 +145,11 @@ export default class PageTurnAnimator {
 
   get progress() {
     return this.#progress;
+  }
+
+  /** Request id awaiting a native snapshot reply (0 when none). */
+  get pendingSnapshotRequestId() {
+    return this.#pendingSnapshotRequestId;
   }
 
   /**
@@ -278,6 +253,7 @@ export default class PageTurnAnimator {
     this.#motionQuery?.removeEventListener?.("change", this.#onReduceMotionChange);
     this.#motionQuery = null;
     this.#cleanupOverlay();
+    this.#invalidateSnapshot("detach");
     this.#phase = "idle";
     this.#gesture = null;
     this.#renderer = null;
@@ -285,6 +261,57 @@ export default class PageTurnAnimator {
   }
 
   // --- Public lifecycle (also used by self-check) ---------------------------
+
+  /**
+   * Ask the native host for a WKWebView snapshot of the current page.
+   * Returns the request id (tests use this to drive receiveNativeSnapshot).
+   */
+  beginSnapshotRequest() {
+    return this.#requestNativeSnapshot();
+  }
+
+  /**
+   * Native host delivers a snapshot (or null on failure). Stale request ids and
+   * replies after the gesture ends are ignored.
+   *
+   * @param {number} requestId
+   * @param {string|null|undefined} dataUrl
+   */
+  receiveNativeSnapshot(requestId, dataUrl) {
+    // Accept only the currently outstanding request. Phase may still be idle for
+    // a beat while touchstart arms the gesture, so do not require pending here.
+    if (requestId !== this.#pendingSnapshotRequestId || requestId === 0) {
+      debugLog("PageTurnAnimator", "reject stale snapshot", {
+        requestId,
+        expected: this.#pendingSnapshotRequestId,
+      });
+      return;
+    }
+
+    if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:image/")) {
+      debugLog("PageTurnAnimator", "native snapshot failed or empty", { requestId });
+      this.#snapshotFailed = true;
+      this.#pendingSnapshotUrl = null;
+      if (this.#phase === "pending" && this.#gesture?.moved) {
+        // Drag already started; abandon curl rather than show a blank sheet.
+        this.#fallbackThisGesture = true;
+        this.#resetGesture();
+      }
+      return;
+    }
+
+    this.#snapshotFailed = false;
+    this.#pendingSnapshotUrl = dataUrl;
+    debugLog("PageTurnAnimator", "native snapshot ready", {
+      requestId,
+      bytes: dataUrl.length,
+    });
+
+    // If the finger already moved, start the curl with the real page image now.
+    if (this.#phase === "pending" && this.#gesture?.moved && !this.#overlay) {
+      this.#beginFromPendingGesture();
+    }
+  }
 
   begin(context = {}) {
     if (!this.canCurl) {
@@ -311,18 +338,13 @@ export default class PageTurnAnimator {
 
     const fromRight = context.fromRight !== false;
     const rtl = !!context.rtl;
-    let sourceUrl = context.sourceUrl ?? null;
-
-    if (!sourceUrl && context.doc) {
-      // visibleOffset must be section-local (iframe coordinates). Never fall
-      // back to paginator-global renderer.start — that can show the wrong page.
-      const localOffset = context.visibleOffset;
-      if (localOffset == null || !Number.isFinite(localOffset)) {
-        debugLog("PageTurnAnimator", "curl snapshot skipped: no section-local offset");
-        sourceUrl = null;
-      } else {
-        sourceUrl = this.#captureVisiblePage(context.doc, width, height, localOffset);
-      }
+    // Prefer an explicit sourceUrl (tests / late injection); else the pending
+    // native snapshot. Never invent a JS page clone or paint a blank sheet.
+    const sourceUrl = context.sourceUrl ?? this.#pendingSnapshotUrl ?? null;
+    if (!sourceUrl) {
+      debugLog("PageTurnAnimator", "curl fallback: no native snapshot image");
+      this.#fallbackThisGesture = true;
+      return false;
     }
 
     try {
@@ -357,6 +379,7 @@ export default class PageTurnAnimator {
       width,
       height,
       startOffset: context.startOffset ?? this.#renderer?.start ?? 0,
+      moved: true,
     };
     this.#applyVisual(0);
     debugLog("PageTurnAnimator", "curl begin", { fromRight, rtl, width, height });
@@ -422,25 +445,25 @@ export default class PageTurnAnimator {
     const renderer = this.#renderer;
     if (!renderer || renderer.scrolled) return;
 
-    // Prefer the EPUB section document that actually received the touch.
-    // getContents()[0] can disagree near loaded adjacent sections.
-    const touchedDoc = docFromTouchEvent(event) || this.#currentDoc();
-
     this.#fallbackThisGesture = false;
     this.#pageFlipSeen = false;
     this.#awaitingSnap = false;
+    // Arm the gesture before requesting so a fast native reply is not rejected.
     this.#phase = "pending";
     this.#gesture = {
       startX: touch.screenX ?? touch.clientX,
       startY: touch.screenY ?? touch.clientY,
-      startOffset: renderer.start, // paginator scroll — progress only, not snapshot X
+      startOffset: renderer.start, // paginator scroll — progress only
       fromRight: true,
       rtl: renderer.getAttribute?.("dir") === "rtl",
       width: renderer.size,
       height: this.#host?.clientHeight || renderer.getBoundingClientRect?.().height || 0,
       moved: false,
-      doc: touchedDoc,
+      // Touched section doc kept for paperColor under the snapshot only.
+      doc: docFromTouchEvent(event) || this.#currentDoc(),
     };
+    // Capture the current rendered page before the paginator scrolls.
+    this.#requestNativeSnapshot();
   }
 
   #handleScroll() {
@@ -468,38 +491,40 @@ export default class PageTurnAnimator {
       gesture.width = renderer.size;
       gesture.height = this.#host?.clientHeight || gesture.height;
 
-      const doc = gesture.doc || this.#currentDoc();
-      const hostRect = renderer.getBoundingClientRect?.();
-      const visibleOffset = doc
-        ? visibleOffsetInDoc(doc, hostRect, gesture.width)
-        : null;
-
-      const started = this.begin({
-        fromRight: gesture.fromRight,
-        rtl: gesture.rtl,
-        width: gesture.width,
-        height: gesture.height,
-        startOffset: gesture.startOffset,
-        visibleOffset,
-        doc,
-        paperColor: this.#paperColor(doc),
-        allowPaperFallback: true,
-      });
-      if (!started) {
+      if (this.#snapshotFailed) {
+        debugLog("PageTurnAnimator", "curl fallback: snapshot unavailable at drag start");
         this.#fallbackThisGesture = true;
         this.#phase = "idle";
         this.#gesture = null;
         return;
       }
+
+      if (!this.#pendingSnapshotUrl) {
+        // Snapshot still in flight — stay pending; receiveNativeSnapshot will begin.
+        debugLog("PageTurnAnimator", "curl waiting for native snapshot");
+        return;
+      }
+
+      this.#beginFromPendingGesture();
+      if (this.#phase !== "curling") return;
     }
 
-    const progress = clamp01(Math.abs(delta) / Math.max(1, renderer.size));
-    this.update({ progress });
+    if (this.#phase === "curling") {
+      const progress = clamp01(Math.abs(delta) / Math.max(1, renderer.size));
+      this.update({ progress });
+    }
   }
 
   #handleTouchEnd() {
     if (this.#phase === "pending" && !this.#gesture?.moved) {
       // Tap / no drag — nothing to curl.
+      this.#resetGesture();
+      return;
+    }
+    if (this.#phase === "pending" && this.#gesture?.moved && !this.#overlay) {
+      // Drag ended while still waiting on a snapshot — abandon curl; Foliate snaps.
+      debugLog("PageTurnAnimator", "curl abandon: touch ended before snapshot");
+      this.#fallbackThisGesture = true;
       this.#resetGesture();
       return;
     }
@@ -521,6 +546,11 @@ export default class PageTurnAnimator {
   #handlePageFlip() {
     if (this.#phase !== "curling" && this.#phase !== "pending") return;
     this.#pageFlipSeen = true;
+    if (this.#phase === "pending" && !this.#overlay) {
+      // Flip happened before we could mount a curl sheet — let Foliate win.
+      this.#resetGesture();
+      return;
+    }
     // Foliate has accepted the turn; finish the visual curl. The underlying
     // page is already (or immediately) at the destination because curl strips
     // `animated`, so removing the overlay after completion shows the new page.
@@ -541,6 +571,91 @@ export default class PageTurnAnimator {
   #handleOrientationChange() {
     if (this.#phase === "idle") return;
     this.cancel({ reason: "orientation", durationMs: 0 });
+  }
+
+  // --- Native snapshot -----------------------------------------------------
+
+  #requestNativeSnapshot() {
+    this.#clearSnapshotTimer();
+    const id = ++this.#snapshotRequestId;
+    this.#pendingSnapshotRequestId = id;
+    this.#pendingSnapshotUrl = null;
+    this.#snapshotFailed = false;
+
+    const handler = globalThis.window?.webkit?.messageHandlers?.RequestPageSnapshot;
+    if (!handler?.postMessage) {
+      this.#snapshotFailed = true;
+      debugLog("PageTurnAnimator", "curl fallback: no RequestPageSnapshot bridge");
+      return id;
+    }
+
+    try {
+      handler.postMessage({ requestId: id });
+    } catch (error) {
+      this.#snapshotFailed = true;
+      debugLog("PageTurnAnimator", "curl fallback: snapshot request failed", error);
+      return id;
+    }
+
+    this.#snapshotTimer = setTimeout(() => {
+      if (id !== this.#pendingSnapshotRequestId) return;
+      if (this.#pendingSnapshotUrl) return;
+      this.#snapshotFailed = true;
+      debugLog("PageTurnAnimator", "curl fallback: native snapshot timeout", { requestId: id });
+      if (this.#phase === "pending" && this.#gesture?.moved && !this.#overlay) {
+        this.#fallbackThisGesture = true;
+        this.#resetGesture();
+      }
+    }, SNAPSHOT_TIMEOUT_MS);
+
+    return id;
+  }
+
+  #beginFromPendingGesture() {
+    const gesture = this.#gesture;
+    const sourceUrl = this.#pendingSnapshotUrl;
+    if (!gesture || !sourceUrl) return;
+
+    const started = this.begin({
+      fromRight: gesture.fromRight,
+      rtl: gesture.rtl,
+      width: gesture.width,
+      height: gesture.height,
+      startOffset: gesture.startOffset,
+      sourceUrl,
+      paperColor: this.#paperColor(gesture.doc),
+    });
+    if (!started) {
+      this.#fallbackThisGesture = true;
+      this.#phase = "idle";
+      this.#gesture = null;
+      return;
+    }
+
+    const renderer = this.#renderer;
+    if (renderer) {
+      const progress = clamp01(
+        Math.abs(renderer.start - gesture.startOffset) / Math.max(1, renderer.size || 1),
+      );
+      this.update({ progress });
+    }
+  }
+
+  #invalidateSnapshot(reason) {
+    this.#clearSnapshotTimer();
+    // Bump so any in-flight native reply is rejected as stale.
+    this.#snapshotRequestId += 1;
+    this.#pendingSnapshotRequestId = 0;
+    this.#pendingSnapshotUrl = null;
+    this.#snapshotFailed = false;
+    if (reason) debugLog("PageTurnAnimator", "snapshot invalidated", reason);
+  }
+
+  #clearSnapshotTimer() {
+    if (this.#snapshotTimer) {
+      clearTimeout(this.#snapshotTimer);
+      this.#snapshotTimer = 0;
+    }
   }
 
   // --- Visual layer --------------------------------------------------------
@@ -567,7 +682,7 @@ export default class PageTurnAnimator {
         height: 100%;
         transform-style: preserve-3d;
         will-change: transform;
-        background-size: cover;
+        background-size: 100% 100%;
         background-repeat: no-repeat;
         background-position: center;
         box-shadow: 0 0 0 rgba(0,0,0,0);
@@ -604,6 +719,7 @@ export default class PageTurnAnimator {
     this.#cleanupOverlay();
     const host = this.#host;
     if (!host) throw new Error("no host");
+    if (!sourceUrl) throw new Error("no snapshot");
 
     const overlay = document.createElement("div");
     overlay.id = OVERLAY_ID;
@@ -615,9 +731,7 @@ export default class PageTurnAnimator {
     sheet.style.left = fromRight ? "auto" : "0";
     sheet.style.right = fromRight ? "0" : "auto";
     sheet.style.backgroundColor = paperColor;
-    if (sourceUrl) {
-      sheet.style.backgroundImage = `url("${sourceUrl}")`;
-    }
+    sheet.style.backgroundImage = `url("${sourceUrl}")`;
 
     const fold = document.createElement("div");
     fold.className = "inkamp-curl-fold";
@@ -746,7 +860,7 @@ export default class PageTurnAnimator {
     const hadOverlay = !!this.#overlay;
     if (this.#sheet) {
       this.#sheet.style.willChange = "auto";
-      // Release background image bitmap.
+      // Release background image bitmap (native JPEG data-URL).
       this.#sheet.style.backgroundImage = "";
     }
     this.#overlay?.remove();
@@ -759,6 +873,12 @@ export default class PageTurnAnimator {
   }
 
   #resetGesture() {
+    this.#clearSnapshotTimer();
+    // Invalidate in-flight native replies tied to this gesture.
+    this.#snapshotRequestId += 1;
+    this.#pendingSnapshotRequestId = 0;
+    this.#pendingSnapshotUrl = null;
+    this.#snapshotFailed = false;
     this.#phase = "idle";
     this.#gesture = null;
     this.#progress = 0;
@@ -795,54 +915,5 @@ export default class PageTurnAnimator {
       /* ignore */
     }
     return "#f7f3ea";
-  }
-
-  /**
-   * Capture the currently visible page into a data-URL for the curl sheet.
-   * Uses SVG foreignObject of the section document, clipped to the visible
-   * column window. `localOffset` must be in that document/iframe's coordinates.
-   * Returns null on failure (caller falls back to paper).
-   */
-  #captureVisiblePage(doc, width, height, localOffset) {
-    try {
-      if (!doc?.documentElement || typeof XMLSerializer === "undefined") return null;
-      if (localOffset == null || !Number.isFinite(localOffset)) return null;
-
-      const win = doc.defaultView;
-      const iframe = win?.frameElement;
-      const iframeWidth = Math.max(
-        width,
-        Math.ceil(iframe?.offsetWidth || doc.documentElement.scrollWidth || width),
-      );
-      const iframeHeight = Math.max(
-        height,
-        Math.ceil(iframe?.offsetHeight || height),
-      );
-
-      const clone = doc.documentElement.cloneNode(true);
-      clone.querySelectorAll("script").forEach((node) => node.remove());
-      clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
-      // Hide interactive chrome that shouldn't appear on the sheet.
-      clone.querySelectorAll("canvas").forEach((node) => {
-        node.setAttribute("style", `${node.getAttribute("style") || ""};opacity:0`);
-      });
-
-      const serialized = new XMLSerializer().serializeToString(clone);
-      const srcX = Math.max(0, Math.round(localOffset));
-      const svg =
-        `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">`
-        + `<foreignObject width="${iframeWidth}" height="${iframeHeight}" x="${-srcX}" y="0">`
-        + serialized
-        + `</foreignObject></svg>`;
-
-      // Synchronous data-URL path keeps begin() simple; foreignObject paint is
-      // async when used via Image, so we store the SVG data URL directly as the
-      // sheet background. Safari paints SVG foreignObject backgrounds for many
-      // same-origin documents; if it fails visually we still have paperColor.
-      return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-    } catch (error) {
-      debugLog("PageTurnAnimator", "curl fallback: snapshot failed", error);
-      return null;
-    }
   }
 }
