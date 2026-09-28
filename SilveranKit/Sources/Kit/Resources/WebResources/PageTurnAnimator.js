@@ -8,6 +8,9 @@
  * - instant: ensure no Foliate sliding transition (`animated` removed)
  *
  * reduceMotion: when true, effective style becomes instant (future Swift wiring).
+ *
+ * Instant may temporarily strip `animated`. Slide/curl restore whatever the
+ * renderer had before this animator first managed it — they do not force it on.
  */
 
 const VALID_STYLES = new Set(["slide", "curl", "instant"]);
@@ -15,6 +18,7 @@ const VALID_STYLES = new Set(["slide", "curl", "instant"]);
 export default class PageTurnAnimator {
   #style = "slide";
   #reduceMotion = false;
+  #originalAnimated = new WeakMap();
 
   setStyle(style) {
     this.#style = VALID_STYLES.has(style) ? style : "slide";
@@ -39,14 +43,24 @@ export default class PageTurnAnimator {
     return this.#style;
   }
 
-  /**
-   * Toggle Foliate paginator's built-in `animated` attribute.
-   * Current app never sets `animated`; slide/curl preserve that. Instant
-   * removes it so any future slide animation stays off for this mode.
-   */
   applyToRenderer(renderer) {
-    if (!renderer?.removeAttribute) return;
+    if (
+      !renderer?.removeAttribute
+      || !renderer?.setAttribute
+      || !renderer?.hasAttribute
+    ) {
+      return;
+    }
+    if (!this.#originalAnimated.has(renderer)) {
+      this.#originalAnimated.set(renderer, renderer.hasAttribute("animated"));
+    }
     if (this.effectiveStyle === "instant") {
+      renderer.removeAttribute("animated");
+      return;
+    }
+    if (this.#originalAnimated.get(renderer)) {
+      renderer.setAttribute("animated", "");
+    } else {
       renderer.removeAttribute("animated");
     }
   }

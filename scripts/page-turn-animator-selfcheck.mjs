@@ -8,6 +8,21 @@ function assert(cond, msg) {
   if (!cond) throw new Error(msg);
 }
 
+function makeRenderer(animated) {
+  const attrs = new Set(animated ? ["animated"] : []);
+  return {
+    removeAttribute(name) {
+      attrs.delete(name);
+    },
+    setAttribute(name) {
+      attrs.add(name);
+    },
+    hasAttribute(name) {
+      return attrs.has(name);
+    },
+  };
+}
+
 const animator = new PageTurnAnimator();
 assert(animator.style === "slide", "default style slide");
 assert(animator.effectiveStyle === "slide", "default effective slide");
@@ -25,24 +40,34 @@ assert(animator.style === "slide", "invalid falls back to slide");
 animator.setStyle("slide");
 animator.setReduceMotion(true);
 assert(animator.effectiveStyle === "instant", "reduceMotion forces instant");
-
-const renderer = {
-  attrs: new Set(["animated"]),
-  removeAttribute(name) {
-    this.attrs.delete(name);
-  },
-  hasAttribute(name) {
-    return this.attrs.has(name);
-  },
-};
-
 animator.setReduceMotion(false);
-animator.setStyle("slide");
-animator.applyToRenderer(renderer);
-assert(renderer.hasAttribute("animated"), "slide leaves animated alone");
 
+const startedAnimated = makeRenderer(true);
+animator.setStyle("slide");
+animator.applyToRenderer(startedAnimated);
+assert(startedAnimated.hasAttribute("animated"), "slide keeps original animated");
 animator.setStyle("instant");
-animator.applyToRenderer(renderer);
-assert(!renderer.hasAttribute("animated"), "instant removes animated");
+animator.applyToRenderer(startedAnimated);
+assert(!startedAnimated.hasAttribute("animated"), "instant removes animated");
+animator.setStyle("slide");
+animator.applyToRenderer(startedAnimated);
+assert(
+  startedAnimated.hasAttribute("animated"),
+  "slide restores original animated after instant",
+);
+
+const startedUnset = makeRenderer(false);
+animator.setStyle("slide");
+animator.applyToRenderer(startedUnset);
+assert(!startedUnset.hasAttribute("animated"), "slide keeps original unset");
+animator.setStyle("instant");
+animator.applyToRenderer(startedUnset);
+assert(!startedUnset.hasAttribute("animated"), "instant stays unset");
+animator.setStyle("slide");
+animator.applyToRenderer(startedUnset);
+assert(
+  !startedUnset.hasAttribute("animated"),
+  "slide does not force animated after instant",
+);
 
 console.log("PageTurnAnimator.selfcheck: ok");
