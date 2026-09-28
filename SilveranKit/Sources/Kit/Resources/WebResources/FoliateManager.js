@@ -183,11 +183,20 @@ class FoliateManager {
     await this.#view.open(file);
 
     this.#bookmarkManager.setView(this.#view);
+    this.#attachPageTurnAnimator();
 
     debugLog("FoliateManager", "Book opened, reporting structure to Swift");
     await this.#reportBookStructureReady();
 
     debugLog("FoliateManager", "Initialization complete");
+  }
+
+  #attachPageTurnAnimator() {
+    const renderer = this.#view?.renderer;
+    if (!renderer) return;
+    const host = document.getElementById("reader-container");
+    this.#pageTurnAnimator.attach(renderer, host);
+    this.#pageTurnAnimator.applyToRenderer(renderer);
   }
 
   #attachEventListeners() {
@@ -265,6 +274,9 @@ class FoliateManager {
 
         this.#markAlignableText(doc);
         this.#bookmarkManager.setupSection(index, doc);
+        // Iframe touches do not bubble to the paginator host; observe each
+        // section document so manual swipe lifecycle reaches PageTurnAnimator.
+        this.#pageTurnAnimator.observeDocument(doc);
       }
     });
 
@@ -686,7 +698,6 @@ class FoliateManager {
         : "slide";
       this.#pageTurnAnimator.setStyle(this.#pageTurnStyle);
     }
-    // Optional reduceMotion from Swift/accessibility (future). Prep only.
     if (styles.reduceMotion !== undefined && styles.reduceMotion !== null) {
       this.#pageTurnAnimator.setReduceMotion(styles.reduceMotion);
     }
@@ -742,6 +753,9 @@ class FoliateManager {
     const flow = this.#scrollingMode ? "scrolled" : "paginated";
     this.#view.renderer.setAttribute("flow", flow);
     debugLog("FoliateManager", `Set flow to ${flow}`);
+    if (this.#scrollingMode) {
+      this.#pageTurnAnimator.cancel({ reason: "scrolling-mode", durationMs: 0 });
+    }
 
     const columnCount = (this.#singleColumnMode || this.#scrollingMode) ? "1" : "2";
     this.#view.renderer.setAttribute("max-column-count", columnCount);
@@ -752,6 +766,7 @@ class FoliateManager {
     debugLog("FoliateManager", `Set margin to ${marginPx}px`);
 
     this.#view.renderer.setAttribute("gap", "0%");
+    this.#attachPageTurnAnimator();
     this.#pageTurnAnimator.applyToRenderer(this.#view.renderer);
     debugLog(
       "FoliateManager",
@@ -1037,6 +1052,10 @@ class FoliateManager {
   highlightFragment(sectionIndex, textId, seekToLocation = false) {
     debugLog("FoliateManager", `highlightFragment(sectionIndex: ${sectionIndex}, textId: ${textId}, seekToLocation: ${seekToLocation})`);
 
+    // Read-aloud / page-follow is driving the UI — never curl, and drop any
+    // in-flight manual curl so narration navigation stays untouched.
+    this.#pageTurnAnimator.setReadAloudActive(true);
+
     const prevHighlightEl = this.#highlightedElement?.deref?.();
 
     if (!this.#view?.book) {
@@ -1138,6 +1157,8 @@ class FoliateManager {
     }
     this.#highlightedElement = null;
     this.#clearReadaloudHighlight();
+    // Manual curl may run again on the next user gesture.
+    this.#pageTurnAnimator.setReadAloudActive(false);
   }
 
   // MARK: - Search methods
