@@ -32,11 +32,32 @@ struct SilveranReaderWidgets: WidgetBundle {
 struct InkAmpContinueEntry: TimelineEntry {
     let date: Date
     let snapshot: ContinueWidgetSnapshot
+    /// True only for the redacted Widget Gallery sample. Live snapshot and
+    /// timeline entries are never placeholders.
+    let isPlaceholder: Bool
+    /// Empty copy is a property of the shared snapshot, not of theme.
+    let showsEmptyState: Bool
 
-    static var placeholder: InkAmpContinueEntry {
-        InkAmpContinueEntry(
-            date: Date(),
-            snapshot: ContinueWidgetSnapshot(
+    init(date: Date, resolved: InkAmpContinueResolvedTimeline) {
+        self.date = date
+        self.snapshot = resolved.snapshot
+        self.isPlaceholder = resolved.isPlaceholder
+        self.showsEmptyState = resolved.showsEmptyState
+    }
+
+    /// Live entry. Previews and tests use this; theme is not an input.
+    init(date: Date, snapshot: ContinueWidgetSnapshot) {
+        self.init(
+            date: date,
+            resolved: InkAmpContinueTimelineResolver.resolveLive(
+                loaded: snapshot,
+                phase: .timeline,
+            ),
+        )
+    }
+
+    static var placeholderSnapshot: ContinueWidgetSnapshot {
+        ContinueWidgetSnapshot(
                 title: "The Quiet Path",
                 subtitle: "Ella Monroe",
                 isPlaying: false,
@@ -73,26 +94,45 @@ struct InkAmpContinueEntry: TimelineEntry {
                             .absoluteString,
                     ),
                 ],
-            ),
+            )
+    }
+
+    static var placeholder: InkAmpContinueEntry {
+        InkAmpContinueEntry(
+            date: Date(),
+            resolved: InkAmpContinueTimelineResolver.placeholder(sample: placeholderSnapshot),
         )
     }
 }
 
 struct InkAmpContinueTimelineProvider: TimelineProvider {
+    /// Logged only. Not passed to the snapshot store.
+    let kind: String
+    /// Logged only. Live entries do not branch on this.
+    let theme: InkAmpWidgetTheme
+
     func placeholder(in context: Context) -> InkAmpContinueEntry {
-        .placeholder
+        let entry = InkAmpContinueEntry.placeholder
+        log(phase: .placeholder, preview: context.isPreview, snapshot: entry.snapshot, family: context.family)
+        return entry
     }
 
     func getSnapshot(
         in context: Context,
         completion: @escaping (InkAmpContinueEntry) -> Void,
     ) {
-        if context.isPreview {
-            completion(.placeholder)
-            return
-        }
+        // Gallery preview included. `isPreview` must not swap in the redacted
+        // sample — that sample is what made the light compact tile look like a
+        // skeleton while a live entry was available.
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "continue.snapshot")
-        completion(InkAmpContinueEntry(date: Date(), snapshot: Self.loadSnapshot()))
+        let resolved = Self.resolve(phase: .snapshot, theme: theme)
+        log(
+            phase: resolved.phase,
+            preview: context.isPreview,
+            snapshot: resolved.snapshot,
+            family: context.family,
+        )
+        completion(InkAmpContinueEntry(date: Date(), resolved: resolved))
     }
 
     func getTimeline(
@@ -100,14 +140,51 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
         completion: @escaping (Timeline<InkAmpContinueEntry>) -> Void,
     ) {
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "continue.timeline")
-        let snapshot = Self.loadSnapshot()
-        let entry = InkAmpContinueEntry(date: Date(), snapshot: snapshot)
-        let refresh: TimeInterval = snapshot.isPlaying ? 5 * 60 : 15 * 60
+        let resolved = Self.resolve(phase: .timeline, theme: theme)
+        log(
+            phase: resolved.phase,
+            preview: context.isPreview,
+            snapshot: resolved.snapshot,
+            family: context.family,
+        )
+        let refresh: TimeInterval = resolved.snapshot.isPlaying ? 5 * 60 : 15 * 60
+        let entry = InkAmpContinueEntry(date: Date(), resolved: resolved)
         completion(Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(refresh))))
     }
 
     static func loadSnapshot() -> ContinueWidgetSnapshot {
         ContinueWidgetSnapshotStore.loadSnapshot()
+    }
+
+    /// Theme is forwarded into the resolver, which ignores it and returns `loaded`.
+    private static func resolve(
+        phase: InkAmpContinueLivePhase,
+        theme: InkAmpWidgetTheme,
+    ) -> InkAmpContinueResolvedTimeline {
+        InkAmpContinueTimelineResolver.resolve(
+            loaded: loadSnapshot(),
+            phase: phase,
+            theme: theme,
+        )
+    }
+
+    private func log(
+        phase: InkAmpContinueTimelinePhase,
+        preview: Bool,
+        snapshot: ContinueWidgetSnapshot,
+        family: WidgetFamily,
+    ) {
+        // Temporary diagnostic — same fields for compact and large.
+        print(
+            InkAmpContinueTimelineResolver.logLine(
+                kind: kind,
+                family: String(describing: family),
+                theme: theme,
+                phase: phase,
+                isPreview: preview,
+                snapshot: snapshot,
+            )
+        )
     }
 }
 
@@ -117,8 +194,12 @@ struct InkAmpLightMediumWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(
             kind: SilveranWidgetConstants.continueWidgetKinds[0],
-            provider: InkAmpContinueTimelineProvider(),
+            provider: InkAmpContinueTimelineProvider(
+                kind: SilveranWidgetConstants.continueWidgetKinds[0],
+                theme: .light,
+            ),
         ) { entry in
+            // Same entry the dark compact tile gets; theme is paint only.
             InkAmpContinueWidgetView(entry: entry, theme: .light, layout: .medium)
         }
         .configurationDisplayName("ink+amp Light Medium")
@@ -132,7 +213,10 @@ struct InkAmpLightLargeWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(
             kind: SilveranWidgetConstants.continueWidgetKinds[1],
-            provider: InkAmpContinueTimelineProvider(),
+            provider: InkAmpContinueTimelineProvider(
+                kind: SilveranWidgetConstants.continueWidgetKinds[1],
+                theme: .light,
+            ),
         ) { entry in
             InkAmpContinueWidgetView(entry: entry, theme: .light, layout: .large)
         }
@@ -147,7 +231,10 @@ struct InkAmpDarkMediumWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(
             kind: SilveranWidgetConstants.continueWidgetKinds[2],
-            provider: InkAmpContinueTimelineProvider(),
+            provider: InkAmpContinueTimelineProvider(
+                kind: SilveranWidgetConstants.continueWidgetKinds[2],
+                theme: .dark,
+            ),
         ) { entry in
             InkAmpContinueWidgetView(entry: entry, theme: .dark, layout: .medium)
         }
@@ -162,7 +249,10 @@ struct InkAmpDarkLargeWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(
             kind: SilveranWidgetConstants.continueWidgetKinds[3],
-            provider: InkAmpContinueTimelineProvider(),
+            provider: InkAmpContinueTimelineProvider(
+                kind: SilveranWidgetConstants.continueWidgetKinds[3],
+                theme: .dark,
+            ),
         ) { entry in
             InkAmpContinueWidgetView(entry: entry, theme: .dark, layout: .large)
         }
@@ -188,7 +278,7 @@ struct InkAmpContinueWidgetView: View {
 
     var body: some View {
         Group {
-            if InkAmpContinueWidgetActions.showsEmptyState(snapshot) {
+            if entry.showsEmptyState {
                 emptyState
             } else if layout == .medium {
                 mediumBody
@@ -199,6 +289,7 @@ struct InkAmpContinueWidgetView: View {
         .containerBackground(for: .widget) {
             colors.background
         }
+        .inkAmpLiveContent(isPlaceholder: entry.isPlaceholder)
     }
 
     // MARK: Medium
@@ -724,6 +815,19 @@ struct InkAmpThemedProgressBar: View {
             }
         }
         .frame(height: height)
+    }
+}
+
+extension View {
+    /// Live timelines opt out of WidgetKit's placeholder redaction. The gallery
+    /// sample stays redacted so it cannot be mistaken for the book in progress.
+    @ViewBuilder
+    func inkAmpLiveContent(isPlaceholder: Bool) -> some View {
+        if isPlaceholder {
+            self
+        } else {
+            unredacted()
+        }
     }
 }
 

@@ -341,6 +341,166 @@ struct ContinueWidgetSnapshotTests {
         #expect(!InkAmpContinueWidgetActions.showsEmptyState(withItem))
     }
 
+    @Test func activePlaybackDarkAppearanceKeepsTheItem() {
+        let loaded = ContinueWidgetSnapshot(
+            title: "Piranesi",
+            subtitle: "Susanna Clarke",
+            isPlaying: true,
+            kind: .audiobook,
+            upNext: [
+                ContinueWidgetQueueItem(
+                    id: "pod:ep-1",
+                    title: "Cold Open",
+                    kind: .podcast,
+                    deepLink: InkAmpContinueLink.queueItemURL(id: "pod:ep-1").absoluteString,
+                )
+            ],
+        )
+        let resolved = InkAmpContinueTimelineResolver.resolve(
+            loaded: loaded,
+            phase: .timeline,
+            theme: .dark,
+        )
+        #expect(resolved.snapshot.title == "Piranesi")
+        #expect(resolved.snapshot.upNext?.count == 1)
+        #expect(!resolved.showsEmptyState)
+        #expect(!resolved.isPlaceholder)
+        #expect(resolved.phase == .timeline)
+    }
+
+    @Test func activePlaybackLightAppearanceKeepsTheItem() {
+        let loaded = ContinueWidgetSnapshot(title: "Piranesi", isPlaying: true, kind: .audiobook)
+        let resolved = InkAmpContinueTimelineResolver.resolve(
+            loaded: loaded,
+            phase: .timeline,
+            theme: .light,
+        )
+        #expect(resolved.snapshot == loaded)
+        #expect(resolved.snapshot.title == "Piranesi")
+        #expect(!resolved.showsEmptyState)
+        #expect(!resolved.isPlaceholder)
+    }
+
+    @Test func noPlaybackShowsNothingInProgressModel() {
+        for theme in InkAmpWidgetTheme.allCases {
+            let resolved = InkAmpContinueTimelineResolver.resolve(
+                loaded: .empty,
+                phase: .timeline,
+                theme: theme,
+            )
+            #expect(resolved.showsEmptyState)
+            #expect(resolved.snapshot.title == nil)
+            #expect(!resolved.isPlaceholder)
+            #expect(resolved.phase == .timeline)
+        }
+    }
+
+    @Test func liveTimelineIsNotThePlaceholderSample() {
+        let sample = ContinueWidgetSnapshot(title: "The Quiet Path")
+        let placeholder = InkAmpContinueTimelineResolver.placeholder(sample: sample)
+        #expect(placeholder.isPlaceholder)
+        #expect(placeholder.phase == .placeholder)
+        // An empty gallery sample still must not take the live empty-state branch.
+        let emptySample = InkAmpContinueTimelineResolver.placeholder(sample: .empty)
+        #expect(emptySample.isPlaceholder)
+        #expect(!emptySample.showsEmptyState)
+
+        let live = InkAmpContinueTimelineResolver.resolve(
+            loaded: sample,
+            phase: .snapshot,
+            theme: .light,
+        )
+        #expect(!live.isPlaceholder)
+        #expect(live.phase == .snapshot)
+        #expect(live.snapshot == sample)
+    }
+
+    @Test func themeSelectionDoesNotChangeThePlaybackModel() {
+        let loaded = ContinueWidgetSnapshot(
+            title: "Piranesi",
+            isPlaying: false,
+            kind: .ebook,
+            progress: 0.4,
+            upNext: [
+                ContinueWidgetQueueItem(
+                    id: "book:storyteller/abc",
+                    title: "Next",
+                    kind: .ebook,
+                    deepLink: InkAmpContinueLink.queueItemURL(id: "book:storyteller/abc")
+                        .absoluteString,
+                )
+            ],
+        )
+        let paints = InkAmpWidgetTheme.allCases.map { theme in
+            InkAmpContinueTimelineResolver.resolve(
+                loaded: loaded,
+                phase: .timeline,
+                theme: theme,
+            )
+        }
+        #expect(paints.count == 2)
+        #expect(paints.allSatisfy { $0.snapshot == loaded && !$0.isPlaceholder && !$0.showsEmptyState })
+        #expect(paints[0] == paints[1])
+
+        let snapshotPhase = InkAmpContinueTimelineResolver.resolve(
+            loaded: loaded,
+            phase: .snapshot,
+            theme: .dark,
+        )
+        let timelinePhase = InkAmpContinueTimelineResolver.resolve(
+            loaded: loaded,
+            phase: .timeline,
+            theme: .light,
+        )
+        #expect(snapshotPhase.snapshot == timelinePhase.snapshot)
+        #expect(snapshotPhase.phase == .snapshot)
+        #expect(timelinePhase.phase == .timeline)
+    }
+
+    @Test func timelineLogNamesKindFamilyThemePhaseTitleAndQueue() {
+        let loaded = ContinueWidgetSnapshot(
+            title: "Piranesi",
+            upNext: [
+                ContinueWidgetQueueItem(
+                    id: "pod:ep-1",
+                    title: "Cold Open",
+                    kind: .podcast,
+                    deepLink: "punkrally://continue?item=pod:ep-1",
+                )
+            ],
+        )
+        let line = InkAmpContinueTimelineResolver.logLine(
+            kind: "inkamp.continue.light.medium.v2",
+            family: "systemMedium",
+            theme: .light,
+            phase: .timeline,
+            isPreview: false,
+            snapshot: loaded,
+        )
+        #expect(line.contains("kind=inkamp.continue.light.medium.v2"))
+        #expect(line.contains("family=systemMedium"))
+        #expect(line.contains("theme=light"))
+        #expect(line.contains("phase=timeline"))
+        #expect(line.contains("preview=false"))
+        #expect(line.contains("title=Piranesi"))
+        #expect(line.contains("queue=1"))
+
+        let empty = InkAmpContinueTimelineResolver.logLine(
+            kind: "inkamp.continue.dark.large.v1",
+            family: "systemLarge",
+            theme: .dark,
+            phase: .snapshot,
+            isPreview: true,
+            snapshot: .empty,
+        )
+        #expect(empty.contains("kind=inkamp.continue.dark.large.v1"))
+        #expect(empty.contains("theme=dark"))
+        #expect(empty.contains("phase=snapshot"))
+        #expect(empty.contains("title=nil"))
+        #expect(empty.contains("queue=0"))
+        #expect(empty.contains("preview=true"))
+    }
+
     @Test func homeScreenWidgetsDoNotUsePlaybackTransportIntents() {
         #expect(!InkAmpContinueWidgetActions.usesPlaybackTransportIntents)
         #expect(

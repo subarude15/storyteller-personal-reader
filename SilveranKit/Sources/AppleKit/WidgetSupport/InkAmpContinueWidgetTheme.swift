@@ -163,3 +163,107 @@ public enum InkAmpContinueWidgetActions {
         Array(snapshot.upNextItems.prefix(layout.upNextLimit))
     }
 }
+
+/// How a Continue tile timeline was produced.
+///
+/// `.placeholder` is the redacted Widget Gallery sample only. Snapshot and
+/// timeline phases are live reads of the shared playback snapshot.
+public enum InkAmpContinueTimelinePhase: String, Sendable, Equatable {
+    case placeholder
+    case snapshot
+    case timeline
+}
+
+/// Live snapshot/timeline phases. Placeholder is not a member, so a real
+/// entry cannot be constructed as the gallery sample.
+public enum InkAmpContinueLivePhase: String, Sendable, Equatable {
+    case snapshot
+    case timeline
+
+    public var timelinePhase: InkAmpContinueTimelinePhase {
+        switch self {
+            case .snapshot: return .snapshot
+            case .timeline: return .timeline
+        }
+    }
+}
+
+/// Playback model for one Continue tile update.
+///
+/// Theme is not stored. Light and dark compact tiles must carry the same
+/// snapshot; appearance is applied later by the view.
+public struct InkAmpContinueResolvedTimeline: Sendable, Equatable {
+    public var phase: InkAmpContinueTimelinePhase
+    public var snapshot: ContinueWidgetSnapshot
+    public var isPlaceholder: Bool
+    public var showsEmptyState: Bool
+
+    public init(
+        phase: InkAmpContinueTimelinePhase,
+        snapshot: ContinueWidgetSnapshot,
+        isPlaceholder: Bool,
+        showsEmptyState: Bool,
+    ) {
+        self.phase = phase
+        self.snapshot = snapshot
+        self.isPlaceholder = isPlaceholder
+        self.showsEmptyState = showsEmptyState
+    }
+}
+
+/// Builds Continue tile timelines from the shared playback snapshot.
+///
+/// `theme` is accepted on the live path so every call site has to name the
+/// appearance it will paint, then ignored. Adding a theme case fails the
+/// exhaustive switch until it is explicitly mapped onto the same snapshot.
+public enum InkAmpContinueTimelineResolver {
+    public static func resolve(
+        loaded: ContinueWidgetSnapshot,
+        phase: InkAmpContinueLivePhase,
+        theme: InkAmpWidgetTheme,
+    ) -> InkAmpContinueResolvedTimeline {
+        switch theme {
+            case .light, .dark:
+                return resolveLive(loaded: loaded, phase: phase)
+        }
+    }
+
+    public static func resolveLive(
+        loaded: ContinueWidgetSnapshot,
+        phase: InkAmpContinueLivePhase,
+    ) -> InkAmpContinueResolvedTimeline {
+        InkAmpContinueResolvedTimeline(
+            phase: phase.timelinePhase,
+            snapshot: loaded,
+            isPlaceholder: false,
+            showsEmptyState: InkAmpContinueWidgetActions.showsEmptyState(loaded),
+        )
+    }
+
+    /// Gallery sample. Never means "nothing in progress" — WidgetKit redacts it.
+    public static func placeholder(
+        sample: ContinueWidgetSnapshot,
+    ) -> InkAmpContinueResolvedTimeline {
+        InkAmpContinueResolvedTimeline(
+            phase: .placeholder,
+            snapshot: sample,
+            isPlaceholder: true,
+            showsEmptyState: false,
+        )
+    }
+
+    /// Temporary diagnostic line. Same fields for compact and large tiles.
+    public static func logLine(
+        kind: String,
+        family: String,
+        theme: InkAmpWidgetTheme,
+        phase: InkAmpContinueTimelinePhase,
+        isPreview: Bool,
+        snapshot: ContinueWidgetSnapshot,
+    ) -> String {
+        let trimmed = snapshot.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let title = trimmed.isEmpty ? "nil" : trimmed
+        let queue = snapshot.upNext?.count ?? 0
+        return "[ContinueWidget] timeline kind=\(kind) family=\(family) theme=\(theme.rawValue) phase=\(phase.rawValue) preview=\(isPreview) title=\(title) queue=\(queue)"
+    }
+}
