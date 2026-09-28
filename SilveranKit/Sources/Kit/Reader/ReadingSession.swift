@@ -24,6 +24,7 @@ final class HeadlessReaderSettings: ReaderSettingsReading {
     var customCSS: String? { nil }
     var singleColumnMode: Bool { false }
     var scrollingMode: Bool { false }
+    var pageTurnStyle: PageTurnStyle { kDefaultPageTurnStyle }
     var enableMarginClickNavigation: Bool { false }
     var userHighlightMode: String { "underline" }
     var readaloudHighlightMode: String { "underline" }

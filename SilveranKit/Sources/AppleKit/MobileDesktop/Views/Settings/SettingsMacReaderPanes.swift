@@ -54,6 +54,26 @@ struct MacReaderSettingsView: View {
                 }
 
                 GridRow {
+                    label("Page Turn")
+                    VStack(alignment: .leading, spacing: 4) {
+                        Picker("", selection: $reading.pageTurnStyle) {
+                            ForEach(PageTurnStyle.allCases) { style in
+                                Text(style.label).tag(style)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(width: 180, alignment: .leading)
+                        .disabled(reading.scrollingMode)
+                        if reading.scrollingMode {
+                            Text("Page turn style applies in paginated mode.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                GridRow {
                     label("Text Alignment")
                     Picker("", selection: $reading.textAlignment) {
                         Image(systemName: "text.alignleft").tag("left")

@@ -3,6 +3,7 @@ import { Overlayer } from "./foliate-js/overlayer.js";
 import { SpanHighlighter } from "./SpanHighlighter.js";
 import { debugLog } from "./DebugConfig.js";
 import BookmarkManager from "./BookmarkManager.js";
+import PageTurnAnimator from "./PageTurnAnimator.js";
 
 const getCSS = ({
   lineSpacing = 1.4,
@@ -152,6 +153,8 @@ class FoliateManager {
   #lastSpanHighlightedColor = null;
   #singleColumnMode = false;
   #scrollingMode = false;
+  #pageTurnStyle = "slide";
+  #pageTurnAnimator = new PageTurnAnimator();
   #hasAudioNarration = false;
   #enableMarginClickNavigation = true;
   #lastRelocateRange = null;
@@ -676,6 +679,17 @@ class FoliateManager {
     if (styles.scrollingMode !== undefined && styles.scrollingMode !== null) {
       this.#scrollingMode = styles.scrollingMode;
     }
+    if (styles.pageTurnStyle !== undefined && styles.pageTurnStyle !== null) {
+      const valid = ["slide", "curl", "instant"];
+      this.#pageTurnStyle = valid.includes(styles.pageTurnStyle)
+        ? styles.pageTurnStyle
+        : "slide";
+      this.#pageTurnAnimator.setStyle(this.#pageTurnStyle);
+    }
+    // Optional reduceMotion from Swift/accessibility (future). Prep only.
+    if (styles.reduceMotion !== undefined && styles.reduceMotion !== null) {
+      this.#pageTurnAnimator.setReduceMotion(styles.reduceMotion);
+    }
     if (styles.hasAudioNarration !== undefined && styles.hasAudioNarration !== null) {
       this.#hasAudioNarration = styles.hasAudioNarration;
     }
@@ -738,6 +752,11 @@ class FoliateManager {
     debugLog("FoliateManager", `Set margin to ${marginPx}px`);
 
     this.#view.renderer.setAttribute("gap", "0%");
+    this.#pageTurnAnimator.applyToRenderer(this.#view.renderer);
+    debugLog(
+      "FoliateManager",
+      `Page turn style ${this.#pageTurnStyle} (effective ${this.#pageTurnAnimator.effectiveStyle})`,
+    );
     this.#updateMaxInlineSize();
 
     if (!this.#resizeHandler) {
