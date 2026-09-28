@@ -512,10 +512,12 @@ public struct EbookPlayerView: View {
 
             // Immersive ebook reading: no persistent bottom % / page footer.
             // Read-aloud / narration still gets its bottom time + transport chrome.
+            // Hide while page-curl is active so progress chrome never floats over the sheet.
             let shouldShowImmersiveAudioChrome =
                 viewModel.hasAudioNarration
                 && !viewModel.showAudioSidebar
                 && !viewModel.isTopBarVisible
+                && !viewModel.isPageCurlActive
 
             if shouldShowImmersiveAudioChrome {
                 EbookOverlayIos(
@@ -551,7 +553,7 @@ public struct EbookPlayerView: View {
             }
 
             // Tap-revealed chrome: floating progress/page (no solid footer band).
-            if viewModel.isTopBarVisible && !viewModel.showAudioSidebar {
+            if viewModel.isTopBarVisible && !viewModel.showAudioSidebar && !viewModel.isPageCurlActive {
                 EbookOverlayIos(
                     showProgress: viewModel.settingsVM.showProgress,
                     showTimeRemainingInBook: viewModel.hasAudioNarration
@@ -580,7 +582,7 @@ public struct EbookPlayerView: View {
                 .transition(.opacity)
             }
 
-            if viewModel.isTopBarVisible {
+            if viewModel.isTopBarVisible && !viewModel.isPageCurlActive {
                 EbookPlayerTopToolbar(
                     hasAudioNarration: viewModel.hasAudioNarration,
                     playbackSpeed: viewModel.settingsVM.defaultPlaybackSpeed,
@@ -621,7 +623,7 @@ public struct EbookPlayerView: View {
 
             // Thin bottom scrub indicator is for narration/audio; keep ebook pages
             // full-bleed without a permanent progress strip.
-            if viewModel.hasAudioNarration {
+            if viewModel.hasAudioNarration && !viewModel.isPageCurlActive {
                 playbackProgressBar
             }
             #else

@@ -209,6 +209,11 @@ class FoliateManager {
     this.#pageTurnAnimator.receiveNativeSnapshot(requestId, dataUrl);
   }
 
+  /** Hide selection/highlight toolbar before a page-curl snapshot capture. */
+  hideSelectionToolbarForSnapshot() {
+    this.#bookmarkManager?.hideSelectionToolbar?.();
+  }
+
   #attachEventListeners() {
     this.#view.addEventListener("relocate", ({ detail }) => {
       this.#reportRelocate(detail);

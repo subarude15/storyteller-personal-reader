@@ -625,6 +625,7 @@ assert(atHalf.foldOpacity > 0, "progress 0.5 → backside fold visible");
 assert(atHalf.shadowOpacity > 0 && atHalf.shadowOpacity <= 0.3, "soft localized fold shadow");
 assert(atHalf.highlightOpacity > 0, "fold highlight present");
 assert(atHalf.sheetRotateY === 0 && atHalf.sheetSkewY === 0, "no full-page skew/rotate at 0.5");
+assert(atHalf.bulgeY === 0.5, "default bulge stays centered");
 // Mid bulge sits left of top/bottom edge (C silhouette for fromRight).
 assert(atHalf.curveAmp > 0, "fromRight peel has inward curve amp");
 // Tapered flap: outer mid differs from edge; path pinches at top/bottom (same x).
@@ -634,6 +635,30 @@ assert(
     || atHalf.foldPath.includes(`${Math.round(atHalf.edgeX * 10) / 10} 0`),
   "fold path starts at crease top (no rectangular end bar)",
 );
+
+// Vertical drag bias: upper touch lifts the fold peak; lower drops it; center matches baseline.
+const atHalfUpper = peelVisualState(0.5, W, H, true, 0.38);
+const atHalfLower = peelVisualState(0.5, W, H, true, 0.62);
+assert(atHalfUpper.bulgeY === 0.38, "upper drag locks bulge near top third");
+assert(atHalfLower.bulgeY === 0.62, "lower drag locks bulge near bottom third");
+assert(atHalfUpper.foldPath !== atHalf.foldPath, "upper bulge changes fold path");
+assert(atHalfLower.foldPath !== atHalf.foldPath, "lower bulge changes fold path");
+assert(atHalfUpper.foldPath !== atHalfLower.foldPath, "upper and lower bulges differ");
+assert(
+  atHalfUpper.foldWidth === atHalf.foldWidth && atHalfLower.foldWidth === atHalf.foldWidth,
+  "vertical bias does not change fold width",
+);
+assert(
+  atHalfUpper.curveAmp === atHalf.curveAmp && atHalfLower.curveAmp === atHalf.curveAmp,
+  "vertical bias does not change curve amplitude",
+);
+assert(
+  peelVisualState(0.5, W, H, true, 0.5).foldPath === atHalf.foldPath,
+  "explicit center bulgeY matches default center silhouette",
+);
+// Exaggerated inputs clamp into the subtle band.
+assert(peelVisualState(0.5, W, H, true, 0).bulgeY === 0.38, "top clamp is subtle");
+assert(peelVisualState(0.5, W, H, true, 1).bulgeY === 0.62, "bottom clamp is subtle");
 
 const at1 = peelVisualState(1, W, H, true);
 assert(at1.remain === 0, "progress 1 → foreground fully peeled");

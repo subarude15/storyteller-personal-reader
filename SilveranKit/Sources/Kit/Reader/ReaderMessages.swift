@@ -35,6 +35,12 @@ public struct PageFlippedMessage: Codable {
 public struct OverlayToggledMessage: Codable {
 }
 
+/// Sent when the page-curl animator needs floating reader chrome hidden/restored.
+/// `active: true` while a curl gesture/overlay is in flight; false when idle again.
+public struct PageCurlChromeMessage: Codable {
+    public let active: Bool
+}
+
 /// Sent when user clicks in margin zone to navigate - routed through EPM like arrow keys
 public struct MarginClickNavMessage: Codable {
     public let direction: String
