@@ -598,7 +598,7 @@ assert(
 );
 rtlAnimator.cancel({ durationMs: 0 });
 
-// --- Curved peel geometry -------------------------------------------------
+// --- Diagonal peel geometry -------------------------------------------------
 const W = 400;
 const H = 800;
 const at0 = peelVisualState(0, W, H, true);
@@ -612,42 +612,69 @@ assert(!at0.foldVisible, "progress 0 → fold hidden");
 
 const atEarly = peelVisualState(0.1, W, H, true);
 assert(atEarly.foldVisible, "progress 0.1 → fold already visible (no delayed takeover)");
+assert(atEarly.topX > atEarly.bottomX, "early fromRight peel is already diagonal (top right of bottom)");
 assert(atEarly.curveAmp / W < peelVisualState(0.5, W, H, true).curveAmp / W, "curve grows with progress");
 
 const atHalf = peelVisualState(0.5, W, H, true);
 assert(atHalf.remain === 0.5, "progress 0.5 → half remain");
-assert(atHalf.edgeX === W * 0.5, "progress 0.5 → edge at mid");
 assert(atHalf.flatPath.includes("C "), "progress 0.5 → cubic curved boundary");
 assert(atHalf.foldPath.includes("C "), "progress 0.5 → curved fold wedge");
-assert(atHalf.curveAmp / W >= 0.05, "curve amplitude strong enough to read as peel");
-assert(atHalf.foldWidth / W >= 0.05 && atHalf.foldWidth / W <= 0.18, "fold width mid ~5–18%");
+assert(atHalf.curveAmp / W >= 0.03, "curve amplitude strong enough to read as peel");
+assert(atHalf.foldWidth / W >= 0.08 && atHalf.foldWidth / W <= 0.4, "lower flap width mid ~8–40%");
 assert(atHalf.foldOpacity > 0, "progress 0.5 → backside fold visible");
 assert(atHalf.shadowOpacity > 0 && atHalf.shadowOpacity <= 0.3, "soft localized fold shadow");
 assert(atHalf.highlightOpacity > 0, "fold highlight present");
 assert(atHalf.sheetRotateY === 0 && atHalf.sheetSkewY === 0, "no full-page skew/rotate at 0.5");
-// Mid bulge sits left of top/bottom edge (C silhouette for fromRight).
-assert(atHalf.curveAmp > 0, "fromRight peel has inward curve amp");
-// Tapered flap: outer mid differs from edge; path pinches at top/bottom (same x).
-assert(atHalf.outerMid > atHalf.edgeX, "fromRight flap outer mid beyond crease");
+assert(atHalf.touchY === 0.5 && atHalf.bulgeY === 0.5, "default touch bias stays centered");
+// Diagonal crease: top stays nearer free edge, bottom swings farther inward.
+assert(atHalf.topX > atHalf.bottomX + W * 0.08, "fromRight mid peel has clear diagonal lean");
+assert(atHalf.topX > atHalf.edgeX && atHalf.bottomX < atHalf.edgeX, "edgeX sits between top/bottom endpoints");
 assert(
-  atHalf.foldPath.startsWith(`M ${Math.round(atHalf.edgeX * 10) / 10} 0 `)
-    || atHalf.foldPath.includes(`${Math.round(atHalf.edgeX * 10) / 10} 0`),
-  "fold path starts at crease top (no rectangular end bar)",
+  (atHalf.bottomOuter - atHalf.bottomX) > (atHalf.topOuter - atHalf.topX) * 1.5,
+  "backside flap depth much wider at bottom than top",
 );
+assert(atHalf.curveAmp > 0, "fromRight peel has inward curve amp");
+assert(
+  atHalf.foldPath.startsWith(`M ${Math.round(atHalf.topX * 10) / 10} 0 `)
+    || atHalf.foldPath.includes(`${Math.round(atHalf.topX * 10) / 10} 0`),
+  "fold path starts at top crease endpoint (narrow top)",
+);
+
+// Touch-Y rotates the diagonal (endpoints), not a vertical ribbon bulge.
+const atHalfUpper = peelVisualState(0.5, W, H, true, 0.28);
+const atHalfLower = peelVisualState(0.5, W, H, true, 0.72);
+assert(atHalfUpper.touchY === 0.28, "upper drag locks touch near top");
+assert(atHalfLower.touchY === 0.72, "lower drag locks touch near bottom");
+assert(atHalfUpper.topX < atHalf.topX, "upper drag peels top endpoint farther inward");
+assert(atHalfLower.bottomX < atHalf.bottomX, "lower drag swings bottom endpoint farther inward");
+assert(atHalfUpper.foldPath !== atHalf.foldPath, "upper touch changes fold path");
+assert(atHalfLower.foldPath !== atHalf.foldPath, "lower touch changes fold path");
+assert(atHalfUpper.foldPath !== atHalfLower.foldPath, "upper and lower diagonals differ");
+assert(
+  (atHalfLower.topX - atHalfLower.bottomX) > (atHalfUpper.topX - atHalfUpper.bottomX),
+  "lower drag produces a steeper diagonal lean than upper drag",
+);
+assert(
+  peelVisualState(0.5, W, H, true, 0.5).foldPath === atHalf.foldPath,
+  "explicit center touchY matches default center silhouette",
+);
+// Exaggerated inputs clamp into the safe band.
+assert(peelVisualState(0.5, W, H, true, 0).touchY === 0.28, "top clamp is subtle");
+assert(peelVisualState(0.5, W, H, true, 1).touchY === 0.72, "bottom clamp is subtle");
 
 const at1 = peelVisualState(1, W, H, true);
 assert(at1.remain === 0, "progress 1 → foreground fully peeled");
-assert(at1.edgeX === 0, "progress 1 → edge at spine");
 assert(at1.foldOpacity === 0, "progress 1 → fold gone");
 assert(!at1.foldVisible, "progress 1 → fold not visible");
 
 const leftHalf = peelVisualState(0.5, W, H, false);
-assert(leftHalf.edgeX === W * 0.5, "opposite direction edge mirrors to mid");
+assert(leftHalf.bottomX > leftHalf.topX, "opposite direction mirrors diagonal lean");
 assert(leftHalf.flatPath.includes("C "), "opposite direction uses curved boundary");
 assert(leftHalf.foldPath.includes("C "), "opposite direction has fold wedge");
 
 const wideHalf = peelVisualState(0.5, 900, 1200, true);
-assert(wideHalf.foldWidth / 900 <= 0.18, "wide viewport fold stays ≤18%");
+assert(wideHalf.foldWidth / 900 <= 0.4, "wide viewport flap stays ≤40%");
+assert(wideHalf.topX > wideHalf.bottomX, "wide viewport keeps diagonal crease");
 
 // Live overlay applies peel state (clip, no full-page transform)
 const peelAnimator = new PageTurnAnimator();

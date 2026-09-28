@@ -24,6 +24,9 @@ public final class ReaderCommsBridge {
     /// Notifies when user taps to toggle overlay (iOS only)
     public var onOverlayToggled: (() -> Void)?
 
+    /// Notifies when page-curl wants floating chrome hidden (`true`) or restored (`false`)
+    public var onPageCurlChrome: ((Bool) -> Void)?
+
     /// Notifies when user clicks margin zone to navigate (routed through EPM)
     public var onMarginClickNav: ((MarginClickNavMessage) -> Void)?
 
@@ -108,6 +111,12 @@ public final class ReaderCommsBridge {
     public func sendSwiftOverlayToggled(_: OverlayToggledMessage) {
         debugLog("[ReaderCommsBridge] sendSwiftOverlayToggled")
         onOverlayToggled?()
+    }
+
+    /// JS page-curl lifecycle wants floating reader chrome suppressed or restored
+    public func sendSwiftPageCurlChrome(_ message: PageCurlChromeMessage) {
+        debugLog("[ReaderCommsBridge] sendSwiftPageCurlChrome active=\(message.active)")
+        onPageCurlChrome?(message.active)
     }
 
     /// JS detected a margin click for navigation

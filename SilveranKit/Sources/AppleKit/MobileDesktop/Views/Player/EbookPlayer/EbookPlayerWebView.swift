@@ -625,6 +625,7 @@ private func makeWebViewConfiguration2(
     contentController.add(coordinator, name: "Relocated")
     contentController.add(coordinator, name: "PageFlipped")
     contentController.add(coordinator, name: "OverlayToggled")
+    contentController.add(coordinator, name: "PageCurlChrome")
     contentController.add(coordinator, name: "MarginClickNav")
     contentController.add(coordinator, name: "SentenceSkip")
     contentController.add(coordinator, name: "mediaOverlaySeek")

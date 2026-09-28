@@ -127,6 +127,9 @@ class EbookPlayerViewModel {
     var showAudioSheet = false
     var isReadingBarVisible = true
     var isTopBarVisible = true
+    /// True while a page-curl gesture/overlay is active. Hides floating chrome
+    /// for the curl lifetime without permanently toggling overlay preferences.
+    var isPageCurlActive = false
     var collapseCardTrigger = 0
     #endif
     var showCustomizePopover = false
@@ -653,6 +656,20 @@ class EbookPlayerViewModel {
             guard let self else { return }
             Task { @MainActor in
                 self.handleToggleOverlay()
+            }
+        }
+
+        bridge.onPageCurlChrome = { [weak self] active in
+            guard let self else { return }
+            Task { @MainActor in
+                #if os(iOS)
+                if self.isPageCurlActive != active {
+                    self.isPageCurlActive = active
+                    debugLog(
+                        "[EbookPlayerViewModel] Page curl chrome suppress active=\(active)"
+                    )
+                }
+                #endif
             }
         }
 

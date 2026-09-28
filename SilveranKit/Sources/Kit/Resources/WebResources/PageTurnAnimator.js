@@ -2,10 +2,10 @@
  * Owns page-turn *appearance* only. Foliate's paginator still owns which page
  * is shown and fires PageFlipped / Relocated. Do not put navigation logic here.
  *
- * Curl visual model (curved paper peel):
+ * Curl visual model (diagonal paper peel — Apple Books–like 2.5D):
  * - native WKWebView snapshot stays flat and readable (no full-page 3D)
- * - cubic curved clip boundary (not a straight vertical wipe)
- * - narrow backside fold wedge + soft curved shadow/highlight
+ * - angled crease: top stays nearer the free edge, bottom swings farther in
+ * - backside flap is narrow at top and broad toward the bottom
  * - solid underlay hides Foliate's intermediate scroll during the drag
  *
  * Curl is bypassed when:
@@ -32,6 +32,7 @@ const CANCEL_MS = 200;
 const SNAPSHOT_TIMEOUT_MS = 220;
 const clamp01 = (value) => Math.max(0, Math.min(1, value));
 const px = (n) => Math.round(n * 10) / 10;
+const lerp = (a, b, t) => a + (b - a) * t;
 
 /**
  * Document that originated a touch. Prefer the section document the listener
@@ -54,89 +55,88 @@ export function docFromTouchEvent(event, rootDocument = globalThis.document) {
 }
 
 /**
- * Cubic C-curve for a page-fold silhouette.
- * Midpoint bows into the remaining page (classic peel outline).
- * Top/bottom terminate at `edge` so the crease meets the viewport cleanly.
+ * Touch-Y band used to rotate the diagonal peel.
+ * Wider than the old vertical-bulge nudge so endpoints can actually lean.
  */
-function foldBoundaryPath(edge, amp, h, fromRight) {
-  const xTB = px(edge);
-  const xMid = px(fromRight ? edge - amp : edge + amp);
-  const y1 = px(h * 0.22);
-  const y2 = px(h * 0.38);
-  const yMid = px(h * 0.5);
-  const y3 = px(h * 0.62);
-  const y4 = px(h * 0.78);
-  const yH = px(h);
-  return (
-    `${xTB} 0 `
-    + `C ${xTB} ${y1}, ${xMid} ${y2}, ${xMid} ${yMid} `
-    + `C ${xMid} ${y3}, ${xTB} ${y4}, ${xTB} ${yH}`
-  );
+function clampTouchY(touchY) {
+  const raw = Number.isFinite(touchY) ? touchY : 0.5;
+  return Math.max(0.28, Math.min(0.72, raw));
 }
 
-function reverseFoldBoundaryPath(edge, amp, h, fromRight) {
-  const xTB = px(edge);
-  const xMid = px(fromRight ? edge - amp : edge + amp);
-  const y1 = px(h * 0.22);
-  const y2 = px(h * 0.38);
-  const yMid = px(h * 0.5);
-  const y3 = px(h * 0.62);
-  const y4 = px(h * 0.78);
+/**
+ * Angled crease from (topX, 0) → (bottomX, h).
+ * Control points bow slightly into the remaining page (convex paper fold).
+ */
+function diagonalCreasePath(topX, bottomX, bowX, midY, h, reverse = false) {
+  const xT = px(topX);
+  const xB = px(bottomX);
+  const x1 = px(lerp(topX, bowX, 0.55));
+  const x2 = px(lerp(bottomX, bowX, 0.55));
+  const y1 = px(midY * 0.42);
+  const y2 = px(midY * 0.82);
+  const y3 = px(midY + (h - midY) * 0.22);
+  const y4 = px(midY + (h - midY) * 0.58);
   const yH = px(h);
+  if (reverse) {
+    return (
+      `${xB} ${yH} `
+      + `C ${x2} ${y4}, ${x2} ${y3}, ${px(bowX)} ${px(midY)} `
+      + `C ${x1} ${y2}, ${x1} ${y1}, ${xT} 0`
+    );
+  }
   return (
-    `${xTB} ${yH} `
-    + `C ${xTB} ${y4}, ${xMid} ${y3}, ${xMid} ${yMid} `
-    + `C ${xMid} ${y2}, ${xTB} ${y1}, ${xTB} 0`
+    `${xT} 0 `
+    + `C ${x1} ${y1}, ${x1} ${y2}, ${px(bowX)} ${px(midY)} `
+    + `C ${x2} ${y3}, ${x2} ${y4}, ${xB} ${yH}`
   );
 }
 
 /**
- * Outer flap edge that pinches to `edge` at top/bottom (zero-width caps)
- * and reaches `outerMid` only at mid-height. Prevents rectangular end bars.
+ * Outer edge of the backside flap: pinches near the top crease endpoint and
+ * swings wide toward the bottom (triangular / peeled-sheet silhouette).
  */
-function taperedFlapOuterPath(edge, outerMid, h) {
-  const xTB = px(edge);
-  const xMid = px(outerMid);
-  const y1 = px(h * 0.16);
-  const y2 = px(h * 0.34);
-  const yMid = px(h * 0.5);
-  const y3 = px(h * 0.66);
-  const y4 = px(h * 0.84);
+function diagonalFlapOuterPath(topOuter, bottomOuter, tipX, tipY, h, reverse = false) {
+  const xT = px(topOuter);
+  const xB = px(bottomOuter);
+  const xTip = px(tipX);
+  const yTip = px(tipY);
+  const y1 = px(tipY * 0.35);
+  const y2 = px(tipY * 0.75);
+  const y3 = px(tipY + (h - tipY) * 0.28);
+  const y4 = px(tipY + (h - tipY) * 0.62);
   const yH = px(h);
+  // Soft approach into the tip, then out to the wide bottom.
+  if (reverse) {
+    return (
+      `${xB} ${yH} `
+      + `C ${px(lerp(bottomOuter, tipX, 0.35))} ${y4}, ${xTip} ${y3}, ${xTip} ${yTip} `
+      + `C ${xTip} ${y2}, ${px(lerp(topOuter, tipX, 0.4))} ${y1}, ${xT} 0`
+    );
+  }
   return (
-    `${xTB} 0 `
-    + `C ${xTB} ${y1}, ${xMid} ${y2}, ${xMid} ${yMid} `
-    + `C ${xMid} ${y3}, ${xTB} ${y4}, ${xTB} ${yH}`
-  );
-}
-
-function reverseTaperedFlapOuterPath(edge, outerMid, h) {
-  const xTB = px(edge);
-  const xMid = px(outerMid);
-  const y1 = px(h * 0.16);
-  const y2 = px(h * 0.34);
-  const yMid = px(h * 0.5);
-  const y3 = px(h * 0.66);
-  const y4 = px(h * 0.84);
-  const yH = px(h);
-  return (
-    `${xTB} ${yH} `
-    + `C ${xTB} ${y4}, ${xMid} ${y3}, ${xMid} ${yMid} `
-    + `C ${xMid} ${y2}, ${xTB} ${y1}, ${xTB} 0`
+    `${xT} 0 `
+    + `C ${px(lerp(topOuter, tipX, 0.4))} ${y1}, ${xTip} ${y2}, ${xTip} ${yTip} `
+    + `C ${xTip} ${y3}, ${px(lerp(bottomOuter, tipX, 0.35))} ${y4}, ${xB} ${yH}`
   );
 }
 
 /**
- * Curved page-peel geometry — one continuous function of progress.
- * The snapshot sheet itself is never rotated/skewed — only clipped by a curve.
- * Fold backside / shadow / highlight are tapered wedges attached to that curve.
+ * Diagonal page-peel geometry — continuous in progress, locked touch-Y per gesture.
+ * Snapshot sheet stays flat; only the clip crease and SVG flap change.
+ *
+ * Model (forward / fromRight):
+ * - top crease stays nearer the free (right) edge
+ * - bottom crease travels farther left
+ * - backside flap is narrow at top, broad at bottom
+ * - touchY rotates that lean (upper / middle / lower drag)
  *
  * @param {number} progress 0..1
  * @param {number} width CSS px
  * @param {number} [height=0] CSS px (defaults to a tall phone-like ratio)
  * @param {boolean} [fromRight=true]
+ * @param {number} [touchY=0.5] normalized vertical grab (0=top … 1=bottom)
  */
-export function peelVisualState(progress, width, height = 0, fromRight = true) {
+export function peelVisualState(progress, width, height = 0, fromRight = true, touchY = 0.5) {
   // Back-compat: peelVisualState(p, w, fromRightBoolean)
   if (typeof height === "boolean") {
     fromRight = height;
@@ -146,25 +146,73 @@ export function peelVisualState(progress, width, height = 0, fromRight = true) {
   const p = clamp01(progress);
   const w = Math.max(1, width || 1);
   const h = Math.max(1, height || w * 1.9);
+  const ty = clampTouchY(touchY);
+  const touch = ty - 0.5; // −0.22 … +0.22
   const remain = 1 - p;
-  const edgeX = fromRight ? w * remain : w * p;
 
-  // Progress-responsive fold: tiny early, pronounced mid, taper near end.
-  // sin(πp) peaks at p=0.5 so slow/fast swipes share one continuous curve.
+  // Progress envelope: tiny early, fullest mid, taper near end.
   const peelEnvelope = Math.sin(p * Math.PI);
-  const foldWidth = w * (0.055 + 0.11 * peelEnvelope); // ~5.5–16.5% mid
-  const curveAmp = w * (0.018 + 0.1 * peelEnvelope); // ~1.8–11.8%
 
-  // Fold appears as soon as there is meaningful peel — no delayed takeover.
+  // How far top vs bottom advance from the free edge (as a fraction of width).
+  // bottomRate > topRate ⇒ diagonal lean (Apple Books–like peel).
+  // Upper touch raises topRate / lowers bottomRate; lower touch does the opposite.
+  const topRate = 0.36 - touch * 0.55; // ~0.24–0.48
+  const bottomRate = 1.12 + touch * 0.5; // ~1.01–1.23
+
+  const topAdvance = Math.min(0.92, p * topRate * (0.85 + 0.15 * peelEnvelope));
+  const bottomAdvance = Math.min(0.98, p * bottomRate * (0.9 + 0.1 * peelEnvelope));
+
+  let topX;
+  let bottomX;
+  if (fromRight) {
+    topX = w * (1 - topAdvance);
+    bottomX = w * (1 - bottomAdvance);
+    // Keep a readable diagonal: bottom must sit left of top.
+    bottomX = Math.min(bottomX, topX - w * 0.04 * peelEnvelope);
+    bottomX = Math.max(0, bottomX);
+    topX = Math.min(w, Math.max(bottomX + 1, topX));
+  } else {
+    topX = w * topAdvance;
+    bottomX = w * bottomAdvance;
+    bottomX = Math.max(bottomX, topX + w * 0.04 * peelEnvelope);
+    bottomX = Math.min(w, bottomX);
+    topX = Math.max(0, Math.min(bottomX - 1, topX));
+  }
+
+  // Average front used by gradients / legacy edgeX consumers.
+  const edgeX = (topX + bottomX) * 0.5;
+
+  // Crease bows into the remaining page; peak follows touch Y slightly.
+  const midY = h * (0.48 + touch * 0.22);
+  const lean = Math.abs(topX - bottomX);
+  const curveAmp = foldVisibleAmp(p, w, peelEnvelope, lean);
+  const bowX = fromRight
+    ? edgeX - curveAmp
+    : edgeX + curveAmp;
+
+  // Flap: narrow at top, broad at bottom — triangular peeled sheet.
   const foldVisible = p > 0.008 && p < 0.992;
-  const amp = foldVisible ? curveAmp : 0;
-  const flap = foldVisible ? foldWidth : 0;
+  const flapTop = foldVisible ? w * (0.012 + 0.035 * peelEnvelope) : 0;
+  const flapBottom = foldVisible
+    ? w * (0.07 + 0.14 * peelEnvelope) + lean * 0.28
+    : 0;
+  const foldWidth = flapBottom; // max flap depth (for asserts / gradients)
+  const tipY = h * (0.62 + touch * 0.12);
+  const tipExtra = foldVisible ? w * (0.02 + 0.06 * peelEnvelope) + lean * 0.12 : 0;
 
-  // Mid-height outer tip of the backside flap (into the revealed zone).
-  // Top/bottom pinch to edgeX — no parallel rectangular caps.
-  const outerMid = fromRight
-    ? Math.min(w, edgeX + flap)
-    : Math.max(0, edgeX - flap);
+  let topOuter;
+  let bottomOuter;
+  let tipX;
+  if (fromRight) {
+    topOuter = Math.min(w, topX + flapTop);
+    bottomOuter = Math.min(w, bottomX + flapBottom);
+    tipX = Math.min(w, lerp(topOuter, bottomOuter, tipY / h) + tipExtra);
+  } else {
+    topOuter = Math.max(0, topX - flapTop);
+    bottomOuter = Math.max(0, bottomX - flapBottom);
+    tipX = Math.max(0, lerp(topOuter, bottomOuter, tipY / h) - tipExtra);
+  }
+  const outerMid = tipX;
 
   let flatPath;
   let foldPath = "";
@@ -177,30 +225,37 @@ export function peelVisualState(progress, width, height = 0, fromRight = true) {
     flatPath = fromRight
       ? `M 0 0 L 0 0 L 0 ${px(h)} L 0 ${px(h)} Z`
       : `M ${px(w)} 0 L ${px(w)} 0 L ${px(w)} ${px(h)} L ${px(w)} ${px(h)} Z`;
-  } else if (fromRight) {
-    const boundary = foldBoundaryPath(edgeX, amp, h, true);
-    flatPath = `M 0 0 L ${boundary} L 0 ${px(h)} Z`;
-    const inner = foldBoundaryPath(edgeX, amp, h, true);
-    const outer = reverseTaperedFlapOuterPath(edgeX, outerMid, h);
-    foldPath = `M ${inner} L ${outer} Z`;
-    // Shadow hugs the crease — narrower tapered band into the flap.
-    const shadowMid = Math.min(w, edgeX + flap * 0.45);
-    shadowPath = `M ${inner} L ${reverseTaperedFlapOuterPath(edgeX, shadowMid, h)} Z`;
-    // Soft highlight on the readable-page side of the crease.
-    const hiInset = Math.min(amp * 0.4, w * 0.018);
-    const hiInner = foldBoundaryPath(Math.max(0, edgeX - hiInset), amp * 0.85, h, true);
-    highlightPath = `M ${hiInner} L ${reverseFoldBoundaryPath(edgeX, amp, h, true)} Z`;
   } else {
-    const boundary = foldBoundaryPath(edgeX, amp, h, false);
-    flatPath = `M ${px(w)} 0 L ${boundary} L ${px(w)} ${px(h)} Z`;
-    const inner = foldBoundaryPath(edgeX, amp, h, false);
-    const outer = reverseTaperedFlapOuterPath(edgeX, outerMid, h);
-    foldPath = `M ${inner} L ${outer} Z`;
-    const shadowMid = Math.max(0, edgeX - flap * 0.45);
-    shadowPath = `M ${inner} L ${reverseTaperedFlapOuterPath(edgeX, shadowMid, h)} Z`;
-    const hiInset = Math.min(amp * 0.4, w * 0.018);
-    const hiInner = foldBoundaryPath(Math.min(w, edgeX + hiInset), amp * 0.85, h, false);
-    highlightPath = `M ${hiInner} L ${reverseFoldBoundaryPath(edgeX, amp, h, false)} Z`;
+    const crease = diagonalCreasePath(topX, bottomX, bowX, midY, h, false);
+    const creaseRev = diagonalCreasePath(topX, bottomX, bowX, midY, h, true);
+    if (fromRight) {
+      flatPath = `M 0 0 L ${crease} L 0 ${px(h)} Z`;
+    } else {
+      flatPath = `M ${px(w)} 0 L ${crease} L ${px(w)} ${px(h)} Z`;
+    }
+
+    const outer = diagonalFlapOuterPath(topOuter, bottomOuter, tipX, tipY, h, true);
+    foldPath = `M ${crease} L ${outer} Z`;
+
+    // Shadow band: same diagonal, shallower flap depth.
+    const shadowTop = fromRight
+      ? Math.min(w, topX + flapTop * 0.45)
+      : Math.max(0, topX - flapTop * 0.45);
+    const shadowBottom = fromRight
+      ? Math.min(w, bottomX + flapBottom * 0.45)
+      : Math.max(0, bottomX - flapBottom * 0.45);
+    const shadowTip = fromRight
+      ? Math.min(w, lerp(shadowTop, shadowBottom, tipY / h) + tipExtra * 0.35)
+      : Math.max(0, lerp(shadowTop, shadowBottom, tipY / h) - tipExtra * 0.35);
+    shadowPath = `M ${crease} L ${diagonalFlapOuterPath(shadowTop, shadowBottom, shadowTip, tipY, h, true)} Z`;
+
+    // Soft highlight on the readable side of the crease (slight inset).
+    const hi = Math.min(curveAmp * 0.45, w * 0.02);
+    const hiTop = fromRight ? Math.max(0, topX - hi) : Math.min(w, topX + hi);
+    const hiBottom = fromRight ? Math.max(0, bottomX - hi) : Math.min(w, bottomX + hi);
+    const hiBow = fromRight ? bowX - hi * 0.6 : bowX + hi * 0.6;
+    const hiCrease = diagonalCreasePath(hiTop, hiBottom, hiBow, midY, h, false);
+    highlightPath = `M ${hiCrease} L ${creaseRev} Z`;
   }
 
   const foldOpacity = foldVisible ? Math.min(0.96, 0.5 + p * 0.4) : 0;
@@ -211,11 +266,22 @@ export function peelVisualState(progress, width, height = 0, fromRight = true) {
     progress: p,
     remain,
     edgeX,
+    topX,
+    bottomX,
     height: h,
     width: w,
-    foldWidth: flap,
-    curveAmp: amp,
+    /** @deprecated alias kept for gesture field / older asserts — touch-Y bias */
+    bulgeY: ty,
+    touchY: ty,
+    foldWidth,
+    curveAmp,
     outerMid,
+    topOuter,
+    bottomOuter,
+    tipX,
+    tipY,
+    midY,
+    bowX,
     flatPath,
     foldPath,
     shadowPath,
@@ -232,6 +298,12 @@ export function peelVisualState(progress, width, height = 0, fromRight = true) {
     sheetSkewY: 0,
     sheetScaleX: 1,
   };
+}
+
+function foldVisibleAmp(p, w, peelEnvelope, lean) {
+  if (p <= 0.008 || p >= 0.992) return 0;
+  // Modest bow so the crease reads as paper, not a hard diagonal line.
+  return w * (0.012 + 0.055 * peelEnvelope) + lean * 0.08;
 }
 
 export default class PageTurnAnimator {
@@ -271,6 +343,8 @@ export default class PageTurnAnimator {
   /** True when the current request failed, timed out, or bridge is missing. */
   #snapshotFailed = false;
   #snapshotTimer = 0;
+  /** True while native chrome should stay hidden for an in-flight curl. */
+  #chromeSuppressed = false;
 
   #onTouchStart = (event) => this.#handleTouchStart(event);
   #onTouchMove = (event) => this.#handleTouchMove(event);
@@ -438,6 +512,7 @@ export default class PageTurnAnimator {
     this.#motionQuery = null;
     this.#cleanupOverlay();
     this.#invalidateSnapshot("detach");
+    this.#setChromeSuppressed(false);
     this.#phase = "idle";
     this.#gesture = null;
     this.#renderer = null;
@@ -512,7 +587,10 @@ export default class PageTurnAnimator {
       return false;
     }
 
-    const width = context.width ?? this.#renderer?.size ?? 0;
+    const width = context.width
+      ?? this.#host?.clientWidth
+      ?? this.#renderer?.size
+      ?? 0;
     const height = context.height ?? this.#host?.clientHeight ?? 0;
     if (!width || !height) {
       debugLog("PageTurnAnimator", "curl fallback: missing viewport geometry");
@@ -570,11 +648,13 @@ export default class PageTurnAnimator {
       startX: context.startX ?? prior?.startX,
       startY: context.startY ?? prior?.startY,
       lastX: context.lastX ?? prior?.lastX,
+      bulgeY: context.bulgeY ?? prior?.bulgeY ?? 0.5,
       fingerProgress: initialProgress,
       directionLocked: true,
       moved: true,
       doc: context.doc ?? prior?.doc,
     };
+    this.#setChromeSuppressed(true);
     this.#applyVisual(initialProgress);
     debugLog("PageTurnAnimator", "curl begin", {
       fromRight,
@@ -656,6 +736,10 @@ export default class PageTurnAnimator {
     this.#phase = "pending";
     const startX = touch.screenX ?? touch.clientX;
     const startY = touch.screenY ?? touch.clientY;
+    const hostHeight =
+      this.#host?.clientHeight || renderer.getBoundingClientRect?.().height || 0;
+    // Prefer host width so the sheet matches the WKWebView snapshot bounds.
+    const hostWidth = this.#host?.clientWidth || renderer.size || 0;
     this.#gesture = {
       startX,
       startY,
@@ -663,8 +747,10 @@ export default class PageTurnAnimator {
       startOffset: renderer.start, // paginator scroll — fallback progress only
       fromRight: true,
       rtl: renderer.getAttribute?.("dir") === "rtl",
-      width: renderer.size,
-      height: this.#host?.clientHeight || renderer.getBoundingClientRect?.().height || 0,
+      width: hostWidth || renderer.size,
+      height: hostHeight,
+      // Lock fold peak to touch Y at gesture start (no live wobble).
+      bulgeY: this.#bulgeYFromClientY(touch.clientY, hostHeight),
       moved: false,
       directionLocked: false,
       fingerProgress: 0,
@@ -691,7 +777,8 @@ export default class PageTurnAnimator {
 
     const x = touch.screenX ?? touch.clientX;
     gesture.lastX = x;
-    gesture.width = renderer.size || gesture.width;
+    // Keep visual size synced to the host (snapshot viewport); do not retarget bulgeY.
+    gesture.width = this.#host?.clientWidth || renderer.size || gesture.width;
     gesture.height = this.#host?.clientHeight || gesture.height;
 
     const dx = x - gesture.startX;
@@ -700,11 +787,13 @@ export default class PageTurnAnimator {
       this.#lockDirectionFromDelta(dx > 0 ? 1 : -1, /* fromFinger */ true);
       if (!gesture.moved) return;
 
+      // Real drag started — hide floating chrome for the curl lifetime.
+      this.#setChromeSuppressed(true);
+
       if (this.#snapshotFailed) {
         debugLog("PageTurnAnimator", "curl fallback: snapshot unavailable at drag start");
+        this.#resetGesture();
         this.#fallbackThisGesture = true;
-        this.#phase = "idle";
-        this.#gesture = null;
         return;
       }
 
@@ -753,14 +842,16 @@ export default class PageTurnAnimator {
       if (Math.abs(delta) < 1) return;
       // Prefer Foliate scroll for direction when touchmove has not locked yet.
       this.#lockDirectionFromDelta(delta, /* fromFinger */ false);
-      gesture.width = renderer.size;
+      gesture.width = this.#host?.clientWidth || renderer.size || gesture.width;
       gesture.height = this.#host?.clientHeight || gesture.height;
+
+      // Real drag started — hide floating chrome for the curl lifetime.
+      this.#setChromeSuppressed(true);
 
       if (this.#snapshotFailed) {
         debugLog("PageTurnAnimator", "curl fallback: snapshot unavailable at drag start");
+        this.#resetGesture();
         this.#fallbackThisGesture = true;
-        this.#phase = "idle";
-        this.#gesture = null;
         return;
       }
 
@@ -824,6 +915,27 @@ export default class PageTurnAnimator {
     // fromRight peel: drag left increases progress; fromLeft: drag right.
     const raw = gesture.fromRight !== false ? -dx / width : dx / width;
     return clamp01(raw);
+  }
+
+  /**
+   * Map clientY within the reader host to a diagonal-peel touch bias.
+   * Locked per gesture; rotates top/bottom crease endpoints (not a vertical bulge slide).
+   */
+  #bulgeYFromClientY(clientY, hostHeight) {
+    const h = Math.max(1, hostHeight || this.#host?.clientHeight || 1);
+    let norm = 0.5;
+    if (Number.isFinite(clientY) && this.#host?.getBoundingClientRect) {
+      try {
+        const top = this.#host.getBoundingClientRect().top;
+        norm = clamp01((clientY - top) / h);
+      } catch {
+        norm = 0.5;
+      }
+    } else if (Number.isFinite(clientY) && h > 1) {
+      norm = clamp01(clientY / h);
+    }
+    // Keep full-page Y influence, but clamp into the diagonal-safe band.
+    return clampTouchY(0.5 + (norm - 0.5) * 0.7);
   }
 
   #handleTouchEnd() {
@@ -893,6 +1005,13 @@ export default class PageTurnAnimator {
     this.#pendingSnapshotUrl = null;
     this.#snapshotFailed = false;
 
+    // Drop in-webview selection chrome so it cannot appear in the JPEG sheet.
+    try {
+      globalThis.window?.foliateManager?.hideSelectionToolbarForSnapshot?.();
+    } catch {
+      /* ignore */
+    }
+
     const handler = globalThis.window?.webkit?.messageHandlers?.RequestPageSnapshot;
     if (!handler?.postMessage) {
       this.#snapshotFailed = true;
@@ -943,15 +1062,15 @@ export default class PageTurnAnimator {
       startX: gesture.startX,
       startY: gesture.startY,
       lastX: gesture.lastX,
+      bulgeY: gesture.bulgeY,
       progress,
       sourceUrl,
       paperColor: this.#paperColor(gesture.doc),
       doc: gesture.doc,
     });
     if (!started) {
+      this.#resetGesture();
       this.#fallbackThisGesture = true;
-      this.#phase = "idle";
-      this.#gesture = null;
       return;
     }
   }
@@ -1171,7 +1290,8 @@ export default class PageTurnAnimator {
     const width = gesture.width || sheet.clientWidth || 1;
     const height = gesture.height || sheet.clientHeight || width * 1.9;
     const fromRight = gesture.fromRight !== false;
-    const state = peelVisualState(progress, width, height, fromRight);
+    const bulgeY = gesture.bulgeY ?? 0.5;
+    const state = peelVisualState(progress, width, height, fromRight, bulgeY);
 
     // Flat readable page — curved clip only.
     sheet.style.transform = "none";
@@ -1188,25 +1308,31 @@ export default class PageTurnAnimator {
     }
 
     if (this.#backGrad) {
-      // Gradient across the fold flap, crease → free edge.
+      // Gradient across the flap, following the diagonal crease → free tip.
       const x1 = state.edgeX;
-      const x2 = fromRight
-        ? state.outerMid ?? (state.edgeX + state.foldWidth)
-        : state.outerMid ?? (state.edgeX - state.foldWidth);
+      const y1 = state.midY ?? height * 0.5;
+      const x2 = state.tipX ?? state.outerMid ?? (
+        fromRight
+          ? state.edgeX + state.foldWidth
+          : state.edgeX - state.foldWidth
+      );
+      const y2 = state.tipY ?? height * 0.62;
       this.#backGrad.setAttribute("x1", String(px(x1)));
-      this.#backGrad.setAttribute("y1", "0");
+      this.#backGrad.setAttribute("y1", String(px(y1)));
       this.#backGrad.setAttribute("x2", String(px(x2)));
-      this.#backGrad.setAttribute("y2", "0");
+      this.#backGrad.setAttribute("y2", String(px(y2)));
     }
     if (this.#shadowGrad) {
       const x1 = state.edgeX;
+      const y1 = state.midY ?? height * 0.5;
       const x2 = fromRight
         ? state.edgeX + state.foldWidth * 0.45
         : state.edgeX - state.foldWidth * 0.45;
+      const y2 = state.tipY ?? height * 0.62;
       this.#shadowGrad.setAttribute("x1", String(px(x1)));
-      this.#shadowGrad.setAttribute("y1", "0");
+      this.#shadowGrad.setAttribute("y1", String(px(y1)));
       this.#shadowGrad.setAttribute("x2", String(px(x2)));
-      this.#shadowGrad.setAttribute("y2", "0");
+      this.#shadowGrad.setAttribute("y2", String(px(y2)));
     }
 
     if (this.#backPath) {
@@ -1294,6 +1420,24 @@ export default class PageTurnAnimator {
     this.#pageFlipSeen = false;
     this.#awaitingSnap = false;
     this.#fallbackThisGesture = false;
+    this.#setChromeSuppressed(false);
+  }
+
+  /**
+   * Ask Swift to hide/restore floating reader chrome for the curl lifetime.
+   * Does not permanently change overlay preferences — only gates visibility.
+   */
+  #setChromeSuppressed(active) {
+    const next = !!active;
+    if (next === this.#chromeSuppressed) return;
+    this.#chromeSuppressed = next;
+    try {
+      globalThis.window?.webkit?.messageHandlers?.PageCurlChrome?.postMessage({
+        active: next,
+      });
+    } catch {
+      /* bridge optional in tests / non-iOS */
+    }
   }
 
   #progressFromOffset(offset) {
