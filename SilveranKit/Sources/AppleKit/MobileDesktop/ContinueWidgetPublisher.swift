@@ -15,6 +15,10 @@ import UIKit
 public enum ContinueWidgetPublisher {
     private static var installed = false
     private static var publishTask: Task<Void, Never>?
+    /// Bumped on every Home publish. A task that awaited the audio session must
+    /// not write after a newer Home publish, or an early empty queue clears the
+    /// book the large tile is still showing.
+    private static var publishSerial: UInt64 = 0
 
     /// Call once from the host shell. Installs Darwin toggle/open observers and
     /// starts mirroring the audio session into the Continue widget snapshot.
@@ -60,12 +64,18 @@ public enum ContinueWidgetPublisher {
         durationSeconds: Double? = nil,
         upNext: [ContinueWidgetUpNextDraft] = [],
     ) {
+        publishSerial &+= 1
+        let serial = publishSerial
         Task { @MainActor in
             let session = await AudioSessionActor.shared.currentSnapshot()
+            // Home can publish before the queue loads (nil title) and again
+            // once the in-progress item exists. The nil write must not land last.
+            guard serial == publishSerial else { return }
             if session != nil {
-                await publishSession(session, upNext: upNext)
+                await publishSession(session, upNext: upNext, serial: serial)
                 return
             }
+            guard serial == publishSerial else { return }
             ContinueWidgetSnapshotStore.publish(
                 title: title,
                 subtitle: subtitle,
@@ -103,7 +113,9 @@ public enum ContinueWidgetPublisher {
     private static func publishSession(
         _ snapshot: AudioSessionSnapshot?,
         upNext: [ContinueWidgetUpNextDraft]? = nil,
+        serial: UInt64? = nil,
     ) async {
+        guard serial == nil || serial == publishSerial else { return }
         guard let snapshot else {
             // Session ended — keep title/cover, clear playing so the tile isn't stuck.
             let last = ContinueWidgetSnapshotStore.loadSnapshot()
@@ -150,6 +162,7 @@ public enum ContinueWidgetPublisher {
         let queue = upNext?.filter { draft in
             draft.title.trimmingCharacters(in: .whitespacesAndNewlines) != snapshot.title
         }
+        guard serial == nil || serial == publishSerial else { return }
         ContinueWidgetSnapshotStore.publish(
             title: snapshot.title,
             subtitle: snapshot.author ?? snapshot.chapterLabel,
