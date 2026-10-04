@@ -215,21 +215,13 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
         }
     }
 
-    nonisolated func pictureInPictureController(
-        _ pictureInPictureController: AVPictureInPictureController,
-        restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler:
-            @escaping (Bool) -> Void
-    ) {
-        if Thread.isMainThread {
-            let restored = MainActor.assumeIsolated {
-                self.restoreInterfaceForPictureInPictureStop()
-            }
-            completionHandler(restored)
-        } else {
-            Task { @MainActor in
-                completionHandler(self.restoreInterfaceForPictureInPictureStop())
-            }
-        }
+    /// AVKit's Swift overlay is `async -> Bool` (the completion handler is
+    /// `@Sendable`). Stay on this MainActor type so restore and the one
+    /// generated completion run together, with no cross-isolation send.
+    func pictureInPictureController(
+        _ pictureInPictureController: AVPictureInPictureController
+    ) async -> Bool {
+        restoreInterfaceForPictureInPictureStop()
     }
 
     private nonisolated func hopToMain(
