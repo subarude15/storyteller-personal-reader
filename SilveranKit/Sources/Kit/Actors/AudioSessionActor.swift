@@ -280,6 +280,7 @@ public actor AudioSessionActor {
         duration: TimeInterval? = nil,
         startAtSeconds: TimeInterval? = nil,
         youtubeVideoID: String? = nil,
+        isVideo: Bool = false,
     ) async throws {
         guard let factory = SilveranPlatform.audioPlayerFactory else {
             throw AudiobookSessionError.audiobookNotOpen
@@ -296,6 +297,7 @@ public actor AudioSessionActor {
                 currentTime: await podcastPlayer?.currentTime ?? 0,
                 rate: podcastRate
             ) {
+                await configurePodcastBackgroundAudio()
                 try? await transport(.play)
                 if await waitForPodcastTimeProgress(timeout: 2.0) {
                     return
@@ -310,6 +312,9 @@ public actor AudioSessionActor {
         let rate = min(max(config.playback.defaultPlaybackSpeed, 0.5), 10)
 
         try? await factory.prepareSession(longForm: true)
+        if isVideo {
+            useMoviePlaybackSession()
+        }
         let player = factory.makePlayer(profile: .smilSegment)
         do {
             let loaded = try await player.load(url: audioURL)
@@ -341,6 +346,7 @@ public actor AudioSessionActor {
         }
 
         await configureNowPlayingCommands(for: .podcast(episodeID))
+        await configurePodcastBackgroundAudio()
         await publishPodcastState()
         await player.play()
         guard await waitForPodcastTimeProgress(timeout: 5.0) else {
@@ -409,6 +415,7 @@ public actor AudioSessionActor {
         sponsorBlockSeekInFlight = false
         await podcastPlayer?.stop()
         podcastPlayer = nil
+        useSpokenAudioSession()
         podcastEpisodeID = nil
         podcastTitle = nil
         podcastAuthor = nil
@@ -421,6 +428,42 @@ public actor AudioSessionActor {
         notifySnapshotObservers(nil)
         await updateNowPlaying(nil)
         await teardownNowPlayingCommands()
+    }
+
+    /// Video sessions need movie-playback mode so PiP and lock-screen audio
+    /// stay on the shared session. Audio-only keeps the spoken session from
+    /// `prepareSession`. No-op off iOS.
+    private func useMoviePlaybackSession() {
+        #if os(iOS)
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playback, mode: .moviePlayback, options: [])
+            try session.setActive(true)
+        } catch {
+            debugLog(
+                "[AudioSessionActor] movie playback session failed: \(error.localizedDescription)"
+            )
+        }
+        #endif
+    }
+
+    /// Drop back to spoken audio after a podcast session ends. Does not
+    /// deactivate the session — the next opener activates its own category.
+    private func useSpokenAudioSession() {
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setCategory(
+            .playback,
+            mode: .spokenAudio,
+            options: []
+        )
+        #endif
+    }
+
+    private func configurePodcastBackgroundAudio() async {
+        #if canImport(AVFoundation)
+        guard let provider = podcastPlayer as? any AVPlayerProvidingPlaying else { return }
+        await provider.continueAudioInBackground()
+        #endif
     }
 
     #if canImport(AVFoundation)
@@ -907,6 +950,24 @@ public actor AudioSessionActor {
     /// Re-publish Now Playing (e.g. on background so Lock Screen shows fresh elapsed).
     public func refreshNowPlaying() async {
         await refreshNowPlayingForCurrentKind()
+    }
+
+    /// Lock / background must not tear down a live podcast. Re-assert continued
+    /// audio on the existing item when the system pauses a video timebase.
+    public func maintainPodcastPlaybackForBackground() async {
+        let isPodcast: Bool
+        if case .podcast = currentKind {
+            isPodcast = true
+        } else {
+            isPodcast = false
+        }
+        guard
+            InternalVideoPlaybackLifecycle.shouldMaintainPlaybackInBackground(
+                hasPodcastSession: isPodcast,
+                isPlaying: podcastIsPlaying
+            )
+        else { return }
+        await configurePodcastBackgroundAudio()
     }
 
     public func closeAudiobook() async {

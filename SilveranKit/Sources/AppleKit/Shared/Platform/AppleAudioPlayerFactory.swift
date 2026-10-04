@@ -226,6 +226,16 @@ actor AppleSMILAudioPlayer: AudioPlaying, AVPlayerProvidingPlaying {
         player
     }
 
+    /// Video AVPlayer defaults to pausing when the scene backgrounds. Opt into
+    /// continued audio on the same item. A system pause while we still intend
+    /// to play (lock button, home) is resumed in place; buffering is left alone.
+    func continueAudioInBackground() async {
+        guard let player else { return }
+        player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
+        guard isPlaying, player.timeControlStatus == .paused else { return }
+        player.rate = Float(desiredRate)
+    }
+
     func play() {
         guard let player else { return }
         player.rate = Float(desiredRate)

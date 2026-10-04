@@ -5,9 +5,17 @@ import Foundation
 import UIKit
 #endif
 
+/// Process-wide idle-timer / display-sleep lock.
+///
+/// Clients hold a named token (`IdleTimerHold`). The timer stays disabled
+/// until every holder releases, so video playback and read-aloud cannot
+/// clear each other's lock or leave the screen awake after they stop.
 @MainActor
 final class ScreenWakeLock {
     static let shared = ScreenWakeLock()
+
+    private var hold = IdleTimerHold()
+    private var appliedDisablesIdleTimer = false
 
     #if os(macOS)
     private var displaySleepActivity: NSObjectProtocol?
@@ -16,13 +24,35 @@ final class ScreenWakeLock {
     private init() {}
 
     func set(_ enabled: Bool) {
+        set(enabled, for: IdleTimerClient.mediaOverlay)
+    }
+
+    func set(_ enabled: Bool, for client: String) {
+        hold = hold.setting(enabled, client: client)
+        apply(hold.disablesIdleTimer)
+    }
+
+    func applyInternalVideo(_ context: InternalVideoPlaybackContext) {
+        set(
+            InternalVideoPlaybackLifecycle.shouldDisableIdleTimer(context),
+            for: IdleTimerClient.internalVideo
+        )
+    }
+
+    func releaseInternalVideo() {
+        set(false, for: IdleTimerClient.internalVideo)
+    }
+
+    private func apply(_ disablesIdleTimer: Bool) {
+        guard disablesIdleTimer != appliedDisablesIdleTimer else { return }
+        appliedDisablesIdleTimer = disablesIdleTimer
         #if os(iOS)
-        UIApplication.shared.isIdleTimerDisabled = enabled
+        UIApplication.shared.isIdleTimerDisabled = disablesIdleTimer
         debugLog(
-            "[ScreenWakeLock] iOS idle timer \(enabled ? "disabled" : "enabled")"
+            "[ScreenWakeLock] iOS idle timer \(disablesIdleTimer ? "disabled" : "enabled")"
         )
         #elseif os(macOS)
-        if enabled {
+        if disablesIdleTimer {
             guard displaySleepActivity == nil else { return }
             displaySleepActivity = ProcessInfo.processInfo.beginActivity(
                 options: [.idleDisplaySleepDisabled, .userInitiated],

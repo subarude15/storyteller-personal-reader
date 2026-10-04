@@ -3,32 +3,43 @@ import AVFoundation
 import SwiftUI
 import UIKit
 
-/// Renders the shared podcast `AVPlayer` into an `AVPlayerLayer` (no extra controls).
+/// Renders the shared podcast `AVPlayer` into one `AVPlayerLayer`.
 ///
-/// Portrait and landscape fullscreen must pass the same `AVPlayer` instance from
-/// `AudioSessionActor.podcastAVPlayer()` — never allocate a second engine when
-/// re-hosting this surface.
+/// Portrait and fullscreen both embed `PodcastVideoPictureInPictureCoordinator`'s
+/// layer host. They never allocate a second `AVPlayer` or a second layer.
 struct PodcastVideoSurfaceView: UIViewRepresentable {
     let player: AVPlayer
 
-    func makeUIView(context: Context) -> PlayerLayerView {
-        let view = PlayerLayerView()
-        view.playerLayer.player = player
-        view.playerLayer.videoGravity = .resizeAspect
+    func makeUIView(context: Context) -> PodcastVideoContainerView {
+        let view = PodcastVideoContainerView()
         view.backgroundColor = .black
+        PodcastVideoPictureInPictureCoordinator.shared.attach(container: view, player: player)
         return view
     }
 
-    func updateUIView(_ uiView: PlayerLayerView, context: Context) {
-        if uiView.playerLayer.player !== player {
-            uiView.playerLayer.player = player
+    func updateUIView(_ uiView: PodcastVideoContainerView, context: Context) {
+        if uiView.backgroundColor != .black {
+            uiView.backgroundColor = .black
         }
+        PodcastVideoPictureInPictureCoordinator.shared.attach(container: uiView, player: player)
     }
 
-    final class PlayerLayerView: UIView {
-        override class var layerClass: AnyClass { AVPlayerLayer.self }
-
-        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    static func dismantleUIView(_ uiView: PodcastVideoContainerView, coordinator: Coordinator) {
+        PodcastVideoPictureInPictureCoordinator.shared.detach(container: uiView)
     }
+}
+
+/// Host for the single shared player layer. Layout keeps the layer full-bleed.
+final class PodcastVideoContainerView: UIView {
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        subviews.first?.frame = bounds
+    }
+}
+
+final class PodcastPlayerLayerView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
 }
 #endif

@@ -209,6 +209,9 @@ public struct PunkRallyTabView: View {
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
+                    // If the system paused a live podcast while we were away,
+                    // resume that same item. A user pause leaves isPlaying false.
+                    Task { await AudioSessionActor.shared.maintainPodcastPlaybackForBackground() }
                     _ = PodcastDownloadStore.shared.runOvernightPruneIfDue()
                     ContinueWidgetPublisher.consumePendingWidgetCommands()
                     NotificationCenter.default.post(
@@ -223,6 +226,7 @@ public struct PunkRallyTabView: View {
                 } else if phase == .background {
                     Task {
                         await AudioSessionActor.shared.refreshNowPlaying()
+                        await AudioSessionActor.shared.maintainPodcastPlaybackForBackground()
                         await AudioSessionActor.shared.flushResolvedResume()
                         await PodcastPlayerPresenter.persistPodcastProgress(markFinished: false)
                         if let progress = await AudioSessionActor.shared.podcastPlaybackProgress() {

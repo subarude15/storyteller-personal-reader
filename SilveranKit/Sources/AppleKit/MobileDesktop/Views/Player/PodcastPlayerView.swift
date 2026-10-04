@@ -14,6 +14,7 @@ import UIKit
 public struct PodcastPlayerView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     private var theme: InkAmpAppTheme { .resolve(for: colorScheme) }
     private let episode: PodcastPlayerPresenter.Episode
     private let onClose: () -> Void
@@ -29,6 +30,7 @@ public struct PodcastPlayerView: View {
     @State private var showYouTubeMatch = false
     @State private var matchEpoch = 0
     @State private var videoPresentation = PodcastVideoPresentationCoordinator.shared
+    @State private var pipState = PodcastVideoPictureInPictureCoordinator.shared.state
 
     public init(episode: PodcastPlayerPresenter.Episode, onClose: @escaping () -> Void) {
         self.episode = episode
@@ -103,15 +105,33 @@ public struct PodcastPlayerView: View {
         }
         .onChange(of: live.isVideo) { _, _ in
             syncVideoPresentationContext()
+            syncVideoChromePolicy(playerPresented: true)
         }
         .onAppear {
             monitor.start()
             scrubFraction = monitor.snapshot?.bookProgress ?? 0
             syncVideoPresentationContext()
             syncInterfaceOrientation(size: nil)
+            syncVideoChromePolicy(playerPresented: true)
         }
         .onDisappear {
             videoPresentation.updatePlayerVisibility(expanded: false, isInternalVideo: false)
+            // Card closed or covered. Drop the wake lock and don't auto-PiP
+            // from the mini player. The shared session keeps playing.
+            syncVideoChromePolicy(playerPresented: false)
+            ScreenWakeLock.shared.releaseInternalVideo()
+        }
+        .onChange(of: isPlaying) { _, _ in
+            syncVideoChromePolicy(playerPresented: true)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            syncVideoChromePolicy(playerPresented: true)
+            if phase == .active, live.isVideo {
+                Task { await refreshVideoPlayer() }
+            }
+        }
+        .onChange(of: pipState.isActive) { _, _ in
+            syncVideoChromePolicy(playerPresented: true)
         }
         .onReceive(
             NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)
@@ -315,18 +335,21 @@ public struct PodcastPlayerView: View {
                         )
                     )
                     .overlay(alignment: .topTrailing) {
-                        Button {
-                            videoPresentation.enterFullscreenManually()
-                        } label: {
-                            Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .padding(8)
-                                .background(Circle().fill(Color.black.opacity(0.45)))
+                        HStack(spacing: 8) {
+                            PodcastVideoPictureInPictureButton(chrome: .overlay)
+                            Button {
+                                videoPresentation.enterFullscreenManually()
+                            } label: {
+                                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 32, height: 32)
+                                    .background(Circle().fill(Color.black.opacity(0.45)))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Enter fullscreen")
                         }
-                        .buttonStyle(.plain)
                         .padding(10)
-                        .accessibilityLabel("Enter fullscreen")
                     }
                 }
                 .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
@@ -479,6 +502,22 @@ public struct PodcastPlayerView: View {
         }
         // Reuse the session AVPlayer — never allocate a second engine for fullscreen.
         videoPlayer = await AudioSessionActor.shared.podcastAVPlayer()
+    }
+
+    private func syncVideoChromePolicy(playerPresented: Bool) {
+        let context = InternalVideoPlaybackContext(
+            isInternalVideo: live.isVideo,
+            isPlaying: isPlaying,
+            isPlayerPresented: playerPresented,
+            isPictureInPictureActive: pipState.isActive,
+            isAppActive: scenePhase == .active,
+            isPictureInPicturePossible: pipState.isPossible,
+            isPictureInPictureSupported: pipState.isSupported
+        )
+        ScreenWakeLock.shared.applyInternalVideo(context)
+        PodcastVideoPictureInPictureCoordinator.shared.setAutomaticStartEnabled(
+            InternalVideoPlaybackLifecycle.allowsAutomaticPictureInPicture(context)
+        )
     }
 
     private func syncVideoPresentationContext() {

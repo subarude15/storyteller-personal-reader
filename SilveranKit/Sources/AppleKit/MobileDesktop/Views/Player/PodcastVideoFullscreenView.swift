@@ -160,6 +160,8 @@ struct PodcastVideoFullscreenView: View {
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+            PodcastVideoPictureInPictureButton(chrome: .fullscreenBar)
+
             PlaybackRateButton(
                 currentRate: currentRate,
                 onRateChange: { rate in
