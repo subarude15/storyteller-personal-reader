@@ -30,7 +30,6 @@ public struct PodcastPlayerView: View {
     @State private var showYouTubeMatch = false
     @State private var matchEpoch = 0
     @State private var videoPresentation = PodcastVideoPresentationCoordinator.shared
-    @State private var pipState = PodcastVideoPictureInPictureCoordinator.shared.state
 
     public init(episode: PodcastPlayerPresenter.Episode, onClose: @escaping () -> Void) {
         self.episode = episode
@@ -59,9 +58,11 @@ public struct PodcastPlayerView: View {
     }
 
     public var body: some View {
-        ZStack {
+        Group {
             if videoPresentation.isFullscreen, live.isVideo {
-                // Same AVPlayer as portrait — presentation-only swap of chrome.
+                // Same AVPlayer as portrait — each surface owns a local layer.
+                // No opacity transition: simultaneous source/destination
+                // surfaces were fighting over UIKit ownership in earlier builds.
                 PodcastVideoFullscreenView(
                     title: live.title,
                     player: videoPlayer,
@@ -74,13 +75,12 @@ public struct PodcastPlayerView: View {
                     scrubFraction: $scrubFraction,
                     isScrubbing: $isScrubbing
                 )
-                .transition(.opacity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
             } else {
                 portraitPlayerContent
-                    .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: videoPresentation.isFullscreen)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .inkAmpAppThemed()
         .background {
@@ -130,12 +130,22 @@ public struct PodcastPlayerView: View {
                 Task { await refreshVideoPlayer() }
             }
         }
-        .onChange(of: pipState.isActive) { _, _ in
+        .onChange(of: videoPresentation.isFullscreen) { _, isFullscreen in
+            #if DEBUG
+            debugLog(
+                "[PodcastVideoPresentation] fullscreen=\(isFullscreen) video=\(live.isVideo)"
+            )
+            #endif
             syncVideoChromePolicy(playerPresented: true)
         }
         .onReceive(
             NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)
         ) { _ in
+            #if DEBUG
+            debugLog(
+                "[PodcastVideoPresentation] orientationDidChange fullscreen=\(videoPresentation.isFullscreen)"
+            )
+            #endif
             syncInterfaceOrientation(size: nil)
         }
         .onChange(of: monitor.snapshot?.bookProgress ?? 0) { _, newValue in
@@ -335,20 +345,17 @@ public struct PodcastPlayerView: View {
                         )
                     )
                     .overlay(alignment: .topTrailing) {
-                        HStack(spacing: 8) {
-                            PodcastVideoPictureInPictureButton(chrome: .overlay)
-                            Button {
-                                videoPresentation.enterFullscreenManually()
-                            } label: {
-                                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.white)
-                                    .frame(width: 32, height: 32)
-                                    .background(Circle().fill(Color.black.opacity(0.45)))
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Enter fullscreen")
+                        Button {
+                            videoPresentation.enterFullscreenManually()
+                        } label: {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 32, height: 32)
+                                .background(Circle().fill(Color.black.opacity(0.45)))
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Enter fullscreen")
                         .padding(10)
                     }
                 }
@@ -509,15 +516,10 @@ public struct PodcastPlayerView: View {
             isInternalVideo: live.isVideo,
             isPlaying: isPlaying,
             isPlayerPresented: playerPresented,
-            isPictureInPictureActive: pipState.isActive,
-            isAppActive: scenePhase == .active,
-            isPictureInPicturePossible: pipState.isPossible,
-            isPictureInPictureSupported: pipState.isSupported
+            isPictureInPictureActive: false,
+            isAppActive: scenePhase == .active
         )
         ScreenWakeLock.shared.applyInternalVideo(context)
-        PodcastVideoPictureInPictureCoordinator.shared.setAutomaticStartEnabled(
-            InternalVideoPlaybackLifecycle.allowsAutomaticPictureInPicture(context)
-        )
     }
 
     private func syncVideoPresentationContext() {

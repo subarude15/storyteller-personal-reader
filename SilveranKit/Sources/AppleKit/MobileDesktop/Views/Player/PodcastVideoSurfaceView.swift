@@ -3,43 +3,66 @@ import AVFoundation
 import SwiftUI
 import UIKit
 
-/// Renders the shared podcast `AVPlayer` into one `AVPlayerLayer`.
+/// Renders the shared podcast `AVPlayer` into a local `AVPlayerLayer`.
 ///
-/// Portrait and fullscreen both embed `PodcastVideoPictureInPictureCoordinator`'s
-/// layer host. They never allocate a second `AVPlayer` or a second layer.
+/// Portrait and landscape fullscreen each own their own layer/view. They must
+/// pass the same `AVPlayer` from `AudioSessionActor.podcastAVPlayer()` — never
+/// allocate a second playback engine. Layers are never re-parented between
+/// SwiftUI containers.
 struct PodcastVideoSurfaceView: UIViewRepresentable {
     let player: AVPlayer
 
-    func makeUIView(context: Context) -> PodcastVideoContainerView {
-        let view = PodcastVideoContainerView()
+    func makeUIView(context: Context) -> PlayerLayerView {
+        let view = PlayerLayerView()
+        view.surfaceID = context.coordinator.surfaceID
+        view.playerLayer.player = player
+        view.playerLayer.videoGravity = .resizeAspect
         view.backgroundColor = .black
-        PodcastVideoPictureInPictureCoordinator.shared.attach(container: view, player: player)
+        #if DEBUG
+        debugLog(
+            "[PodcastVideoSurface] create id=\(context.coordinator.surfaceID) player=\(ObjectIdentifier(player))"
+        )
+        #endif
         return view
     }
 
-    func updateUIView(_ uiView: PodcastVideoContainerView, context: Context) {
+    func updateUIView(_ uiView: PlayerLayerView, context: Context) {
+        // Identity-only player updates. Never remove/add the view or touch
+        // observable PiP/wake-lock state from this path.
+        if uiView.playerLayer.player !== player {
+            #if DEBUG
+            debugLog(
+                "[PodcastVideoSurface] update id=\(context.coordinator.surfaceID) player=\(ObjectIdentifier(player))"
+            )
+            #endif
+            uiView.playerLayer.player = player
+        }
         if uiView.backgroundColor != .black {
             uiView.backgroundColor = .black
         }
-        PodcastVideoPictureInPictureCoordinator.shared.attach(container: uiView, player: player)
     }
 
-    static func dismantleUIView(_ uiView: PodcastVideoContainerView, coordinator: Coordinator) {
-        PodcastVideoPictureInPictureCoordinator.shared.detach(container: uiView)
+    static func dismantleUIView(_ uiView: PlayerLayerView, coordinator: Coordinator) {
+        #if DEBUG
+        debugLog("[PodcastVideoSurface] dismantle id=\(coordinator.surfaceID)")
+        #endif
+        uiView.playerLayer.player = nil
     }
-}
 
-/// Host for the single shared player layer. Layout keeps the layer full-bleed.
-final class PodcastVideoContainerView: UIView {
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        subviews.first?.frame = bounds
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
     }
-}
 
-final class PodcastPlayerLayerView: UIView {
-    override class var layerClass: AnyClass { AVPlayerLayer.self }
+    final class Coordinator {
+        let surfaceID = String(UUID().uuidString.prefix(8))
+    }
 
-    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    final class PlayerLayerView: UIView {
+        var surfaceID = "unset"
+
+        override class var layerClass: AnyClass { AVPlayerLayer.self }
+
+        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    }
 }
 #endif

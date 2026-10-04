@@ -86,7 +86,8 @@ struct InternalVideoPlaybackLifecycleTests {
     }
 
     @Test func automaticPictureInPictureRequiresWatchingInlineVideo() {
-        #expect(InternalVideoPlaybackLifecycle.allowsAutomaticPictureInPicture(watching()))
+        #expect(!InternalVideoPlaybackLifecycle.isPictureInPictureEnabled)
+        #expect(!InternalVideoPlaybackLifecycle.allowsAutomaticPictureInPicture(watching()))
 
         var audio = watching()
         audio.isInternalVideo = false
@@ -102,8 +103,9 @@ struct InternalVideoPlaybackLifecycleTests {
     }
 
     @Test func pictureInPictureControlIsVideoOnlyAndFailsClosed() {
-        #expect(InternalVideoPlaybackLifecycle.shouldShowPictureInPictureControl(watching()))
-        #expect(InternalVideoPlaybackLifecycle.canStartPictureInPicture(watching()))
+        #expect(!InternalVideoPlaybackLifecycle.isPictureInPictureEnabled)
+        #expect(!InternalVideoPlaybackLifecycle.shouldShowPictureInPictureControl(watching()))
+        #expect(!InternalVideoPlaybackLifecycle.canStartPictureInPicture(watching()))
 
         var unsupported = watching()
         unsupported.isPictureInPictureSupported = false
@@ -113,7 +115,7 @@ struct InternalVideoPlaybackLifecycleTests {
 
         var notYet = watching()
         notYet.isPictureInPicturePossible = false
-        #expect(InternalVideoPlaybackLifecycle.shouldShowPictureInPictureControl(notYet))
+        #expect(!InternalVideoPlaybackLifecycle.shouldShowPictureInPictureControl(notYet))
         #expect(!InternalVideoPlaybackLifecycle.canStartPictureInPicture(notYet))
 
         var audio = watching()

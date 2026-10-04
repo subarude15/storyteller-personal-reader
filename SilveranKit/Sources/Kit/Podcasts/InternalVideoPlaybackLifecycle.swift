@@ -71,6 +71,10 @@ public struct InternalVideoPlaybackContext: Equatable, Sendable {
 }
 
 public enum InternalVideoPlaybackLifecycle {
+    /// PiP is off until a non-reparenting layer-registration model lands.
+    /// Keep wake-lock and lock-screen audio shipping without that risk.
+    public static let isPictureInPictureEnabled = false
+
     /// Disable the idle timer only while internal video is actively playing
     /// in the foreground player. Audio-only, pause, close, finish, PiP, and
     /// a non-active scene all restore normal auto-lock.
@@ -87,7 +91,10 @@ public enum InternalVideoPlaybackLifecycle {
     public static func allowsAutomaticPictureInPicture(
         _ context: InternalVideoPlaybackContext
     ) -> Bool {
-        context.isInternalVideo && context.isPlaying && context.isPlayerPresented
+        isPictureInPictureEnabled
+            && context.isInternalVideo
+            && context.isPlaying
+            && context.isPlayerPresented
     }
 
     /// Offer the control for internal video on devices that support PiP.
@@ -95,7 +102,9 @@ public enum InternalVideoPlaybackLifecycle {
     public static func shouldShowPictureInPictureControl(
         _ context: InternalVideoPlaybackContext
     ) -> Bool {
-        context.isInternalVideo && context.isPictureInPictureSupported
+        isPictureInPictureEnabled
+            && context.isInternalVideo
+            && context.isPictureInPictureSupported
     }
 
     public static func canStartPictureInPicture(_ context: InternalVideoPlaybackContext) -> Bool {
