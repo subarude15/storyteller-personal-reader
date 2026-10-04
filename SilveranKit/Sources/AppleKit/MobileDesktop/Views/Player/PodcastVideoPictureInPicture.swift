@@ -215,13 +215,16 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
         }
     }
 
-    /// AVKit's Swift overlay is `async -> Bool` (the completion handler is
-    /// `@Sendable`). Stay on this MainActor type so restore and the one
-    /// generated completion run together, with no cross-isolation send.
-    func pictureInPictureController(
+    /// AVKit's Swift overlay is `async -> Bool`. The requirement is
+    /// nonisolated (`AVPictureInPictureController` is not Sendable), so hop
+    /// only the restore onto this MainActor type. The overlay invokes the
+    /// completion handler once with the returned Bool.
+    nonisolated func pictureInPictureController(
         _ pictureInPictureController: AVPictureInPictureController
     ) async -> Bool {
-        restoreInterfaceForPictureInPictureStop()
+        await MainActor.run {
+            restoreInterfaceForPictureInPictureStop()
+        }
     }
 
     private nonisolated func hopToMain(
