@@ -21,22 +21,22 @@ public enum SilveranWidgetConstants {
     public static let readingWidgetKind = "SilveranReadingWidget"
     /// Four Continue + Next Up kinds (light/dark × medium/large).
     ///
-    /// The Medium kinds intentionally use v2. Real-device testing showed both
-    /// v1 Medium registrations could remain pinned to WidgetKit's redacted
-    /// placeholder even while the Large kinds loaded the same shared snapshot.
-    /// New kind identities invalidate only those poisoned Medium timeline caches;
-    /// the working Large v1 registrations remain stable.
+    /// Medium uses v3. Installed v2 Medium Home Screen tiles stayed on a cached
+    /// audiobook timeline even after the gallery picker and Large tiles showed
+    /// the current podcast. WidgetKit cannot migrate a kind string; v3 is a new
+    /// timeline namespace. Large v1 stays as-is.
     public static let continueWidgetKinds = [
-        "inkamp.continue.light.medium.v2",
+        "inkamp.continue.light.medium.v3",
         "inkamp.continue.light.large.v1",
-        "inkamp.continue.dark.medium.v2",
+        "inkamp.continue.dark.medium.v3",
         "inkamp.continue.dark.large.v1",
     ]
     /// Convenience alias — first of `continueWidgetKinds` (light medium).
     public static let continueWidgetKind = continueWidgetKinds[0]
-    /// Retired Continue kinds. Never register or reload these, or a dead tile
-    /// comes back. Includes the previous single Up-next kind and the blank
-    /// AltStore tiles.
+    /// Retired Continue kinds. Never register or reload these — WidgetKit keeps
+    /// a Home Screen instance bound to its kind, so a stale tile would linger.
+    /// After this build, remove any leftover Medium v1/v2 tile and add Medium
+    /// from the gallery once (v3).
     public static let legacySideloadContinueWidgetKinds = [
         "inkamp.continue.v3",
         "inkamp.continue.v4",
@@ -44,6 +44,8 @@ public enum SilveranWidgetConstants {
         "inkamp.continue.upnext.v1",
         "inkamp.continue.light.medium.v1",
         "inkamp.continue.dark.medium.v1",
+        "inkamp.continue.light.medium.v2",
+        "inkamp.continue.dark.medium.v2",
     ]
 }
 

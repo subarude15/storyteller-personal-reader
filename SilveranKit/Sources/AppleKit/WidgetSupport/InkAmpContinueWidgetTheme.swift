@@ -262,14 +262,86 @@ public enum InkAmpContinueTimelineResolver {
         snapshot: ContinueWidgetSnapshot,
         generatedAt: Date? = nil,
         storageKey: String = ContinueWidgetCurrentSnapshot.storageKey,
+        entryDate: Date? = nil,
+        refreshAfter: Date? = nil,
     ) -> String {
         let trimmed = snapshot.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let title = trimmed.isEmpty ? "nil" : trimmed
         let queue = snapshot.upNext?.count ?? 0
-        let progress = snapshot.percentComplete.map(String.init) ?? "nil"
+        let progress = snapshot.clampedProgress.map { String(format: "%.2f", $0) } ?? "nil"
         let item = snapshot.mediaIdentity.isEmpty ? "nil" : snapshot.mediaIdentity
         let generated = (generatedAt ?? snapshot.generatedAt).timeIntervalSince1970
-        return "[ContinueWidget] timeline kind=\(kind) family=\(family) theme=\(theme.rawValue) phase=\(phase.rawValue) preview=\(isPreview) item=\(item) title=\(title) progress=\(progress) generated=\(generated) source=\(storageKey) queue=\(queue)"
+        let call: String
+        switch phase {
+            case .placeholder: call = "placeholder"
+            case .snapshot: call = "getSnapshot"
+            case .timeline: call = "getTimeline"
+        }
+        var line =
+            "[ContinueWidget] \(call) kind=\(kind) family=\(family) theme=\(theme.rawValue) phase=\(phase.rawValue) preview=\(isPreview) item=\(item) title=\"\(title)\" progress=\(progress) generated=\(generated) source=\(storageKey) queue=\(queue)"
+        if let entryDate {
+            line += " entry=\(entryDate.timeIntervalSince1970)"
+        }
+        if let refreshAfter {
+            line += " refreshAfter=\(refreshAfter.timeIntervalSince1970)"
+        } else if phase == .timeline {
+            line += " refreshAfter=nil"
+        }
+        return line
+    }
+}
+
+/// One live gallery snapshot or Home Screen timeline built from the shared file.
+public struct ContinueWidgetLiveUpdate: Sendable, Equatable {
+    public var resolved: InkAmpContinueResolvedTimeline
+    public var entryDate: Date
+    /// `getTimeline` only — next WidgetKit refresh. Nil for gallery snapshots.
+    public var refreshAfter: Date?
+
+    public var snapshot: ContinueWidgetSnapshot { resolved.snapshot }
+
+    public init(
+        resolved: InkAmpContinueResolvedTimeline,
+        entryDate: Date,
+        refreshAfter: Date?,
+    ) {
+        self.resolved = resolved
+        self.entryDate = entryDate
+        self.refreshAfter = refreshAfter
+    }
+}
+
+/// Gallery `getSnapshot` and Home Screen `getTimeline` read the same snapshot.
+public enum ContinueWidgetLiveUpdateBuilder {
+    public static func refreshInterval(isPlaying: Bool) -> TimeInterval {
+        isPlaying ? 5 * 60 : 15 * 60
+    }
+
+    public static func make(
+        loaded: ContinueWidgetSnapshot,
+        phase: InkAmpContinueLivePhase,
+        theme: InkAmpWidgetTheme,
+        now: Date = Date(),
+    ) -> ContinueWidgetLiveUpdate {
+        let resolved = InkAmpContinueTimelineResolver.resolve(
+            loaded: loaded,
+            phase: phase,
+            theme: theme,
+        )
+        let refreshAfter: Date?
+        switch phase {
+            case .snapshot:
+                refreshAfter = nil
+            case .timeline:
+                refreshAfter = now.addingTimeInterval(
+                    refreshInterval(isPlaying: resolved.snapshot.isPlaying)
+                )
+        }
+        return ContinueWidgetLiveUpdate(
+            resolved: resolved,
+            entryDate: now,
+            refreshAfter: refreshAfter,
+        )
     }
 }
 

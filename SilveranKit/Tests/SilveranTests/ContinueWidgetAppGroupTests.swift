@@ -66,9 +66,9 @@ struct ContinueWidgetAppGroupTests {
         #expect(kinds.count == 4)
         #expect(Set(kinds).count == 4)
         #expect(kinds == [
-            "inkamp.continue.light.medium.v2",
+            "inkamp.continue.light.medium.v3",
             "inkamp.continue.light.large.v1",
-            "inkamp.continue.dark.medium.v2",
+            "inkamp.continue.dark.medium.v3",
             "inkamp.continue.dark.large.v1",
         ])
         // reloadTimelines() iterates continueWidgetKinds — publish must hit all four.
@@ -100,6 +100,16 @@ struct ContinueWidgetAppGroupTests {
         #expect(
             SilveranWidgetConstants.legacySideloadContinueWidgetKinds.contains(
                 "inkamp.continue.dark.medium.v1"
+            )
+        )
+        #expect(
+            SilveranWidgetConstants.legacySideloadContinueWidgetKinds.contains(
+                "inkamp.continue.light.medium.v2"
+            )
+        )
+        #expect(
+            SilveranWidgetConstants.legacySideloadContinueWidgetKinds.contains(
+                "inkamp.continue.dark.medium.v2"
             )
         )
     }
@@ -470,19 +480,20 @@ struct ContinueWidgetSnapshotTests {
             ],
         )
         let line = InkAmpContinueTimelineResolver.logLine(
-            kind: "inkamp.continue.light.medium.v2",
+            kind: "inkamp.continue.light.medium.v3",
             family: "systemMedium",
             theme: .light,
             phase: .timeline,
             isPreview: false,
             snapshot: loaded,
         )
-        #expect(line.contains("kind=inkamp.continue.light.medium.v2"))
+        #expect(line.contains("getTimeline"))
+        #expect(line.contains("kind=inkamp.continue.light.medium.v3"))
         #expect(line.contains("family=systemMedium"))
         #expect(line.contains("theme=light"))
         #expect(line.contains("phase=timeline"))
         #expect(line.contains("preview=false"))
-        #expect(line.contains("title=Piranesi"))
+        #expect(line.contains("title=\"Piranesi\""))
         #expect(line.contains("queue=1"))
 
         let empty = InkAmpContinueTimelineResolver.logLine(
@@ -496,7 +507,8 @@ struct ContinueWidgetSnapshotTests {
         #expect(empty.contains("kind=inkamp.continue.dark.large.v1"))
         #expect(empty.contains("theme=dark"))
         #expect(empty.contains("phase=snapshot"))
-        #expect(empty.contains("title=nil"))
+        #expect(empty.contains("getSnapshot"))
+        #expect(empty.contains("title=\"nil\""))
         #expect(empty.contains("queue=0"))
         #expect(empty.contains("preview=true"))
     }
@@ -695,15 +707,15 @@ struct ContinueWidgetCurrentSnapshotTests {
 
     @Test func refreshRequestIncludesCompactWidgetKinds() {
         let kinds = ContinueWidgetSnapshotStore.timelineKindsToReload
-        #expect(kinds.contains("inkamp.continue.light.medium.v2"))
-        #expect(kinds.contains("inkamp.continue.dark.medium.v2"))
+        #expect(kinds.contains("inkamp.continue.light.medium.v3"))
+        #expect(kinds.contains("inkamp.continue.dark.medium.v3"))
         #expect(kinds.contains("inkamp.continue.light.large.v1"))
         #expect(kinds.contains("inkamp.continue.dark.large.v1"))
         #expect(
             ContinueWidgetSnapshotStore.compactTimelineKinds.sorted()
                 == [
-                    "inkamp.continue.dark.medium.v2",
-                    "inkamp.continue.light.medium.v2",
+                    "inkamp.continue.dark.medium.v3",
+                    "inkamp.continue.light.medium.v3",
                 ]
         )
         #expect(Set(ContinueWidgetSnapshotStore.compactTimelineKinds).isSubset(of: Set(kinds)))
@@ -846,5 +858,74 @@ struct ContinueWidgetCurrentSnapshotTests {
         )
         #expect(snapshot.itemID == nil)
         #expect(snapshot.mediaIdentity.contains("The Troop"))
+    }
+
+    @Test func mediumKindsAreV3AndLargeKindsStayV1() {
+        let kinds = SilveranWidgetConstants.continueWidgetKinds
+        #expect(kinds.contains(where: { $0.contains(".medium.v3") }))
+        #expect(!kinds.contains(where: { $0.contains(".medium.v2") }))
+        #expect(kinds[1] == "inkamp.continue.light.large.v1")
+        #expect(kinds[3] == "inkamp.continue.dark.large.v1")
+        #expect(
+            Set(ContinueWidgetSnapshotStore.timelineKindsToReload).isSuperset(
+                of: [
+                    "inkamp.continue.light.medium.v3",
+                    "inkamp.continue.dark.medium.v3",
+                ]
+            )
+        )
+    }
+
+    @Test func gallerySnapshotAndHomeTimelineUseTheSameSharedSnapshot() {
+        let now = Date(timeIntervalSince1970: 1_777_000_000)
+        let gallery = ContinueWidgetLiveUpdateBuilder.make(
+            loaded: vergecast,
+            phase: .snapshot,
+            theme: .dark,
+            now: now,
+        )
+        let home = ContinueWidgetLiveUpdateBuilder.make(
+            loaded: vergecast,
+            phase: .timeline,
+            theme: .light,
+            now: now,
+        )
+        #expect(gallery.snapshot == home.snapshot)
+        #expect(gallery.snapshot.itemID == "pod:vergecast-123")
+        #expect(gallery.refreshAfter == nil)
+        #expect(home.refreshAfter == now.addingTimeInterval(5 * 60))
+        #expect(gallery.resolved.phase == .snapshot)
+        #expect(home.resolved.phase == .timeline)
+        #expect(!gallery.resolved.isPlaceholder)
+        #expect(!home.resolved.isPlaceholder)
+    }
+
+    @Test func mediumTimelineAfterIdentitySwitchDoesNotRetainPreviousItem() {
+        let now = Date(timeIntervalSince1970: 1_777_000_100)
+        let afterAudiobook = ContinueWidgetLiveUpdateBuilder.make(
+            loaded: troop,
+            phase: .timeline,
+            theme: .dark,
+            now: now,
+        )
+        let afterPodcast = ContinueWidgetLiveUpdateBuilder.make(
+            loaded: vergecast,
+            phase: .timeline,
+            theme: .dark,
+            now: now,
+        )
+        #expect(afterAudiobook.snapshot.itemID == "book:storyteller/troop")
+        #expect(afterPodcast.snapshot.itemID == "pod:vergecast-123")
+        #expect(afterPodcast.snapshot.itemID != afterAudiobook.snapshot.itemID)
+        #expect(afterPodcast.snapshot.title != "The Troop")
+        #expect(afterPodcast.snapshot.title == vergecast.title)
+        #expect(
+            ContinueWidgetReloadPolicy.shouldReload(
+                previous: afterAudiobook.snapshot,
+                next: afterPodcast.snapshot,
+                lastReload: now,
+                now: now,
+            )
+        )
     }
 }
