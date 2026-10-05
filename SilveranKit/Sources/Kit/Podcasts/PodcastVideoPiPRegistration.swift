@@ -61,3 +61,27 @@ public struct PodcastVideoPiPRestoreGate: Equatable, Sendable {
         restoreAllowed && observedGeneration == sessionGeneration
     }
 }
+
+/// Pure teardown / observation decisions for the PiP coordinator.
+public enum PodcastVideoPiPLifecyclePolicy {
+    /// While PiP is showing the dismantling surface's layer as its content
+    /// source, keep `layer.player` bound so the floating window does not blank.
+    /// No UIKit re-parenting — the coordinator retains that source view instead.
+    public static func shouldClearPlayerOnDismantle(
+        isPictureInPictureActive: Bool,
+        isControllerContentSource: Bool
+    ) -> Bool {
+        !(isPictureInPictureActive && isControllerContentSource)
+    }
+
+    /// Keep refreshing `isPictureInPicturePossible` until it becomes true or
+    /// the controller/source identity changes. Avoids a short startup window
+    /// that leaves the button stuck disabled after slow stream start.
+    public static func shouldContinuePossibilityRefresh(
+        isPossible: Bool,
+        hasController: Bool,
+        controllerMatchesObserved: Bool
+    ) -> Bool {
+        !isPossible && hasController && controllerMatchesObserved
+    }
+}

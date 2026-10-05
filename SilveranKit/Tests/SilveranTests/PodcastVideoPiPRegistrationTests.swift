@@ -64,4 +64,57 @@ struct PodcastVideoPiPRegistrationTests {
     @Test func pictureInPictureTransitionDoesNotResetPlayback() {
         #expect(!InternalVideoPlaybackLifecycle.shouldResetPlaybackOnPictureInPictureTransition())
     }
+
+    @Test func teardownWhilePiPActiveKeepsControllerSourcePlayerBound() {
+        #expect(
+            !PodcastVideoPiPLifecyclePolicy.shouldClearPlayerOnDismantle(
+                isPictureInPictureActive: true,
+                isControllerContentSource: true
+            )
+        )
+        // Non-source surfaces (or inactive PiP) may clear normally.
+        #expect(
+            PodcastVideoPiPLifecyclePolicy.shouldClearPlayerOnDismantle(
+                isPictureInPictureActive: true,
+                isControllerContentSource: false
+            )
+        )
+        #expect(
+            PodcastVideoPiPLifecyclePolicy.shouldClearPlayerOnDismantle(
+                isPictureInPictureActive: false,
+                isControllerContentSource: true
+            )
+        )
+    }
+
+    @Test func possibilityRefreshContinuesUntilPossibleOrControllerChanges() {
+        #expect(
+            PodcastVideoPiPLifecyclePolicy.shouldContinuePossibilityRefresh(
+                isPossible: false,
+                hasController: true,
+                controllerMatchesObserved: true
+            )
+        )
+        #expect(
+            !PodcastVideoPiPLifecyclePolicy.shouldContinuePossibilityRefresh(
+                isPossible: true,
+                hasController: true,
+                controllerMatchesObserved: true
+            )
+        )
+        #expect(
+            !PodcastVideoPiPLifecyclePolicy.shouldContinuePossibilityRefresh(
+                isPossible: false,
+                hasController: false,
+                controllerMatchesObserved: true
+            )
+        )
+        #expect(
+            !PodcastVideoPiPLifecyclePolicy.shouldContinuePossibilityRefresh(
+                isPossible: false,
+                hasController: true,
+                controllerMatchesObserved: false
+            )
+        )
+    }
 }

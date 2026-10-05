@@ -23,6 +23,11 @@ enum PodcastVideoPictureInPictureAvailability {
 /// Each `PodcastVideoSurfaceView` owns its layer and registers it here. This
 /// coordinator never moves, removes, or re-parents UIKit views — it only
 /// points `AVPictureInPictureController` at the active surface's layer.
+///
+/// When the content-source surface is dismantled while PiP is active, the
+/// coordinator strongly retains that source view (still no re-parenting) so
+/// `layer.player` stays bound until PiP stops or a new surface takes over
+/// after stop.
 @MainActor
 final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictureControllerDelegate {
     static let shared = PodcastVideoPictureInPictureCoordinator()
@@ -37,9 +42,16 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
     private var pictureInPictureController: AVPictureInPictureController?
     /// ObjectIdentity of the layer the current controller was built for.
     private var controllerLayerID: ObjectIdentifier?
+    /// Weak identity of the layer currently feeding the PiP controller.
+    private weak var controllerSourceLayer: AVPlayerLayer?
+    /// Retains a dismantled content-source view while PiP is still using it.
+    /// Not inserted into any other hierarchy — ownership only.
+    private var retainedSourceView: UIView?
     private var automaticStartEnabled = false
     private var suppressRestore = false
     private var possibilityTask: Task<Void, Never>?
+    /// Bumped whenever the controller instance changes so observers stop.
+    private var possibilityObservationID = UUID()
 
     private override init() {
         super.init()
@@ -87,11 +99,11 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
             return
         }
 
+        // A newly visible surface can replace a retained orphaned source.
+        releaseRetainedSource(clearPlayer: true)
+
         if controllerLayerID == ObjectIdentifier(layer), pictureInPictureController != nil {
-            refreshPossibility()
-            if !state.isPossible {
-                schedulePossibilityRefresh()
-            }
+            startPossibilityObservation()
             return
         }
 
@@ -118,17 +130,38 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
         }
     }
 
-    /// Surface left the hierarchy. Only clears when `surfaceID` is still current.
-    func unregister(surfaceID: String) {
+    /// Surface left the hierarchy. Only clears registration when `surfaceID`
+    /// is still current. Returns whether the caller may clear `layer.player`.
+    @discardableResult
+    func unregister(surfaceID: String, sourceView: UIView) -> Bool {
+        let sourceLayer = sourceView.layer as? AVPlayerLayer
+        let isControllerSource = sourceLayer != nil && sourceLayer === controllerSourceLayer
         let wasCurrent = activeSurface.surfaceID == surfaceID
         activeSurface.unregister(surfaceID: surfaceID)
+
+        let shouldClear = PodcastVideoPiPLifecyclePolicy.shouldClearPlayerOnDismantle(
+            isPictureInPictureActive: state.isActive,
+            isControllerContentSource: isControllerSource
+        )
+
+        // Whether or not this surface still owns registration, if PiP is
+        // sampling its layer we must retain the view and keep player bound.
+        if !shouldClear {
+            retainedSourceView = sourceView
+            #if DEBUG
+            debugLog(
+                "[PodcastVideoPiP] retain content source during active PiP surface=\(surfaceID)"
+            )
+            #endif
+        }
+
         guard wasCurrent, activeSurface.surfaceID == nil else {
             #if DEBUG
             debugLog(
                 "[PodcastVideoPiP] unregister ignored stale surface=\(surfaceID) current=\(activeSurface.surfaceID ?? "nil")"
             )
             #endif
-            return
+            return shouldClear
         }
 
         #if DEBUG
@@ -137,15 +170,12 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
         registeredSurfaceID = nil
         registeredLayer = nil
 
-        if state.isActive {
-            // PiP owns the content source; leave the controller alone.
-            return
+        if !state.isActive {
+            pictureInPictureController?.canStartPictureInPictureAutomaticallyFromInline = false
+            stopPossibilityObservation()
+            state.isPossible = false
         }
-
-        pictureInPictureController?.canStartPictureInPictureAutomaticallyFromInline = false
-        // Keep the controller until a new surface registers or the session ends.
-        // Possibility becomes false without a live layer in the hierarchy.
-        state.isPossible = false
+        return shouldClear
     }
 
     func setAutomaticStartEnabled(_ enabled: Bool) {
@@ -176,8 +206,7 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
 
     /// Session ended (stop / close). Drops PiP without seeking a replacement item.
     func endSession() {
-        possibilityTask?.cancel()
-        possibilityTask = nil
+        stopPossibilityObservation()
         restoreGate.endSession()
         restoreGeneration = restoreGate.sessionGeneration
         #if DEBUG
@@ -191,6 +220,8 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
         pictureInPictureController?.delegate = nil
         pictureInPictureController = nil
         controllerLayerID = nil
+        controllerSourceLayer = nil
+        releaseRetainedSource(clearPlayer: true)
         registeredLayer = nil
         registeredSurfaceID = nil
         activeSurface = PodcastVideoPiPActiveSurface()
@@ -200,9 +231,11 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
     }
 
     private func installController(for layer: AVPlayerLayer) {
+        stopPossibilityObservation()
         pictureInPictureController?.delegate = nil
         pictureInPictureController = nil
         controllerLayerID = nil
+        controllerSourceLayer = nil
         state.isPossible = false
 
         guard PodcastVideoPictureInPictureAvailability.isEnabled,
@@ -222,30 +255,66 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
         controller.canStartPictureInPictureAutomaticallyFromInline = automaticStartEnabled
         pictureInPictureController = controller
         controllerLayerID = ObjectIdentifier(layer)
-        refreshPossibility()
-        if !state.isPossible {
-            schedulePossibilityRefresh()
-        }
+        controllerSourceLayer = layer
+        startPossibilityObservation()
     }
 
     private func refreshPossibility() {
         state.isPossible = pictureInPictureController?.isPictureInPicturePossible ?? false
     }
 
-    /// `isPictureInPicturePossible` becomes true after the layer has frames.
-    /// ponytail: short poll instead of KVO. Upgrade path: observe the property
-    /// on the main actor when the callback isolation allows it.
-    private func schedulePossibilityRefresh() {
-        guard possibilityTask == nil else { return }
+    /// Observe `isPictureInPicturePossible` for the life of the current
+    /// controller. Polls with backoff until possible (or the controller
+    /// changes) so slow stream start does not leave the button stuck off.
+    private func startPossibilityObservation() {
+        stopPossibilityObservation()
+        refreshPossibility()
+        guard !state.isPossible, pictureInPictureController != nil else { return }
+
+        let observationID = UUID()
+        possibilityObservationID = observationID
+        let observedLayerID = controllerLayerID
+
         possibilityTask = Task { @MainActor in
-            for _ in 0..<8 {
-                try? await Task.sleep(for: .milliseconds(300))
-                guard !Task.isCancelled else { return }
-                refreshPossibility()
-                if state.isPossible { break }
+            var delayMs: UInt64 = 300
+            while !Task.isCancelled {
+                let hasController = self.pictureInPictureController != nil
+                let matches = self.controllerLayerID == observedLayerID
+                    && self.possibilityObservationID == observationID
+                self.refreshPossibility()
+                let shouldContinue = PodcastVideoPiPLifecyclePolicy.shouldContinuePossibilityRefresh(
+                    isPossible: self.state.isPossible,
+                    hasController: hasController,
+                    controllerMatchesObserved: matches
+                )
+                guard shouldContinue else { break }
+                try? await Task.sleep(for: .milliseconds(delayMs))
+                delayMs = min(delayMs * 2, 2_000)
             }
-            possibilityTask = nil
+            if self.possibilityObservationID == observationID {
+                self.possibilityTask = nil
+            }
         }
+    }
+
+    private func stopPossibilityObservation() {
+        possibilityObservationID = UUID()
+        possibilityTask?.cancel()
+        possibilityTask = nil
+    }
+
+    private func releaseRetainedSource(clearPlayer: Bool) {
+        if clearPlayer, let retainedSourceView,
+           let layer = retainedSourceView.layer as? AVPlayerLayer
+        {
+            layer.player = nil
+        }
+        if retainedSourceView != nil {
+            #if DEBUG
+            debugLog("[PodcastVideoPiP] release retained content source clearPlayer=\(clearPlayer)")
+            #endif
+        }
+        retainedSourceView = nil
     }
 
     private func restoreInterfaceForPictureInPictureStop() -> Bool {
@@ -316,11 +385,17 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
                 "[PodcastVideoPiP] didStop surface=\(coordinator.registeredSurfaceID ?? "nil")"
             )
             #endif
-            // No UIView re-hosting — the visible surface already has its own
-            // local layer bound to the same shared AVPlayer.
+            // Drop any orphaned content-source view retained during teardown.
+            // Prefer the currently registered live surface for the next controller.
+            coordinator.releaseRetainedSource(clearPlayer: true)
             if let layer = coordinator.registeredLayer {
                 coordinator.installController(for: layer)
             } else {
+                coordinator.stopPossibilityObservation()
+                coordinator.pictureInPictureController?.delegate = nil
+                coordinator.pictureInPictureController = nil
+                coordinator.controllerLayerID = nil
+                coordinator.controllerSourceLayer = nil
                 coordinator.refreshPossibility()
             }
         }

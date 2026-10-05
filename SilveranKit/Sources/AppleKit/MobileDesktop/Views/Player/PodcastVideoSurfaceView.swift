@@ -56,8 +56,15 @@ struct PodcastVideoSurfaceView: UIViewRepresentable {
         #if DEBUG
         debugLog("[PodcastVideoSurface] dismantle id=\(coordinator.surfaceID)")
         #endif
-        PodcastVideoPictureInPictureCoordinator.shared.unregister(surfaceID: coordinator.surfaceID)
-        uiView.playerLayer.player = nil
+        // While PiP is actively sampling this layer, leave player bound and let
+        // the coordinator retain the view. Never re-parent into another container.
+        let shouldClearPlayer = PodcastVideoPictureInPictureCoordinator.shared.unregister(
+            surfaceID: coordinator.surfaceID,
+            sourceView: uiView
+        )
+        if shouldClearPlayer {
+            uiView.playerLayer.player = nil
+        }
     }
 
     func makeCoordinator() -> Coordinator {
