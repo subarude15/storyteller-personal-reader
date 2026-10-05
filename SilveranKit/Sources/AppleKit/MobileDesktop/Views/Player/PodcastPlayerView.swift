@@ -30,6 +30,7 @@ public struct PodcastPlayerView: View {
     @State private var showYouTubeMatch = false
     @State private var matchEpoch = 0
     @State private var videoPresentation = PodcastVideoPresentationCoordinator.shared
+    @State private var pipState = PodcastVideoPictureInPictureCoordinator.shared.state
 
     public init(episode: PodcastPlayerPresenter.Episode, onClose: @escaping () -> Void) {
         self.episode = episode
@@ -129,6 +130,9 @@ public struct PodcastPlayerView: View {
             if phase == .active, live.isVideo {
                 Task { await refreshVideoPlayer() }
             }
+        }
+        .onChange(of: pipState.isActive) { _, _ in
+            syncVideoChromePolicy(playerPresented: true)
         }
         .onChange(of: videoPresentation.isFullscreen) { _, isFullscreen in
             #if DEBUG
@@ -345,17 +349,20 @@ public struct PodcastPlayerView: View {
                         )
                     )
                     .overlay(alignment: .topTrailing) {
-                        Button {
-                            videoPresentation.enterFullscreenManually()
-                        } label: {
-                            Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .frame(width: 32, height: 32)
-                                .background(Circle().fill(Color.black.opacity(0.45)))
+                        HStack(spacing: 8) {
+                            PodcastVideoPictureInPictureButton(chrome: .overlay)
+                            Button {
+                                videoPresentation.enterFullscreenManually()
+                            } label: {
+                                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 32, height: 32)
+                                    .background(Circle().fill(Color.black.opacity(0.45)))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Enter fullscreen")
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Enter fullscreen")
                         .padding(10)
                     }
                 }
@@ -516,10 +523,17 @@ public struct PodcastPlayerView: View {
             isInternalVideo: live.isVideo,
             isPlaying: isPlaying,
             isPlayerPresented: playerPresented,
-            isPictureInPictureActive: false,
-            isAppActive: scenePhase == .active
+            isPictureInPictureActive: pipState.isActive,
+            isAppActive: scenePhase == .active,
+            isPictureInPicturePossible: pipState.isPossible,
+            isPictureInPictureSupported: pipState.isSupported
         )
         ScreenWakeLock.shared.applyInternalVideo(context)
+        // Auto PiP stays off (`isAutomaticPictureInPictureEnabled`); keep the
+        // controller flag in sync so a future enablement only needs the policy.
+        PodcastVideoPictureInPictureCoordinator.shared.setAutomaticStartEnabled(
+            InternalVideoPlaybackLifecycle.allowsAutomaticPictureInPicture(context)
+        )
     }
 
     private func syncVideoPresentationContext() {

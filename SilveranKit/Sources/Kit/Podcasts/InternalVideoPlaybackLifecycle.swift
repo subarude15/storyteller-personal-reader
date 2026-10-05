@@ -71,9 +71,14 @@ public struct InternalVideoPlaybackContext: Equatable, Sendable {
 }
 
 public enum InternalVideoPlaybackLifecycle {
-    /// PiP is off until a non-reparenting layer-registration model lands.
-    /// Keep wake-lock and lock-screen audio shipping without that risk.
-    public static let isPictureInPictureEnabled = false
+    /// Manual Picture in Picture for internal video (registration model — no
+    /// UIKit layer re-parenting between SwiftUI surfaces).
+    public static let isPictureInPictureEnabled = true
+
+    /// Auto-start from inline stays off. Manual PiP is the supported path;
+    /// enabling automatic start adds lifecycle edge cases around surface
+    /// registration during portrait ↔ fullscreen swaps.
+    public static let isAutomaticPictureInPictureEnabled = false
 
     /// Disable the idle timer only while internal video is actively playing
     /// in the foreground player. Audio-only, pause, close, finish, PiP, and
@@ -88,10 +93,12 @@ public enum InternalVideoPlaybackLifecycle {
 
     /// System automatic PiP only when the user is actually watching inline video.
     /// Audio-only, paused, and mini-player-only sessions must not start PiP.
+    /// Currently gated off via `isAutomaticPictureInPictureEnabled`.
     public static func allowsAutomaticPictureInPicture(
         _ context: InternalVideoPlaybackContext
     ) -> Bool {
         isPictureInPictureEnabled
+            && isAutomaticPictureInPictureEnabled
             && context.isInternalVideo
             && context.isPlaying
             && context.isPlayerPresented

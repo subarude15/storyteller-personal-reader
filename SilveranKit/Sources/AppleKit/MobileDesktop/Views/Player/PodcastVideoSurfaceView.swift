@@ -8,7 +8,8 @@ import UIKit
 /// Portrait and landscape fullscreen each own their own layer/view. They must
 /// pass the same `AVPlayer` from `AudioSessionActor.podcastAVPlayer()` — never
 /// allocate a second playback engine. Layers are never re-parented between
-/// SwiftUI containers.
+/// SwiftUI containers. Each surface registers its local layer with the PiP
+/// coordinator while visible.
 struct PodcastVideoSurfaceView: UIViewRepresentable {
     let player: AVPlayer
 
@@ -23,12 +24,17 @@ struct PodcastVideoSurfaceView: UIViewRepresentable {
             "[PodcastVideoSurface] create id=\(context.coordinator.surfaceID) player=\(ObjectIdentifier(player))"
         )
         #endif
+        PodcastVideoPictureInPictureCoordinator.shared.register(
+            layer: view.playerLayer,
+            surfaceID: context.coordinator.surfaceID
+        )
         return view
     }
 
     func updateUIView(_ uiView: PlayerLayerView, context: Context) {
-        // Identity-only player updates. Never remove/add the view or touch
-        // observable PiP/wake-lock state from this path.
+        // Identity-only player updates. Never remove/add the view, never
+        // re-claim PiP registration (a sibling fullscreen surface may already
+        // be current), and never touch Observable PiP/wake-lock state here.
         if uiView.playerLayer.player !== player {
             #if DEBUG
             debugLog(
@@ -36,6 +42,10 @@ struct PodcastVideoSurfaceView: UIViewRepresentable {
             )
             #endif
             uiView.playerLayer.player = player
+            PodcastVideoPictureInPictureCoordinator.shared.refreshPlayerIfCurrent(
+                surfaceID: context.coordinator.surfaceID,
+                layer: uiView.playerLayer
+            )
         }
         if uiView.backgroundColor != .black {
             uiView.backgroundColor = .black
@@ -46,6 +56,7 @@ struct PodcastVideoSurfaceView: UIViewRepresentable {
         #if DEBUG
         debugLog("[PodcastVideoSurface] dismantle id=\(coordinator.surfaceID)")
         #endif
+        PodcastVideoPictureInPictureCoordinator.shared.unregister(surfaceID: coordinator.surfaceID)
         uiView.playerLayer.player = nil
     }
 
