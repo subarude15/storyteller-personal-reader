@@ -1071,6 +1071,7 @@ private struct HomeTabView: View {
             progress: item.progress,
             durationSeconds: item.durationSeconds,
             upNext: upNext,
+            itemID: item.id,
         )
     }
 

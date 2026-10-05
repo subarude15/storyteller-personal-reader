@@ -108,6 +108,9 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
     /// Following Home mixed-queue rows (not a second queue). Nil on snapshots
     /// written before Up next existed.
     public var upNext: [ContinueWidgetQueueItem]?
+    /// Stable book / episode / session id (`book:<source>/<uuid>` or `pod:<id>`).
+    /// Optional so snapshots written before this field still decode.
+    public var itemID: String?
 
     public static let upNextLimit = 3
 
@@ -125,6 +128,7 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         hasLiveSession: Bool? = nil,
         rate: Double? = nil,
         upNext: [ContinueWidgetQueueItem]? = nil,
+        itemID: String? = nil,
     ) {
         self.generatedAt = generatedAt
         self.title = title
@@ -139,6 +143,7 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         self.hasLiveSession = hasLiveSession
         self.rate = rate
         self.upNext = upNext
+        self.itemID = itemID
     }
 
     public static let empty = ContinueWidgetSnapshot()
@@ -206,16 +211,53 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         Array((upNext ?? []).prefix(Self.upNextLimit))
     }
 
+    /// Which item is Now Listening. Prefers the stable item id; title is display.
+    public var mediaIdentity: String {
+        Self.mediaIdentity(itemID: itemID, kind: kind, title: title, deepLink: deepLink)
+    }
+
+    public static func mediaIdentity(
+        itemID: String?,
+        kind: ContinueWidgetKindTag?,
+        title: String?,
+        deepLink: String?,
+    ) -> String {
+        if let itemID {
+            let trimmed = itemID.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return [
+            kind?.rawValue ?? "",
+            title ?? "",
+            deepLink ?? "",
+        ].joined(separator: "|")
+    }
+
+    /// Keep the last cover only when Now Listening is the same item.
+    public static func shouldKeepPreviousCover(
+        previous: ContinueWidgetSnapshot,
+        nextItemID: String?,
+        nextTitle: String?,
+        nextKind: ContinueWidgetKindTag?,
+        nextDeepLink: String?,
+    ) -> Bool {
+        guard nextTitle != nil, previous.coverFilename != nil else { return false }
+        return previous.mediaIdentity == mediaIdentity(
+            itemID: nextItemID,
+            kind: nextKind,
+            title: nextTitle,
+            deepLink: nextDeepLink,
+        )
+    }
+
     /// Identity for "did anything the widget paints change?" comparisons —
     /// deliberately excludes `generatedAt`.
     var paintSignature: String {
         [
-            title ?? "",
+            mediaIdentity,
             subtitle ?? "",
             coverFilename ?? "",
             isPlaying ? "1" : "0",
-            kind?.rawValue ?? "",
-            deepLink ?? "",
             (hasLiveSession ?? false) ? "1" : "0",
             percentComplete.map(String.init) ?? "",
             queueSignature,
@@ -244,41 +286,43 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
 }
 
 public enum ContinueWidgetSnapshotStore {
-    private static let snapshotFilename = "continue-now.json"
+    private static let snapshotFilename = ContinueWidgetCurrentSnapshot.storageKey
     private static let coversDirectoryName = "ContinueCovers"
     private static let lastTitleDefaultsKey = "inkamp.continueWidget.lastTitle"
     private static let lastSnapshotDefaultsKey = "inkamp.continueWidget.lastSnapshot"
 
-    /// Minimum gap between WidgetKit reload requests while playback advances.
-    /// iOS budgets widget reloads; progress ticks must not burn them all.
-    private static let progressReloadInterval: TimeInterval = 20
-
     private static let publishLock = NSLock()
-    nonisolated(unsafe) private static var lastPublishedPaintSignature: String?
-    nonisolated(unsafe) private static var lastPublishedTransportSignature: String?
-    nonisolated(unsafe) private static var lastPublishedQueueSignature: String?
     nonisolated(unsafe) private static var lastReloadDate: Date = .distantPast
 
     public static func loadSnapshot(bundle: Bundle = .main) -> ContinueWidgetSnapshot {
+        let fallback = localFallbackSnapshot()
         guard let container = SilveranWidgetSnapshotStore.sharedContainerURL(bundle: bundle)
         else {
-            return localFallbackSnapshot()
+            return ContinueWidgetCurrentSnapshot.select(
+                shared: nil,
+                localFallback: fallback,
+                sharedContainerReachable: false,
+            )
         }
         let url = snapshotURL(in: container)
-        // Reachable container is authoritative: nothing published yet means an
-        // empty tile, not a stale item resurrected from local cache.
-        guard let data = try? Data(contentsOf: url) else {
-            return .empty
-        }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        guard let snapshot = try? decoder.decode(ContinueWidgetSnapshot.self, from: data),
-            snapshot.hasItem
-        else {
-            return .empty
+        let shared: ContinueWidgetSnapshot?
+        if let data = try? Data(contentsOf: url) {
+            shared = try? decoder.decode(ContinueWidgetSnapshot.self, from: data)
+        } else {
+            shared = nil
         }
-        // Widget-extension local memory: survives empty reloads if the App Group blips.
-        rememberLastSnapshot(snapshot)
+        // Reachable container is authoritative: compact tiles must not keep an
+        // older process-local audiobook after the shared file has moved on.
+        let snapshot = ContinueWidgetCurrentSnapshot.select(
+            shared: shared,
+            localFallback: fallback,
+            sharedContainerReachable: true,
+        )
+        if snapshot.hasItem {
+            rememberLastSnapshot(snapshot)
+        }
         return snapshot
     }
 
@@ -301,9 +345,6 @@ public enum ContinueWidgetSnapshotStore {
         UserDefaults.standard.removeObject(forKey: lastTitleDefaultsKey)
         UserDefaults.standard.removeObject(forKey: lastSnapshotDefaultsKey)
         publishLock.lock()
-        lastPublishedPaintSignature = nil
-        lastPublishedTransportSignature = nil
-        lastPublishedQueueSignature = nil
         lastReloadDate = .distantPast
         publishLock.unlock()
     }
@@ -354,6 +395,7 @@ public enum ContinueWidgetSnapshotStore {
         hasLiveSession: Bool = false,
         rate: Double? = nil,
         upNext: [ContinueWidgetUpNextDraft]? = nil,
+        itemID: String? = nil,
     ) {
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "publish")
         guard let container = SilveranWidgetSnapshotStore.sharedContainerURL() else {
@@ -373,20 +415,25 @@ public enum ContinueWidgetSnapshotStore {
                 withIntermediateDirectories: true,
             )
 
+            let previousSnapshot = readSnapshotFile(in: container)
             var coverFilename: String?
             if let coverData, !coverData.isEmpty {
                 let name = "continue_cover.dat"
                 let url = covers.appendingPathComponent(name, isDirectory: false)
                 try coverData.write(to: url, options: [.atomic])
                 coverFilename = name
-            } else if let existing = readSnapshotFile(in: container)?.coverFilename,
-                title != nil
+            } else if let previousSnapshot,
+                ContinueWidgetSnapshot.shouldKeepPreviousCover(
+                    previous: previousSnapshot,
+                    nextItemID: itemID,
+                    nextTitle: title,
+                    nextKind: kind,
+                    nextDeepLink: title == nil ? nil : deepLink,
+                ),
+                let existing = previousSnapshot.coverFilename
             {
-                // Keep last cover while the same session refreshes without image bytes.
                 coverFilename = existing
             }
-
-            let previousSnapshot = readSnapshotFile(in: container)
             let resolvedUpNext = try resolveUpNext(
                 drafts: upNext,
                 previous: previousSnapshot?.upNext,
@@ -406,21 +453,18 @@ public enum ContinueWidgetSnapshotStore {
                 hasLiveSession: hasLiveSession,
                 rate: rate,
                 upNext: resolvedUpNext,
+                itemID: itemID,
             )
 
             publishLock.lock()
-            let previousPaint = lastPublishedPaintSignature
-            let previousTransport = lastPublishedTransportSignature
-            let previousQueue = lastPublishedQueueSignature
             let previousReload = lastReloadDate
             publishLock.unlock()
 
-            let paintChanged = previousPaint != snapshot.paintSignature
-            let transportChanged = previousTransport != snapshot.transportSignature
-            let queueChanged = previousQueue != snapshot.queueSignature
             let now = Date()
-
-            guard paintChanged || transportChanged else { return }
+            guard ContinueWidgetReloadPolicy.shouldWrite(
+                previous: previousSnapshot,
+                next: snapshot,
+            ) else { return }
 
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
@@ -428,17 +472,16 @@ public enum ContinueWidgetSnapshotStore {
             let data = try encoder.encode(snapshot)
             try data.write(to: snapshotURL(in: container), options: [.atomic])
             rememberLastSnapshot(snapshot)
+            debugLogPublish(snapshot)
 
-            let progressTickDue =
-                now.timeIntervalSince(previousReload) >= progressReloadInterval
-            let reloadNow =
-                transportChanged || queueChanged || (paintChanged && progressTickDue)
-                || now.timeIntervalSince(previousReload) >= 300
+            let reloadNow = ContinueWidgetReloadPolicy.shouldReload(
+                previous: previousSnapshot,
+                next: snapshot,
+                lastReload: previousReload,
+                now: now,
+            )
 
             publishLock.lock()
-            lastPublishedPaintSignature = snapshot.paintSignature
-            lastPublishedTransportSignature = snapshot.transportSignature
-            lastPublishedQueueSignature = snapshot.queueSignature
             if reloadNow { lastReloadDate = now }
             publishLock.unlock()
 
@@ -476,6 +519,7 @@ public enum ContinueWidgetSnapshotStore {
             durationSeconds: session.durationSeconds,
             hasLiveSession: true,
             rate: session.playbackRate,
+            itemID: ContinueWidgetItemID.from(sessionKind: session.kind),
         )
     }
 
@@ -495,20 +539,46 @@ public enum ContinueWidgetSnapshotStore {
             durationSeconds: last.durationSeconds,
             hasLiveSession: false,
             rate: last.rate,
+            itemID: last.itemID,
         )
     }
 
     public static func reloadTimelines() {
         #if canImport(WidgetKit) && (os(iOS) || os(macOS))
         for kind in timelineKindsToReload {
+            debugLog("[ContinueWidget] reload kind=\(kind)")
             WidgetCenter.shared.reloadTimelines(ofKind: kind)
         }
+        // ofKind: bursts can be coalesced to a single kind, which left compact
+        // tiles on an old timeline while the large kind refreshed. Follow with
+        // reloadAll so every registered family reads the shared snapshot.
+        WidgetCenter.shared.reloadAllTimelines()
+        debugLog("[ContinueWidget] reload all timelines")
         #endif
     }
 
     /// Kind identifiers `reloadTimelines()` asks WidgetKit to refresh.
+    /// Compact (medium) kinds are included — family must not skip a reload.
     public static var timelineKindsToReload: [String] {
         SilveranWidgetConstants.continueWidgetKinds
+    }
+
+    public static var compactTimelineKinds: [String] {
+        SilveranWidgetConstants.continueWidgetKinds.filter { $0.contains(".medium.") }
+    }
+
+    private static func debugLogPublish(_ snapshot: ContinueWidgetSnapshot) {
+        let title = snapshot.title ?? "nil"
+            let progress = snapshot.clampedProgress.map { String(format: "%.2f", $0) } ?? "nil"
+        debugLog(
+            "[ContinueWidget] publish item=\(snapshot.mediaIdentity) title=\"\(title)\" progress=\(progress) source=\(ContinueWidgetCurrentSnapshot.storageKey)"
+        )
+    }
+
+    private static func debugLog(_ line: String) {
+        #if DEBUG
+        print(line)
+        #endif
     }
 
     // MARK: - Paths
@@ -596,6 +666,18 @@ public enum ContinueWidgetSnapshotStore {
             let name = url.lastPathComponent
             guard name.hasPrefix("upnext_"), !names.contains(name) else { continue }
             try? FileManager.default.removeItem(at: url)
+        }
+    }
+}
+
+/// Home-queue / session identity written onto Continue snapshots.
+public enum ContinueWidgetItemID {
+    public static func from(sessionKind: AudioSessionKind) -> String {
+        switch sessionKind {
+            case .audiobook(let id), .readaloud(let id):
+                return "book:\(id.sourceID)/\(id.uuid)"
+            case .podcast(let episodeID):
+                return "pod:\(episodeID)"
         }
     }
 }

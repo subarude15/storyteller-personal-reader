@@ -63,6 +63,7 @@ public enum ContinueWidgetPublisher {
         progress: Double? = nil,
         durationSeconds: Double? = nil,
         upNext: [ContinueWidgetUpNextDraft] = [],
+        itemID: String? = nil,
     ) {
         publishSerial &+= 1
         let serial = publishSerial
@@ -86,6 +87,7 @@ public enum ContinueWidgetPublisher {
                 durationSeconds: durationSeconds,
                 hasLiveSession: false,
                 upNext: upNext,
+                itemID: itemID,
             )
         }
     }
@@ -132,6 +134,7 @@ public enum ContinueWidgetPublisher {
                 hasLiveSession: false,
                 rate: last.rate,
                 upNext: upNext,
+                itemID: last.itemID,
             )
             return
         }
@@ -175,6 +178,7 @@ public enum ContinueWidgetPublisher {
             hasLiveSession: true,
             rate: snapshot.playbackRate,
             upNext: queue,
+            itemID: ContinueWidgetItemID.from(sessionKind: snapshot.kind),
         )
     }
 

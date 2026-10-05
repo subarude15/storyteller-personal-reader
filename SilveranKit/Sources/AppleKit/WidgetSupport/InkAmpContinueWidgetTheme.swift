@@ -260,10 +260,165 @@ public enum InkAmpContinueTimelineResolver {
         phase: InkAmpContinueTimelinePhase,
         isPreview: Bool,
         snapshot: ContinueWidgetSnapshot,
+        generatedAt: Date? = nil,
+        storageKey: String = ContinueWidgetCurrentSnapshot.storageKey,
+        entryDate: Date? = nil,
+        refreshAfter: Date? = nil,
     ) -> String {
         let trimmed = snapshot.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let title = trimmed.isEmpty ? "nil" : trimmed
         let queue = snapshot.upNext?.count ?? 0
-        return "[ContinueWidget] timeline kind=\(kind) family=\(family) theme=\(theme.rawValue) phase=\(phase.rawValue) preview=\(isPreview) title=\(title) queue=\(queue)"
+        let progress = snapshot.clampedProgress.map { String(format: "%.2f", $0) } ?? "nil"
+        let item = snapshot.mediaIdentity.isEmpty ? "nil" : snapshot.mediaIdentity
+        let generated = (generatedAt ?? snapshot.generatedAt).timeIntervalSince1970
+        let call: String
+        switch phase {
+            case .placeholder: call = "placeholder"
+            case .snapshot: call = "getSnapshot"
+            case .timeline: call = "getTimeline"
+        }
+        var line =
+            "[ContinueWidget] \(call) kind=\(kind) family=\(family) theme=\(theme.rawValue) phase=\(phase.rawValue) preview=\(isPreview) item=\(item) title=\"\(title)\" progress=\(progress) generated=\(generated) source=\(storageKey) queue=\(queue)"
+        if let entryDate {
+            line += " entry=\(entryDate.timeIntervalSince1970)"
+        }
+        if let refreshAfter {
+            line += " refreshAfter=\(refreshAfter.timeIntervalSince1970)"
+        } else if phase == .timeline {
+            line += " refreshAfter=nil"
+        }
+        return line
+    }
+}
+
+/// One live gallery snapshot or Home Screen timeline built from the shared file.
+public struct ContinueWidgetLiveUpdate: Sendable, Equatable {
+    public var resolved: InkAmpContinueResolvedTimeline
+    public var entryDate: Date
+    /// `getTimeline` only — next WidgetKit refresh. Nil for gallery snapshots.
+    public var refreshAfter: Date?
+
+    public var snapshot: ContinueWidgetSnapshot { resolved.snapshot }
+
+    public init(
+        resolved: InkAmpContinueResolvedTimeline,
+        entryDate: Date,
+        refreshAfter: Date?,
+    ) {
+        self.resolved = resolved
+        self.entryDate = entryDate
+        self.refreshAfter = refreshAfter
+    }
+}
+
+/// Gallery `getSnapshot` and Home Screen `getTimeline` read the same snapshot.
+public enum ContinueWidgetLiveUpdateBuilder {
+    public static func refreshInterval(isPlaying: Bool) -> TimeInterval {
+        isPlaying ? 5 * 60 : 15 * 60
+    }
+
+    public static func make(
+        loaded: ContinueWidgetSnapshot,
+        phase: InkAmpContinueLivePhase,
+        theme: InkAmpWidgetTheme,
+        now: Date = Date(),
+    ) -> ContinueWidgetLiveUpdate {
+        let resolved = InkAmpContinueTimelineResolver.resolve(
+            loaded: loaded,
+            phase: phase,
+            theme: theme,
+        )
+        let refreshAfter: Date?
+        switch phase {
+            case .snapshot:
+                refreshAfter = nil
+            case .timeline:
+                refreshAfter = now.addingTimeInterval(
+                    refreshInterval(isPlaying: resolved.snapshot.isPlaying)
+                )
+        }
+        return ContinueWidgetLiveUpdate(
+            resolved: resolved,
+            entryDate: now,
+            refreshAfter: refreshAfter,
+        )
+    }
+}
+
+/// WidgetKit family names used when proving compact and large share one snapshot.
+/// Presentation-only — never selects a different Now Listening item.
+public enum ContinueWidgetTimelineFamily: String, Sendable, CaseIterable {
+    case systemSmall
+    case systemMedium
+    case systemLarge
+}
+
+/// Authoritative Now Listening snapshot. Family is not an input to storage.
+public enum ContinueWidgetCurrentSnapshot {
+    public static let storageKey = "continue-now.json"
+
+    public static func select(
+        shared: ContinueWidgetSnapshot?,
+        localFallback: ContinueWidgetSnapshot?,
+        sharedContainerReachable: Bool,
+    ) -> ContinueWidgetSnapshot {
+        if sharedContainerReachable {
+            // Reachable App Group is source of truth: do not resurrect an older
+            // process-local audiobook when the shared file has moved on.
+            guard let shared, shared.hasItem else { return .empty }
+            return shared
+        }
+        guard let localFallback, localFallback.hasItem else { return .empty }
+        return localFallback
+    }
+
+    /// Family affects layout only. Compact and large must resolve the same item.
+    public static func snapshot(
+        for family: ContinueWidgetTimelineFamily,
+        shared: ContinueWidgetSnapshot?,
+        localFallback: ContinueWidgetSnapshot?,
+        sharedContainerReachable: Bool,
+    ) -> ContinueWidgetSnapshot {
+        switch family {
+            case .systemSmall, .systemMedium, .systemLarge:
+                return select(
+                    shared: shared,
+                    localFallback: localFallback,
+                    sharedContainerReachable: sharedContainerReachable,
+                )
+        }
+    }
+}
+
+/// When to write the shared snapshot and ask WidgetKit to reload every kind.
+public enum ContinueWidgetReloadPolicy {
+    public static let progressReloadInterval: TimeInterval = 20
+
+    public static func shouldWrite(
+        previous: ContinueWidgetSnapshot?,
+        next: ContinueWidgetSnapshot,
+    ) -> Bool {
+        previous?.paintSignature != next.paintSignature
+            || previous?.transportSignature != next.transportSignature
+    }
+
+    /// Identity changes reload immediately so compact tiles cannot keep The Troop
+    /// after the shared file has already moved to a podcast.
+    public static func shouldReload(
+        previous: ContinueWidgetSnapshot?,
+        next: ContinueWidgetSnapshot,
+        lastReload: Date,
+        now: Date,
+    ) -> Bool {
+        let identityChanged = previous?.mediaIdentity != next.mediaIdentity
+        if identityChanged { return true }
+        let transportChanged = previous?.transportSignature != next.transportSignature
+        let queueChanged = previous?.queueSignature != next.queueSignature
+        if transportChanged || queueChanged { return true }
+        let paintChanged = previous?.paintSignature != next.paintSignature
+        if paintChanged, now.timeIntervalSince(lastReload) >= progressReloadInterval {
+            return true
+        }
+        return now.timeIntervalSince(lastReload) >= 300
     }
 }

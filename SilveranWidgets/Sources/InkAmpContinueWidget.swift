@@ -113,7 +113,14 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
 
     func placeholder(in context: Context) -> InkAmpContinueEntry {
         let entry = InkAmpContinueEntry.placeholder
-        log(phase: .placeholder, preview: context.isPreview, snapshot: entry.snapshot, family: context.family)
+        log(
+            phase: .placeholder,
+            preview: context.isPreview,
+            snapshot: entry.snapshot,
+            family: context.family,
+            entryDate: entry.date,
+            refreshAfter: nil,
+        )
         return entry
     }
 
@@ -125,14 +132,16 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
         // sample — that sample is what made the light compact tile look like a
         // skeleton while a live entry was available.
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "continue.snapshot")
-        let resolved = Self.resolve(phase: .snapshot, theme: theme)
+        let update = liveUpdate(phase: .snapshot)
         log(
-            phase: resolved.phase,
+            phase: update.resolved.phase,
             preview: context.isPreview,
-            snapshot: resolved.snapshot,
+            snapshot: update.snapshot,
             family: context.family,
+            entryDate: update.entryDate,
+            refreshAfter: update.refreshAfter,
         )
-        completion(InkAmpContinueEntry(date: Date(), resolved: resolved))
+        completion(InkAmpContinueEntry(date: update.entryDate, resolved: update.resolved))
     }
 
     func getTimeline(
@@ -140,31 +149,35 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
         completion: @escaping (Timeline<InkAmpContinueEntry>) -> Void,
     ) {
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "continue.timeline")
-        let resolved = Self.resolve(phase: .timeline, theme: theme)
+        let update = liveUpdate(phase: .timeline)
         log(
-            phase: resolved.phase,
+            phase: update.resolved.phase,
             preview: context.isPreview,
-            snapshot: resolved.snapshot,
+            snapshot: update.snapshot,
             family: context.family,
+            entryDate: update.entryDate,
+            refreshAfter: update.refreshAfter,
         )
-        let refresh: TimeInterval = resolved.snapshot.isPlaying ? 5 * 60 : 15 * 60
-        let entry = InkAmpContinueEntry(date: Date(), resolved: resolved)
-        completion(Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(refresh))))
+        let policy: TimelineReloadPolicy
+        if let refreshAfter = update.refreshAfter {
+            policy = .after(refreshAfter)
+        } else {
+            policy = .atEnd
+        }
+        let entry = InkAmpContinueEntry(date: update.entryDate, resolved: update.resolved)
+        completion(Timeline(entries: [entry], policy: policy))
     }
 
     static func loadSnapshot() -> ContinueWidgetSnapshot {
         ContinueWidgetSnapshotStore.loadSnapshot()
     }
 
-    /// Theme is forwarded into the resolver, which ignores it and returns `loaded`.
-    private static func resolve(
-        phase: InkAmpContinueLivePhase,
-        theme: InkAmpWidgetTheme,
-    ) -> InkAmpContinueResolvedTimeline {
-        InkAmpContinueTimelineResolver.resolve(
-            loaded: loadSnapshot(),
+    private func liveUpdate(phase: InkAmpContinueLivePhase) -> ContinueWidgetLiveUpdate {
+        ContinueWidgetLiveUpdateBuilder.make(
+            loaded: Self.loadSnapshot(),
             phase: phase,
             theme: theme,
+            now: Date(),
         )
     }
 
@@ -173,8 +186,10 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
         preview: Bool,
         snapshot: ContinueWidgetSnapshot,
         family: WidgetFamily,
+        entryDate: Date,
+        refreshAfter: Date?,
     ) {
-        // Temporary diagnostic — same fields for compact and large.
+        #if DEBUG
         print(
             InkAmpContinueTimelineResolver.logLine(
                 kind: kind,
@@ -183,8 +198,12 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
                 phase: phase,
                 isPreview: preview,
                 snapshot: snapshot,
+                generatedAt: snapshot.generatedAt,
+                entryDate: entryDate,
+                refreshAfter: refreshAfter,
             )
         )
+        #endif
     }
 }
 

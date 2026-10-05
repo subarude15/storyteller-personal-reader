@@ -8,9 +8,9 @@ Queue actions. Playback transport controls are **not** on these tiles.
 
 | Gallery name | Kind | Family |
 |---|---|---|
-| ink+amp Light Medium | `inkamp.continue.light.medium.v1` | `.systemMedium` |
+| ink+amp Light Medium | `inkamp.continue.light.medium.v3` | `.systemMedium` |
 | ink+amp Light Large | `inkamp.continue.light.large.v1` | `.systemLarge` |
-| ink+amp Dark Medium | `inkamp.continue.dark.medium.v1` | `.systemMedium` |
+| ink+amp Dark Medium | `inkamp.continue.dark.medium.v3` | `.systemMedium` |
 | ink+amp Dark Large | `inkamp.continue.dark.large.v1` | `.systemLarge` |
 
 Constants: `SilveranWidgetConstants.continueWidgetKinds`. Snapshot publish reloads
@@ -19,15 +19,24 @@ Constants: `SilveranWidgetConstants.continueWidgetKinds`. Snapshot publish reloa
 ### Retired kinds (do not reinstall)
 
 These must never be registered or reloaded again — WidgetKit keeps a Home Screen
-instance bound to its kind, so a stale/blank tile will not pick up the new layout:
+instance bound to its kind, so a stale tile will not pick up a new timeline:
 
 - `InkAmpContinueWidget`
 - `inkamp.continue.v3` / `inkamp.continue.v4`
 - `inkamp.continue.upnext.v1`
+- `inkamp.continue.light.medium.v1` / `inkamp.continue.dark.medium.v1`
+- `inkamp.continue.light.medium.v2` / `inkamp.continue.dark.medium.v2`
 
-**After installing a new build:** remove any old Continue / Continue + Up next
-tile from the Home Screen, open ink+amp once (so the App Group snapshot is
-written), then add one of the four new widgets.
+WidgetKit cannot migrate an installed widget from one kind string to another.
+v2 Medium Home Screen tiles stayed on an old audiobook timeline even while the
+gallery picker (`getSnapshot`) and Large tiles showed the current podcast. v3
+is a new Medium timeline namespace, not a visual redesign. v2 is not registered,
+so it does not appear in the gallery.
+
+**After installing this build:** delete any leftover Medium v1/v2 tile, open
+ink+amp once (so the App Group snapshot is written), then add **ink+amp Light
+Medium** or **ink+amp Dark Medium** from the gallery (v3). Large tiles do not
+need to be replaced.
 
 ## Design (Concept 2)
 

@@ -176,7 +176,7 @@ fi
 
 WIDGET_EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${WIDGET_APPEX}/Info.plist")"
 WIDGET_STRINGS="$(strings "${WIDGET_APPEX}/${WIDGET_EXECUTABLE}")"
-for REQUIRED_WIDGET_STRING in     "inkamp.continue.light.medium.v2"     "inkamp.continue.light.large.v1"     "inkamp.continue.dark.medium.v2"     "inkamp.continue.dark.large.v1"     "ink+amp Light Medium"     "ink+amp Light Large"     "ink+amp Dark Medium"     "ink+amp Dark Large"
+for REQUIRED_WIDGET_STRING in     "inkamp.continue.light.medium.v3"     "inkamp.continue.light.large.v1"     "inkamp.continue.dark.medium.v3"     "inkamp.continue.dark.large.v1"     "ink+amp Light Medium"     "ink+amp Light Large"     "ink+amp Dark Medium"     "ink+amp Dark Large"
 do
     if [[ "${WIDGET_STRINGS}" != *"${REQUIRED_WIDGET_STRING}"* ]]; then
         echo "ERROR: packaged widget binary is missing '${REQUIRED_WIDGET_STRING}'."
