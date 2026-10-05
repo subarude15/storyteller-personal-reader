@@ -126,13 +126,19 @@ public final class PodcastPlayerPresenter {
                 audioURL: episode.audioURL,
                 duration: episode.duration,
                 startAtSeconds: resumeAt,
-                youtubeVideoID: episode.youtubeVideoID
+                youtubeVideoID: episode.youtubeVideoID,
+                isVideo: episode.isVideo
             )
         } catch {
             debugLog("[PodcastPlayerPresenter] Failed to open episode: \(error)")
             startError = "Couldn't start playback"
             // Keep card visible with Play + error; drop live-session retain.
             activeEpisode = episode
+            // Only drop PiP when the shared session is actually gone. A throw
+            // before teardown must not clear a player that is still running.
+            if await AudioSessionActor.shared.currentSessionKind() == nil {
+                Self.endVideoPresentation()
+            }
             return false
         }
 
@@ -200,6 +206,7 @@ public final class PodcastPlayerPresenter {
             if snapshot?.isPlaying != true {
                 activeEpisode = nil
                 await AudioSessionActor.shared.closePodcast()
+                Self.endVideoPresentation()
                 if let closing {
                     PunkRallyStatsEvents.sessionEnd(mediaID: "podcast/\(closing.id)")
                 } else {
@@ -228,6 +235,14 @@ public final class PodcastPlayerPresenter {
         activeEpisode = nil
         startError = nil
         isOpening = false
+        Self.endVideoPresentation()
+    }
+
+    /// Wake lock (and any future PiP session) are UI around the shared
+    /// playback session. Drop them when that session is actually gone.
+    private static func endVideoPresentation() {
+        PodcastVideoPictureInPictureCoordinator.shared.endSession()
+        ScreenWakeLock.shared.releaseInternalVideo()
     }
 
     /// Writes listen progress into the playhead store (always) and download

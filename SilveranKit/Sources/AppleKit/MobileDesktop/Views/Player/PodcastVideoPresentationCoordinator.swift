@@ -91,6 +91,13 @@ public final class PodcastVideoPresentationCoordinator {
             event: event,
             context: context
         )
+        #if DEBUG
+        if previous != state {
+            debugLog(
+                "[PodcastVideoPresentation] event=\(event) mode=\(state.mode) expanded=\(isPlayerExpanded) video=\(isInternalVideo) orientation=\(interfaceOrientation)"
+            )
+        }
+        #endif
         if previous.mode == .landscapeFullscreen, state.mode == .portrait {
             requestPortraitLockIfNeeded()
         }

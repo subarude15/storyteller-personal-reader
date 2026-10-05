@@ -40,6 +40,10 @@ import AVFoundation
 /// Optional: AVPlayer-backed players expose the instance for a video surface.
 public protocol AVPlayerProvidingPlaying: AudioPlaying {
     func avPlayer() async -> AVPlayer?
+    /// Keep the current item's audio going when the app locks or backgrounds.
+    /// Does not seek or replace the item. Resumes only if this engine still
+    /// intends to play and the system has paused the timebase.
+    func continueAudioInBackground() async
 }
 #endif
 
