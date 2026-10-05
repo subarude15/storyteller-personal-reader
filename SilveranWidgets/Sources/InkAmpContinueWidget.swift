@@ -131,6 +131,7 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
             preview: context.isPreview,
             snapshot: resolved.snapshot,
             family: context.family,
+            generatedAt: Date(),
         )
         completion(InkAmpContinueEntry(date: Date(), resolved: resolved))
     }
@@ -146,6 +147,7 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
             preview: context.isPreview,
             snapshot: resolved.snapshot,
             family: context.family,
+            generatedAt: Date(),
         )
         let refresh: TimeInterval = resolved.snapshot.isPlaying ? 5 * 60 : 15 * 60
         let entry = InkAmpContinueEntry(date: Date(), resolved: resolved)
@@ -173,8 +175,9 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
         preview: Bool,
         snapshot: ContinueWidgetSnapshot,
         family: WidgetFamily,
+        generatedAt: Date = Date(),
     ) {
-        // Temporary diagnostic — same fields for compact and large.
+        #if DEBUG
         print(
             InkAmpContinueTimelineResolver.logLine(
                 kind: kind,
@@ -183,8 +186,10 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
                 phase: phase,
                 isPreview: preview,
                 snapshot: snapshot,
+                generatedAt: generatedAt,
             )
         )
+        #endif
     }
 }
 

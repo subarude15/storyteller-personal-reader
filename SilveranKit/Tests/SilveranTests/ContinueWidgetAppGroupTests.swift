@@ -608,3 +608,155 @@ struct ContinueWidgetSnapshotTests {
         )
     }
 }
+
+@Suite("Continue widget current snapshot selection")
+struct ContinueWidgetCurrentSnapshotTests {
+    private var troop: ContinueWidgetSnapshot {
+        ContinueWidgetSnapshot(
+            title: "The Troop",
+            isPlaying: true,
+            kind: .audiobook,
+            deepLink: InkAmpContinueLink.continueURL.absoluteString,
+            progress: 0.04,
+        )
+    }
+
+    private var vergecast: ContinueWidgetSnapshot {
+        ContinueWidgetSnapshot(
+            title: "Dots get up...",
+            isPlaying: true,
+            kind: .podcast,
+            deepLink: InkAmpContinueLink.continueURL.absoluteString,
+            progress: 0.18,
+        )
+    }
+
+    @Test func compactAndLargeFamiliesSelectTheSameCurrentSnapshot() {
+        let selected = ContinueWidgetTimelineFamily.allCases.map { family in
+            ContinueWidgetCurrentSnapshot.snapshot(
+                for: family,
+                shared: vergecast,
+                localFallback: troop,
+                sharedContainerReachable: true,
+            )
+        }
+        #expect(Set(selected.map(\.mediaIdentity)).count == 1)
+        #expect(selected.allSatisfy { $0.title == "Dots get up..." })
+        #expect(selected.allSatisfy { $0.kind == .podcast })
+        #expect(selected.allSatisfy { $0.percentComplete == 18 })
+    }
+
+    @Test func audiobookToPodcastResolvesThePodcastForEveryFamily() {
+        for family in ContinueWidgetTimelineFamily.allCases {
+            let resolved = ContinueWidgetCurrentSnapshot.snapshot(
+                for: family,
+                shared: vergecast,
+                localFallback: troop,
+                sharedContainerReachable: true,
+            )
+            #expect(resolved.mediaIdentity == vergecast.mediaIdentity)
+            #expect(resolved.title == "Dots get up...")
+        }
+        #expect(
+            ContinueWidgetReloadPolicy.shouldReload(
+                previous: troop,
+                next: vergecast,
+                lastReload: Date(),
+                now: Date(),
+            )
+        )
+    }
+
+    @Test func compactDoesNotPreferOlderPersistedAudiobookOverSharedSnapshot() {
+        let compact = ContinueWidgetCurrentSnapshot.snapshot(
+            for: .systemSmall,
+            shared: vergecast,
+            localFallback: troop,
+            sharedContainerReachable: true,
+        )
+        let large = ContinueWidgetCurrentSnapshot.snapshot(
+            for: .systemLarge,
+            shared: vergecast,
+            localFallback: troop,
+            sharedContainerReachable: true,
+        )
+        #expect(compact.mediaIdentity == large.mediaIdentity)
+        #expect(compact.title != "The Troop")
+        #expect(compact.title == vergecast.title)
+        let reachableEmpty = ContinueWidgetCurrentSnapshot.select(
+            shared: .empty,
+            localFallback: troop,
+            sharedContainerReachable: true,
+        )
+        #expect(!reachableEmpty.hasItem)
+    }
+
+    @Test func refreshRequestIncludesCompactWidgetKinds() {
+        let kinds = ContinueWidgetSnapshotStore.timelineKindsToReload
+        #expect(kinds.contains("inkamp.continue.light.medium.v2"))
+        #expect(kinds.contains("inkamp.continue.dark.medium.v2"))
+        #expect(kinds.contains("inkamp.continue.light.large.v1"))
+        #expect(kinds.contains("inkamp.continue.dark.large.v1"))
+        #expect(
+            ContinueWidgetSnapshotStore.compactTimelineKinds.sorted()
+                == [
+                    "inkamp.continue.dark.medium.v2",
+                    "inkamp.continue.light.medium.v2",
+                ]
+        )
+        #expect(Set(ContinueWidgetSnapshotStore.compactTimelineKinds).isSubset(of: Set(kinds)))
+    }
+
+    @Test func placeholderCannotOverwriteAValidCurrentSnapshot() {
+        let live = InkAmpContinueTimelineResolver.resolve(
+            loaded: vergecast,
+            phase: .timeline,
+            theme: .light,
+        )
+        let sample = ContinueWidgetSnapshot(title: "The Quiet Path", kind: .audiobook, progress: 0.56)
+        let placeholder = InkAmpContinueTimelineResolver.placeholder(sample: sample)
+        #expect(!live.isPlaceholder)
+        #expect(live.snapshot.mediaIdentity == vergecast.mediaIdentity)
+        #expect(placeholder.isPlaceholder)
+        #expect(live.snapshot.mediaIdentity != placeholder.snapshot.mediaIdentity)
+        #expect(
+            ContinueWidgetCurrentSnapshot.select(
+                shared: vergecast,
+                localFallback: sample,
+                sharedContainerReachable: true,
+            ).mediaIdentity == vergecast.mediaIdentity
+        )
+    }
+
+    @Test func progressUpdatePreservesCurrentMediaIdentity() {
+        let later = ContinueWidgetSnapshot(
+            title: vergecast.title,
+            isPlaying: vergecast.isPlaying,
+            kind: vergecast.kind,
+            deepLink: vergecast.deepLink,
+            progress: 0.42,
+        )
+        #expect(later.mediaIdentity == vergecast.mediaIdentity)
+        #expect(later.percentComplete != vergecast.percentComplete)
+        let now = Date()
+        #expect(
+            !ContinueWidgetReloadPolicy.shouldReload(
+                previous: vergecast,
+                next: later,
+                lastReload: now,
+                now: now,
+            )
+        )
+        #expect(
+            ContinueWidgetReloadPolicy.shouldWrite(previous: vergecast, next: later)
+        )
+        #expect(
+            ContinueWidgetReloadPolicy.shouldReload(
+                previous: vergecast,
+                next: later,
+                lastReload: now.addingTimeInterval(-21),
+                now: now,
+            )
+        )
+    }
+}
