@@ -62,11 +62,72 @@ public struct PodcastVideoPiPRestoreGate: Equatable, Sendable {
     }
 }
 
+/// Distinguishes the currently visible registered surface from the layer
+/// protected as the active PiP content source. They may differ during an
+/// A→B surface swap while PiP is still running on A.
+public struct PodcastVideoPiPBindingState: Equatable, Sendable {
+    /// Visible surface that owns the pending/live inline layer.
+    public var visibleSurfaceID: String?
+    /// Identity of the layer/surface feeding the active PiP controller.
+    public var protectedSourceID: String?
+    public var isPictureInPictureActive: Bool
+
+    public init(
+        visibleSurfaceID: String? = nil,
+        protectedSourceID: String? = nil,
+        isPictureInPictureActive: Bool = false
+    ) {
+        self.visibleSurfaceID = visibleSurfaceID
+        self.protectedSourceID = protectedSourceID
+        self.isPictureInPictureActive = isPictureInPictureActive
+    }
+
+    public mutating func registerVisible(surfaceID: String) {
+        visibleSurfaceID = surfaceID
+    }
+
+    public mutating func unregisterVisible(surfaceID: String) {
+        guard visibleSurfaceID == surfaceID else { return }
+        visibleSurfaceID = nil
+    }
+
+    public mutating func protectSource(sourceID: String) {
+        protectedSourceID = sourceID
+        isPictureInPictureActive = true
+    }
+
+    public mutating func releaseProtectedSource() {
+        protectedSourceID = nil
+        isPictureInPictureActive = false
+    }
+
+    public mutating func endSession() {
+        visibleSurfaceID = nil
+        protectedSourceID = nil
+        isPictureInPictureActive = false
+    }
+
+    public func mayClearPlayer(sourceID: String) -> Bool {
+        PodcastVideoPiPLifecyclePolicy.shouldClearPlayerOnDismantle(
+            isPictureInPictureActive: isPictureInPictureActive,
+            isControllerContentSource: protectedSourceID == sourceID
+        )
+    }
+
+    /// After PiP stops, clear the orphaned source only when that layer is not
+    /// still the live visible surface's layer.
+    public func shouldClearReleasedSourcePlayer(
+        releasedSourceIsStillVisibleLayer: Bool
+    ) -> Bool {
+        !releasedSourceIsStillVisibleLayer
+    }
+}
+
 /// Pure teardown / observation decisions for the PiP coordinator.
 public enum PodcastVideoPiPLifecyclePolicy {
     /// While PiP is showing the dismantling surface's layer as its content
     /// source, keep `layer.player` bound so the floating window does not blank.
-    /// No UIKit re-parenting — the coordinator retains that source view instead.
+    /// No UIKit re-parenting — the coordinator retains that source layer instead.
     public static func shouldClearPlayerOnDismantle(
         isPictureInPictureActive: Bool,
         isControllerContentSource: Bool

@@ -56,13 +56,14 @@ struct PodcastVideoSurfaceView: UIViewRepresentable {
         #if DEBUG
         debugLog("[PodcastVideoSurface] dismantle id=\(coordinator.surfaceID)")
         #endif
-        // While PiP is actively sampling this layer, leave player bound and let
-        // the coordinator retain the view. Never re-parent into another container.
-        let shouldClearPlayer = PodcastVideoPictureInPictureCoordinator.shared.unregister(
+        // While this layer is the protected active PiP source, leave player
+        // bound and let the coordinator retain the layer (detached is fine).
+        // Never re-parent into another container.
+        let mayClearPlayer = PodcastVideoPictureInPictureCoordinator.shared.unregister(
             surfaceID: coordinator.surfaceID,
             sourceView: uiView
         )
-        if shouldClearPlayer {
+        if mayClearPlayer {
             uiView.playerLayer.player = nil
         }
     }

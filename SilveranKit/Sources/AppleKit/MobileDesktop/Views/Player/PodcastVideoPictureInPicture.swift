@@ -22,12 +22,12 @@ enum PodcastVideoPictureInPictureAvailability {
 ///
 /// Each `PodcastVideoSurfaceView` owns its layer and registers it here. This
 /// coordinator never moves, removes, or re-parents UIKit views — it only
-/// points `AVPictureInPictureController` at the active surface's layer.
+/// points `AVPictureInPictureController` at a local layer.
 ///
-/// When the content-source surface is dismantled while PiP is active, the
-/// coordinator strongly retains that source view (still no re-parenting) so
-/// `layer.player` stays bound until PiP stops or a new surface takes over
-/// after stop.
+/// **Visible vs protected source:** the currently registered visible surface
+/// may differ from the layer feeding an active PiP controller. While PiP is
+/// active that content-source layer is retained strongly (detached is fine;
+/// still no re-parenting) and its `player` must not be cleared until PiP stops.
 @MainActor
 final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictureControllerDelegate {
     static let shared = PodcastVideoPictureInPictureCoordinator()
@@ -37,16 +37,20 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
     private weak var registeredLayer: AVPlayerLayer?
     private var registeredSurfaceID: String?
     private var activeSurface = PodcastVideoPiPActiveSurface()
+    private var binding = PodcastVideoPiPBindingState()
     private var restoreGate = PodcastVideoPiPRestoreGate()
     private var restoreGeneration: UInt64 = 0
     private var pictureInPictureController: AVPictureInPictureController?
     /// ObjectIdentity of the layer the current controller was built for.
     private var controllerLayerID: ObjectIdentifier?
-    /// Weak identity of the layer currently feeding the PiP controller.
-    private weak var controllerSourceLayer: AVPlayerLayer?
-    /// Retains a dismantled content-source view while PiP is still using it.
-    /// Not inserted into any other hierarchy — ownership only.
-    private var retainedSourceView: UIView?
+    /// Weak ref to the layer used when the controller was installed. Promoted
+    /// to `protectedSourceLayer` when PiP becomes active.
+    private weak var installedSourceLayer: AVPlayerLayer?
+    /// Strong retain of the layer feeding the active PiP controller. May outlive
+    /// its SwiftUI surface as a detached layer; never re-parented.
+    private var protectedSourceLayer: AVPlayerLayer?
+    /// Token for `binding.protectedSourceID` (stable ObjectIdentifier string).
+    private var protectedSourceToken: String?
     private var automaticStartEnabled = false
     private var suppressRestore = false
     private var possibilityTask: Task<Void, Never>?
@@ -58,12 +62,12 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
         state.isSupported = AVPictureInPictureController.isPictureInPictureSupported()
     }
 
-    /// True when this surface/layer is already the active PiP source.
+    /// True when this surface/layer is already the visible registered surface.
     func isRegistered(surfaceID: String, layer: AVPlayerLayer) -> Bool {
         activeSurface.surfaceID == surfaceID && registeredLayer === layer
     }
 
-    /// Portrait/fullscreen surface became the active PiP source.
+    /// Portrait/fullscreen surface became the visible PiP-eligible surface.
     ///
     /// Call from `makeUIView` / explicit appear — not from every `updateUIView`,
     /// so a dismantling sibling cannot steal registration back mid-transition.
@@ -79,13 +83,14 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
         restoreGeneration = restoreGate.sessionGeneration
         let previousID = activeSurface.surfaceID
         activeSurface.register(surfaceID: surfaceID)
+        binding.registerVisible(surfaceID: surfaceID)
         registeredSurfaceID = surfaceID
         registeredLayer = layer
 
         #if DEBUG
         if previousID != surfaceID {
             debugLog(
-                "[PodcastVideoPiP] active layer change from=\(previousID ?? "nil") to=\(surfaceID) layer=\(ObjectIdentifier(layer))"
+                "[PodcastVideoPiP] visible surface change from=\(previousID ?? "nil") to=\(surfaceID) layer=\(ObjectIdentifier(layer)) protected=\(binding.protectedSourceID ?? "nil")"
             )
         }
         debugLog(
@@ -94,13 +99,13 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
         #endif
 
         // While PiP is running, keep the existing controller/content source.
-        // Surfaces may come and go; do not rebuild mid-flight.
-        if state.isActive {
+        // Surfaces may come and go; do not rebuild mid-flight onto B.
+        if state.isActive || binding.isPictureInPictureActive {
             return
         }
 
-        // A newly visible surface can replace a retained orphaned source.
-        releaseRetainedSource(clearPlayer: true)
+        // A newly visible surface can replace an orphaned protected source.
+        releaseProtectedSource(clearPlayerIfOrphaned: true)
 
         if controllerLayerID == ObjectIdentifier(layer), pictureInPictureController != nil {
             startPossibilityObservation()
@@ -130,27 +135,36 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
         }
     }
 
-    /// Surface left the hierarchy. Only clears registration when `surfaceID`
-    /// is still current. Returns whether the caller may clear `layer.player`.
+    /// Surface left the hierarchy. Only clears visible registration when
+    /// `surfaceID` is still current. Returns whether the caller may clear
+    /// `layer.player` — false while this layer is the protected PiP source.
     @discardableResult
     func unregister(surfaceID: String, sourceView: UIView) -> Bool {
         let sourceLayer = sourceView.layer as? AVPlayerLayer
-        let isControllerSource = sourceLayer != nil && sourceLayer === controllerSourceLayer
+        let sourceToken = sourceLayer.map(Self.sourceToken(for:))
+        let matchesInstalled = sourceLayer.map { ObjectIdentifier($0) == controllerLayerID } ?? false
+        let isProtectedSource =
+            (sourceToken != nil && sourceToken == binding.protectedSourceID)
+            || (sourceLayer != nil && sourceLayer === protectedSourceLayer)
+            || (sourceLayer != nil && sourceLayer === installedSourceLayer)
+            || matchesInstalled
+        let pipActive = state.isActive || binding.isPictureInPictureActive
         let wasCurrent = activeSurface.surfaceID == surfaceID
         activeSurface.unregister(surfaceID: surfaceID)
+        binding.unregisterVisible(surfaceID: surfaceID)
 
-        let shouldClear = PodcastVideoPiPLifecyclePolicy.shouldClearPlayerOnDismantle(
-            isPictureInPictureActive: state.isActive,
-            isControllerContentSource: isControllerSource
+        let mayClear = PodcastVideoPiPLifecyclePolicy.shouldClearPlayerOnDismantle(
+            isPictureInPictureActive: pipActive,
+            isControllerContentSource: isProtectedSource
         )
 
-        // Whether or not this surface still owns registration, if PiP is
-        // sampling its layer we must retain the view and keep player bound.
-        if !shouldClear {
-            retainedSourceView = sourceView
+        // Keep the content-source layer alive for AVKit even after the SwiftUI
+        // surface goes away. Detached is fine; do not re-parent.
+        if !mayClear, let sourceLayer {
+            protectSourceLayer(sourceLayer, token: sourceToken)
             #if DEBUG
             debugLog(
-                "[PodcastVideoPiP] retain content source during active PiP surface=\(surfaceID)"
+                "[PodcastVideoPiP] protect content source during active PiP surface=\(surfaceID) token=\(sourceToken ?? "nil")"
             )
             #endif
         }
@@ -158,24 +172,24 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
         guard wasCurrent, activeSurface.surfaceID == nil else {
             #if DEBUG
             debugLog(
-                "[PodcastVideoPiP] unregister ignored stale surface=\(surfaceID) current=\(activeSurface.surfaceID ?? "nil")"
+                "[PodcastVideoPiP] unregister ignored stale surface=\(surfaceID) visible=\(activeSurface.surfaceID ?? "nil")"
             )
             #endif
-            return shouldClear
+            return mayClear
         }
 
         #if DEBUG
-        debugLog("[PodcastVideoPiP] unregister surface=\(surfaceID)")
+        debugLog("[PodcastVideoPiP] unregister visible surface=\(surfaceID)")
         #endif
         registeredSurfaceID = nil
         registeredLayer = nil
 
-        if !state.isActive {
+        if !state.isActive, !binding.isPictureInPictureActive {
             pictureInPictureController?.canStartPictureInPictureAutomaticallyFromInline = false
             stopPossibilityObservation()
             state.isPossible = false
         }
-        return shouldClear
+        return mayClear
     }
 
     func setAutomaticStartEnabled(_ enabled: Bool) {
@@ -220,8 +234,10 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
         pictureInPictureController?.delegate = nil
         pictureInPictureController = nil
         controllerLayerID = nil
-        controllerSourceLayer = nil
-        releaseRetainedSource(clearPlayer: true)
+        installedSourceLayer = nil
+        // Always clear the protected source player on session teardown.
+        releaseProtectedSource(clearPlayerIfOrphaned: true, forceClearPlayer: true)
+        binding.endSession()
         registeredLayer = nil
         registeredSurfaceID = nil
         activeSurface = PodcastVideoPiPActiveSurface()
@@ -235,7 +251,7 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
         pictureInPictureController?.delegate = nil
         pictureInPictureController = nil
         controllerLayerID = nil
-        controllerSourceLayer = nil
+        installedSourceLayer = nil
         state.isPossible = false
 
         guard PodcastVideoPictureInPictureAvailability.isEnabled,
@@ -255,8 +271,48 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
         controller.canStartPictureInPictureAutomaticallyFromInline = automaticStartEnabled
         pictureInPictureController = controller
         controllerLayerID = ObjectIdentifier(layer)
-        controllerSourceLayer = layer
+        installedSourceLayer = layer
+        // Not yet strongly protected — protection begins when PiP actually starts.
         startPossibilityObservation()
+    }
+
+    private static func sourceToken(for layer: AVPlayerLayer) -> String {
+        String(describing: ObjectIdentifier(layer))
+    }
+
+    private func protectSourceLayer(_ layer: AVPlayerLayer, token: String?) {
+        let token = token ?? Self.sourceToken(for: layer)
+        protectedSourceLayer = layer
+        protectedSourceToken = token
+        installedSourceLayer = layer
+        controllerLayerID = ObjectIdentifier(layer)
+        binding.protectSource(sourceID: token)
+    }
+
+    /// PiP became active: strongly retain the controller's content-source layer
+    /// so a later surface dismantle cannot deallocate it or clear its player.
+    private func markPictureInPictureActive() {
+        state.isActive = true
+        if let protectedSourceLayer {
+            protectSourceLayer(protectedSourceLayer, token: protectedSourceToken)
+            return
+        }
+        if let installedSourceLayer {
+            protectSourceLayer(
+                installedSourceLayer,
+                token: Self.sourceToken(for: installedSourceLayer)
+            )
+            return
+        }
+        if let registeredLayer, ObjectIdentifier(registeredLayer) == controllerLayerID {
+            protectSourceLayer(registeredLayer, token: Self.sourceToken(for: registeredLayer))
+            return
+        }
+        if let controllerLayerID {
+            let token = String(describing: controllerLayerID)
+            protectedSourceToken = token
+            binding.protectSource(sourceID: token)
+        }
     }
 
     private func refreshPossibility() {
@@ -303,18 +359,39 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
         possibilityTask = nil
     }
 
-    private func releaseRetainedSource(clearPlayer: Bool) {
-        if clearPlayer, let retainedSourceView,
-           let layer = retainedSourceView.layer as? AVPlayerLayer
-        {
-            layer.player = nil
+    private func releaseProtectedSource(
+        clearPlayerIfOrphaned: Bool,
+        forceClearPlayer: Bool = false
+    ) {
+        let token = protectedSourceToken
+        let layer = protectedSourceLayer
+        let stillVisible = layer != nil && registeredLayer === layer
+        let shouldClear: Bool
+        if forceClearPlayer {
+            shouldClear = layer != nil
+        } else if clearPlayerIfOrphaned {
+            shouldClear = binding.shouldClearReleasedSourcePlayer(
+                releasedSourceIsStillVisibleLayer: stillVisible
+            )
+        } else {
+            shouldClear = false
         }
-        if retainedSourceView != nil {
+        if shouldClear {
+            layer?.player = nil
+        }
+        if layer != nil || token != nil {
             #if DEBUG
-            debugLog("[PodcastVideoPiP] release retained content source clearPlayer=\(clearPlayer)")
+            debugLog(
+                "[PodcastVideoPiP] release protected source clearPlayer=\(shouldClear) token=\(token ?? "nil")"
+            )
             #endif
         }
-        retainedSourceView = nil
+        protectedSourceLayer = nil
+        protectedSourceToken = nil
+        if !stillVisible {
+            installedSourceLayer = nil
+        }
+        binding.releaseProtectedSource()
     }
 
     private func restoreInterfaceForPictureInPictureStop() -> Bool {
@@ -340,10 +417,10 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
         _ pictureInPictureController: AVPictureInPictureController
     ) {
         hopToMain { coordinator in
-            coordinator.state.isActive = true
+            coordinator.markPictureInPictureActive()
             #if DEBUG
             debugLog(
-                "[PodcastVideoPiP] willStart surface=\(coordinator.registeredSurfaceID ?? "nil")"
+                "[PodcastVideoPiP] willStart visible=\(coordinator.registeredSurfaceID ?? "nil") protected=\(coordinator.binding.protectedSourceID ?? "nil")"
             )
             #endif
         }
@@ -353,10 +430,10 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
         _ pictureInPictureController: AVPictureInPictureController
     ) {
         hopToMain { coordinator in
-            coordinator.state.isActive = true
+            coordinator.markPictureInPictureActive()
             #if DEBUG
             debugLog(
-                "[PodcastVideoPiP] didStart surface=\(coordinator.registeredSurfaceID ?? "nil")"
+                "[PodcastVideoPiP] didStart visible=\(coordinator.registeredSurfaceID ?? "nil") protected=\(coordinator.binding.protectedSourceID ?? "nil")"
             )
             #endif
         }
@@ -369,6 +446,7 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
         let message = error.localizedDescription
         hopToMain { coordinator in
             coordinator.state.isActive = false
+            coordinator.releaseProtectedSource(clearPlayerIfOrphaned: false)
             #if DEBUG
             debugLog("[PodcastVideoPiP] failed: \(message)")
             #endif
@@ -382,12 +460,13 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
             coordinator.state.isActive = false
             #if DEBUG
             debugLog(
-                "[PodcastVideoPiP] didStop surface=\(coordinator.registeredSurfaceID ?? "nil")"
+                "[PodcastVideoPiP] didStop visible=\(coordinator.registeredSurfaceID ?? "nil") protected=\(coordinator.binding.protectedSourceID ?? "nil")"
             )
             #endif
-            // Drop any orphaned content-source view retained during teardown.
-            // Prefer the currently registered live surface for the next controller.
-            coordinator.releaseRetainedSource(clearPlayer: true)
+            // Release the protected (possibly detached) source. Clear its
+            // player only when no live visible surface still uses that layer.
+            // Then prepare the controller for the currently registered surface.
+            coordinator.releaseProtectedSource(clearPlayerIfOrphaned: true)
             if let layer = coordinator.registeredLayer {
                 coordinator.installController(for: layer)
             } else {
@@ -395,7 +474,6 @@ final class PodcastVideoPictureInPictureCoordinator: NSObject, AVPictureInPictur
                 coordinator.pictureInPictureController?.delegate = nil
                 coordinator.pictureInPictureController = nil
                 coordinator.controllerLayerID = nil
-                coordinator.controllerSourceLayer = nil
                 coordinator.refreshPossibility()
             }
         }
