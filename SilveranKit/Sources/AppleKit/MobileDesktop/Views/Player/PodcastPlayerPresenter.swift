@@ -238,8 +238,8 @@ public final class PodcastPlayerPresenter {
         Self.endVideoPresentation()
     }
 
-    /// Wake lock (and any future PiP session) are UI around the shared
-    /// playback session. Drop them when that session is actually gone.
+    /// Wake lock and PiP are UI around the shared playback session. Drop
+    /// them when that session is actually gone (blocks late PiP restore).
     private static func endVideoPresentation() {
         PodcastVideoPictureInPictureCoordinator.shared.endSession()
         ScreenWakeLock.shared.releaseInternalVideo()

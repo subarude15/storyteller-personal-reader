@@ -86,7 +86,8 @@ struct InternalVideoPlaybackLifecycleTests {
     }
 
     @Test func automaticPictureInPictureRequiresWatchingInlineVideo() {
-        #expect(!InternalVideoPlaybackLifecycle.isPictureInPictureEnabled)
+        // Auto-start stays off; manual PiP is the supported path.
+        #expect(!InternalVideoPlaybackLifecycle.isAutomaticPictureInPictureEnabled)
         #expect(!InternalVideoPlaybackLifecycle.allowsAutomaticPictureInPicture(watching()))
 
         var audio = watching()
@@ -103,9 +104,9 @@ struct InternalVideoPlaybackLifecycleTests {
     }
 
     @Test func pictureInPictureControlIsVideoOnlyAndFailsClosed() {
-        #expect(!InternalVideoPlaybackLifecycle.isPictureInPictureEnabled)
-        #expect(!InternalVideoPlaybackLifecycle.shouldShowPictureInPictureControl(watching()))
-        #expect(!InternalVideoPlaybackLifecycle.canStartPictureInPicture(watching()))
+        #expect(InternalVideoPlaybackLifecycle.isPictureInPictureEnabled)
+        #expect(InternalVideoPlaybackLifecycle.shouldShowPictureInPictureControl(watching()))
+        #expect(InternalVideoPlaybackLifecycle.canStartPictureInPicture(watching()))
 
         var unsupported = watching()
         unsupported.isPictureInPictureSupported = false
@@ -115,16 +116,47 @@ struct InternalVideoPlaybackLifecycleTests {
 
         var notYet = watching()
         notYet.isPictureInPicturePossible = false
-        #expect(!InternalVideoPlaybackLifecycle.shouldShowPictureInPictureControl(notYet))
+        #expect(InternalVideoPlaybackLifecycle.shouldShowPictureInPictureControl(notYet))
         #expect(!InternalVideoPlaybackLifecycle.canStartPictureInPicture(notYet))
 
         var audio = watching()
         audio.isInternalVideo = false
         #expect(!InternalVideoPlaybackLifecycle.shouldShowPictureInPictureControl(audio))
+        #expect(!InternalVideoPlaybackLifecycle.canStartPictureInPicture(audio))
+    }
+
+    @Test func audioOnlyNeverOffersPictureInPicture() {
+        var audio = watching()
+        audio.isInternalVideo = false
+        audio.isPictureInPictureSupported = true
+        audio.isPictureInPicturePossible = true
+        #expect(!InternalVideoPlaybackLifecycle.shouldShowPictureInPictureControl(audio))
+        #expect(!InternalVideoPlaybackLifecycle.canStartPictureInPicture(audio))
+    }
+
+    @Test func unsupportedDevicesNeverOfferPictureInPicture() {
+        var unsupported = watching()
+        unsupported.isPictureInPictureSupported = false
+        #expect(!InternalVideoPlaybackLifecycle.shouldShowPictureInPictureControl(unsupported))
+        #expect(!InternalVideoPlaybackLifecycle.canStartPictureInPicture(unsupported))
     }
 
     @Test func pictureInPictureTransitionDoesNotResetPlayback() {
         #expect(!InternalVideoPlaybackLifecycle.shouldResetPlaybackOnPictureInPictureTransition())
+    }
+
+    @Test func pictureInPictureDoesNotAffectWakeLockPolicyIncorrectly() {
+        // Playing inline video still holds the wake lock.
+        #expect(InternalVideoPlaybackLifecycle.shouldDisableIdleTimer(watching()))
+
+        // Active PiP releases it (system chrome owns the window).
+        var pip = watching()
+        pip.isPictureInPictureActive = true
+        #expect(!InternalVideoPlaybackLifecycle.shouldDisableIdleTimer(pip))
+
+        // Leaving PiP while still watching restores the hold.
+        pip.isPictureInPictureActive = false
+        #expect(InternalVideoPlaybackLifecycle.shouldDisableIdleTimer(pip))
     }
 
     @Test func backgroundAndLockDoNotPauseSession() {
