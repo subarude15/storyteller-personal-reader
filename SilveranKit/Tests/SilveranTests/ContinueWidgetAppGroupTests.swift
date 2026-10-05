@@ -618,6 +618,7 @@ struct ContinueWidgetCurrentSnapshotTests {
             kind: .audiobook,
             deepLink: InkAmpContinueLink.continueURL.absoluteString,
             progress: 0.04,
+            itemID: "book:storyteller/troop",
         )
     }
 
@@ -628,6 +629,7 @@ struct ContinueWidgetCurrentSnapshotTests {
             kind: .podcast,
             deepLink: InkAmpContinueLink.continueURL.absoluteString,
             progress: 0.18,
+            itemID: "pod:vergecast-123",
         )
     }
 
@@ -735,6 +737,7 @@ struct ContinueWidgetCurrentSnapshotTests {
             kind: vergecast.kind,
             deepLink: vergecast.deepLink,
             progress: 0.42,
+            itemID: vergecast.itemID,
         )
         #expect(later.mediaIdentity == vergecast.mediaIdentity)
         #expect(later.percentComplete != vergecast.percentComplete)
@@ -758,5 +761,90 @@ struct ContinueWidgetCurrentSnapshotTests {
                 now: now,
             )
         )
+    }
+
+    @Test func sameTitleDifferentItemIDsReloadAndDropOldCover() {
+        let first = ContinueWidgetSnapshot(
+            title: "The Vergecast",
+            coverFilename: "continue_cover.dat",
+            isPlaying: true,
+            kind: .podcast,
+            deepLink: InkAmpContinueLink.continueURL.absoluteString,
+            progress: 0.10,
+            itemID: "pod:episode-a",
+        )
+        let second = ContinueWidgetSnapshot(
+            title: "The Vergecast",
+            isPlaying: true,
+            kind: .podcast,
+            deepLink: InkAmpContinueLink.continueURL.absoluteString,
+            progress: 0.02,
+            itemID: "pod:episode-b",
+        )
+        #expect(first.mediaIdentity == "pod:episode-a")
+        #expect(second.mediaIdentity == "pod:episode-b")
+        #expect(first.mediaIdentity != second.mediaIdentity)
+        #expect(
+            ContinueWidgetReloadPolicy.shouldReload(
+                previous: first,
+                next: second,
+                lastReload: Date(),
+                now: Date(),
+            )
+        )
+        #expect(
+            !ContinueWidgetSnapshot.shouldKeepPreviousCover(
+                previous: first,
+                nextItemID: second.itemID,
+                nextTitle: second.title,
+                nextKind: second.kind,
+                nextDeepLink: second.deepLink,
+            )
+        )
+        #expect(
+            ContinueWidgetSnapshot.shouldKeepPreviousCover(
+                previous: first,
+                nextItemID: first.itemID,
+                nextTitle: first.title,
+                nextKind: first.kind,
+                nextDeepLink: first.deepLink,
+            )
+        )
+    }
+
+    @Test func sessionKindMapsToStableQueueItemIDs() {
+        #expect(
+            ContinueWidgetItemID.from(
+                sessionKind: .audiobook(BookID(sourceID: "storyteller", uuid: "troop"))
+            ) == "book:storyteller/troop"
+        )
+        #expect(
+            ContinueWidgetItemID.from(
+                sessionKind: .readaloud(BookID(sourceID: "storyteller", uuid: "quiet-path"))
+            ) == "book:storyteller/quiet-path"
+        )
+        #expect(
+            ContinueWidgetItemID.from(sessionKind: .podcast("vergecast-123"))
+                == "pod:vergecast-123"
+        )
+    }
+
+    @Test func legacySnapshotsWithoutItemIDStillDecode() throws {
+        let legacyJSON = """
+            {
+              "generatedAt": "2026-09-16T12:00:00Z",
+              "isPlaying": true,
+              "kind": "audiobook",
+              "title": "The Troop"
+            }
+            """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let snapshot = try decoder.decode(
+            ContinueWidgetSnapshot.self,
+            from: Data(legacyJSON.utf8),
+        )
+        #expect(snapshot.itemID == nil)
+        #expect(snapshot.mediaIdentity.contains("The Troop"))
     }
 }

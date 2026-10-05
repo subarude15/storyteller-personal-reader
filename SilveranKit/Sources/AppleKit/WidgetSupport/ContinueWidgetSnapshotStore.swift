@@ -108,6 +108,9 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
     /// Following Home mixed-queue rows (not a second queue). Nil on snapshots
     /// written before Up next existed.
     public var upNext: [ContinueWidgetQueueItem]?
+    /// Stable book / episode / session id (`book:<source>/<uuid>` or `pod:<id>`).
+    /// Optional so snapshots written before this field still decode.
+    public var itemID: String?
 
     public static let upNextLimit = 3
 
@@ -125,6 +128,7 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         hasLiveSession: Bool? = nil,
         rate: Double? = nil,
         upNext: [ContinueWidgetQueueItem]? = nil,
+        itemID: String? = nil,
     ) {
         self.generatedAt = generatedAt
         self.title = title
@@ -139,6 +143,7 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         self.hasLiveSession = hasLiveSession
         self.rate = rate
         self.upNext = upNext
+        self.itemID = itemID
     }
 
     public static let empty = ContinueWidgetSnapshot()
@@ -206,13 +211,43 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         Array((upNext ?? []).prefix(Self.upNextLimit))
     }
 
-    /// Which item is Now Listening. Progress ticks must not change this.
+    /// Which item is Now Listening. Prefers the stable item id; title is display.
     public var mediaIdentity: String {
-        [
+        Self.mediaIdentity(itemID: itemID, kind: kind, title: title, deepLink: deepLink)
+    }
+
+    public static func mediaIdentity(
+        itemID: String?,
+        kind: ContinueWidgetKindTag?,
+        title: String?,
+        deepLink: String?,
+    ) -> String {
+        if let itemID {
+            let trimmed = itemID.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return [
             kind?.rawValue ?? "",
             title ?? "",
             deepLink ?? "",
         ].joined(separator: "|")
+    }
+
+    /// Keep the last cover only when Now Listening is the same item.
+    public static func shouldKeepPreviousCover(
+        previous: ContinueWidgetSnapshot,
+        nextItemID: String?,
+        nextTitle: String?,
+        nextKind: ContinueWidgetKindTag?,
+        nextDeepLink: String?,
+    ) -> Bool {
+        guard nextTitle != nil, previous.coverFilename != nil else { return false }
+        return previous.mediaIdentity == mediaIdentity(
+            itemID: nextItemID,
+            kind: nextKind,
+            title: nextTitle,
+            deepLink: nextDeepLink,
+        )
     }
 
     /// Identity for "did anything the widget paints change?" comparisons —
@@ -360,6 +395,7 @@ public enum ContinueWidgetSnapshotStore {
         hasLiveSession: Bool = false,
         rate: Double? = nil,
         upNext: [ContinueWidgetUpNextDraft]? = nil,
+        itemID: String? = nil,
     ) {
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "publish")
         guard let container = SilveranWidgetSnapshotStore.sharedContainerURL() else {
@@ -386,19 +422,17 @@ public enum ContinueWidgetSnapshotStore {
                 let url = covers.appendingPathComponent(name, isDirectory: false)
                 try coverData.write(to: url, options: [.atomic])
                 coverFilename = name
-            } else if let previousSnapshot, let existing = previousSnapshot.coverFilename,
-                title != nil
+            } else if let previousSnapshot,
+                ContinueWidgetSnapshot.shouldKeepPreviousCover(
+                    previous: previousSnapshot,
+                    nextItemID: itemID,
+                    nextTitle: title,
+                    nextKind: kind,
+                    nextDeepLink: title == nil ? nil : deepLink,
+                ),
+                let existing = previousSnapshot.coverFilename
             {
-                let nextIdentity = [
-                    kind?.rawValue ?? "",
-                    title ?? "",
-                    deepLink,
-                ].joined(separator: "|")
-                // Same item, no new bytes: keep art. A new item must not inherit
-                // the previous audiobook cover while the snapshot title has moved on.
-                if previousSnapshot.mediaIdentity == nextIdentity {
-                    coverFilename = existing
-                }
+                coverFilename = existing
             }
             let resolvedUpNext = try resolveUpNext(
                 drafts: upNext,
@@ -419,6 +453,7 @@ public enum ContinueWidgetSnapshotStore {
                 hasLiveSession: hasLiveSession,
                 rate: rate,
                 upNext: resolvedUpNext,
+                itemID: itemID,
             )
 
             publishLock.lock()
@@ -484,6 +519,7 @@ public enum ContinueWidgetSnapshotStore {
             durationSeconds: session.durationSeconds,
             hasLiveSession: true,
             rate: session.playbackRate,
+            itemID: ContinueWidgetItemID.from(sessionKind: session.kind),
         )
     }
 
@@ -503,6 +539,7 @@ public enum ContinueWidgetSnapshotStore {
             durationSeconds: last.durationSeconds,
             hasLiveSession: false,
             rate: last.rate,
+            itemID: last.itemID,
         )
     }
 
@@ -629,6 +666,18 @@ public enum ContinueWidgetSnapshotStore {
             let name = url.lastPathComponent
             guard name.hasPrefix("upnext_"), !names.contains(name) else { continue }
             try? FileManager.default.removeItem(at: url)
+        }
+    }
+}
+
+/// Home-queue / session identity written onto Continue snapshots.
+public enum ContinueWidgetItemID {
+    public static func from(sessionKind: AudioSessionKind) -> String {
+        switch sessionKind {
+            case .audiobook(let id), .readaloud(let id):
+                return "book:\(id.sourceID)/\(id.uuid)"
+            case .podcast(let episodeID):
+                return "pod:\(episodeID)"
         }
     }
 }
