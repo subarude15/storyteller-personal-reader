@@ -878,19 +878,21 @@ struct ContinueWidgetCurrentSnapshotTests {
 
     @Test func gallerySnapshotAndHomeTimelineUseTheSameSharedSnapshot() {
         let now = Date(timeIntervalSince1970: 1_777_000_000)
+        let current = vergecast
         let gallery = ContinueWidgetLiveUpdateBuilder.make(
-            loaded: vergecast,
+            loaded: current,
             phase: .snapshot,
             theme: .dark,
             now: now,
         )
         let home = ContinueWidgetLiveUpdateBuilder.make(
-            loaded: vergecast,
+            loaded: current,
             phase: .timeline,
             theme: .light,
             now: now,
         )
         #expect(gallery.snapshot == home.snapshot)
+        #expect(gallery.snapshot.mediaIdentity == current.mediaIdentity)
         #expect(gallery.snapshot.itemID == "pod:vergecast-123")
         #expect(gallery.refreshAfter == nil)
         #expect(home.refreshAfter == now.addingTimeInterval(5 * 60))
