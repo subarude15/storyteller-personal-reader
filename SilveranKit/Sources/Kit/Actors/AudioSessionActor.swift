@@ -843,6 +843,12 @@ public actor AudioSessionActor {
             await configureNowPlayingCommands(for: .audiobook(book.id))
             await publishState()
             startCoverTask(for: book, sessionID: sessionID)
+            // Hydrate durable user-action clock so relaunch still protects rewinds.
+            if let stored = await ProgressSyncActor.shared.lastAuthoritativeUserActionTimestamp(
+                for: book.id
+            ) {
+                lastUserActionTimestampMs = max(lastUserActionTimestampMs, stored)
+            }
             await ProgressSyncActor.shared.savePausedSessionRecord(
                 AudiobookPausedSessionRecord(bookID: book.id, eligibleForRestore: true)
             )
@@ -1039,9 +1045,24 @@ public actor AudioSessionActor {
 
         do {
             try await openAudiobook(bookID: record.bookID)
+            guard case .audiobook(let openedID) = currentKind, openedID == record.bookID,
+                metadata != nil
+            else {
+                debugLog(
+                    "[AudioSessionActor] paused restore incomplete for \(record.bookID)"
+                )
+                return false
+            }
             // Ensure we stay paused after restore — never autoplay across relaunch.
             await AudiobookActor.shared.pause()
+            lastObservedIsPlaying = false
             await publishState()
+            if let state = await AudiobookActor.shared.getCurrentState(), state.isPlaying {
+                debugLog(
+                    "[AudioSessionActor] paused restore still playing for \(record.bookID); treating as failure"
+                )
+                return false
+            }
             debugLog(
                 "[AudioSessionActor] restored paused session for \(record.bookID) without autoplay"
             )
@@ -1067,32 +1088,67 @@ public actor AudioSessionActor {
     }
 
     /// Apply an explicit listening-history restore into the live player + PSA.
+    /// Persists checkpoint, updates local canonical progress, and queues Storyteller sync.
+    @discardableResult
     public func restoreListeningPosition(
         locator: BookLocator,
         locationDescription: String,
-    ) async {
-        guard let book else { return }
+    ) async -> ListeningRestoreResult {
+        guard let book else { return .noActiveBook }
         let timestamp = floor(Date().timeIntervalSince1970 * 1_000)
         lastUserActionTimestampMs = timestamp
         await ProgressSyncActor.shared.noteAuthoritativeUserAction(
             bookID: book.id,
             timestamp: timestamp,
+            persist: true,
         )
-        let _ = await ProgressSyncActor.shared.restorePosition(
+
+        let syncResult = await ProgressSyncActor.shared.restorePosition(
             bookID: book.id,
             locator: locator,
             locationDescription: locationDescription,
         )
-        if let progression = locator.locations?.totalProgression {
-            await AudiobookActor.shared.seekToTotalProgressFraction(
-                min(max(progression, 0), 1)
-            )
-            playheadInitialized = true
-            if let state = await AudiobookActor.shared.getCurrentState(), let metadata {
-                lastSyncedLocator = makeLocator(state: state, metadata: metadata)
-            }
-            await publishState()
+        switch syncResult {
+            case .rejected:
+                debugLog("[AudioSessionActor] restoreListeningPosition sync rejected")
+                return .syncRejected
+            case .failed:
+                debugLog("[AudioSessionActor] restoreListeningPosition sync failed")
+                return .syncFailed
+            case .success, .queued:
+                break
         }
+
+        guard let progression = locator.locations?.totalProgression
+            ?? locator.locations?.progression
+        else {
+            return .seekFailed
+        }
+        let target = min(max(progression, 0), 1)
+        await AudiobookActor.shared.seekToTotalProgressFraction(target)
+        playheadInitialized = true
+
+        guard let state = await AudiobookActor.shared.getCurrentState(),
+            let metadata,
+            metadata.totalDuration > 0
+        else {
+            return .seekFailed
+        }
+        let landed =
+            metadata.totalDuration > 0
+            ? state.currentTime / metadata.totalDuration
+            : 0
+        // Allow a small seek tolerance; otherwise treat as failure.
+        if abs(landed - target) > 0.05, target > AudiobookProgressConflict.zeroEpsilon {
+            debugLog(
+                "[AudioSessionActor] restoreListeningPosition seek missed target=\(target) landed=\(landed)"
+            )
+            return .seekFailed
+        }
+
+        lastSyncedLocator = makeLocator(state: state, metadata: metadata)
+        await publishState()
+        return .success
     }
 
     public func closeAudiobookArmIfActive() async {
@@ -1277,6 +1333,7 @@ public actor AudioSessionActor {
             await ProgressSyncActor.shared.noteAuthoritativeUserAction(
                 bookID: book.id,
                 timestamp: timestamp,
+                persist: true,
             )
             await syncProgress(reason: seekReason, isExplicitUserAction: true)
         }
@@ -1590,6 +1647,7 @@ public actor AudioSessionActor {
                 reason: "periodicCheckpoint",
                 state: state,
                 recordMilestone: false,
+                isExplicitUserAction: false,
             )
         }
 
@@ -1721,14 +1779,6 @@ public actor AudioSessionActor {
                     : 0
             } ?? 0
         let locator = makeLocator(state: state, metadata: metadata)
-        guard locator != lastSyncedLocator else {
-            await persistRecoveryCheckpoint(
-                reason: reason.rawValue,
-                state: state,
-                recordMilestone: isMilestoneReason(reason),
-            )
-            return
-        }
         let timestamp = floor(Date().timeIntervalSince1970 * 1_000)
         let explicit =
             isExplicitUserAction
@@ -1738,26 +1788,42 @@ public actor AudioSessionActor {
             || reason == .userSkippedForward
             || reason == .userSkippedBackward
             || reason == .userSelectedChapter
-        let result = await ProgressSyncActor.shared.syncProgress(
-            bookID: book.id,
-            locator: locator,
-            timestamp: timestamp,
-            reason: reason,
-            sourceIdentifier: "Audiobook Player",
-            locationDescription: "\(chapter?.title ?? "Audiobook"), \(Int(chapterProgress * 100))%",
-            playheadInitialized: playheadInitialized && metadata.totalDuration > 0,
-            isExplicitUserAction: explicit,
-        )
-        switch result {
-            case .success, .queued:
-                lastSyncedLocator = locator
-            case .failed:
-                break
+        let initialized = playheadInitialized && metadata.totalDuration > 0
+
+        // Even when the locator is unchanged, checkpoint writes must still pass
+        // PSA conflict validation — never bypass via lastSyncedLocator short-circuit.
+        if locator != lastSyncedLocator {
+            let result = await ProgressSyncActor.shared.syncProgress(
+                bookID: book.id,
+                locator: locator,
+                timestamp: timestamp,
+                reason: reason,
+                sourceIdentifier: "Audiobook Player",
+                locationDescription:
+                    "\(chapter?.title ?? "Audiobook"), \(Int(chapterProgress * 100))%",
+                playheadInitialized: initialized,
+                isExplicitUserAction: explicit,
+            )
+            switch result {
+                case .success, .queued:
+                    lastSyncedLocator = locator
+                case .rejected:
+                    debugLog(
+                        "[AudioSessionActor] syncProgress rejected (\(reason.rawValue)); skipping checkpoint"
+                    )
+                    return
+                case .failed:
+                    // Network/queue failure — still attempt a validated local checkpoint.
+                    break
+            }
         }
+
         await persistRecoveryCheckpoint(
             reason: reason.rawValue,
             state: state,
             recordMilestone: isMilestoneReason(reason),
+            isExplicitUserAction: explicit,
+            eventTimestamp: timestamp,
         )
     }
 
@@ -1775,29 +1841,29 @@ public actor AudioSessionActor {
         }
     }
 
+    @discardableResult
     private func persistRecoveryCheckpoint(
         reason: String,
         state: AudiobookPlaybackState? = nil,
         recordMilestone: Bool,
-    ) async {
-        guard resolvedPlayback == nil, playheadInitialized,
+        isExplicitUserAction: Bool = false,
+        eventTimestamp: Double? = nil,
+    ) async -> CheckpointSaveResult {
+        guard resolvedPlayback == nil,
             let book, let metadata
-        else { return }
+        else { return .failed }
         let playbackState: AudiobookPlaybackState
         if let state {
             playbackState = state
         } else if let current = await AudiobookActor.shared.getCurrentState() {
             playbackState = current
         } else {
-            return
+            return .failed
         }
-        guard metadata.totalDuration > 0 else { return }
 
         let locator = makeLocator(state: playbackState, metadata: metadata)
-        let progression =
-            locator.locations?.totalProgression
-            ?? 0
-        let timestamp = floor(Date().timeIntervalSince1970 * 1_000)
+        let progression = locator.locations?.totalProgression ?? 0
+        let timestamp = eventTimestamp ?? floor(Date().timeIntervalSince1970 * 1_000)
         let checkpoint = AudiobookRecoveryCheckpoint(
             bookID: book.id,
             locator: locator,
@@ -1806,34 +1872,49 @@ public actor AudioSessionActor {
             reason: reason,
             sessionGeneration: storytellerSessionGeneration,
         )
-        await ProgressSyncActor.shared.saveRecoveryCheckpoint(checkpoint)
-        lastCheckpointWrite = Date()
-
-        if recordMilestone {
-            let chapter = playbackState.currentChapterIndex.flatMap { metadata.chapters[safe: $0] }
-            let chapterProgress =
-                chapter.map {
-                    $0.duration > 0
-                        ? min(max((playbackState.currentTime - $0.startTime) / $0.duration, 0), 1)
-                        : 0
-                } ?? 0
-            let syncReason = SyncReason(rawValue: reason) ?? .periodicDuringActivePlayback
-            await ProgressSyncActor.shared.recordListeningMilestone(
-                AudiobookListeningMilestone(
-                    bookID: book.id,
-                    locator: locator,
-                    totalProgression: progression,
-                    timestamp: timestamp,
-                    locationDescription:
-                        "\(chapter?.title ?? "Audiobook"), \(Int(chapterProgress * 100))%",
-                    reason: syncReason,
-                )
-            )
-        }
-
-        await ProgressSyncActor.shared.savePausedSessionRecord(
-            AudiobookPausedSessionRecord(bookID: book.id, eligibleForRestore: true)
+        // Validation lives entirely inside PSA so every path is protected.
+        let result = await ProgressSyncActor.shared.saveRecoveryCheckpoint(
+            checkpoint,
+            playheadInitialized: playheadInitialized && metadata.totalDuration > 0,
+            isExplicitUserAction: isExplicitUserAction,
         )
+        switch result {
+            case .saved:
+                lastCheckpointWrite = Date()
+                if recordMilestone {
+                    let chapter = playbackState.currentChapterIndex.flatMap {
+                        metadata.chapters[safe: $0]
+                    }
+                    let chapterProgress =
+                        chapter.map {
+                            $0.duration > 0
+                                ? min(
+                                    max((playbackState.currentTime - $0.startTime) / $0.duration, 0),
+                                    1
+                                )
+                                : 0
+                        } ?? 0
+                    let syncReason = SyncReason(rawValue: reason) ?? .periodicDuringActivePlayback
+                    await ProgressSyncActor.shared.recordListeningMilestone(
+                        AudiobookListeningMilestone(
+                            bookID: book.id,
+                            locator: locator,
+                            totalProgression: progression,
+                            timestamp: timestamp,
+                            locationDescription:
+                                "\(chapter?.title ?? "Audiobook"), \(Int(chapterProgress * 100))%",
+                            reason: syncReason,
+                        )
+                    )
+                }
+                // Do NOT re-enable paused-session restore here — only openAudiobook
+                // marks eligibility true; Stop/Close clear it.
+            case .rejected, .rejectedStale, .failed:
+                debugLog(
+                    "[AudioSessionActor] checkpoint not saved (\(result)) reason=\(reason)"
+                )
+        }
+        return result
     }
 
     private func makeLocator(
@@ -2063,6 +2144,7 @@ public actor AudioSessionActor {
             await ProgressSyncActor.shared.noteAuthoritativeUserAction(
                 bookID: book.id,
                 timestamp: timestamp,
+                persist: true,
             )
             await syncProgress(reason: reason, isExplicitUserAction: true)
         }

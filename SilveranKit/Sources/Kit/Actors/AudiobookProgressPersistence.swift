@@ -95,11 +95,62 @@ public struct PersistedAudiobookCheckpoints: Codable, Sendable {
         public var checkpoints: [AudiobookRecoveryCheckpoint]
     }
 
-    public var books: [Book]
+    public struct AuthoritativeUserAction: Codable, Sendable, Equatable {
+        public var bookID: BookID
+        public var timestamp: Double
 
-    public init(books: [Book] = []) {
-        self.books = books
+        public init(bookID: BookID, timestamp: Double) {
+            self.bookID = bookID
+            self.timestamp = timestamp
+        }
     }
+
+    public var books: [Book]
+    /// Survives process death so deliberate rewinds stay protected after relaunch.
+    public var authoritativeUserActions: [AuthoritativeUserAction]
+
+    public init(
+        books: [Book] = [],
+        authoritativeUserActions: [AuthoritativeUserAction] = [],
+    ) {
+        self.books = books
+        self.authoritativeUserActions = authoritativeUserActions
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case books
+        case authoritativeUserActions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        books = try container.decode([Book].self, forKey: .books)
+        authoritativeUserActions =
+            try container.decodeIfPresent(
+                [AuthoritativeUserAction].self,
+                forKey: .authoritativeUserActions,
+            ) ?? []
+    }
+}
+
+public enum CheckpointAppendOutcome: Equatable, Sendable {
+    case appended([AudiobookRecoveryCheckpoint])
+    case rejectedStale
+}
+
+public enum CheckpointSaveResult: Equatable, Sendable {
+    case saved
+    case rejected(ProgressAcceptance)
+    case rejectedStale
+    case failed
+}
+
+public enum ListeningRestoreResult: Equatable, Sendable {
+    case success
+    case noActiveBook
+    case syncRejected
+    case syncFailed
+    case seekFailed
 }
 
 public struct PersistedAudiobookListeningHistory: Codable, Sendable {
@@ -207,23 +258,39 @@ public enum AudiobookProgressConflict {
         })
     }
 
+    /// Append by **event timestamp**, not wall-clock finish order.
+    /// A delayed async write with an older event time cannot become latest unless
+    /// it is an explicit user action (seek / restart / history restore).
     public static func appendCheckpoint(
         existing: [AudiobookRecoveryCheckpoint],
         new: AudiobookRecoveryCheckpoint,
-    ) -> [AudiobookRecoveryCheckpoint] {
+        isExplicitUserAction: Bool = false,
+    ) -> CheckpointAppendOutcome {
+        if let latest = existing.first,
+            new.timestamp + 0.5 < latest.timestamp,
+            !isExplicitUserAction
+        {
+            return .rejectedStale
+        }
+
         var next = existing.filter {
             abs($0.timestamp - new.timestamp) > 0.5 || $0.reason != new.reason
         }
-        next.insert(new, at: 0)
+        next.append(new)
+        next.sort { lhs, rhs in
+            if lhs.timestamp != rhs.timestamp {
+                return lhs.timestamp > rhs.timestamp
+            }
+            return lhs.updatedAt > rhs.updatedAt
+        }
         if next.count > maxCheckpointsPerBook {
-            // Always keep index 0 (latest valid). Drop oldest only.
+            // Keep newest-by-event-time; never drop the only remaining entry.
             next = Array(next.prefix(maxCheckpointsPerBook))
         }
-        // Guarantee latest remains even if pruning somehow emptied.
         if next.isEmpty {
             next = [new]
         }
-        return next
+        return .appended(next)
     }
 
     public static func appendMilestone(

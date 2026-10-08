@@ -14,6 +14,7 @@ public struct AudiobookListeningHistoryView: View {
     @State private var isLoading = true
     @State private var pendingResume: AudiobookListeningMilestone?
     @State private var showResumeConfirmation = false
+    @State private var restoreErrorMessage: String?
 
     public init(
         bookID: BookID,
@@ -75,13 +76,28 @@ public struct AudiobookListeningHistoryView: View {
                 Button("Resume Here") {
                     guard let milestone = pendingResume else { return }
                     Task {
-                        await AudioSessionActor.shared.restoreListeningPosition(
+                        let result = await AudioSessionActor.shared.restoreListeningPosition(
                             locator: milestone.locator,
                             locationDescription: milestone.locationDescription,
                         )
                         pendingResume = nil
-                        onResumed?()
-                        dismiss()
+                        switch result {
+                            case .success:
+                                onResumed?()
+                                dismiss()
+                            case .noActiveBook:
+                                restoreErrorMessage =
+                                    "No audiobook is open. Open the book, then try Resume Here again."
+                            case .syncRejected:
+                                restoreErrorMessage =
+                                    "Could not restore that position (conflict with newer listening progress)."
+                            case .syncFailed:
+                                restoreErrorMessage =
+                                    "Could not save the restored position. Check your connection and try again."
+                            case .seekFailed:
+                                restoreErrorMessage =
+                                    "Saved progress, but seeking to that position failed. Try again."
+                        }
                     }
                 }
             } message: {
@@ -90,6 +106,17 @@ public struct AudiobookListeningHistoryView: View {
                         "Jump to \(milestone.locationDescription) (\(milestone.percentLabel)) from \(milestone.humanTimestamp)?"
                     )
                 }
+            }
+            .alert(
+                "Restore Failed",
+                isPresented: Binding(
+                    get: { restoreErrorMessage != nil },
+                    set: { if !$0 { restoreErrorMessage = nil } },
+                ),
+            ) {
+                Button("OK", role: .cancel) { restoreErrorMessage = nil }
+            } message: {
+                Text(restoreErrorMessage ?? "")
             }
         }
         .inkAmpAppThemed()

@@ -147,11 +147,17 @@ public actor ProgressSyncActor {
             ?? locator.locations?.progression
             ?? 0
 
-        if isExplicitUserAction {
-            let previous = lastAuthoritativeUserActionTimestamp[bookID] ?? 0
-            if timestamp >= previous {
-                lastAuthoritativeUserActionTimestamp[bookID] = timestamp
-            }
+        let explicit =
+            isExplicitUserAction
+            || reason == .userConfirmedRestart
+            || reason == .userRestoredFromHistory
+            || reason == .userDraggedSeekBar
+            || reason == .userSkippedForward
+            || reason == .userSkippedBackward
+            || reason == .userSelectedChapter
+
+        if explicit {
+            await noteAuthoritativeUserAction(bookID: bookID, timestamp: timestamp, persist: true)
         }
 
         let knownBest = await knownBestProgression(for: bookID)
@@ -160,13 +166,7 @@ public actor ProgressSyncActor {
                 incomingProgression: progression,
                 incomingTimestamp: timestamp,
                 playheadInitialized: playheadInitialized,
-                isExplicitUserAction: isExplicitUserAction
-                    || reason == .userConfirmedRestart
-                    || reason == .userRestoredFromHistory
-                    || reason == .userDraggedSeekBar
-                    || reason == .userSkippedForward
-                    || reason == .userSkippedBackward
-                    || reason == .userSelectedChapter,
+                isExplicitUserAction: explicit,
                 knownBestProgression: knownBest,
                 lastAuthoritativeUserActionTimestamp: lastAuthoritativeUserActionTimestamp[bookID],
             )
@@ -183,7 +183,7 @@ public actor ProgressSyncActor {
                 locatorSummary: "\(locatorSummary)\nrejected: \(String(describing: conflict))",
                 locator: locator,
             )
-            return .success
+            return .rejected
         }
 
         guard
@@ -1040,29 +1040,40 @@ public actor ProgressSyncActor {
             playheadInitialized: true,
             isExplicitUserAction: true,
         )
-        if result == .queued || result == .success {
-            await saveRecoveryCheckpoint(
-                AudiobookRecoveryCheckpoint(
-                    bookID: bookID,
-                    locator: locator,
-                    totalProgression: progression,
-                    timestamp: timestamp,
-                    reason: SyncReason.userRestoredFromHistory.rawValue,
-                    sessionGeneration: 0,
+        switch result {
+            case .queued, .success:
+                let checkpointResult = await saveRecoveryCheckpoint(
+                    AudiobookRecoveryCheckpoint(
+                        bookID: bookID,
+                        locator: locator,
+                        totalProgression: progression,
+                        timestamp: timestamp,
+                        reason: SyncReason.userRestoredFromHistory.rawValue,
+                        sessionGeneration: 0,
+                    ),
+                    playheadInitialized: true,
+                    isExplicitUserAction: true,
                 )
-            )
-            await recordListeningMilestone(
-                AudiobookListeningMilestone(
-                    bookID: bookID,
-                    locator: locator,
-                    totalProgression: progression,
-                    timestamp: timestamp,
-                    locationDescription: locationDescription,
-                    reason: .userRestoredFromHistory,
+                guard checkpointResult == .saved else {
+                    debugLog(
+                        "[PSA] restorePosition: durable checkpoint required but got \(checkpointResult) for \(bookID)"
+                    )
+                    return .failed
+                }
+                await recordListeningMilestone(
+                    AudiobookListeningMilestone(
+                        bookID: bookID,
+                        locator: locator,
+                        totalProgression: progression,
+                        timestamp: timestamp,
+                        locationDescription: locationDescription,
+                        reason: .userRestoredFromHistory,
+                    )
                 )
-            )
+                return result
+            case .rejected, .failed:
+                return result
         }
-        return result
     }
 
     /// Newest valid local recovery position by timestamp (checkpoint / pending / server / metadata).
@@ -1129,15 +1140,53 @@ public actor ProgressSyncActor {
         )
     }
 
-    public func saveRecoveryCheckpoint(_ checkpoint: AudiobookRecoveryCheckpoint) async {
-        guard await ensureCheckpointsLoaded() else { return }
-        let existing = recoveryCheckpoints[checkpoint.bookID] ?? []
-        let next = AudiobookProgressConflict.appendCheckpoint(existing: existing, new: checkpoint)
-        recoveryCheckpoints[checkpoint.bookID] = next
-        await saveCheckpointsToDisk()
-        debugLog(
-            "[PSA] saveRecoveryCheckpoint: bookID=\(checkpoint.bookID) progress=\(checkpoint.totalProgression) reason=\(checkpoint.reason) gen=\(checkpoint.sessionGeneration)"
+    /// Sole checkpoint write boundary — every caller gets the same conflict protection.
+    @discardableResult
+    public func saveRecoveryCheckpoint(
+        _ checkpoint: AudiobookRecoveryCheckpoint,
+        playheadInitialized: Bool,
+        isExplicitUserAction: Bool,
+    ) async -> CheckpointSaveResult {
+        guard await ensureCheckpointsLoaded() else { return .failed }
+
+        let knownBest = await knownBestProgression(for: checkpoint.bookID)
+        let conflict = AudiobookProgressConflict.evaluate(
+            ProgressConflictInput(
+                incomingProgression: checkpoint.totalProgression,
+                incomingTimestamp: checkpoint.timestamp,
+                playheadInitialized: playheadInitialized,
+                isExplicitUserAction: isExplicitUserAction,
+                knownBestProgression: knownBest,
+                lastAuthoritativeUserActionTimestamp:
+                    lastAuthoritativeUserActionTimestamp[checkpoint.bookID],
+            )
         )
+        guard conflict == .accept else {
+            debugLog(
+                "[PSA] saveRecoveryCheckpoint: rejected \(conflict) for \(checkpoint.bookID) progress=\(checkpoint.totalProgression)"
+            )
+            return .rejected(conflict)
+        }
+
+        let existing = recoveryCheckpoints[checkpoint.bookID] ?? []
+        switch AudiobookProgressConflict.appendCheckpoint(
+            existing: existing,
+            new: checkpoint,
+            isExplicitUserAction: isExplicitUserAction,
+        ) {
+            case .rejectedStale:
+                debugLog(
+                    "[PSA] saveRecoveryCheckpoint: rejected stale event ts=\(checkpoint.timestamp) for \(checkpoint.bookID)"
+                )
+                return .rejectedStale
+            case .appended(let next):
+                recoveryCheckpoints[checkpoint.bookID] = next
+                await saveCheckpointsToDisk()
+                debugLog(
+                    "[PSA] saveRecoveryCheckpoint: saved bookID=\(checkpoint.bookID) progress=\(checkpoint.totalProgression) reason=\(checkpoint.reason) gen=\(checkpoint.sessionGeneration)"
+                )
+                return .saved
+        }
     }
 
     public func latestRecoveryCheckpoint(for bookID: BookID) async -> AudiobookRecoveryCheckpoint? {
@@ -1189,15 +1238,23 @@ public actor ProgressSyncActor {
         }
     }
 
-    public func noteAuthoritativeUserAction(bookID: BookID, timestamp: Double) {
+    public func noteAuthoritativeUserAction(
+        bookID: BookID,
+        timestamp: Double,
+        persist: Bool = true,
+    ) async {
         let previous = lastAuthoritativeUserActionTimestamp[bookID] ?? 0
-        if timestamp >= previous {
-            lastAuthoritativeUserActionTimestamp[bookID] = timestamp
+        guard timestamp >= previous else { return }
+        lastAuthoritativeUserActionTimestamp[bookID] = timestamp
+        if persist {
+            _ = await ensureCheckpointsLoaded()
+            await saveCheckpointsToDisk()
         }
     }
 
-    public func lastAuthoritativeUserActionTimestamp(for bookID: BookID) -> Double? {
-        lastAuthoritativeUserActionTimestamp[bookID]
+    public func lastAuthoritativeUserActionTimestamp(for bookID: BookID) async -> Double? {
+        _ = await ensureCheckpointsLoaded()
+        return lastAuthoritativeUserActionTimestamp[bookID]
     }
 
     private func knownBestProgression(for bookID: BookID) async -> Double? {
@@ -1254,21 +1311,35 @@ public actor ProgressSyncActor {
         do {
             let loaded = try await FilesystemActor.shared.loadAudiobookCheckpoints()
             guard !checkpointsLoaded else { return }
-            recoveryCheckpoints = loaded
+            recoveryCheckpoints = loaded.checkpoints
+            for (bookID, timestamp) in loaded.authoritativeUserActions {
+                let existing = lastAuthoritativeUserActionTimestamp[bookID] ?? 0
+                if timestamp >= existing {
+                    lastAuthoritativeUserActionTimestamp[bookID] = timestamp
+                }
+            }
             checkpointsLoaded = true
-            debugLog("[PSA] loadCheckpointsFromDisk: books=\(loaded.count)")
+            debugLog(
+                "[PSA] loadCheckpointsFromDisk: books=\(loaded.checkpoints.count) userActions=\(loaded.authoritativeUserActions.count)"
+            )
         } catch {
             guard !checkpointsLoaded else { return }
             debugLog("[PSA] loadCheckpointsFromDisk: failed - \(error)")
+            // Keep any in-memory state; do not wipe a live recovery ring on I/O failure.
             checkpointsLoaded = true
-            recoveryCheckpoints = [:]
+            if recoveryCheckpoints.isEmpty {
+                recoveryCheckpoints = [:]
+            }
         }
     }
 
     private func saveCheckpointsToDisk() async {
         guard checkpointsLoaded else { return }
         do {
-            try await FilesystemActor.shared.saveAudiobookCheckpoints(recoveryCheckpoints)
+            try await FilesystemActor.shared.saveAudiobookCheckpoints(
+                recoveryCheckpoints,
+                authoritativeUserActions: lastAuthoritativeUserActionTimestamp,
+            )
         } catch {
             debugLog("[PSA] saveCheckpointsToDisk: failed - \(error)")
         }

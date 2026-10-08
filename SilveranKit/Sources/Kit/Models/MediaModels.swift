@@ -552,10 +552,13 @@ public struct BookReadingPosition: Codable, Sendable, Hashable {
     }
 }
 
-public enum SyncResult: Sendable {
+public enum SyncResult: Sendable, Equatable {
     case success
     case queued
     case failed
+    /// Policy/conflict rejection (uninitialized, suspicious zero, stale vs user action).
+    /// Distinct from `.success` so callers do not treat a rejection as a durable write.
+    case rejected
 }
 
 public enum SyncReason: String, Sendable, Codable {
