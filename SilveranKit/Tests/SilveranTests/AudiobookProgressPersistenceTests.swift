@@ -516,19 +516,20 @@ private func sampleCheckpoint(
             durationSeconds: tenHours,
         ) == true
     )
-    // Exactly 2s still within budget.
-    let exactlyTwoSeconds = 0.50 + (2.0 / tenHours)
+    // Just under 2s still within budget (avoid constructing exact 2.0 via
+    // fraction*duration — IEEE noise can nudge it slightly over).
+    let underTwoSeconds = 0.50 + (1.999 / tenHours)
     #expect(
         AudiobookProgressConflict.seekLandedWithinTolerance(
             targetProgression: 0.50,
-            landedProgression: exactlyTwoSeconds,
+            landedProgression: underTwoSeconds,
             durationSeconds: tenHours,
         ) == true
     )
     // Just over 2s must fail — a fixed fractional floor (e.g. 0.0005 ≈ 18s
     // on a 10h book) must not accept this.
     let overTwoSeconds = 0.50 + (2.5 / tenHours)
-    #expect(abs(overTwoSeconds - 0.50) * tenHours == 2.5)
+    #expect(abs(overTwoSeconds - 0.50) * tenHours > AudiobookProgressConflict.seekToleranceSeconds)
     #expect(
         AudiobookProgressConflict.seekLandedWithinTolerance(
             targetProgression: 0.50,
