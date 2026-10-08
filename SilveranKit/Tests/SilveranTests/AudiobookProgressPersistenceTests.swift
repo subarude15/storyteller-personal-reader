@@ -516,8 +516,19 @@ private func sampleCheckpoint(
             durationSeconds: tenHours,
         ) == true
     )
-    // Just over 2s must fail.
+    // Exactly 2s still within budget.
+    let exactlyTwoSeconds = 0.50 + (2.0 / tenHours)
+    #expect(
+        AudiobookProgressConflict.seekLandedWithinTolerance(
+            targetProgression: 0.50,
+            landedProgression: exactlyTwoSeconds,
+            durationSeconds: tenHours,
+        ) == true
+    )
+    // Just over 2s must fail — a fixed fractional floor (e.g. 0.0005 ≈ 18s
+    // on a 10h book) must not accept this.
     let overTwoSeconds = 0.50 + (2.5 / tenHours)
+    #expect(abs(overTwoSeconds - 0.50) * tenHours == 2.5)
     #expect(
         AudiobookProgressConflict.seekLandedWithinTolerance(
             targetProgression: 0.50,
@@ -525,10 +536,13 @@ private func sampleCheckpoint(
             durationSeconds: tenHours,
         ) == false
     )
+    // Tolerance width derived from seconds, not a % floor.
+    let expectedFraction = 2.0 / tenHours
     #expect(
         AudiobookProgressConflict.seekToleranceFraction(durationSeconds: tenHours)
-            < 0.001
+            == expectedFraction
     )
+    #expect(expectedFraction < 0.001)
 }
 
 @Test func seekToleranceAllowsNearExactLandingOnShortAssets() {

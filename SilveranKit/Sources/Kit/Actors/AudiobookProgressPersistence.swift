@@ -211,9 +211,10 @@ public enum AudiobookProgressConflict {
     /// Minimum progression delta before recording another listening milestone.
     public static let milestoneProgressEpsilon: Double = 0.002
     /// Seek landing tolerance in wall-clock seconds (player accuracy), not %.
+    /// Must not be implemented as a progression fraction — on long books a
+    /// fixed fraction (e.g. 0.0005) balloons to many seconds and defeats the
+    /// seconds budget.
     public static let seekToleranceSeconds: TimeInterval = 2.0
-    /// Tiny fractional floor so extremely short books still allow sub-sample error.
-    public static let seekToleranceMinimumFraction: Double = 0.0005
 
     public static func isNearZero(_ progression: Double) -> Bool {
         progression <= zeroEpsilon
@@ -250,13 +251,15 @@ public enum AudiobookProgressConflict {
         return raw
     }
 
+    /// Equivalent progression width of `seekToleranceSeconds` for a given duration.
+    /// Purely informational / for callers that prefer fractions — still seconds-derived.
     public static func seekToleranceFraction(durationSeconds: TimeInterval) -> Double {
         guard durationSeconds > 0 else { return 1 }
-        return min(1, max(seekToleranceMinimumFraction, seekToleranceSeconds / durationSeconds))
+        return min(1, seekToleranceSeconds / durationSeconds)
     }
 
-    /// True when the landed playhead is within `seekToleranceSeconds` of target
-    /// (or within the tiny fractional floor for very short assets).
+    /// True when the landed playhead is within `seekToleranceSeconds` of target.
+    /// Comparison is always in wall-clock seconds, never a fixed %-of-book floor.
     public static func seekLandedWithinTolerance(
         targetProgression: Double,
         landedProgression: Double,
@@ -268,11 +271,7 @@ public enum AudiobookProgressConflict {
         else {
             return false
         }
-        let errorFraction = abs(landedProgression - targetProgression)
-        if errorFraction <= seekToleranceMinimumFraction {
-            return true
-        }
-        let errorSeconds = errorFraction * durationSeconds
+        let errorSeconds = abs(landedProgression - targetProgression) * durationSeconds
         return errorSeconds <= seekToleranceSeconds
     }
 
