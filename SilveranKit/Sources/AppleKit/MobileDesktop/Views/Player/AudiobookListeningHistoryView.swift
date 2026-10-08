@@ -88,15 +88,21 @@ public struct AudiobookListeningHistoryView: View {
                             case .noActiveBook:
                                 restoreErrorMessage =
                                     "No audiobook is open. Open the book, then try Resume Here again."
-                            case .syncRejected:
+                            case .invalidLocator:
                                 restoreErrorMessage =
-                                    "Could not restore that position (conflict with newer listening progress)."
-                            case .syncFailed:
+                                    "That saved position is not valid for the open audiobook."
+                            case .sessionReplaced:
                                 restoreErrorMessage =
-                                    "Could not save the restored position. Check your connection and try again."
+                                    "The audiobook session changed during restore. Try again."
                             case .seekFailed:
                                 restoreErrorMessage =
-                                    "Saved progress, but seeking to that position failed. Try again."
+                                    "Could not seek to that position. Progress was not changed."
+                            case .syncRejected:
+                                restoreErrorMessage =
+                                    "Reached the position, but it conflicted with newer listening progress."
+                            case .syncFailed:
+                                restoreErrorMessage =
+                                    "Reached the position, but saving progress failed. Try again."
                         }
                     }
                 }

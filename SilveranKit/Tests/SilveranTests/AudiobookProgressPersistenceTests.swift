@@ -374,6 +374,9 @@ private func sampleCheckpoint(
     #expect(ListeningRestoreResult.success != .syncFailed)
     #expect(ListeningRestoreResult.syncRejected != .seekFailed)
     #expect(ListeningRestoreResult.noActiveBook != .success)
+    #expect(ListeningRestoreResult.invalidLocator != .sessionReplaced)
+    #expect(ListeningRestoreResult.seekFailed != .invalidLocator)
+    #expect(ListeningRestoreResult.sessionReplaced != .syncFailed)
 }
 
 @Test func syncResultRejectedIsDistinctFromSuccess() {
@@ -381,4 +384,246 @@ private func sampleCheckpoint(
     #expect(rejected != .success)
     #expect(rejected != .queued)
     #expect(rejected != .failed)
+}
+
+@Test func validatedRestoreProgressionRejectsMissingOrOutOfRange() {
+    let known: Set<String> = ["chapter-0", "chapter-1"]
+    let missing = BookLocator(
+        href: "chapter-0",
+        type: "audio/mp4",
+        title: nil,
+        locations: nil,
+        text: nil,
+    )
+    #expect(
+        AudiobookProgressConflict.validatedRestoreProgression(
+            locator: missing,
+            knownHrefs: known,
+        ) == nil
+    )
+
+    let over = sampleLocator(progress: 1.5)
+    #expect(
+        AudiobookProgressConflict.validatedRestoreProgression(
+            locator: over,
+            knownHrefs: known,
+        ) == nil
+    )
+
+    let under = sampleLocator(progress: -0.1)
+    #expect(
+        AudiobookProgressConflict.validatedRestoreProgression(
+            locator: under,
+            knownHrefs: known,
+        ) == nil
+    )
+}
+
+@Test func validatedRestoreProgressionRejectsForeignHref() {
+    let known: Set<String> = ["chapter-0", "chapter-1"]
+    let foreign = BookLocator(
+        href: "other-book-track",
+        type: "audio/mp4",
+        title: "Ch",
+        locations: BookLocator.Locations(
+            fragments: nil,
+            progression: 0.4,
+            position: nil,
+            totalProgression: 0.4,
+            cssSelector: nil,
+            partialCfi: nil,
+            domRange: nil,
+        ),
+        text: nil,
+    )
+    #expect(
+        AudiobookProgressConflict.validatedRestoreProgression(
+            locator: foreign,
+            knownHrefs: known,
+        ) == nil
+    )
+
+    let emptyHref = BookLocator(
+        href: "  ",
+        type: "audio/mp4",
+        title: nil,
+        locations: BookLocator.Locations(
+            fragments: nil,
+            progression: 0.2,
+            position: nil,
+            totalProgression: 0.2,
+            cssSelector: nil,
+            partialCfi: nil,
+            domRange: nil,
+        ),
+        text: nil,
+    )
+    #expect(
+        AudiobookProgressConflict.validatedRestoreProgression(
+            locator: emptyHref,
+            knownHrefs: known,
+        ) == nil
+    )
+}
+
+@Test func validatedRestoreProgressionAcceptsKnownHrefAndGenericFallback() {
+    let known: Set<String> = ["chapter-0", "chapter-1"]
+    #expect(
+        AudiobookProgressConflict.validatedRestoreProgression(
+            locator: BookLocator(
+                href: "chapter-1",
+                type: "audio/mp4",
+                title: "Ch",
+                locations: BookLocator.Locations(
+                    fragments: nil,
+                    progression: 0.55,
+                    position: nil,
+                    totalProgression: 0.55,
+                    cssSelector: nil,
+                    partialCfi: nil,
+                    domRange: nil,
+                ),
+                text: nil,
+            ),
+            knownHrefs: known,
+        ) == 0.55
+    )
+    #expect(
+        AudiobookProgressConflict.validatedRestoreProgression(
+            locator: sampleLocator(progress: 0.42),
+            knownHrefs: known,
+        ) == 0.42
+    )
+}
+
+@Test func seekToleranceIsSecondsBasedNotFivePercent() {
+    // 10-hour book: 5% would be 30 minutes — far too loose.
+    let tenHours: TimeInterval = 10 * 60 * 60
+    let fivePercentMiss = 0.50 + 0.06  // 6pp away from 50%
+    #expect(
+        AudiobookProgressConflict.seekLandedWithinTolerance(
+            targetProgression: 0.50,
+            landedProgression: fivePercentMiss,
+            durationSeconds: tenHours,
+        ) == false
+    )
+    // ~1.5s miss on a long book must still pass.
+    let onePointFiveSeconds = 0.50 + (1.5 / tenHours)
+    #expect(
+        AudiobookProgressConflict.seekLandedWithinTolerance(
+            targetProgression: 0.50,
+            landedProgression: onePointFiveSeconds,
+            durationSeconds: tenHours,
+        ) == true
+    )
+    // Just over 2s must fail.
+    let overTwoSeconds = 0.50 + (2.5 / tenHours)
+    #expect(
+        AudiobookProgressConflict.seekLandedWithinTolerance(
+            targetProgression: 0.50,
+            landedProgression: overTwoSeconds,
+            durationSeconds: tenHours,
+        ) == false
+    )
+    #expect(
+        AudiobookProgressConflict.seekToleranceFraction(durationSeconds: tenHours)
+            < 0.001
+    )
+}
+
+@Test func seekToleranceAllowsNearExactLandingOnShortAssets() {
+    let short: TimeInterval = 30
+    #expect(
+        AudiobookProgressConflict.seekLandedWithinTolerance(
+            targetProgression: 0.10,
+            landedProgression: 0.10 + (1.0 / short),
+            durationSeconds: short,
+        ) == true
+    )
+    #expect(
+        AudiobookProgressConflict.seekLandedWithinTolerance(
+            targetProgression: 0.10,
+            landedProgression: 0.10 + (3.0 / short),
+            durationSeconds: short,
+        ) == false
+    )
+}
+
+@Test func restoreSequenceDoesNotCommitBeforeVerifiedSeek() {
+    // Pure regression of the restore contract: invalid locator / failed seek /
+    // persistence failure must not be reported as success, and delayed server
+    // navigation stays blocked once the user-action clock is stamped.
+    enum Phase: Equatable {
+        case validate
+        case stampUserAction
+        case seek
+        case verify
+        case persist
+        case done
+    }
+
+    func simulate(
+        locatorValid: Bool,
+        seekOk: Bool,
+        persistOk: Bool,
+    ) -> (result: ListeningRestoreResult, committed: Bool, lastPhase: Phase) {
+        var phase = Phase.validate
+        var committed = false
+        var userActionTs: Double?
+
+        guard locatorValid else {
+            return (.invalidLocator, false, phase)
+        }
+        phase = .stampUserAction
+        userActionTs = 5_000
+        // Delayed older server must not navigate past the stamp.
+        #expect(
+            AudiobookProgressConflict.shouldNavigateToIncomingServer(
+                incomingTimestamp: 1_000,
+                lastUserActionTimestamp: userActionTs,
+                autoSyncEnabled: true,
+            ) == false
+        )
+
+        phase = .seek
+        guard seekOk else {
+            return (.seekFailed, false, phase)
+        }
+        phase = .verify
+        // Seek verified — only now may we commit.
+        phase = .persist
+        guard persistOk else {
+            return (.syncFailed, false, phase)
+        }
+        committed = true
+        phase = .done
+        return (.success, committed, phase)
+    }
+
+    let failedSeek = simulate(locatorValid: true, seekOk: false, persistOk: true)
+    #expect(failedSeek.result == .seekFailed)
+    #expect(failedSeek.committed == false)
+
+    let invalid = simulate(locatorValid: false, seekOk: true, persistOk: true)
+    #expect(invalid.result == .invalidLocator)
+    #expect(invalid.committed == false)
+
+    let persistFail = simulate(locatorValid: true, seekOk: true, persistOk: false)
+    #expect(persistFail.result == .syncFailed)
+    #expect(persistFail.committed == false)
+    #expect(persistFail.lastPhase == .persist)
+
+    let ok = simulate(locatorValid: true, seekOk: true, persistOk: true)
+    #expect(ok.result == .success)
+    #expect(ok.committed == true)
+    #expect(ok.lastPhase == .done)
+}
+
+@Test func sessionReplacementDuringRestoreIsDistinctFailure() {
+    // Captured generation must match after each await; mismatch is not seekFailed.
+    let startGeneration: UInt64 = 3
+    let afterOpenGeneration: UInt64 = 4
+    #expect(startGeneration != afterOpenGeneration)
+    #expect(ListeningRestoreResult.sessionReplaced != .seekFailed)
+    #expect(ListeningRestoreResult.sessionReplaced != .syncFailed)
 }

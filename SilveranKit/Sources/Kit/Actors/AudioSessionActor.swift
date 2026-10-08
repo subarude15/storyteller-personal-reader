@@ -1088,67 +1088,121 @@ public actor AudioSessionActor {
     }
 
     /// Apply an explicit listening-history restore into the live player + PSA.
-    /// Persists checkpoint, updates local canonical progress, and queues Storyteller sync.
+    ///
+    /// Order is intentional: validate locator → stamp user-action clock (blocks
+    /// delayed server navigation) → seek + verify landing → only then persist
+    /// authoritative checkpoint / queue Storyteller sync. Failed seeks never
+    /// commit progress. Session replacement mid-flight returns `.sessionReplaced`.
     @discardableResult
     public func restoreListeningPosition(
         locator: BookLocator,
         locationDescription: String,
     ) async -> ListeningRestoreResult {
-        guard let book else { return .noActiveBook }
+        guard case .audiobook = currentKind,
+            let book,
+            let metadata,
+            let sessionID = activeSessionID
+        else {
+            return .noActiveBook
+        }
+        let bookID = book.id
+        let generation = storytellerSessionGeneration
+        let knownHrefs = Set(metadata.tracks.map(\.href)).union(metadata.chapters.map(\.id))
+
+        guard
+            let target = AudiobookProgressConflict.validatedRestoreProgression(
+                locator: locator,
+                knownHrefs: knownHrefs,
+            )
+        else {
+            debugLog("[AudioSessionActor] restoreListeningPosition invalid locator href=\(locator.href)")
+            return .invalidLocator
+        }
+
+        // Stamp BEFORE seek so a delayed sync response cannot navigate away
+        // while we are mid-restore. Does not yet write a progress checkpoint.
         let timestamp = floor(Date().timeIntervalSince1970 * 1_000)
         lastUserActionTimestampMs = timestamp
         await ProgressSyncActor.shared.noteAuthoritativeUserAction(
-            bookID: book.id,
+            bookID: bookID,
             timestamp: timestamp,
             persist: true,
         )
-
-        let syncResult = await ProgressSyncActor.shared.restorePosition(
-            bookID: book.id,
-            locator: locator,
-            locationDescription: locationDescription,
-        )
-        switch syncResult {
-            case .rejected:
-                debugLog("[AudioSessionActor] restoreListeningPosition sync rejected")
-                return .syncRejected
-            case .failed:
-                debugLog("[AudioSessionActor] restoreListeningPosition sync failed")
-                return .syncFailed
-            case .success, .queued:
-                break
-        }
-
-        guard let progression = locator.locations?.totalProgression
-            ?? locator.locations?.progression
+        guard isRestoreSessionIntact(sessionID: sessionID, generation: generation, bookID: bookID)
         else {
-            return .seekFailed
+            return .sessionReplaced
         }
-        let target = min(max(progression, 0), 1)
+
         await AudiobookActor.shared.seekToTotalProgressFraction(target)
-        playheadInitialized = true
-
-        guard let state = await AudiobookActor.shared.getCurrentState(),
-            let metadata,
-            metadata.totalDuration > 0
+        guard isRestoreSessionIntact(sessionID: sessionID, generation: generation, bookID: bookID)
         else {
-            return .seekFailed
+            return .sessionReplaced
         }
-        let landed =
-            metadata.totalDuration > 0
-            ? state.currentTime / metadata.totalDuration
-            : 0
-        // Allow a small seek tolerance; otherwise treat as failure.
-        if abs(landed - target) > 0.05, target > AudiobookProgressConflict.zeroEpsilon {
+
+        guard let liveMetadata = self.metadata, liveMetadata.totalDuration > 0,
+            let state = await AudiobookActor.shared.getCurrentState()
+        else {
+            if isRestoreSessionIntact(sessionID: sessionID, generation: generation, bookID: bookID) {
+                return .seekFailed
+            }
+            return .sessionReplaced
+        }
+        let landed = state.currentTime / liveMetadata.totalDuration
+        guard
+            AudiobookProgressConflict.seekLandedWithinTolerance(
+                targetProgression: target,
+                landedProgression: landed,
+                durationSeconds: liveMetadata.totalDuration,
+            )
+        else {
             debugLog(
-                "[AudioSessionActor] restoreListeningPosition seek missed target=\(target) landed=\(landed)"
+                "[AudioSessionActor] restoreListeningPosition seek missed target=\(target) landed=\(landed) duration=\(liveMetadata.totalDuration)"
             )
             return .seekFailed
         }
 
-        lastSyncedLocator = makeLocator(state: state, metadata: metadata)
-        await publishState()
-        return .success
+        playheadInitialized = true
+        // Persist the verified playhead — not the pre-seek request alone.
+        let verifiedLocator = makeLocator(state: state, metadata: liveMetadata)
+        let syncResult = await ProgressSyncActor.shared.restorePosition(
+            bookID: bookID,
+            locator: verifiedLocator,
+            locationDescription: locationDescription,
+        )
+        guard isRestoreSessionIntact(sessionID: sessionID, generation: generation, bookID: bookID)
+        else {
+            return .sessionReplaced
+        }
+
+        switch syncResult {
+            case .rejected:
+                debugLog("[AudioSessionActor] restoreListeningPosition sync rejected after seek")
+                return .syncRejected
+            case .failed:
+                debugLog("[AudioSessionActor] restoreListeningPosition persistence failed after seek")
+                return .syncFailed
+            case .success, .queued:
+                lastSyncedLocator = verifiedLocator
+                await publishState()
+                return .success
+        }
+    }
+
+    /// True while the same Storyteller audiobook session is still active after an await.
+    private func isRestoreSessionIntact(
+        sessionID: UUID,
+        generation: UInt64,
+        bookID: BookID,
+    ) -> Bool {
+        guard activeSessionID == sessionID,
+            storytellerSessionGeneration == generation,
+            self.book?.id == bookID,
+            case .audiobook(let openID) = currentKind,
+            openID == bookID
+        else {
+            return false
+        }
+        return true
     }
 
     public func closeAudiobookArmIfActive() async {

@@ -148,9 +148,11 @@ public enum CheckpointSaveResult: Equatable, Sendable {
 public enum ListeningRestoreResult: Equatable, Sendable {
     case success
     case noActiveBook
+    case invalidLocator
+    case sessionReplaced
+    case seekFailed
     case syncRejected
     case syncFailed
-    case seekFailed
 }
 
 public struct PersistedAudiobookListeningHistory: Codable, Sendable {
@@ -208,9 +210,70 @@ public enum AudiobookProgressConflict {
     public static let checkpointIntervalSeconds: TimeInterval = 7
     /// Minimum progression delta before recording another listening milestone.
     public static let milestoneProgressEpsilon: Double = 0.002
+    /// Seek landing tolerance in wall-clock seconds (player accuracy), not %.
+    public static let seekToleranceSeconds: TimeInterval = 2.0
+    /// Tiny fractional floor so extremely short books still allow sub-sample error.
+    public static let seekToleranceMinimumFraction: Double = 0.0005
 
     public static func isNearZero(_ progression: Double) -> Bool {
         progression <= zeroEpsilon
+    }
+
+    /// Extract and validate a restore progression from a locator against the
+    /// active audiobook's known track/chapter hrefs.
+    /// Returns `nil` for missing/out-of-range progression or an href that does
+    /// not belong to the open book (unless the generic `"audiobook"` fallback).
+    public static func validatedRestoreProgression(
+        locator: BookLocator,
+        knownHrefs: Set<String>,
+    ) -> Double? {
+        guard let raw = locator.locations?.totalProgression
+            ?? locator.locations?.progression,
+            raw.isFinite,
+            raw >= 0,
+            raw <= 1
+        else {
+            return nil
+        }
+
+        let href = locator.href.trimmingCharacters(in: .whitespacesAndNewlines)
+        if href.isEmpty {
+            return nil
+        }
+        // Locators written when track href was unavailable use this fallback.
+        if href == "audiobook" {
+            return raw
+        }
+        guard knownHrefs.contains(href) else {
+            return nil
+        }
+        return raw
+    }
+
+    public static func seekToleranceFraction(durationSeconds: TimeInterval) -> Double {
+        guard durationSeconds > 0 else { return 1 }
+        return min(1, max(seekToleranceMinimumFraction, seekToleranceSeconds / durationSeconds))
+    }
+
+    /// True when the landed playhead is within `seekToleranceSeconds` of target
+    /// (or within the tiny fractional floor for very short assets).
+    public static func seekLandedWithinTolerance(
+        targetProgression: Double,
+        landedProgression: Double,
+        durationSeconds: TimeInterval,
+    ) -> Bool {
+        guard durationSeconds > 0,
+            targetProgression.isFinite,
+            landedProgression.isFinite
+        else {
+            return false
+        }
+        let errorFraction = abs(landedProgression - targetProgression)
+        if errorFraction <= seekToleranceMinimumFraction {
+            return true
+        }
+        let errorSeconds = errorFraction * durationSeconds
+        return errorSeconds <= seekToleranceSeconds
     }
 
     /// Explicit, testable conflict rules for Storyteller audiobook progress writes.
