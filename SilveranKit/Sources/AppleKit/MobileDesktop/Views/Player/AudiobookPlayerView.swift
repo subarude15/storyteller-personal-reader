@@ -1,6 +1,9 @@
 #if os(iOS) || os(macOS)
 import SilveranKit
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 public struct AudiobookPlayerView: View {
     private let bookData: PlayerBookData?
@@ -14,6 +17,7 @@ public struct AudiobookPlayerView: View {
     @State private var stateObserverID: UUID?
     @State private var showServerPositionDialog = false
     @State private var lastPendingServerPosition: AudiobookSessionServerPosition?
+    @State private var showListeningHistory = false
 
     public init(bookData: PlayerBookData?, onClose: (() -> Void)? = nil) {
         self.bookData = bookData
@@ -51,6 +55,14 @@ public struct AudiobookPlayerView: View {
             } message: {
                 Text(serverPositionDescription)
             }
+            .sheet(isPresented: $showListeningHistory) {
+                if let bookData {
+                    AudiobookListeningHistoryView(
+                        bookID: bookData.metadata.id,
+                        bookTitle: bookData.metadata.title,
+                    )
+                }
+            }
             .onAppear {
                 Task { @MainActor in
                     await openSession()
@@ -85,12 +97,35 @@ public struct AudiobookPlayerView: View {
                 }
             }
             #if os(iOS)
+        .onReceive(NotificationCenter.default.publisher(for: .appWillResignActive)) { _ in
+            var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+            backgroundTask = UIApplication.shared.beginBackgroundTask {
+                if backgroundTask != .invalid {
+                    UIApplication.shared.endBackgroundTask(backgroundTask)
+                    backgroundTask = .invalid
+                }
+            }
+            Task {
+                await AudioSessionActor.shared.flushLifecycleProgress(reason: .appBackgrounding)
+                if backgroundTask != .invalid {
+                    UIApplication.shared.endBackgroundTask(backgroundTask)
+                    backgroundTask = .invalid
+                }
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button {
                     closeBook()
                 } label: {
                     Label("Library", systemImage: "chevron.left")
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showListeningHistory = true
+                } label: {
+                    Label("Previous Positions", systemImage: "clock.arrow.circlepath")
                 }
             }
         }

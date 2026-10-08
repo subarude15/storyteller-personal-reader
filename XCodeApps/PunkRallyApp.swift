@@ -14,6 +14,7 @@
 
 #if os(iOS)
 import SwiftUI
+import UIKit
 import SilveranAppleKit
 import SilveranAppleWidgets
 import SilveranKit
@@ -153,6 +154,11 @@ public struct PunkRallyTabView: View {
                 openPendingRequestActivityIfNeeded()
                 consumePendingWidgetDeepLinkIfNeeded()
                 Task { await processManualDownloadIntake() }
+                Task {
+                    // Restore last Storyteller audiobook into a paused mini-player /
+                    // Now Playing surface without autoplay.
+                    _ = await AudioSessionActor.shared.restorePausedAudiobookSessionIfNeeded()
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .inkampProcessManualDownloadIntake)) { _ in
                 Task { await processManualDownloadIntake() }
@@ -212,6 +218,9 @@ public struct PunkRallyTabView: View {
                     // If the system paused a live podcast while we were away,
                     // resume that same item. A user pause leaves isPlaying false.
                     Task { await AudioSessionActor.shared.maintainPodcastPlaybackForBackground() }
+                    Task {
+                        _ = await AudioSessionActor.shared.restorePausedAudiobookSessionIfNeeded()
+                    }
                     _ = PodcastDownloadStore.shared.runOvernightPruneIfDue()
                     ContinueWidgetPublisher.consumePendingWidgetCommands()
                     NotificationCenter.default.post(
@@ -224,10 +233,22 @@ public struct PunkRallyTabView: View {
                     Task { await PodcastSyncCoordinator.shared.syncNow(reason: "appActive") }
                     Task { await SettingsSyncCoordinator.shared.syncNow(reason: "appActive") }
                 } else if phase == .background {
+                    #if os(iOS)
+                    var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+                    backgroundTask = UIApplication.shared.beginBackgroundTask {
+                        if backgroundTask != .invalid {
+                            UIApplication.shared.endBackgroundTask(backgroundTask)
+                            backgroundTask = .invalid
+                        }
+                    }
+                    #endif
                     Task {
                         await AudioSessionActor.shared.refreshNowPlaying()
                         await AudioSessionActor.shared.maintainPodcastPlaybackForBackground()
                         await AudioSessionActor.shared.flushResolvedResume()
+                        await AudioSessionActor.shared.flushLifecycleProgress(
+                            reason: .appBackgrounding
+                        )
                         await PodcastPlayerPresenter.persistPodcastProgress(markFinished: false)
                         if let progress = await AudioSessionActor.shared.podcastPlaybackProgress() {
                             PodcastRecentStore.shared.updateProgress(
@@ -244,6 +265,12 @@ public struct PunkRallyTabView: View {
                         YouTubePlayheadSyncCoordinator.shared.scheduleSyncAfterLocalChange()
                         PodcastSyncCoordinator.shared.scheduleSyncAfterLocalChange()
                         await SettingsSyncCoordinator.shared.syncPendingOnBackground()
+                        #if os(iOS)
+                        if backgroundTask != .invalid {
+                            UIApplication.shared.endBackgroundTask(backgroundTask)
+                            backgroundTask = .invalid
+                        }
+                        #endif
                     }
                 }
             }

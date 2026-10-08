@@ -577,6 +577,7 @@ public enum SyncReason: String, Sendable, Codable {
     // User-initiated events (general)
     case userClosedBook
     case userRestoredFromHistory
+    case userConfirmedRestart
 
     // App lifecycle
     case appBackgrounding

@@ -136,6 +136,9 @@ public final class PlayerPresenter {
                 category: Self.category(for: kind),
             )
             PunkRallyStatsEvents.sessionEnd()
+            if case .audiobook = kind {
+                await AudioSessionActor.shared.clearPausedSessionRestoreEligibility()
+            }
             await Self.endLiveSession(excluding: nil)
         }
     }

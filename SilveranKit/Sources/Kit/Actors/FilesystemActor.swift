@@ -45,6 +45,10 @@ public actor FilesystemActor {
     private var pendingQueueWriteId: Int = 0
     private var pendingHistoryWriteTask: Task<Void, Error>?
     private var pendingHistoryWriteId: Int = 0
+    private var pendingCheckpointWriteTask: Task<Void, Error>?
+    private var pendingCheckpointWriteId: Int = 0
+    private var pendingListeningHistoryWriteTask: Task<Void, Error>?
+    private var pendingListeningHistoryWriteId: Int = 0
 
     public init() {}
 
@@ -606,6 +610,202 @@ public actor FilesystemActor {
             _ = try? await task.value
             if pendingHistoryWriteId == currentId {
                 break
+            }
+        }
+    }
+
+    private func waitForPendingCheckpointWrite() async {
+        while let task = pendingCheckpointWriteTask {
+            let currentId = pendingCheckpointWriteId
+            _ = try? await task.value
+            if pendingCheckpointWriteId == currentId {
+                break
+            }
+        }
+    }
+
+    private func waitForPendingListeningHistoryWrite() async {
+        while let task = pendingListeningHistoryWriteTask {
+            let currentId = pendingListeningHistoryWriteId
+            _ = try? await task.value
+            if pendingListeningHistoryWriteId == currentId {
+                break
+            }
+        }
+    }
+
+    func audiobookCheckpointsURL() -> URL {
+        getConfigDirectory().appendingPathComponent(
+            "audiobook_recovery_checkpoints_v1.json",
+            isDirectory: false,
+        )
+    }
+
+    func audiobookListeningHistoryURL() -> URL {
+        getConfigDirectory().appendingPathComponent(
+            "audiobook_listening_history_v1.json",
+            isDirectory: false,
+        )
+    }
+
+    func audiobookPausedSessionURL() -> URL {
+        getConfigDirectory().appendingPathComponent(
+            "audiobook_paused_session_v1.json",
+            isDirectory: false,
+        )
+    }
+
+    public func loadAudiobookCheckpoints() async throws -> [BookID: [AudiobookRecoveryCheckpoint]] {
+        await waitForPendingCheckpointWrite()
+        let url = audiobookCheckpointsURL()
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: url.path) else { return [:] }
+        let data = try Data(contentsOf: url)
+        do {
+            let store = try JSONDecoder().decode(PersistedAudiobookCheckpoints.self, from: data)
+            return store.books.reduce(into: [:]) { result, book in
+                result[book.bookID] = book.checkpoints
+            }
+        } catch is DecodingError {
+            try? fm.removeItem(at: url)
+            return [:]
+        }
+    }
+
+    public func saveAudiobookCheckpoints(
+        _ checkpoints: [BookID: [AudiobookRecoveryCheckpoint]]
+    ) async throws {
+        let configDir = getConfigDirectory()
+        try ensureDirectoryExists(at: configDir)
+        let url = audiobookCheckpointsURL()
+        let snapshot = checkpoints
+        let writeId = pendingCheckpointWriteId + 1
+        pendingCheckpointWriteId = writeId
+        let task = Task {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                ioQueue.async {
+                    do {
+                        let encoder = JSONEncoder()
+                        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                        let store = PersistedAudiobookCheckpoints(
+                            books: snapshot
+                                .map {
+                                    PersistedAudiobookCheckpoints.Book(
+                                        bookID: $0.key,
+                                        checkpoints: $0.value,
+                                    )
+                                }
+                                .sorted { $0.bookID < $1.bookID }
+                        )
+                        let data = try encoder.encode(store)
+                        try data.write(to: url, options: .atomic)
+                        continuation.resume()
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
+        }
+        pendingCheckpointWriteTask = task
+        defer {
+            if pendingCheckpointWriteId == writeId {
+                pendingCheckpointWriteTask = nil
+            }
+        }
+        try await task.value
+    }
+
+    public func loadAudiobookListeningHistory() async throws -> [BookID: [AudiobookListeningMilestone]]
+    {
+        await waitForPendingListeningHistoryWrite()
+        let url = audiobookListeningHistoryURL()
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: url.path) else { return [:] }
+        let data = try Data(contentsOf: url)
+        do {
+            let store = try JSONDecoder().decode(PersistedAudiobookListeningHistory.self, from: data)
+            return store.books.reduce(into: [:]) { result, book in
+                result[book.bookID] = book.milestones
+            }
+        } catch is DecodingError {
+            try? fm.removeItem(at: url)
+            return [:]
+        }
+    }
+
+    public func saveAudiobookListeningHistory(
+        _ history: [BookID: [AudiobookListeningMilestone]]
+    ) async throws {
+        let configDir = getConfigDirectory()
+        try ensureDirectoryExists(at: configDir)
+        let url = audiobookListeningHistoryURL()
+        let snapshot = history
+        let writeId = pendingListeningHistoryWriteId + 1
+        pendingListeningHistoryWriteId = writeId
+        let task = Task {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                ioQueue.async {
+                    do {
+                        let encoder = JSONEncoder()
+                        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                        let store = PersistedAudiobookListeningHistory(
+                            books: snapshot
+                                .map {
+                                    PersistedAudiobookListeningHistory.Book(
+                                        bookID: $0.key,
+                                        milestones: $0.value,
+                                    )
+                                }
+                                .sorted { $0.bookID < $1.bookID }
+                        )
+                        let data = try encoder.encode(store)
+                        try data.write(to: url, options: .atomic)
+                        continuation.resume()
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
+        }
+        pendingListeningHistoryWriteTask = task
+        defer {
+            if pendingListeningHistoryWriteId == writeId {
+                pendingListeningHistoryWriteTask = nil
+            }
+        }
+        try await task.value
+    }
+
+    public func loadAudiobookPausedSession() async throws -> AudiobookPausedSessionRecord? {
+        let url = audiobookPausedSessionURL()
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: url.path) else { return nil }
+        let data = try Data(contentsOf: url)
+        do {
+            return try JSONDecoder().decode(AudiobookPausedSessionRecord.self, from: data)
+        } catch is DecodingError {
+            try? fm.removeItem(at: url)
+            return nil
+        }
+    }
+
+    public func saveAudiobookPausedSession(_ record: AudiobookPausedSessionRecord?) async throws {
+        let configDir = getConfigDirectory()
+        try ensureDirectoryExists(at: configDir)
+        let url = audiobookPausedSessionURL()
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            ioQueue.async {
+                do {
+                    if let record {
+                        let data = try JSONEncoder().encode(record)
+                        try data.write(to: url, options: .atomic)
+                    } else if FileManager.default.fileExists(atPath: url.path) {
+                        try FileManager.default.removeItem(at: url)
+                    }
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
             }
         }
     }
