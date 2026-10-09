@@ -322,16 +322,20 @@ private func sampleMilestone(
 @Test func exactPositionUsesTrackFragmentPlusStartNotRoundedPercent() {
     let context = AudiobookListeningHistoryDisplayContext(
         totalDuration: 10 * 3600,
-        trackStartByHref: ["track-a": 2 * 3600],
+        trackStartByHref: ["track-a": TimeInterval(2 * 3600)],
     )
     // 35% rounded label would be wrong; fragment says 52m45s into a track that starts at 2h.
-    let locator = sampleLocator(progress: 0.351, href: "track-a", trackTime: 52 * 60 + 45)
+    let locator = sampleLocator(
+        progress: 0.351,
+        href: "track-a",
+        trackTime: TimeInterval(52 * 60 + 45),
+    )
     let seconds = AudiobookListeningHistoryFormatting.exactPositionSeconds(
         locator: locator,
         totalProgression: 0.351,
         context: context,
     )
-    #expect(seconds == 2 * 3600 + 52 * 60 + 45)
+    #expect(seconds == TimeInterval(2 * 3600 + 52 * 60 + 45))
     #expect(
         AudiobookListeningHistoryFormatting.formatPositionTimestamp(seconds) == "02:52:45"
     )
@@ -345,7 +349,7 @@ private func sampleMilestone(
         totalProgression: 0.5,
         context: context,
     )
-    #expect(seconds == 1800)
+    #expect(seconds == 1800 as TimeInterval)
     #expect(AudiobookListeningHistoryFormatting.formatPositionTimestamp(seconds) == "00:30:00")
 }
 
@@ -367,7 +371,7 @@ private func sampleMilestone(
     )
     #expect(AudiobookListeningHistoryFormatting.formatPositionTimestamp(nil) == nil)
     // Track fragment without a matching track start must not invent a time.
-    let withFragment = sampleLocator(progress: 0.2, href: "missing", trackTime: 90)
+    let withFragment = sampleLocator(progress: 0.2, href: "missing", trackTime: 90 as TimeInterval)
     #expect(
         AudiobookListeningHistoryFormatting.exactPositionSeconds(
             locator: withFragment,
