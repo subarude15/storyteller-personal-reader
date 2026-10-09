@@ -1409,6 +1409,21 @@ public actor AudioSessionActor {
         observers.removeValue(forKey: id)
     }
 
+    /// Duration + track starts for Previous Positions exact timestamps.
+    /// Does not mutate playback, checkpoints, or sync state.
+    public func listeningHistoryDisplayContext() -> AudiobookListeningHistoryDisplayContext? {
+        guard let metadata, metadata.totalDuration > 0 else { return nil }
+        var starts: [String: TimeInterval] = [:]
+        starts.reserveCapacity(metadata.tracks.count)
+        for track in metadata.tracks {
+            starts[track.href] = track.startTime
+        }
+        return AudiobookListeningHistoryDisplayContext(
+            totalDuration: metadata.totalDuration,
+            trackStartByHref: starts,
+        )
+    }
+
     public func currentState() async -> AudiobookSessionState? {
         await makeState()
     }
@@ -1939,15 +1954,6 @@ public actor AudioSessionActor {
                     let chapter = playbackState.currentChapterIndex.flatMap {
                         metadata.chapters[safe: $0]
                     }
-                    let chapterProgress =
-                        chapter.map {
-                            $0.duration > 0
-                                ? min(
-                                    max((playbackState.currentTime - $0.startTime) / $0.duration, 0),
-                                    1
-                                )
-                                : 0
-                        } ?? 0
                     let syncReason = SyncReason(rawValue: reason) ?? .periodicDuringActivePlayback
                     await ProgressSyncActor.shared.recordListeningMilestone(
                         AudiobookListeningMilestone(
@@ -1955,8 +1961,8 @@ public actor AudioSessionActor {
                             locator: locator,
                             totalProgression: progression,
                             timestamp: timestamp,
-                            locationDescription:
-                                "\(chapter?.title ?? "Audiobook"), \(Int(chapterProgress * 100))%",
+                            // Percent is rendered separately; keep a chapter/title fallback only.
+                            locationDescription: chapter?.title ?? "Audiobook",
                             reason: syncReason,
                         )
                     )

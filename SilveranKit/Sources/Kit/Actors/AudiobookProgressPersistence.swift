@@ -202,6 +202,156 @@ public struct ProgressConflictInput: Sendable, Equatable {
     }
 }
 
+/// Track/duration context for turning a historical locator into an exact book time.
+/// Absent or incomplete context must yield `nil` — never invent a timestamp.
+public struct AudiobookListeningHistoryDisplayContext: Sendable, Equatable {
+    public var totalDuration: TimeInterval
+    public var trackStartByHref: [String: TimeInterval]
+
+    public init(
+        totalDuration: TimeInterval,
+        trackStartByHref: [String: TimeInterval] = [:],
+    ) {
+        self.totalDuration = totalDuration
+        self.trackStartByHref = trackStartByHref
+    }
+}
+
+/// Pure display helpers for Previous Positions (testable, no player side effects).
+public enum AudiobookListeningHistoryFormatting {
+    /// Exact audiobook position in seconds from historical locator + metadata.
+    /// Prefers `t=` track fragment + track start; falls back to progression × duration.
+    /// Returns `nil` when the time cannot be determined reliably.
+    public static func exactPositionSeconds(
+        locator: BookLocator,
+        totalProgression: Double,
+        context: AudiobookListeningHistoryDisplayContext?,
+    ) -> TimeInterval? {
+        if let fromTrack = positionSecondsFromTrackFragment(locator: locator, context: context) {
+            return fromTrack
+        }
+        guard let context, context.totalDuration > 0,
+            totalProgression.isFinite,
+            totalProgression >= 0,
+            totalProgression <= 1
+        else {
+            return nil
+        }
+        return totalProgression * context.totalDuration
+    }
+
+    /// Always `HH:MM:SS`. Returns `nil` when seconds are missing/non-finite.
+    public static func formatPositionTimestamp(_ seconds: TimeInterval?) -> String? {
+        guard let seconds, seconds.isFinite, seconds >= 0 else { return nil }
+        let total = Int(seconds.rounded())
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let secs = total % 60
+        return String(format: "%02d:%02d:%02d", hours, minutes, secs)
+    }
+
+    /// Localized relative day + time, e.g. `Today, 9:17 PM` / `Yesterday, 9:17 PM` / `Oct 6, 9:17 PM`.
+    /// Respects locale and 12/24-hour preferences via `DateFormatter`.
+    public static func relativeDayTime(
+        _ date: Date,
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        locale: Locale = .current,
+    ) -> String {
+        let time = Self.timeFormatter(locale: locale).string(from: date)
+        if calendar.isDate(date, inSameDayAs: now) {
+            return "Today, \(time)"
+        }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
+            calendar.isDate(date, inSameDayAs: yesterday)
+        {
+            return "Yesterday, \(time)"
+        }
+        let day = Self.dayFormatter(
+            locale: locale,
+            calendar: calendar,
+            includeYear: calendar.component(.year, from: date) != calendar.component(.year, from: now),
+        ).string(from: date)
+        return "\(day), \(time)"
+    }
+
+    public static func relativeDayTime(
+        epochMillis: Double,
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        locale: Locale = .current,
+    ) -> String {
+        relativeDayTime(
+            Date(timeIntervalSince1970: epochMillis / 1_000),
+            now: now,
+            calendar: calendar,
+            locale: locale,
+        )
+    }
+
+    /// Chapter/title fallback when an exact timestamp cannot be shown.
+    /// Strips a trailing `, N%` suffix left by older milestone writers.
+    public static func fallbackLocationLabel(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        if let range = trimmed.range(of: #",\s*\d+%$"#, options: .regularExpression) {
+            return String(trimmed[..<range.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return trimmed
+    }
+
+    private static func positionSecondsFromTrackFragment(
+        locator: BookLocator,
+        context: AudiobookListeningHistoryDisplayContext?,
+    ) -> TimeInterval? {
+        guard let context,
+            let trackTime = trackFragmentSeconds(locator: locator),
+            let start = context.trackStartByHref[locator.href]
+        else {
+            return nil
+        }
+        let absolute = start + trackTime
+        guard absolute.isFinite, absolute >= 0 else { return nil }
+        if context.totalDuration > 0, absolute > context.totalDuration + 1 {
+            return nil
+        }
+        return absolute
+    }
+
+    private static func trackFragmentSeconds(locator: BookLocator) -> TimeInterval? {
+        guard let fragments = locator.locations?.fragments else { return nil }
+        for fragment in fragments {
+            let trimmed = fragment.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.hasPrefix("t=") else { continue }
+            let raw = trimmed.dropFirst(2)
+            guard let value = Double(raw), value.isFinite, value >= 0 else { continue }
+            return value
+        }
+        return nil
+    }
+
+    private static func timeFormatter(locale: Locale) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter
+    }
+
+    private static func dayFormatter(
+        locale: Locale,
+        calendar: Calendar,
+        includeYear: Bool,
+    ) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.calendar = calendar
+        formatter.setLocalizedDateFormatFromTemplate(includeYear ? "MMMdyyyy" : "MMMd")
+        return formatter
+    }
+}
+
 public enum AudiobookProgressConflict {
     public static let zeroEpsilon: Double = 0.005
     public static let suspiciousKnownThreshold: Double = 0.05
@@ -210,6 +360,10 @@ public enum AudiobookProgressConflict {
     public static let checkpointIntervalSeconds: TimeInterval = 7
     /// Minimum progression delta before recording another listening milestone.
     public static let milestoneProgressEpsilon: Double = 0.002
+    /// Accidental double-fire window for identical-reason milestones (ms).
+    public static let milestoneDuplicateWindowMs: Double = 2_000
+    /// Routine pause/background events within this wall-clock window may coalesce (ms).
+    public static let milestoneRoutineCoalesceWindowMs: Double = 2 * 60 * 60 * 1_000
     /// Seek landing tolerance in wall-clock seconds (player accuracy), not %.
     /// Must not be implemented as a progression fraction — on long books a
     /// fixed fraction (e.g. 0.0005) balloons to many seconds and defeats the
@@ -218,6 +372,20 @@ public enum AudiobookProgressConflict {
 
     public static func isNearZero(_ progression: Double) -> Bool {
         progression <= zeroEpsilon
+    }
+
+    /// Lifecycle pauses that are safe to coalesce when the playhead did not move meaningfully.
+    public static func isRoutineListeningMilestoneReason(_ reason: SyncReason) -> Bool {
+        switch reason {
+            case .appBackgrounding, .userPausedPlayback, .appTerminating:
+                return true
+            case .userFlippedPage, .userSelectedChapter, .userDraggedSeekBar,
+                .userStartedPlayback, .userSkippedForward, .userSkippedBackward,
+                .periodicDuringActivePlayback, .periodicWhileReading, .userClosedBook,
+                .userRestoredFromHistory, .userConfirmedRestart, .connectionRestored,
+                .watchReconnected, .relayedFromWatch, .initialLoad, .appWokeFromSleep:
+                return false
+        }
     }
 
     /// Extract and validate a restore progression from a locator against the
@@ -359,13 +527,12 @@ public enum AudiobookProgressConflict {
         existing: [AudiobookListeningMilestone],
         new: AudiobookListeningMilestone,
     ) -> [AudiobookListeningMilestone] {
-        if let last = existing.first,
-            abs(last.totalProgression - new.totalProgression) < milestoneProgressEpsilon,
-            last.reason == new.reason,
-            abs(last.timestamp - new.timestamp) < 2_000
-        {
+        if let last = existing.first, shouldCoalesceListeningMilestone(last: last, new: new) {
             var replaced = existing
-            replaced[0] = new
+            // Prefer the later event clock; out-of-order older writes must not clobber.
+            if new.timestamp >= last.timestamp {
+                replaced[0] = new
+            }
             return replaced
         }
         var next = existing
@@ -374,6 +541,30 @@ public enum AudiobookProgressConflict {
             next = Array(next.prefix(maxListeningMilestonesPerBook))
         }
         return next
+    }
+
+    /// Conservative history cleanup: coalesce routine pause/background spam at the same
+    /// playhead, plus accidental same-reason double-fires. Never collapses seeks, chapter
+    /// changes, restores, or other meaningful actions. Does not touch the checkpoint ring.
+    public static func shouldCoalesceListeningMilestone(
+        last: AudiobookListeningMilestone,
+        new: AudiobookListeningMilestone,
+    ) -> Bool {
+        // Compare full-precision progression — never rounded percent labels.
+        guard abs(last.totalProgression - new.totalProgression) < milestoneProgressEpsilon else {
+            return false
+        }
+        let deltaMs = abs(last.timestamp - new.timestamp)
+        if last.reason == new.reason, deltaMs < milestoneDuplicateWindowMs {
+            return true
+        }
+        guard isRoutineListeningMilestoneReason(last.reason),
+            isRoutineListeningMilestoneReason(new.reason),
+            deltaMs < milestoneRoutineCoalesceWindowMs
+        else {
+            return false
+        }
+        return true
     }
 
     public static func shouldNavigateToIncomingServer(
