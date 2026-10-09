@@ -1424,21 +1424,6 @@ public actor AudioSessionActor {
         )
     }
 
-    /// Duration + track starts for Previous Positions exact timestamps.
-    /// Does not mutate playback, checkpoints, or sync state.
-    public func listeningHistoryDisplayContext() -> AudiobookListeningHistoryDisplayContext? {
-        guard let metadata, metadata.totalDuration > 0 else { return nil }
-        var starts: [String: TimeInterval] = [:]
-        starts.reserveCapacity(metadata.tracks.count)
-        for track in metadata.tracks {
-            starts[track.href] = track.startTime
-        }
-        return AudiobookListeningHistoryDisplayContext(
-            totalDuration: metadata.totalDuration,
-            trackStartByHref: starts,
-        )
-    }
-
     public func currentState() async -> AudiobookSessionState? {
         await makeState()
     }
