@@ -10,6 +10,9 @@ public struct AudiobookPlayerView: View {
     private let onClose: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    #if os(iOS)
+    @Environment(MediaViewModel.self) private var mediaViewModel: MediaViewModel?
+    #endif
 
     @State private var sessionState: AudiobookSessionState?
     @State private var chapterProgress = 0.0
@@ -18,6 +21,9 @@ public struct AudiobookPlayerView: View {
     @State private var showServerPositionDialog = false
     @State private var lastPendingServerPosition: AudiobookSessionServerPosition?
     @State private var showListeningHistory = false
+    #if os(iOS)
+    @State private var showFormatSwitchDialog = false
+    #endif
 
     public init(bookData: PlayerBookData?, onClose: (() -> Void)? = nil) {
         self.bookData = bookData
@@ -121,7 +127,15 @@ public struct AudiobookPlayerView: View {
                     Label("Library", systemImage: "chevron.left")
                 }
             }
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if !audiobookSwitchableFormats.isEmpty {
+                    Button {
+                        showFormatSwitchDialog = true
+                    } label: {
+                        Label("Switch Format", systemImage: "arrow.left.arrow.right")
+                    }
+                    .accessibilityLabel("Switch Format")
+                }
                 Button {
                     showListeningHistory = true
                 } label: {
@@ -129,9 +143,40 @@ public struct AudiobookPlayerView: View {
                 }
             }
         }
+        .confirmationDialog(
+            "Switch Format",
+            isPresented: $showFormatSwitchDialog,
+            titleVisibility: .visible,
+        ) {
+            ForEach(audiobookSwitchableFormats, id: \.category) { format in
+                Button(format.label) {
+                    Task { await switchAudiobookFormat(to: format.category) }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
         .navigationBarBackButtonHidden(true)
         #endif
     }
+
+    #if os(iOS)
+    private var audiobookSwitchableFormats: [(label: String, category: LocalMediaCategory)] {
+        guard let book = bookData?.metadata, let mediaViewModel else { return [] }
+        return FormatSwitchCoordinator.availableFormats(for: book, mediaViewModel: mediaViewModel)
+            .filter { $0.category != .audio }
+            .map { (FormatSwitchLabels.title(for: $0.category), $0.category) }
+    }
+
+    private func switchAudiobookFormat(to destination: LocalMediaCategory) async {
+        guard let book = bookData?.metadata, let mediaViewModel else { return }
+        await FormatSwitchCoordinator.switchFormat(
+            from: book,
+            sourceCategory: .audio,
+            to: destination,
+            mediaViewModel: mediaViewModel,
+        )
+    }
+    #endif
 
     #if os(iOS)
     private func closeBook() {

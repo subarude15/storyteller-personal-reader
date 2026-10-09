@@ -362,6 +362,7 @@ struct SyncHistoryEntryRow: View {
             case .userClosedBook: return "Closed book"
             case .userRestoredFromHistory: return "Restored"
             case .userConfirmedRestart: return "Restart confirmed"
+            case .userSwitchedFormat: return "Switched format"
             case .appBackgrounding: return "App backgrounded"
             case .appTerminating: return "App closing"
             case .connectionRestored: return "Reconnected"

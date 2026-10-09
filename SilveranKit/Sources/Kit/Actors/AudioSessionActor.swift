@@ -1900,8 +1900,8 @@ public actor AudioSessionActor {
         switch reason {
             case .userPausedPlayback, .userClosedBook, .userDraggedSeekBar,
                 .userSkippedForward, .userSkippedBackward, .userSelectedChapter,
-                .userConfirmedRestart, .userRestoredFromHistory, .appBackgrounding,
-                .appTerminating:
+                .userConfirmedRestart, .userRestoredFromHistory, .userSwitchedFormat,
+                .appBackgrounding, .appTerminating:
                 return true
             case .userFlippedPage, .userStartedPlayback, .periodicDuringActivePlayback,
                 .periodicWhileReading, .connectionRestored, .watchReconnected,

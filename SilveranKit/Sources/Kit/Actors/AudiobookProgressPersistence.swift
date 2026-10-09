@@ -382,8 +382,9 @@ public enum AudiobookProgressConflict {
             case .userFlippedPage, .userSelectedChapter, .userDraggedSeekBar,
                 .userStartedPlayback, .userSkippedForward, .userSkippedBackward,
                 .periodicDuringActivePlayback, .periodicWhileReading, .userClosedBook,
-                .userRestoredFromHistory, .userConfirmedRestart, .connectionRestored,
-                .watchReconnected, .relayedFromWatch, .initialLoad, .appWokeFromSleep:
+                .userRestoredFromHistory, .userConfirmedRestart, .userSwitchedFormat,
+                .connectionRestored, .watchReconnected, .relayedFromWatch, .initialLoad,
+                .appWokeFromSleep:
                 return false
         }
     }

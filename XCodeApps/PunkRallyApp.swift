@@ -698,11 +698,11 @@ private struct HomeTabView: View {
         .shadow(color: colorScheme == .dark ? .clear : .black.opacity(0.06), radius: 8, y: 2)
         .contentShape(Rectangle())
         .onTapGesture {
-            Task { await openMixedItem(item) }
+            Task { await handleHomeItemTap(item) }
         }
-        .onLongPressGesture(minimumDuration: 0.5) {
+        .contextMenu {
             if let item {
-                mediumPickerItem = item
+                homeItemContextMenu(for: item)
             }
         }
     }
@@ -743,10 +743,10 @@ private struct HomeTabView: View {
                             }
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                Task { await openMixedItem(item) }
+                                Task { await handleHomeItemTap(item) }
                             }
-                            .onLongPressGesture(minimumDuration: 0.5) {
-                                mediumPickerItem = item
+                            .contextMenu {
+                                homeItemContextMenu(for: item)
                             }
                         }
                     }
@@ -810,10 +810,10 @@ private struct HomeTabView: View {
                     }
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        Task { await openMixedItem(item) }
+                        Task { await handleHomeItemTap(item) }
                     }
-                    .onLongPressGesture(minimumDuration: 0.5) {
-                        mediumPickerItem = item
+                    .contextMenu {
+                        homeItemContextMenu(for: item)
                     }
                 }
             }
@@ -825,6 +825,57 @@ private struct HomeTabView: View {
                     .stroke(chrome.border, lineWidth: 1)
             )
             .accessibilityIdentifier("finish-tonight")
+        }
+    }
+
+    /// Tap → format menu (books with multiple media) or open directly; long-press
+    /// context menu keeps secondary actions. Widget Continue path still uses
+    /// `openMixedItem` / `performContinueFromWidget` unchanged.
+    @MainActor
+    private func handleHomeItemTap(_ item: HomeMixedItem?) async {
+        guard let item else { return }
+        switch item {
+            case .book:
+                let media = availableMedia(for: item)
+                if media.count > 1 {
+                    mediumPickerItem = item
+                } else if let only = media.first {
+                    await openMedium(only, for: item)
+                } else {
+                    await openMixedItem(item)
+                }
+            case .podcast:
+                let media = availableMedia(for: item)
+                if media.count > 1 {
+                    mediumPickerItem = item
+                } else {
+                    await openMixedItem(item)
+                }
+        }
+    }
+
+    @ViewBuilder
+    private func homeItemContextMenu(for item: HomeMixedItem) -> some View {
+        Button {
+            Task { await openMixedItem(item) }
+        } label: {
+            Label("Continue", systemImage: "play.fill")
+        }
+        let media = availableMedia(for: item)
+        if media.count > 1 {
+            Button {
+                mediumPickerItem = item
+            } label: {
+                Label("Choose Format…", systemImage: "rectangle.stack")
+            }
+        }
+        if case .book(let book, _, _, _) = item {
+            Button {
+                mediaViewModel?.pendingOpenBookID = book.id
+                NotificationCenter.default.post(name: .silveranShowLibrary, object: nil)
+            } label: {
+                Label("View in Library", systemImage: "books.vertical")
+            }
         }
     }
 

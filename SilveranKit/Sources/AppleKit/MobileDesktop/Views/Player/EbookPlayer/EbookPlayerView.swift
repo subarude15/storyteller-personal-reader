@@ -48,6 +48,7 @@ public struct EbookPlayerView: View {
     @State private var isAnimatingLeftSidebar = false
     #else
     @Environment(\.dismiss) private var dismiss
+    @Environment(MediaViewModel.self) private var mediaViewModel: MediaViewModel?
     #endif
     @State private var viewModel: EbookPlayerViewModel
     @State private var isComicScrubberVisible = false
@@ -404,6 +405,31 @@ public struct EbookPlayerView: View {
             }()
     }
 
+    #if os(iOS)
+    private var ebookSwitchableFormats: [(label: String, category: LocalMediaCategory)] {
+        guard let book = viewModel.bookData?.metadata,
+            let category = viewModel.bookData?.category,
+            let mediaViewModel
+        else { return [] }
+        return FormatSwitchCoordinator.availableFormats(for: book, mediaViewModel: mediaViewModel)
+            .filter { $0.category != category }
+            .map { (FormatSwitchLabels.title(for: $0.category), $0.category) }
+    }
+
+    private func switchEbookFormat(to destination: LocalMediaCategory) async {
+        guard let book = viewModel.bookData?.metadata,
+            let category = viewModel.bookData?.category,
+            let mediaViewModel
+        else { return }
+        await FormatSwitchCoordinator.switchFormat(
+            from: book,
+            sourceCategory: category,
+            to: destination,
+            mediaViewModel: mediaViewModel,
+        )
+    }
+    #endif
+
     // Views drawn over readerBackgroundColor must use this instead of semantic
     // colors: the theme background follows the user's theme while semantic colors
     // follow the system appearance, and the two can disagree.
@@ -613,6 +639,10 @@ public struct EbookPlayerView: View {
                     onSleepTimerStart: viewModel.handleSleepTimerStart,
                     onSleepTimerCancel: viewModel.handleSleepTimerCancel,
                     settingsVM: viewModel.settingsVM,
+                    switchableFormats: ebookSwitchableFormats,
+                    onSwitchFormat: { category in
+                        Task { await switchEbookFormat(to: category) }
+                    },
                 )
                 .transition(.opacity)
             }

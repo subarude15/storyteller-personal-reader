@@ -581,6 +581,8 @@ public enum SyncReason: String, Sendable, Codable {
     case userClosedBook
     case userRestoredFromHistory
     case userConfirmedRestart
+    /// Intentional in-player / Home format switch (ebook ↔ audio ↔ readaloud).
+    case userSwitchedFormat
 
     // App lifecycle
     case appBackgrounding

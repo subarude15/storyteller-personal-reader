@@ -151,6 +151,7 @@ public actor ProgressSyncActor {
             isExplicitUserAction
             || reason == .userConfirmedRestart
             || reason == .userRestoredFromHistory
+            || reason == .userSwitchedFormat
             || reason == .userDraggedSeekBar
             || reason == .userSkippedForward
             || reason == .userSkippedBackward
