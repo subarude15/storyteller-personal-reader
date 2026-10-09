@@ -330,6 +330,14 @@ public enum StoryPositionTranslator {
         locator.type.contains("audio") || locator.href.hasPrefix("audiobook")
     }
 
+    /// Placeholder / non-spine hrefs that cannot drive Foliate navigation alone.
+    public static func isPlaceholderReaderHref(_ href: String) -> Bool {
+        let trimmed = href.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return true }
+        let lower = trimmed.lowercased()
+        return lower == "ebook" || lower == "audiobook" || lower.hasPrefix("audiobook://")
+    }
+
     public static func isImprecise(_ precision: StoryPositionPrecision) -> Bool {
         switch precision {
             case .wholeBookPercentage, .chapterRelative:
@@ -337,6 +345,60 @@ public enum StoryPositionTranslator {
             case .mediaOverlayAlignment, .contentReference, .destinationSaved:
                 return false
         }
+    }
+
+    /// Resolve a format-switch ebook/readaloud locator into something Foliate can open.
+    /// Percentage-only / placeholder hrefs map onto the closest spine section.
+    public static func resolveReaderNavigationTarget(
+        locator: BookLocator,
+        progression: Double,
+        bookStructure: [SectionInfo],
+    ) -> (locator: BookLocator, navigation: ReaderNavigationStrategy) {
+        let clamped = clampProgression(progression)
+        if isAudioLocator(locator) {
+            let resolved = resolveSpineLocator(
+                progression: clamped,
+                bookStructure: bookStructure,
+                title: locator.title,
+            )
+            return (resolved, .bookFraction)
+        }
+
+        if let fragment = locator.locations?.fragments?.first, !fragment.isEmpty,
+            !isPlaceholderReaderHref(locator.href),
+            findSectionIndex(for: locator.href, in: bookStructure) != nil
+        {
+            return (locator, .fragment)
+        }
+
+        if !isPlaceholderReaderHref(locator.href),
+            findSectionIndex(for: locator.href, in: bookStructure) != nil
+        {
+            if locator.locations?.progression != nil {
+                return (locator, .sectionFraction)
+            }
+            if locator.locations?.totalProgression != nil {
+                return (locator, .bookFraction)
+            }
+            return (locator, .href)
+        }
+
+        let resolved = resolveSpineLocator(
+            progression: clamped,
+            bookStructure: bookStructure,
+            title: locator.title,
+        )
+        debugLog(
+            "[StoryPosition] Resolved placeholder/invalid href=\(locator.href) → spine=\(resolved.href) prog=\(clamped)"
+        )
+        return (resolved, .bookFraction)
+    }
+
+    public enum ReaderNavigationStrategy: String, Sendable, Equatable {
+        case fragment
+        case sectionFraction
+        case bookFraction
+        case href
     }
 
     // MARK: - Private
@@ -427,6 +489,9 @@ public enum StoryPositionTranslator {
             fallback: fallback,
         )
         let chapterProg = source.locations?.progression
+        // Never reuse an audio-shaped locator for ebook/readaloud destinations.
+        let reusableSource: BookLocator? =
+            (input.destinationCategory != .audio && !isAudioLocator(source)) ? source : nil
         return StoryPositionTranslation(
             progression: mapped.progression,
             locator: locatorForDestination(
@@ -434,7 +499,7 @@ public enum StoryPositionTranslator {
                 progression: mapped.progression,
                 chapterTitle: matched.title,
                 chapterHref: matched.href,
-                sourceLocator: input.destinationCategory == .audio ? nil : source,
+                sourceLocator: reusableSource,
                 chapterProgression: chapterProg,
             ),
             precision: mapped.usedRelative ? .chapterRelative : .contentReference,
@@ -446,17 +511,85 @@ public enum StoryPositionTranslator {
         input: StoryPositionTranslationInput,
         progression: Double,
     ) -> StoryPositionTranslation {
+        let chapter = closestChapter(in: input.destinationChapters, progression: progression)
+        let chapterProg: Double? = {
+            guard let chapter,
+                let start = chapter.startProgression,
+                let duration = chapter.durationFraction,
+                duration > 0
+            else { return nil }
+            return clampProgression((progression - start) / duration)
+        }()
+        let reusableSource: BookLocator? = {
+            guard let source = input.sourceLocator, !isAudioLocator(source) else { return nil }
+            return source
+        }()
         let locator = locatorForDestination(
             category: input.destinationCategory,
             progression: progression,
-            chapterTitle: input.sourceLocator?.title,
-            sourceLocator: input.sourceLocator,
+            chapterTitle: chapter?.title ?? input.sourceLocator?.title,
+            chapterHref: chapter?.href,
+            sourceLocator: reusableSource,
+            chapterProgression: chapterProg,
         )
         return StoryPositionTranslation(
             progression: progression,
             locator: locator,
             precision: .wholeBookPercentage,
             shouldApplyHandoff: true,
+        )
+    }
+
+    private static func closestChapter(
+        in chapters: [StoryPositionChapter],
+        progression: Double,
+    ) -> StoryPositionChapter? {
+        guard !chapters.isEmpty else { return nil }
+        let clamped = clampProgression(progression)
+        var best: StoryPositionChapter?
+        var bestDistance = Double.greatestFiniteMagnitude
+        for chapter in chapters {
+            guard let start = chapter.startProgression else { continue }
+            let end = start + max(chapter.durationFraction ?? 0, 0)
+            if clamped >= start && clamped <= max(end, start) {
+                return chapter
+            }
+            let distance = min(abs(clamped - start), abs(clamped - end))
+            if distance < bestDistance {
+                bestDistance = distance
+                best = chapter
+            }
+        }
+        return best ?? chapters.first
+    }
+
+    private static func resolveSpineLocator(
+        progression: Double,
+        bookStructure: [SectionInfo],
+        title: String?,
+    ) -> BookLocator {
+        let clamped = clampProgression(progression)
+        guard !bookStructure.isEmpty else {
+            return locatorForDestination(
+                category: .ebook,
+                progression: clamped,
+                chapterTitle: title,
+            )
+        }
+        let index = min(
+            max(Int((clamped * Double(bookStructure.count)).rounded(.down)), 0),
+            bookStructure.count - 1,
+        )
+        let section = bookStructure[index]
+        let start = Double(index) / Double(bookStructure.count)
+        let duration = 1 / Double(bookStructure.count)
+        let chapterProg = duration > 0 ? clampProgression((clamped - start) / duration) : 0
+        return locatorForDestination(
+            category: .ebook,
+            progression: clamped,
+            chapterTitle: title ?? section.label,
+            chapterHref: section.id,
+            chapterProgression: chapterProg,
         )
     }
 

@@ -265,6 +265,106 @@ struct FormatSwitchHandoffTests {
         #expect(await store.peek(bookID: bookA) == nil)
     }
 
+    @Test func consumeReaderHandoffPrefersRequestedCategoryThenOtherReader() async {
+        let store = FormatSwitchHandoffStore()
+        await store.set(
+            FormatSwitchHandoff(
+                bookID: bookA,
+                category: .ebook,
+                locator: textLocator(0.33, href: "ebook"),
+                progression: 0.33,
+                precision: .wholeBookPercentage,
+            )
+        )
+        let preferred = await store.consumeReaderHandoff(bookID: bookA, preferred: .ebook)
+        #expect(preferred?.progression == 0.33)
+        #expect(await store.peek(bookID: bookA) == nil)
+
+        await store.set(
+            FormatSwitchHandoff(
+                bookID: bookA,
+                category: .synced,
+                locator: textLocator(0.41, href: "p.html", fragment: "x"),
+                progression: 0.41,
+                precision: .mediaOverlayAlignment,
+            )
+        )
+        // Opening as ebook should still accept a synced handoff rather than drop it.
+        let cross = await store.consumeReaderHandoff(bookID: bookA, preferred: .ebook)
+        #expect(cross?.category == .synced)
+        #expect(cross?.progression == 0.41)
+    }
+
+    @Test func audiobookToEbookIgnoresStaleSavedWhenHandoffApplies() {
+        let chapters = [
+            StoryPositionChapter(
+                title: "Mid",
+                href: "OEBPS/mid.xhtml",
+                startProgression: 0.4,
+                durationFraction: 0.3,
+            )
+        ]
+        let result = StoryPositionTranslator.translate(
+            StoryPositionTranslationInput(
+                sourceBookID: bookA,
+                destinationBookID: bookA,
+                sourceCategory: .audio,
+                destinationCategory: .ebook,
+                sourceLocator: audioLocator(0.55),
+                sourceProgression: 0.55,
+                sourceTimestamp: 8_000,
+                destinationChapters: chapters,
+                destinationSavedProgression: 0.12,
+                destinationSavedTimestamp: 1_000,
+                destinationSavedLocator: textLocator(0.12, href: "OEBPS/old.xhtml"),
+            )
+        )
+        #expect(result.shouldApplyHandoff)
+        #expect(result.conflictingDestinationSaved == nil)
+        #expect(abs(result.progression - 0.55) < 0.0001)
+        #expect(result.locator?.href == "OEBPS/mid.xhtml")
+        #expect(result.locator?.locations?.totalProgression == 0.55)
+    }
+
+    @Test func readaloudToEbookKeepsFragmentAcrossSeparateBookIDs() {
+        let result = StoryPositionTranslator.translate(
+            StoryPositionTranslationInput(
+                sourceBookID: bookA,
+                destinationBookID: bookB,
+                sourceCategory: .synced,
+                destinationCategory: .ebook,
+                sourceLocator: textLocator(0.48, href: "chapter.xhtml", fragment: "frag-9"),
+                sourceProgression: 0.48,
+                hasVerifiedMediaOverlay: true,
+            )
+        )
+        #expect(result.precision == .mediaOverlayAlignment)
+        #expect(result.locator?.href == "chapter.xhtml")
+        #expect(result.locator?.locations?.fragments?.first == "frag-9")
+        #expect(result.shouldApplyHandoff)
+    }
+
+    @Test func invalidPlaceholderHrefResolvesViaSpineForDifferentChapter() {
+        let structure = (0..<10).map { index in
+            SectionInfo(
+                index: index,
+                id: "spine/ch\(index).xhtml",
+                label: "Ch \(index)",
+                level: 1,
+                mediaOverlay: [],
+            )
+        }
+        let incoming = textLocator(0.82, href: "ebook")
+        let resolved = StoryPositionTranslator.resolveReaderNavigationTarget(
+            locator: incoming,
+            progression: 0.82,
+            bookStructure: structure,
+        )
+        #expect(resolved.navigation == .bookFraction)
+        #expect(resolved.locator.href == "spine/ch8.xhtml")
+        #expect(resolved.locator.href != "spine/ch1.xhtml")
+    }
+
     // MARK: - Helpers
 
     private func audioLocator(_ progress: Double) -> BookLocator {

@@ -71,6 +71,25 @@ public actor FormatSwitchHandoffStore {
         pending[Self.key(bookID: bookID)]
     }
 
+    /// Consume a reader-destination handoff (`.ebook` or `.synced`).
+    /// Prefers `preferred` when set, otherwise accepts either reader category.
+    public func consumeReaderHandoff(
+        bookID: BookID,
+        preferred: LocalMediaCategory? = nil,
+    ) -> FormatSwitchHandoff? {
+        if let preferred, preferred == .ebook || preferred == .synced {
+            if let match = consume(bookID: bookID, category: preferred) {
+                return match
+            }
+            let other: LocalMediaCategory = preferred == .ebook ? .synced : .ebook
+            return consume(bookID: bookID, category: other)
+        }
+        if let ebook = consume(bookID: bookID, category: .ebook) {
+            return ebook
+        }
+        return consume(bookID: bookID, category: .synced)
+    }
+
     public func clear(bookID: BookID) {
         pending.removeValue(forKey: Self.key(bookID: bookID))
     }

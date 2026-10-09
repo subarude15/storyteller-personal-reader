@@ -214,12 +214,50 @@ public enum FormatSwitchCoordinator {
             category: plan.sourceCategory,
         )
 
+        // Destination reader must open fresh — a leftover readaloud session for the
+        // same BookID would join and skip / override the format-switch locator.
+        if plan.destinationCategory == .ebook || plan.destinationCategory == .synced {
+            if let existing = ReadingSessionStore.shared.activeSession(
+                for: plan.destinationBook.id
+            ) {
+                debugLog(
+                    "[FormatSwitch] Ending leftover \(existing.category.rawValue) session before opening \(plan.destinationCategory.rawValue)"
+                )
+                await existing.close(.endSession)
+            }
+        }
+
         if chosen.shouldApplyHandoff, let locator = chosen.locator {
+            // Ensure ebook/readaloud handoffs always carry totalProgression so EPM can
+            // resolve a spine position even when href is a placeholder ("ebook").
+            let handoffLocator: BookLocator = {
+                if plan.destinationCategory == .audio { return locator }
+                if locator.locations?.totalProgression != nil,
+                    !StoryPositionTranslator.isAudioLocator(locator)
+                {
+                    return locator
+                }
+                return StoryPositionTranslator.locatorForDestination(
+                    category: plan.destinationCategory,
+                    progression: chosen.progression,
+                    chapterTitle: locator.title,
+                    chapterHref: StoryPositionTranslator.isPlaceholderReaderHref(locator.href)
+                        ? nil
+                        : locator.href,
+                    sourceLocator: StoryPositionTranslator.isAudioLocator(locator) ? nil : locator,
+                    chapterProgression: locator.locations?.progression,
+                )
+            }()
+
+            debugLog(
+                "[FormatSwitch] Handoff set dest=\(plan.destinationBook.id) category=\(plan.destinationCategory.rawValue) prog=\(chosen.progression) precision=\(chosen.precision.rawValue) href=\(handoffLocator.href) total=\(handoffLocator.locations?.totalProgression?.description ?? "nil")"
+            )
+
             await FormatSwitchHandoffStore.shared.set(
                 FormatSwitchHandoff(
                     bookID: plan.destinationBook.id,
                     category: plan.destinationCategory,
-                    locator: locator,
+                    locator: handoffLocator,
                     progression: chosen.progression,
                     precision: chosen.precision,
                 )

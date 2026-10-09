@@ -516,17 +516,20 @@ class EbookPlayerViewModel {
         session?.hasAudioNarration = false
         searchManager = nil
         styleManager = nil
+        let pinned = session?.pinnedFormatSwitchHandoff
         let manager = EphemeralProgressManager(
             bridge: nil,
             settingsVM: settingsVM,
             bookID: bookData?.metadata.id,
-            initialLocator: bookData?.metadata.position?.locator,
+            initialLocator: pinned?.locator ?? bookData?.metadata.position?.locator,
+            formatSwitchHandoff: pinned,
         )
         manager.bookStructure = comicBookStructure
         manager.bookTitle = bookData?.metadata.title
         manager.bookAuthor = bookData?.metadata.authors?.first?.name
         manager.handleNativeBookStructureReady(pageCount: urls.count)
         comicProgressManager = manager
+        session?.clearPinnedFormatSwitchHandoff()
 
         Task { @MainActor in
             let syncInterval = await SettingsActor.shared.config.sync.progressSyncIntervalSeconds

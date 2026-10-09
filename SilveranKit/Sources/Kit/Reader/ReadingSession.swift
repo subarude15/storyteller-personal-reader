@@ -48,14 +48,23 @@ public final class ReadingSessionStore {
         settings: (any ReaderSettingsReading)?,
     ) -> ReadingSession {
         if let existing = sessions[metadata.id] {
-            debugLog("[ReadingSession] Joining existing session for \(metadata.id)")
-            if let settings {
-                existing.settings = settings
+            if existing.category == category {
+                debugLog("[ReadingSession] Joining existing session for \(metadata.id)")
+                if let settings {
+                    existing.settings = settings
+                }
+                if let localMediaPath {
+                    existing.localMediaPath = localMediaPath
+                }
+                return existing
             }
-            if let localMediaPath {
-                existing.localMediaPath = localMediaPath
-            }
-            return existing
+            // Format switch into a different reader category must not reuse the
+            // prior session (wrong category + stale seek flags skip handoff).
+            debugLog(
+                "[ReadingSession] Replacing \(existing.category.rawValue) session with \(category.rawValue) for \(metadata.id)"
+            )
+            sessions.removeValue(forKey: metadata.id)
+            Task { await existing.close(.endSession) }
         }
 
         if category == .synced {
@@ -118,6 +127,10 @@ public final class ReadingSession {
     public var ebookFileFormat: EbookFileFormat = .epub
     public var isJoiningExistingSession = false
     public private(set) var lastPrepareError: Error?
+    /// Format-switch open target pinned for the life of this open (survives EPM recreate).
+    public private(set) var pinnedFormatSwitchHandoff: FormatSwitchHandoff?
+    /// Once the first open seek has been issued, recreating EPM must not restore stale metadata.
+    public private(set) var hasCompletedInitialOpenSeek = false
 
     @ObservationIgnored private var nativeLoadingTask: Task<Void, Never>?
     @ObservationIgnored private var incomingPositionObserverId: UUID?
@@ -160,6 +173,7 @@ public final class ReadingSession {
         debugLog("[ReadingSession] Preparing local ebook file")
         let needsNativeAudio = category == .synced
         nativeLoadingTask = Task { @SilveranUIActor in
+            await self.claimFormatSwitchHandoffIfNeeded()
             do {
                 let prepStarted = Date()
                 let prepared = try await BookServiceActor.shared.prepareEbookForReading(
@@ -287,15 +301,33 @@ public final class ReadingSession {
         }
     }
 
+    /// Claim intentional format-switch destination before PSA / metadata restore.
+    public func claimFormatSwitchHandoffIfNeeded() async {
+        guard pinnedFormatSwitchHandoff == nil else { return }
+        guard category == .ebook || category == .synced else { return }
+        if let handoff = await FormatSwitchHandoffStore.shared.consumeReaderHandoff(
+            bookID: bookID,
+            preferred: category,
+        ) {
+            pinnedFormatSwitchHandoff = handoff
+            debugLog(
+                "[ReadingSession] Pinned format-switch handoff prog=\(handoff.progression) precision=\(handoff.precision.rawValue) href=\(handoff.locator.href)"
+            )
+        }
+    }
+
+    public func clearPinnedFormatSwitchHandoff() {
+        pinnedFormatSwitchHandoff = nil
+    }
+
     /// Headless restore; a view restores through the bridge instead.
     public func restoreEnginePositionFromSavedProgress() async {
         guard lastOpenResult == .openedFresh else { return }
 
+        await claimFormatSwitchHandoffIfNeeded()
+
         var locatorToUse: BookLocator? = nil
-        if let handoff = await FormatSwitchHandoffStore.shared.consume(
-            bookID: bookID,
-            category: category,
-        ) {
+        if let handoff = pinnedFormatSwitchHandoff {
             debugLog(
                 "[ReadingSession] Using format-switch handoff prog=\(handoff.progression) precision=\(handoff.precision.rawValue)"
             )
@@ -332,6 +364,7 @@ public final class ReadingSession {
             } else {
                 debugLog("[ReadingSession] No usable SMIL position data, starting from beginning")
             }
+            clearPinnedFormatSwitchHandoff()
         } else {
             debugLog("[ReadingSession] No saved SMIL position, starting from beginning")
         }
@@ -339,11 +372,13 @@ public final class ReadingSession {
 
     private func setUpHeadlessManagers() {
         if progressManager == nil {
+            let openLocator = pinnedFormatSwitchHandoff?.locator ?? metadata.position?.locator
             let manager = EphemeralProgressManager(
                 bridge: nil,
                 settingsVM: settings,
                 bookID: bookID,
-                initialLocator: metadata.position?.locator,
+                initialLocator: openLocator,
+                formatSwitchHandoff: pinnedFormatSwitchHandoff,
             )
             manager.bookTitle = metadata.title
             manager.bookAuthor = metadata.authors?.first?.name
@@ -426,17 +461,31 @@ public final class ReadingSession {
             Task { await oldManager.detach() }
         }
 
+        // prepare()'s loading task claims handoff before extractedEbookPath is set,
+        // so the pin is available by the time the WebView attaches this bridge.
+        let openLocator = pinnedFormatSwitchHandoff?.locator ?? metadata.position?.locator
         let manager = EphemeralProgressManager(
             bridge: bridge,
             settingsVM: settings,
             bookID: bookID,
-            initialLocator: metadata.position?.locator,
+            initialLocator: openLocator,
+            formatSwitchHandoff: pinnedFormatSwitchHandoff,
         )
         manager.bookTitle = metadata.title
         manager.bookAuthor = metadata.authors?.first?.name
+        manager.bookStructure = bookStructure
+        // A recreated WebView/EPM must not re-run initial seek against stale metadata
+        // after an intentional format-switch (or any first open) already navigated.
+        if hasCompletedInitialOpenSeek {
+            manager.hasPerformedInitialSeek = true
+        }
         progressManager = manager
 
         Task { @SilveranUIActor in
+            await self.claimFormatSwitchHandoffIfNeeded()
+            if !self.hasCompletedInitialOpenSeek, let handoff = self.pinnedFormatSwitchHandoff {
+                manager.applyFormatSwitchHandoff(handoff)
+            }
             if let coverData = await BookServiceActor.shared.cachedCoverData(
                 for: bookID,
                 audio: false,
@@ -576,11 +625,25 @@ public final class ReadingSession {
             }
             onReadaloudAvailabilityChanged?(hasAudioNarration)
 
-            if isJoiningExistingSession {
+            await claimFormatSwitchHandoffIfNeeded()
+            if let handoff = pinnedFormatSwitchHandoff {
+                progressManager?.applyFormatSwitchHandoff(handoff)
+            }
+
+            if isJoiningExistingSession, pinnedFormatSwitchHandoff == nil {
                 debugLog("[ReadingSession] Joining session - navigating to current actor position")
                 await navigateToCurrentActorPosition(bridge: bridge)
             } else {
+                if isJoiningExistingSession, pinnedFormatSwitchHandoff != nil {
+                    debugLog(
+                        "[ReadingSession] Format-switch handoff overrides join-at-actor-position"
+                    )
+                }
                 progressManager?.handleBookStructureReady()
+                hasCompletedInitialOpenSeek = true
+                // EPM copied the handoff; clear the pin so a later re-attach cannot
+                // re-apply after the user has already landed.
+                clearPinnedFormatSwitchHandoff()
             }
 
             Task { @SilveranUIActor in
@@ -610,6 +673,7 @@ public final class ReadingSession {
 
             progressManager?.selectedChapterId = syncData.sectionIndex
             progressManager?.hasPerformedInitialSeek = true
+            hasCompletedInitialOpenSeek = true
 
             debugLog(
                 "[ReadingSession] Successfully joined session at section \(syncData.sectionIndex)"

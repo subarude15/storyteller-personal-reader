@@ -283,6 +283,107 @@ struct StoryPositionTranslationTests {
         #expect(!StoryPositionTranslator.isImprecise(.contentReference))
     }
 
+    @Test func placeholderReaderHrefDetection() {
+        #expect(StoryPositionTranslator.isPlaceholderReaderHref("ebook"))
+        #expect(StoryPositionTranslator.isPlaceholderReaderHref("audiobook"))
+        #expect(StoryPositionTranslator.isPlaceholderReaderHref(""))
+        #expect(!StoryPositionTranslator.isPlaceholderReaderHref("OEBPS/ch3.xhtml"))
+    }
+
+    @Test func audiobookToEbookWholeBookUsesDestinationChapterHref() {
+        let chapters = [
+            StoryPositionChapter(
+                title: "Early",
+                href: "text/early.xhtml",
+                startProgression: 0.0,
+                durationFraction: 0.4,
+            ),
+            StoryPositionChapter(
+                title: "Late",
+                href: "text/late.xhtml",
+                startProgression: 0.4,
+                durationFraction: 0.6,
+            ),
+        ]
+        let result = StoryPositionTranslator.translate(
+            input(
+                from: .audio,
+                to: .ebook,
+                progression: 0.7,
+                locator: audioLocator(progress: 0.7, title: "Unrelated Audio Title"),
+                chapters: chapters,
+            )
+        )
+        #expect(result.precision == .wholeBookPercentage)
+        #expect(result.locator?.href == "text/late.xhtml")
+        #expect(result.locator?.locations?.totalProgression == 0.7)
+        #expect(!StoryPositionTranslator.isAudioLocator(result.locator!))
+    }
+
+    @Test func resolveReaderNavigationMapsPlaceholderOntoSpine() {
+        let structure = [
+            SectionInfo(index: 0, id: "OEBPS/ch1.xhtml", label: "One", level: 0, mediaOverlay: []),
+            SectionInfo(index: 1, id: "OEBPS/ch2.xhtml", label: "Two", level: 0, mediaOverlay: []),
+            SectionInfo(index: 2, id: "OEBPS/ch3.xhtml", label: "Three", level: 0, mediaOverlay: []),
+            SectionInfo(index: 3, id: "OEBPS/ch4.xhtml", label: "Four", level: 0, mediaOverlay: []),
+        ]
+        let placeholder = BookLocator(
+            href: "ebook",
+            type: "application/xhtml+xml",
+            title: nil,
+            locations: BookLocator.Locations(
+                fragments: nil,
+                progression: nil,
+                position: nil,
+                totalProgression: 0.75,
+                cssSelector: nil,
+                partialCfi: nil,
+                domRange: nil,
+            ),
+            text: nil,
+        )
+        let resolved = StoryPositionTranslator.resolveReaderNavigationTarget(
+            locator: placeholder,
+            progression: 0.75,
+            bookStructure: structure,
+        )
+        #expect(resolved.navigation == .bookFraction)
+        #expect(resolved.locator.href == "OEBPS/ch4.xhtml")
+        #expect(resolved.locator.locations?.totalProgression == 0.75)
+    }
+
+    @Test func resolveReaderNavigationKeepsValidFragment() {
+        let structure = [
+            SectionInfo(index: 0, id: "p.html", label: "P", level: 0, mediaOverlay: []),
+        ]
+        let source = textLocator(progress: 0.5, href: "p.html", fragment: "sent-1")
+        let resolved = StoryPositionTranslator.resolveReaderNavigationTarget(
+            locator: source,
+            progression: 0.5,
+            bookStructure: structure,
+        )
+        #expect(resolved.navigation == .fragment)
+        #expect(resolved.locator.locations?.fragments?.first == "sent-1")
+    }
+
+    @Test func staleEbookSavedDoesNotBlockMappedAudiobookHandoff() {
+        // Older destination saved place must not win over live audiobook mapping.
+        let result = StoryPositionTranslator.translate(
+            input(
+                from: .audio,
+                to: .ebook,
+                progression: 0.62,
+                locator: audioLocator(progress: 0.62),
+                destSaved: 0.15,
+                destTimestamp: 1_000,
+                sourceTimestamp: 9_000,
+            )
+        )
+        #expect(result.progression == 0.62)
+        #expect(result.conflictingDestinationSaved == nil)
+        #expect(result.shouldApplyHandoff)
+    }
+
     // MARK: - Helpers
 
     private func input(
