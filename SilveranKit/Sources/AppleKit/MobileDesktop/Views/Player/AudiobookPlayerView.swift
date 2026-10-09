@@ -35,6 +35,7 @@ public struct AudiobookPlayerView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .inkAmpAppThemed()
             #if os(iOS)
+        .formatSwitchDiscrepancyDialog()
         .toolbar(.hidden, for: .tabBar)
             #endif
             .alert("Audiobook Error", isPresented: .constant(errorMessage != nil)) {

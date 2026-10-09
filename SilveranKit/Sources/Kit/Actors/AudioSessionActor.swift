@@ -797,14 +797,26 @@ public actor AudioSessionActor {
             await AudiobookActor.shared.setPlaybackRate(config.playback.defaultPlaybackSpeed)
             await AudiobookActor.shared.setVolume(config.playback.defaultVolume)
 
-            let restore = await ProgressSyncActor.shared.bestRestorePosition(
-                for: book.id,
-                bookMetadataPosition: book.position,
-            )
-            let progression = min(max(restore?.progression ?? 0, 0), 1)
-            debugLog(
-                "[AudioSessionActor] openAudiobook restore source=\(restore?.source.rawValue ?? "none") progress=\(progression) gen=\(generation)"
-            )
+            // Intentional format-switch handoff wins over PSA / metadata restore.
+            let progression: Double
+            if let handoff = await FormatSwitchHandoffStore.shared.consume(
+                bookID: book.id,
+                category: .audio,
+            ) {
+                progression = min(max(handoff.progression, 0), 1)
+                debugLog(
+                    "[AudioSessionActor] openAudiobook format-switch handoff progress=\(progression) precision=\(handoff.precision.rawValue) gen=\(generation)"
+                )
+            } else {
+                let restore = await ProgressSyncActor.shared.bestRestorePosition(
+                    for: book.id,
+                    bookMetadataPosition: book.position,
+                )
+                progression = min(max(restore?.progression ?? 0, 0), 1)
+                debugLog(
+                    "[AudioSessionActor] openAudiobook restore source=\(restore?.source.rawValue ?? "none") progress=\(progression) gen=\(generation)"
+                )
+            }
 
             // Prepare media before publishing Now Playing so artwork/duration are valid.
             if progression > AudiobookProgressConflict.zeroEpsilon,
@@ -1456,6 +1468,21 @@ public actor AudioSessionActor {
             case nil:
                 return nil
         }
+    }
+
+    /// Full audiobook session state (chapters + chapter progress) for format-switch capture.
+    public func currentAudiobookSessionState() async -> AudiobookSessionState? {
+        guard case .audiobook = currentKind else { return nil }
+        return await makeState()
+    }
+
+    /// Last locator synced/built for the open audiobook session, if any.
+    public func currentAudiobookLocator() async -> BookLocator? {
+        if let lastSyncedLocator { return lastSyncedLocator }
+        guard let metadata, let state = await AudiobookActor.shared.getCurrentState() else {
+            return nil
+        }
+        return makeLocator(state: state, metadata: metadata)
     }
 
     private func closeReadaloudArm(onlyIfEngineActive: Bool = false) async {

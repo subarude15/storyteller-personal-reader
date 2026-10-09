@@ -292,7 +292,23 @@ public final class EphemeralProgressManager {
                 var locatorToUse = initialLocator
 
                 if let bookID = self.bookID {
-                    if let psaProgress = await ProgressSyncActor.shared.getBookProgress(
+                    // Format-switch handoff wins over PSA / metadata (intentional place).
+                    // Only consume reader destinations (.synced / .ebook) — never steal an audiobook handoff.
+                    let formatHandoff =
+                        await FormatSwitchHandoffStore.shared.consume(
+                            bookID: bookID,
+                            category: .synced,
+                        )
+                        ?? await FormatSwitchHandoffStore.shared.consume(
+                            bookID: bookID,
+                            category: .ebook,
+                        )
+                    if let handoff = formatHandoff {
+                        debugLog(
+                            "[EPM] Using format-switch handoff prog=\(handoff.progression) precision=\(handoff.precision.rawValue)"
+                        )
+                        locatorToUse = handoff.locator
+                    } else if let psaProgress = await ProgressSyncActor.shared.getBookProgress(
                         for: bookID
                     ),
                         let psaLocator = psaProgress.locator

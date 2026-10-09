@@ -147,6 +147,11 @@ public actor AudiobookActor {
 
     private init() {}
 
+    /// Read audiobook TOC/timing without mutating the active playback session.
+    public func peekAudiobookMetadata(url: URL) async throws -> AudiobookMetadata {
+        try await loadManifestPackage(from: url)
+    }
+
     public func validateAndLoadAudiobook(url: URL) async throws -> AudiobookMetadata {
         let source = try await loadManifestPackage(from: url)
         metadata = source

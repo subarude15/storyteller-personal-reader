@@ -73,6 +73,7 @@ public struct EbookPlayerView: View {
             text: viewModel.translationText,
         )
         #if os(iOS)
+        .formatSwitchDiscrepancyDialog()
         .statusBarHidden(!viewModel.isTopBarVisible)
         .persistentSystemOverlays(viewModel.isTopBarVisible ? .automatic : .hidden)
         .navigationBarHidden(true)

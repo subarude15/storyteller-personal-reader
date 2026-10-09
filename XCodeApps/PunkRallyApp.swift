@@ -288,8 +288,10 @@ public struct PunkRallyTabView: View {
                             onFailure: { showShellToast("Can't open yet · try again") }
                         )
                     }
+                    .formatSwitchDiscrepancyDialog()
                 }
         }
+        .formatSwitchDiscrepancyDialog()
     }
 
     private func openMoreDestination(_ destination: InkAmpMoreDestination) {

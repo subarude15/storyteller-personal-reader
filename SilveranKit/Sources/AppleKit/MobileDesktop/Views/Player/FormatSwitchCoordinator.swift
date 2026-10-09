@@ -3,9 +3,25 @@ import Foundation
 import SilveranKit
 import SwiftUI
 
+/// Planned format switch after capture + translation (before session teardown).
+public struct FormatSwitchPlan: Sendable, Equatable {
+    public let sourceBook: BookMetadata
+    public let sourceCategory: LocalMediaCategory
+    public let destinationBook: BookMetadata
+    public let destinationCategory: LocalMediaCategory
+    public let translation: StoryPositionTranslation
+    public let verifiedMediaOverlay: Bool
+    public let destinationChapterCount: Int
+
+    public var needsDiscrepancyChoice: Bool {
+        translation.conflictingDestinationSaved != nil
+    }
+}
+
 /// Orchestrates in-player Ebook / Audiobook / Readaloud switches without a Home detour.
 ///
 /// Reuses Storyteller progress + ProgressSyncActor (no second sync architecture).
+/// Applies translated locators via `FormatSwitchHandoffStore` (local, one-shot).
 /// Widget launch paths are intentionally untouched — callers are player chrome only.
 @MainActor
 public enum FormatSwitchCoordinator {
@@ -23,12 +39,10 @@ public enum FormatSwitchCoordinator {
         var result: [(book: BookMetadata, category: LocalMediaCategory)] = []
         for member in books {
             for category in downloadedCategories(for: member, mediaViewModel: mediaViewModel) {
-                // Prefer the primary/current book when multiple members expose the same category.
                 if result.contains(where: { $0.category == category }) { continue }
                 result.append((member, category))
             }
         }
-        // Stable UX order: Readaloud, Audiobook, Ebook (matches Home medium picker).
         let order: [LocalMediaCategory] = [.synced, .audio, .ebook]
         return result.sorted {
             (order.firstIndex(of: $0.category) ?? 99) < (order.firstIndex(of: $1.category) ?? 99)
@@ -44,7 +58,65 @@ public enum FormatSwitchCoordinator {
             .contains { $0.category != current }
     }
 
-    /// Capture → translate → stop prior playback → seed when needed → present destination.
+    /// Build translation plan (testable) without mutating sessions.
+    public static func planSwitch(
+        from sourceBook: BookMetadata,
+        sourceCategory: LocalMediaCategory,
+        toDestinationBook destinationBook: BookMetadata,
+        destinationCategory: LocalMediaCategory,
+        mediaViewModel: MediaViewModel,
+    ) async -> FormatSwitchPlan? {
+        guard
+            let media = await BookServiceActor.shared.resolveLocalMedia(
+                for: destinationBook.id,
+                category: destinationCategory,
+            )
+        else { return nil }
+
+        let captured = await captureSourcePosition(
+            bookID: sourceBook.id,
+            category: sourceCategory,
+        )
+        let destRestore = await ProgressSyncActor.shared.bestRestorePosition(
+            for: destinationBook.id,
+            bookMetadataPosition: destinationBook.position,
+        )
+        let probe = await probeDestination(
+            book: destinationBook,
+            category: destinationCategory,
+            localURL: media.url,
+        )
+
+        let translation = StoryPositionTranslator.translate(
+            StoryPositionTranslationInput(
+                sourceBookID: sourceBook.id,
+                destinationBookID: destinationBook.id,
+                sourceCategory: sourceCategory,
+                destinationCategory: destinationCategory,
+                sourceLocator: captured.locator,
+                sourceProgression: captured.progression,
+                sourceTimestamp: captured.timestamp,
+                destinationChapters: probe.chapters,
+                destinationSavedProgression: destRestore?.progression,
+                destinationSavedTimestamp: destRestore?.timestamp,
+                destinationSavedLocator: destRestore?.locator,
+                hasVerifiedMediaOverlay: probe.hasVerifiedMediaOverlay,
+            )
+        )
+
+        return FormatSwitchPlan(
+            sourceBook: sourceBook,
+            sourceCategory: sourceCategory,
+            destinationBook: destinationBook,
+            destinationCategory: destinationCategory,
+            translation: translation,
+            verifiedMediaOverlay: probe.hasVerifiedMediaOverlay,
+            destinationChapterCount: probe.chapters.count,
+        )
+    }
+
+    /// Capture → translate → (optional discrepancy choice) → stop prior playback →
+    /// handoff locator → present destination.
     public static func switchFormat(
         from sourceBook: BookMetadata,
         sourceCategory: LocalMediaCategory,
@@ -57,72 +129,57 @@ public enum FormatSwitchCoordinator {
         else { return }
 
         guard
-            await BookServiceActor.shared.resolveLocalMedia(
-                for: destinationBook.id,
-                category: destinationCategory,
-            ) != nil
+            let plan = await planSwitch(
+                from: sourceBook,
+                sourceCategory: sourceCategory,
+                toDestinationBook: destinationBook,
+                destinationCategory: destinationCategory,
+                mediaViewModel: mediaViewModel,
+            )
         else {
             NotificationCenter.default.post(name: .punkRallyOpenPlayerFailed, object: nil)
             return
         }
 
-        let captured = await captureSourcePosition(bookID: sourceBook.id)
-        let destRestore = await ProgressSyncActor.shared.bestRestorePosition(
-            for: destinationBook.id,
-            bookMetadataPosition: destinationBook.position,
-        )
-        let hasOverlay =
-            destinationCategory == .synced
-            || sourceCategory == .synced
-            || destinationBook.hasAvailableReadaloud
-            || sourceBook.hasAvailableReadaloud
-
-        let translation = StoryPositionTranslator.translate(
-            StoryPositionTranslationInput(
-                sourceBookID: sourceBook.id,
-                destinationBookID: destinationBook.id,
-                sourceCategory: sourceCategory,
-                destinationCategory: destinationCategory,
-                sourceLocator: captured.locator,
-                sourceProgression: captured.progression,
-                sourceTimestamp: captured.timestamp,
-                destinationChapters: [],
-                destinationSavedProgression: destRestore?.progression,
-                destinationSavedTimestamp: destRestore?.timestamp,
-                destinationSavedLocator: destRestore?.locator,
-                hasMediaOverlayAlignment: hasOverlay,
-            )
-        )
-
         debugLog(
-            "[FormatSwitch] \(sourceCategory.rawValue)→\(destinationCategory.rawValue) precision=\(translation.precision.rawValue) prog=\(translation.progression) seed=\(translation.shouldSeedDestination)"
+            "[FormatSwitch] \(sourceCategory.rawValue)→\(destinationCategory.rawValue) precision=\(plan.translation.precision.rawValue) prog=\(plan.translation.progression) chapters=\(plan.destinationChapterCount) verifiedMO=\(plan.verifiedMediaOverlay) discrepancy=\(plan.needsDiscrepancyChoice)"
         )
 
-        await endSourcePlayback(
-            bookID: sourceBook.id,
-            category: sourceCategory,
-        )
-
-        // Same-book: endSourcePlayback already flushed into PSA — no extra Storyteller write.
-        // Cross-book (format links): seed the destination so restore lands on the intentional place.
-        if translation.shouldSeedDestination, let locator = translation.locator {
-            _ = await ProgressSyncActor.shared.syncProgress(
-                bookID: destinationBook.id,
-                locator: locator,
-                timestamp: floor(Date().timeIntervalSince1970 * 1000),
-                reason: .userSwitchedFormat,
-                sourceIdentifier: "Format Switch",
-                locationDescription: "Switched from \(FormatSwitchLabels.title(for: sourceCategory))",
-                playheadInitialized: true,
-                isExplicitUserAction: true,
+        if let alternate = plan.translation.conflictingDestinationSaved {
+            FormatSwitchPromptState.shared.presentDiscrepancy(
+                prompt: .init(
+                    bookTitle: destinationBook.title,
+                    destinationLabel: FormatSwitchLabels.title(for: destinationCategory),
+                    mappedPercentLabel: FormatSwitchLabels.progressPercentLabel(
+                        plan.translation.progression
+                    ),
+                    destinationPercentLabel: FormatSwitchLabels.progressPercentLabel(
+                        alternate.progression
+                    ),
+                ),
+                onChooseMapped: {
+                    await completeSwitch(
+                        plan: plan,
+                        chosen: plan.translation,
+                        mediaViewModel: mediaViewModel,
+                    )
+                },
+                onChooseDestination: {
+                    await completeSwitch(
+                        plan: plan,
+                        chosen: alternate,
+                        mediaViewModel: mediaViewModel,
+                    )
+                },
             )
+            return
         }
 
-        let bookData = mediaViewModel.makePlayerBookData(
-            for: destinationBook,
-            category: destinationCategory,
+        await completeSwitch(
+            plan: plan,
+            chosen: plan.translation,
+            mediaViewModel: mediaViewModel,
         )
-        PlayerPresenter.shared.present(bookData)
     }
 
     public static func switchFormat(
@@ -145,7 +202,95 @@ public enum FormatSwitchCoordinator {
         )
     }
 
-    // MARK: - Private
+    // MARK: - Complete / apply
+
+    private static func completeSwitch(
+        plan: FormatSwitchPlan,
+        chosen: StoryPositionTranslation,
+        mediaViewModel: MediaViewModel,
+    ) async {
+        await endSourcePlayback(
+            bookID: plan.sourceBook.id,
+            category: plan.sourceCategory,
+        )
+
+        if chosen.shouldApplyHandoff, let locator = chosen.locator {
+            await FormatSwitchHandoffStore.shared.set(
+                FormatSwitchHandoff(
+                    bookID: plan.destinationBook.id,
+                    category: plan.destinationCategory,
+                    locator: locator,
+                    progression: chosen.progression,
+                    precision: chosen.precision,
+                )
+            )
+        }
+
+        let bookData = mediaViewModel.makePlayerBookData(
+            for: plan.destinationBook,
+            category: plan.destinationCategory,
+        )
+        PlayerPresenter.shared.present(bookData)
+    }
+
+    // MARK: - Probe / capture
+
+    private struct DestinationProbe: Sendable {
+        var chapters: [StoryPositionChapter]
+        var hasVerifiedMediaOverlay: Bool
+    }
+
+    private static func probeDestination(
+        book: BookMetadata,
+        category: LocalMediaCategory,
+        localURL: URL,
+    ) async -> DestinationProbe {
+        switch category {
+            case .audio:
+                if let meta = try? await AudiobookActor.shared.peekAudiobookMetadata(url: localURL) {
+                    return DestinationProbe(
+                        chapters: StoryPositionChapter.fromAudiobookChapters(
+                            meta.chapters,
+                            totalDuration: meta.totalDuration,
+                        ),
+                        hasVerifiedMediaOverlay: false,
+                    )
+                }
+                if let live = await AudioSessionActor.shared.currentAudiobookSessionState(),
+                    live.bookID == book.uuid
+                {
+                    return DestinationProbe(
+                        chapters: StoryPositionChapter.fromSessionChapters(
+                            live.chapters,
+                            totalDuration: live.duration,
+                        ),
+                        hasVerifiedMediaOverlay: false,
+                    )
+                }
+                return DestinationProbe(chapters: [], hasVerifiedMediaOverlay: false)
+
+            case .ebook, .synced:
+                // Prefer live reading session structure (already parsed).
+                if let session = ReadingSessionStore.shared.activeSession(for: book.id),
+                    !session.bookStructure.isEmpty
+                {
+                    let hasSMIL = session.bookStructure.contains { !$0.mediaOverlay.isEmpty }
+                    return DestinationProbe(
+                        chapters: StoryPositionChapter.fromLabeledSections(session.bookStructure),
+                        hasVerifiedMediaOverlay: hasSMIL,
+                    )
+                }
+                if let parsed = try? SMILParser.parseEPUB(at: localURL) {
+                    let hasSMIL = parsed.sections.contains { !$0.mediaOverlay.isEmpty }
+                    return DestinationProbe(
+                        chapters: StoryPositionChapter.fromLabeledSections(parsed.sections),
+                        hasVerifiedMediaOverlay: hasSMIL,
+                    )
+                }
+                // ALIGNED status alone is not verified local media-overlay.
+                return DestinationProbe(chapters: [], hasVerifiedMediaOverlay: false)
+        }
+    }
 
     private static func downloadedCategories(
         for book: BookMetadata,
@@ -164,31 +309,116 @@ public enum FormatSwitchCoordinator {
         return categories
     }
 
-    private static func captureSourcePosition(bookID: BookID) async -> (
+    private static func captureSourcePosition(
+        bookID: BookID,
+        category: LocalMediaCategory,
+    ) async -> (
         progression: Double,
         locator: BookLocator?,
         timestamp: Double?
     ) {
-        if let snapshot = await AudioSessionActor.shared.currentSnapshot(),
-            snapshot.kind.bookID == bookID
+        let now = floor(Date().timeIntervalSince1970 * 1000)
+
+        // Live audiobook: full locator with chapter href + in-chapter progression.
+        if category == .audio,
+            let state = await AudioSessionActor.shared.currentAudiobookSessionState(),
+            state.bookID == bookID.uuid
         {
-            let prog = snapshot.bookProgress
-            let category: LocalMediaCategory =
-                switch snapshot.kind {
-                    case .readaloud: .synced
-                    case .audiobook, .podcast: .audio
-                }
+            if let locator = await AudioSessionActor.shared.currentAudiobookLocator() {
+                return (state.bookProgress, locator, now)
+            }
             let locator = StoryPositionTranslator.locatorForDestination(
-                category: category,
-                progression: prog,
-                chapterTitle: snapshot.chapterLabel,
+                category: .audio,
+                progression: state.bookProgress,
+                chapterTitle: state.currentChapterIndex.flatMap { state.chapters[safe: $0]?.title },
+                chapterHref: state.currentChapterID,
+                chapterProgression: state.chapterProgress,
             )
-            return (prog, locator, floor(Date().timeIntervalSince1970 * 1000))
+            return (state.bookProgress, locator, now)
+        }
+
+        // Live readaloud / SMIL: prefer fragment-bearing locator.
+        if category == .synced,
+            let smil = await SMILPlayerActor.shared.getCurrentState(),
+            smil.bookID == bookID
+        {
+            let prog =
+                smil.bookTotal > 0 ? min(max(smil.bookElapsed / smil.bookTotal, 0), 1) : 0
+            let fragment = smil.currentFragment
+            let href: String
+            let textId: String?
+            if let hash = fragment.firstIndex(of: "#") {
+                href = String(fragment[..<hash])
+                textId = String(fragment[fragment.index(after: hash)...])
+            } else if !fragment.isEmpty {
+                href = fragment
+                textId = nil
+            } else {
+                href = "ebook"
+                textId = nil
+            }
+            let locator = BookLocator(
+                href: href.isEmpty ? "ebook" : href,
+                type: "application/xhtml+xml",
+                title: smil.chapterLabel,
+                locations: BookLocator.Locations(
+                    fragments: textId.map { [$0] },
+                    progression: nil,
+                    position: nil,
+                    totalProgression: prog,
+                    cssSelector: nil,
+                    partialCfi: nil,
+                    domRange: nil,
+                ),
+                text: nil,
+            )
+            return (prog, locator, now)
+        }
+
+        // Live ebook / readaloud session managers.
+        if let session = ReadingSessionStore.shared.activeSession(for: bookID),
+            let fraction = session.progressManager?.bookFraction
+        {
+            let locator: BookLocator?
+            if let mom = session.mediaOverlayManager,
+                mom.hasMediaOverlay,
+                let fragment = mom.currentFragment
+            {
+                let href: String
+                let textId: String?
+                if let hash = fragment.firstIndex(of: "#") {
+                    href = String(fragment[..<hash])
+                    textId = String(fragment[fragment.index(after: hash)...])
+                } else {
+                    href = fragment
+                    textId = nil
+                }
+                locator = BookLocator(
+                    href: href,
+                    type: "application/xhtml+xml",
+                    title: nil,
+                    locations: BookLocator.Locations(
+                        fragments: textId.map { [$0] },
+                        progression: nil,
+                        position: nil,
+                        totalProgression: fraction,
+                        cssSelector: nil,
+                        partialCfi: nil,
+                        domRange: nil,
+                    ),
+                    text: nil,
+                )
+            } else {
+                locator = StoryPositionTranslator.locatorForDestination(
+                    category: category == .audio ? .ebook : category,
+                    progression: fraction,
+                )
+            }
+            return (fraction, locator, now)
         }
 
         if let progress = await ProgressSyncActor.shared.getBookProgress(for: bookID) {
-            let prog = progress.progressFraction
-            return (prog, progress.locator, progress.timestamp)
+            return (progress.progressFraction, progress.locator, progress.timestamp ?? now)
         }
 
         let restore = await ProgressSyncActor.shared.bestRestorePosition(
@@ -198,7 +428,7 @@ public enum FormatSwitchCoordinator {
         return (
             restore?.progression ?? 0,
             restore?.locator,
-            restore?.timestamp
+            restore?.timestamp ?? now
         )
     }
 
@@ -206,7 +436,6 @@ public enum FormatSwitchCoordinator {
         bookID: BookID,
         category: LocalMediaCategory,
     ) async {
-        // Stop audio first so we never leave two engines live across the card swap.
         if let kind = await AudioSessionActor.shared.currentSessionKind(),
             kind.bookID == bookID
         {

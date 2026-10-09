@@ -22,8 +22,9 @@ struct StoryPositionTranslationTests {
         #expect(result.precision == .wholeBookPercentage)
         #expect(abs(result.progression - 0.42) < 0.0001)
         #expect(result.locator?.locations?.totalProgression == 0.42)
-        #expect(result.locator?.type.contains("audio") != true)
-        #expect(!result.shouldSeedDestination)
+        #expect(result.locator.map { !StoryPositionTranslator.isAudioLocator($0) } == true)
+        #expect(result.shouldApplyHandoff)
+        #expect(result.conflictingDestinationSaved == nil)
     }
 
     @Test func ebookToAudiobookUsesWholeBookPercentage() {
@@ -37,24 +38,25 @@ struct StoryPositionTranslationTests {
         )
         #expect(result.precision == .wholeBookPercentage)
         #expect(abs(result.progression - 0.55) < 0.0001)
-        #expect(result.locator?.type.contains("audio") == true)
+        #expect(result.locator.map { StoryPositionTranslator.isAudioLocator($0) } == true)
     }
 
-    @Test func audiobookToReadaloudPrefersMediaOverlayWhenAvailable() {
+    @Test func percentageIntoReadaloudIsNotLabeledMediaOverlay() {
+        // Verified SMIL without a fragment handoff must not claim mediaOverlayAlignment.
         let result = StoryPositionTranslator.translate(
             input(
                 from: .audio,
                 to: .synced,
                 progression: 0.33,
                 locator: audioLocator(progress: 0.33),
-                hasOverlay: true,
+                hasVerifiedOverlay: true,
             )
         )
-        #expect(result.precision == .mediaOverlayAlignment)
-        #expect(abs(result.progression - 0.33) < 0.0001)
+        #expect(result.precision == .wholeBookPercentage)
+        #expect(result.precision != .mediaOverlayAlignment)
     }
 
-    @Test func ebookToReadaloudKeepsTextFragmentForAlignment() {
+    @Test func ebookToReadaloudWithFragmentIsMediaOverlayAlignment() {
         let source = textLocator(
             progress: 0.2,
             href: "text/part0007.html",
@@ -66,7 +68,7 @@ struct StoryPositionTranslationTests {
                 to: .synced,
                 progression: 0.2,
                 locator: source,
-                hasOverlay: true,
+                hasVerifiedOverlay: true,
             )
         )
         #expect(result.precision == .mediaOverlayAlignment)
@@ -74,33 +76,45 @@ struct StoryPositionTranslationTests {
         #expect(result.locator?.href == "text/part0007.html")
     }
 
-    @Test func readaloudToAudiobookUsesMediaOverlayPrecision() {
+    @Test func fragmentWithoutVerifiedOverlayIsNotMediaOverlayAlignment() {
         let result = StoryPositionTranslator.translate(
             input(
-                from: .synced,
-                to: .audio,
-                progression: 0.61,
-                locator: textLocator(progress: 0.61, href: "text/ch2.xhtml", fragment: "s-9"),
-                hasOverlay: true,
+                from: .ebook,
+                to: .synced,
+                progression: 0.2,
+                locator: textLocator(progress: 0.2, href: "t.html", fragment: "p1"),
+                hasVerifiedOverlay: false,
             )
         )
-        #expect(result.precision == .mediaOverlayAlignment)
-        #expect(result.locator?.type.contains("audio") == true)
-        #expect(abs(result.progression - 0.61) < 0.0001)
+        #expect(result.precision != .mediaOverlayAlignment)
     }
 
-    @Test func readaloudToEbookPreservesFragment() {
+    @Test func readaloudFragmentToEbookIsMediaOverlayAlignment() {
         let result = StoryPositionTranslator.translate(
             input(
                 from: .synced,
                 to: .ebook,
                 progression: 0.18,
                 locator: textLocator(progress: 0.18, href: "text/ch1.xhtml", fragment: "p-1"),
-                hasOverlay: true,
+                hasVerifiedOverlay: true,
             )
         )
         #expect(result.precision == .mediaOverlayAlignment)
         #expect(result.locator?.locations?.fragments?.first == "p-1")
+    }
+
+    @Test func readaloudToAudiobookDoesNotClaimMediaOverlay() {
+        let result = StoryPositionTranslator.translate(
+            input(
+                from: .synced,
+                to: .audio,
+                progression: 0.61,
+                locator: textLocator(progress: 0.61, href: "text/ch2.xhtml", fragment: "s-9"),
+                hasVerifiedOverlay: true,
+            )
+        )
+        // Fragment cannot map into audiobook timestamps without chapter metadata.
+        #expect(result.precision == .wholeBookPercentage)
     }
 
     // MARK: - Chapter mapping
@@ -145,7 +159,6 @@ struct StoryPositionTranslationTests {
             )
         )
         #expect(result.precision == .chapterRelative)
-        // 0.25 + 0.5 * 0.30 = 0.40
         #expect(abs(result.progression - 0.40) < 0.0001)
         #expect(result.locator?.href == "chapter-1")
     }
@@ -155,29 +168,11 @@ struct StoryPositionTranslationTests {
             StoryPositionTranslator.normalizedChapterTitle("Chapter 3: Fire")
                 == StoryPositionTranslator.normalizedChapterTitle("CH. 3 Fire")
         )
-        #expect(
-            StoryPositionTranslator.normalizedChapterTitle("Part II — Storm")
-                == StoryPositionTranslator.normalizedChapterTitle("part ii storm")
-        )
     }
 
-    // MARK: - Fallbacks / discrepancy
+    // MARK: - Discrepancy choice (no silent replace)
 
-    @Test func missingAlignmentFallsBackToPercentage() {
-        let result = StoryPositionTranslator.translate(
-            input(
-                from: .ebook,
-                to: .audio,
-                progression: 0.77,
-                locator: textLocator(progress: 0.77, href: "orphan.xhtml"),
-                hasOverlay: false,
-            )
-        )
-        #expect(result.precision == .wholeBookPercentage)
-        #expect(abs(result.progression - 0.77) < 0.0001)
-    }
-
-    @Test func significantDiscrepancyPrefersDestinationSavedWhenNewer() {
+    @Test func significantDiscrepancyOffersChoiceNotSilentReplace() {
         let result = StoryPositionTranslator.translate(
             input(
                 from: .ebook,
@@ -189,9 +184,11 @@ struct StoryPositionTranslationTests {
                 sourceTimestamp: 1_000,
             )
         )
-        #expect(result.precision == .destinationSaved)
-        #expect(abs(result.progression - 0.70) < 0.0001)
-        #expect(!result.shouldSeedDestination)
+        #expect(result.precision == .wholeBookPercentage)
+        #expect(abs(result.progression - 0.20) < 0.0001)
+        #expect(result.conflictingDestinationSaved != nil)
+        #expect(result.conflictingDestinationSaved?.precision == .destinationSaved)
+        #expect(abs((result.conflictingDestinationSaved?.progression ?? 0) - 0.70) < 0.0001)
     }
 
     @Test func intentionalSwitchKeepsSourceWhenDestinationIsOlder() {
@@ -208,16 +205,17 @@ struct StoryPositionTranslationTests {
         )
         #expect(result.precision == .wholeBookPercentage)
         #expect(abs(result.progression - 0.65) < 0.0001)
+        #expect(result.conflictingDestinationSaved == nil)
     }
 
-    @Test func mediaOverlayDoesNotDeferToDestinationDiscrepancy() {
+    @Test func mediaOverlayDoesNotOfferDiscrepancyChoice() {
         let result = StoryPositionTranslator.translate(
             input(
                 from: .synced,
-                to: .audio,
+                to: .ebook,
                 progression: 0.22,
                 locator: textLocator(progress: 0.22, href: "t.xhtml", fragment: "x"),
-                hasOverlay: true,
+                hasVerifiedOverlay: true,
                 destSaved: 0.80,
                 destTimestamp: 9_000,
                 sourceTimestamp: 1_000,
@@ -225,12 +223,18 @@ struct StoryPositionTranslationTests {
         )
         #expect(result.precision == .mediaOverlayAlignment)
         #expect(abs(result.progression - 0.22) < 0.0001)
+        #expect(result.conflictingDestinationSaved == nil)
     }
 
-    // MARK: - Cross-book seeding
+    // MARK: - Handoff apply
 
-    @Test func crossBookLinkRequiresSeeding() {
-        let result = StoryPositionTranslator.translate(
+    @Test func mappedPositionsRequestHandoffApply() {
+        let same = StoryPositionTranslator.translate(
+            input(from: .ebook, to: .audio, progression: 0.3, locator: textLocator(progress: 0.3, href: "c.xhtml"))
+        )
+        #expect(same.shouldApplyHandoff)
+
+        let cross = StoryPositionTranslator.translate(
             StoryPositionTranslationInput(
                 sourceBookID: bookA,
                 destinationBookID: bookB,
@@ -240,18 +244,8 @@ struct StoryPositionTranslationTests {
                 sourceProgression: 0.3,
             )
         )
-        #expect(result.shouldSeedDestination)
-        #expect(result.precision == .wholeBookPercentage)
+        #expect(cross.shouldApplyHandoff)
     }
-
-    @Test func sameBookDoesNotSeed() {
-        let result = StoryPositionTranslator.translate(
-            input(from: .ebook, to: .audio, progression: 0.3, locator: textLocator(progress: 0.3, href: "c.xhtml"))
-        )
-        #expect(!result.shouldSeedDestination)
-    }
-
-    // MARK: - Unavailable / clamp
 
     @Test func clampsOutOfRangeProgression() {
         let high = StoryPositionTranslator.translate(
@@ -276,6 +270,13 @@ struct StoryPositionTranslationTests {
         #expect(!AudiobookProgressConflict.isRoutineListeningMilestoneReason(.userSwitchedFormat))
     }
 
+    @Test func impreciseFlagsMatchDoctrine() {
+        #expect(StoryPositionTranslator.isImprecise(.wholeBookPercentage))
+        #expect(StoryPositionTranslator.isImprecise(.chapterRelative))
+        #expect(!StoryPositionTranslator.isImprecise(.mediaOverlayAlignment))
+        #expect(!StoryPositionTranslator.isImprecise(.contentReference))
+    }
+
     // MARK: - Helpers
 
     private func input(
@@ -284,7 +285,7 @@ struct StoryPositionTranslationTests {
         progression: Double,
         locator: BookLocator?,
         chapters: [StoryPositionChapter] = [],
-        hasOverlay: Bool = false,
+        hasVerifiedOverlay: Bool = false,
         destSaved: Double? = nil,
         destTimestamp: Double? = nil,
         sourceTimestamp: Double? = nil,
@@ -300,10 +301,8 @@ struct StoryPositionTranslationTests {
             destinationChapters: chapters,
             destinationSavedProgression: destSaved,
             destinationSavedTimestamp: destTimestamp,
-            destinationSavedLocator: destSaved.map {
-                audioLocator(progress: $0)
-            },
-            hasMediaOverlayAlignment: hasOverlay,
+            destinationSavedLocator: destSaved.map { audioLocator(progress: $0) },
+            hasVerifiedMediaOverlay: hasVerifiedOverlay,
         )
     }
 

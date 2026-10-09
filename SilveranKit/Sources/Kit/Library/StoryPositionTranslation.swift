@@ -2,15 +2,15 @@ import Foundation
 
 /// How precisely a story position was mapped when switching formats.
 public enum StoryPositionPrecision: String, Sendable, Equatable, CaseIterable {
-    /// SMIL / media-overlay fragment or Storyteller text↔audio alignment.
+    /// Verified SMIL / media-overlay fragment handoff was performed.
     case mediaOverlayAlignment
     /// Matched chapter / content href or title between formats.
     case contentReference
     /// Matched chapter plus relative progress within that chapter.
     case chapterRelative
-    /// Whole-book `totalProgression` percentage only.
+    /// Whole-book `totalProgression` percentage only (estimate).
     case wholeBookPercentage
-    /// Kept the destination format's previously saved position.
+    /// User (or policy) chose the destination format's previously saved position.
     case destinationSaved
 }
 
@@ -33,6 +33,65 @@ public struct StoryPositionChapter: Sendable, Equatable {
         self.startProgression = startProgression
         self.durationFraction = durationFraction
     }
+
+    /// Audiobook chapters with known wall-clock timing.
+    public static func fromAudiobookChapters(
+        _ chapters: [AudiobookChapter],
+        totalDuration: TimeInterval,
+    ) -> [StoryPositionChapter] {
+        guard totalDuration > 0 else {
+            return chapters.map {
+                StoryPositionChapter(title: $0.title, href: $0.href)
+            }
+        }
+        return chapters.map { chapter in
+            StoryPositionChapter(
+                title: chapter.title,
+                href: chapter.href,
+                startProgression: min(max(chapter.startTime / totalDuration, 0), 1),
+                durationFraction: min(max(chapter.duration / totalDuration, 0), 1),
+            )
+        }
+    }
+
+    /// Session chapters (duration only) — reconstruct start offsets cumulatively.
+    public static func fromSessionChapters(
+        _ chapters: [AudiobookSessionChapter],
+        totalDuration: TimeInterval,
+    ) -> [StoryPositionChapter] {
+        var cursor: TimeInterval = 0
+        return chapters.map { chapter in
+            let start = totalDuration > 0 ? cursor / totalDuration : nil
+            let fraction = totalDuration > 0 ? chapter.duration / totalDuration : nil
+            cursor += chapter.duration
+            return StoryPositionChapter(
+                title: chapter.title,
+                href: chapter.id,
+                startProgression: start.map { min(max($0, 0), 1) },
+                durationFraction: fraction.map { min(max($0, 0), 1) },
+            )
+        }
+    }
+
+    /// EPUB / readaloud TOC sections (labeled spine entries).
+    public static func fromLabeledSections(_ sections: [SectionInfo]) -> [StoryPositionChapter] {
+        let labeled = sections.filter { section in
+            guard let label = section.label?.trimmingCharacters(in: .whitespacesAndNewlines),
+                !label.isEmpty
+            else { return false }
+            return true
+        }
+        guard !labeled.isEmpty else { return [] }
+        let count = Double(labeled.count)
+        return labeled.enumerated().map { index, section in
+            StoryPositionChapter(
+                title: section.label ?? "Chapter \(index + 1)",
+                href: section.id,
+                startProgression: Double(index) / count,
+                durationFraction: 1 / count,
+            )
+        }
+    }
 }
 
 public struct StoryPositionTranslationInput: Sendable, Equatable {
@@ -49,11 +108,11 @@ public struct StoryPositionTranslationInput: Sendable, Equatable {
     public let destinationSavedProgression: Double?
     public let destinationSavedTimestamp: Double?
     public let destinationSavedLocator: BookLocator?
-    /// True when SMIL / media-overlay (or equivalent Storyteller alignment) is available
-    /// for the destination (or shared) edition.
-    public let hasMediaOverlayAlignment: Bool
-    /// Progression gap above which a weak (percentage-only) mapping may defer to the
-    /// destination's saved place instead of overwriting it.
+    /// True only when local SMIL / media-overlay entries were verified (not merely
+    /// Storyteller readaloud availability / ALIGNED status).
+    public let hasVerifiedMediaOverlay: Bool
+    /// Progression gap above which an imprecise mapping offers a user choice
+    /// against the destination's saved place.
     public let discrepancyThreshold: Double
 
     public init(
@@ -68,7 +127,7 @@ public struct StoryPositionTranslationInput: Sendable, Equatable {
         destinationSavedProgression: Double? = nil,
         destinationSavedTimestamp: Double? = nil,
         destinationSavedLocator: BookLocator? = nil,
-        hasMediaOverlayAlignment: Bool = false,
+        hasVerifiedMediaOverlay: Bool = false,
         discrepancyThreshold: Double = 0.15,
     ) {
         self.sourceBookID = sourceBookID
@@ -82,7 +141,7 @@ public struct StoryPositionTranslationInput: Sendable, Equatable {
         self.destinationSavedProgression = destinationSavedProgression
         self.destinationSavedTimestamp = destinationSavedTimestamp
         self.destinationSavedLocator = destinationSavedLocator
-        self.hasMediaOverlayAlignment = hasMediaOverlayAlignment
+        self.hasVerifiedMediaOverlay = hasVerifiedMediaOverlay
         self.discrepancyThreshold = discrepancyThreshold
     }
 }
@@ -91,43 +150,53 @@ public struct StoryPositionTranslation: Sendable, Equatable {
     public let progression: Double
     public let locator: BookLocator?
     public let precision: StoryPositionPrecision
-    /// When true, callers should write this position onto the destination book via
-    /// ProgressSyncActor before opening (cross-book links, or forced handoff).
-    public let shouldSeedDestination: Bool
+    /// Always apply via `FormatSwitchHandoffStore` for intentional switches.
+    public let shouldApplyHandoff: Bool
+    /// When non-nil, present a choice: mapped (self) vs this destination-saved alternate.
+    public let conflictingDestinationSaved: StoryPositionTranslation?
 
     public init(
         progression: Double,
         locator: BookLocator?,
         precision: StoryPositionPrecision,
-        shouldSeedDestination: Bool,
+        shouldApplyHandoff: Bool = true,
+        conflictingDestinationSaved: StoryPositionTranslation? = nil,
     ) {
         self.progression = progression
         self.locator = locator
         self.precision = precision
-        self.shouldSeedDestination = shouldSeedDestination
+        self.shouldApplyHandoff = shouldApplyHandoff
+        self.conflictingDestinationSaved = conflictingDestinationSaved
     }
+
+    /// Legacy alias used by earlier call sites / tests.
+    public var shouldSeedDestination: Bool { shouldApplyHandoff }
 }
 
 /// Pure story-position mapping for ebook ↔ audiobook ↔ readaloud switches.
 ///
-/// Priority (matches product doctrine):
-/// 1. Media-overlay / Storyteller alignment when available
+/// Priority:
+/// 1. Verified media-overlay fragment handoff (only when a real mapping ran)
 /// 2. Chapter / content-reference mapping
 /// 3. Chapter-relative progress estimation
 /// 4. Whole-book percentage
 ///
-/// Does not write sync state — callers seed ProgressSyncActor when needed.
+/// Imprecise mappings that disagree with a newer destination saved place expose
+/// `conflictingDestinationSaved` for an explicit user choice — never silent replace.
 public enum StoryPositionTranslator {
-    /// Normalize chapter titles for fuzzy matching across ebook/audio editions.
     public static func normalizedChapterTitle(_ raw: String) -> String {
         let folded = raw.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
         let stripped = folded
-            .replacingOccurrences(of: #"^(chapter|ch\.?|part|section)\s*[\dIVXLCDM]+[.:)\-]?\s*"#,
+            .replacingOccurrences(
+                of: #"^(chapter|ch\.?|part|section)\s*[\dIVXLCDM]+[.:)\-]?\s*"#,
                 with: "",
-                options: .regularExpression)
-            .replacingOccurrences(of: #"^[\dIVXLCDM]+[.:)\-]\s*"#,
+                options: .regularExpression
+            )
+            .replacingOccurrences(
+                of: #"^[\dIVXLCDM]+[.:)\-]\s*"#,
                 with: "",
-                options: .regularExpression)
+                options: .regularExpression
+            )
         let scalars = stripped.unicodeScalars.map { scalar -> Character in
             CharacterSet.alphanumerics.contains(scalar) || scalar == " " ? Character(scalar) : " "
         }
@@ -139,43 +208,27 @@ public enum StoryPositionTranslator {
 
     public static func translate(_ input: StoryPositionTranslationInput) -> StoryPositionTranslation {
         let clampedSource = clampProgression(input.sourceProgression)
-        let sameBook = input.sourceBookID == input.destinationBookID
 
+        let mapped: StoryPositionTranslation
         if let overlay = mediaOverlayTranslation(input: input, progression: clampedSource) {
-            return finalize(
-                overlay,
-                input: input,
-                sameBook: sameBook,
-                allowDestinationFallback: false,
-            )
+            mapped = overlay
+        } else if let content = contentReferenceTranslation(input: input, progression: clampedSource)
+        {
+            mapped = content
+        } else {
+            mapped = wholeBookTranslation(input: input, progression: clampedSource)
         }
 
-        if let content = contentReferenceTranslation(input: input, progression: clampedSource) {
-            return finalize(
-                content,
-                input: input,
-                sameBook: sameBook,
-                allowDestinationFallback: content.precision == .chapterRelative
-                    || content.precision == .wholeBookPercentage,
-            )
-        }
-
-        let percentage = wholeBookTranslation(input: input, progression: clampedSource)
-        return finalize(
-            percentage,
-            input: input,
-            sameBook: sameBook,
-            allowDestinationFallback: true,
-        )
+        return attachDiscrepancyChoice(mapped, input: input)
     }
 
-    /// Build a destination-shaped locator carrying progression (and optional chapter title).
     public static func locatorForDestination(
         category: LocalMediaCategory,
         progression: Double,
         chapterTitle: String? = nil,
         chapterHref: String? = nil,
         sourceLocator: BookLocator? = nil,
+        chapterProgression: Double? = nil,
     ) -> BookLocator {
         let clamped = clampProgression(progression)
         switch category {
@@ -186,7 +239,7 @@ public enum StoryPositionTranslator {
                     title: chapterTitle,
                     locations: BookLocator.Locations(
                         fragments: nil,
-                        progression: nil,
+                        progression: chapterProgression.map(clampProgression),
                         position: nil,
                         totalProgression: clamped,
                         cssSelector: nil,
@@ -196,15 +249,14 @@ public enum StoryPositionTranslator {
                     text: nil,
                 )
             case .ebook, .synced:
-                // Prefer keeping text/SMIL fragments when switching into reader/readaloud
-                // from another text-bearing locator on the same structural edition.
                 if let source = sourceLocator,
-                    !source.type.contains("audio"),
-                    !source.href.hasPrefix("audiobook")
+                    !isAudioLocator(source)
                 {
                     let locations = BookLocator.Locations(
                         fragments: source.locations?.fragments,
-                        progression: source.locations?.progression,
+                        progression: source.locations?.progression ?? chapterProgression.map(
+                            clampProgression
+                        ),
                         position: source.locations?.position,
                         totalProgression: clamped,
                         cssSelector: source.locations?.cssSelector,
@@ -225,7 +277,7 @@ public enum StoryPositionTranslator {
                     title: chapterTitle,
                     locations: BookLocator.Locations(
                         fragments: nil,
-                        progression: nil,
+                        progression: chapterProgression.map(clampProgression),
                         position: nil,
                         totalProgression: clamped,
                         cssSelector: nil,
@@ -237,55 +289,50 @@ public enum StoryPositionTranslator {
         }
     }
 
+    public static func isAudioLocator(_ locator: BookLocator) -> Bool {
+        locator.type.contains("audio") || locator.href.hasPrefix("audiobook")
+    }
+
+    public static func isImprecise(_ precision: StoryPositionPrecision) -> Bool {
+        switch precision {
+            case .wholeBookPercentage, .chapterRelative:
+                return true
+            case .mediaOverlayAlignment, .contentReference, .destinationSaved:
+                return false
+        }
+    }
+
     // MARK: - Private
 
     private static func mediaOverlayTranslation(
         input: StoryPositionTranslationInput,
         progression: Double,
     ) -> StoryPositionTranslation? {
-        guard input.hasMediaOverlayAlignment else { return nil }
-        let source = input.sourceLocator
-        let hasFragment = source?.locations?.fragments?.first.map { !$0.isEmpty } == true
-        let isTextLocator =
-            source.map { !$0.type.contains("audio") && !$0.href.hasPrefix("audiobook") } ?? false
-
-        // Text/SMIL fragment is the strongest handoff into readaloud (or ebook with MO).
-        if hasFragment, isTextLocator,
-            input.destinationCategory == .synced || input.destinationCategory == .ebook
-        {
-            let locator = locatorForDestination(
-                category: input.destinationCategory,
-                progression: progression,
-                chapterTitle: source?.title,
-                chapterHref: source?.href,
-                sourceLocator: source,
-            )
-            return StoryPositionTranslation(
-                progression: progression,
-                locator: locator,
-                precision: .mediaOverlayAlignment,
-                shouldSeedDestination: false,
-            )
+        // Only claim mediaOverlayAlignment when verified SMIL exists AND we perform
+        // a real fragment-bearing text handoff into a reader/readaloud destination.
+        guard input.hasVerifiedMediaOverlay else { return nil }
+        guard let source = input.sourceLocator else { return nil }
+        guard !isAudioLocator(source) else { return nil }
+        guard let fragment = source.locations?.fragments?.first, !fragment.isEmpty else {
+            return nil
+        }
+        guard input.destinationCategory == .synced || input.destinationCategory == .ebook else {
+            return nil
         }
 
-        // Readaloud / SMIL destination can land from whole-book % via existing EPM/MOM paths.
-        if input.destinationCategory == .synced || input.sourceCategory == .synced {
-            let locator = locatorForDestination(
-                category: input.destinationCategory,
-                progression: progression,
-                chapterTitle: source?.title,
-                chapterHref: nil,
-                sourceLocator: isTextLocator ? source : nil,
-            )
-            return StoryPositionTranslation(
-                progression: progression,
-                locator: locator,
-                precision: .mediaOverlayAlignment,
-                shouldSeedDestination: false,
-            )
-        }
-
-        return nil
+        let locator = locatorForDestination(
+            category: input.destinationCategory,
+            progression: progression,
+            chapterTitle: source.title,
+            chapterHref: source.href,
+            sourceLocator: source,
+        )
+        return StoryPositionTranslation(
+            progression: progression,
+            locator: locator,
+            precision: .mediaOverlayAlignment,
+            shouldApplyHandoff: true,
+        )
     }
 
     private static func contentReferenceTranslation(
@@ -305,22 +352,11 @@ public enum StoryPositionTranslator {
                 return hrefEquals(href, destHref)
             })
         {
-            let mapped = chapterMappedProgression(
+            return translationForChapterMatch(
+                input: input,
                 source: source,
                 matched: match,
                 fallback: progression,
-            )
-            return StoryPositionTranslation(
-                progression: mapped.progression,
-                locator: locatorForDestination(
-                    category: input.destinationCategory,
-                    progression: mapped.progression,
-                    chapterTitle: match.title,
-                    chapterHref: match.href,
-                    sourceLocator: input.destinationCategory == .audio ? nil : source,
-                ),
-                precision: mapped.usedRelative ? .chapterRelative : .contentReference,
-                shouldSeedDestination: false,
             )
         }
 
@@ -331,27 +367,42 @@ public enum StoryPositionTranslator {
                     normalizedChapterTitle($0.title) == needle
                 })
             else { return nil }
-
-            let mapped = chapterMappedProgression(
+            return translationForChapterMatch(
+                input: input,
                 source: source,
                 matched: match,
                 fallback: progression,
             )
-            return StoryPositionTranslation(
-                progression: mapped.progression,
-                locator: locatorForDestination(
-                    category: input.destinationCategory,
-                    progression: mapped.progression,
-                    chapterTitle: match.title,
-                    chapterHref: match.href,
-                    sourceLocator: input.destinationCategory == .audio ? nil : source,
-                ),
-                precision: mapped.usedRelative ? .chapterRelative : .contentReference,
-                shouldSeedDestination: false,
-            )
         }
 
         return nil
+    }
+
+    private static func translationForChapterMatch(
+        input: StoryPositionTranslationInput,
+        source: BookLocator,
+        matched: StoryPositionChapter,
+        fallback: Double,
+    ) -> StoryPositionTranslation {
+        let mapped = chapterMappedProgression(
+            source: source,
+            matched: matched,
+            fallback: fallback,
+        )
+        let chapterProg = source.locations?.progression
+        return StoryPositionTranslation(
+            progression: mapped.progression,
+            locator: locatorForDestination(
+                category: input.destinationCategory,
+                progression: mapped.progression,
+                chapterTitle: matched.title,
+                chapterHref: matched.href,
+                sourceLocator: input.destinationCategory == .audio ? nil : source,
+                chapterProgression: chapterProg,
+            ),
+            precision: mapped.usedRelative ? .chapterRelative : .contentReference,
+            shouldApplyHandoff: true,
+        )
     }
 
     private static func wholeBookTranslation(
@@ -368,64 +419,53 @@ public enum StoryPositionTranslator {
             progression: progression,
             locator: locator,
             precision: .wholeBookPercentage,
-            shouldSeedDestination: false,
+            shouldApplyHandoff: true,
         )
     }
 
-    private static func finalize(
-        _ candidate: StoryPositionTranslation,
+    private static func attachDiscrepancyChoice(
+        _ mapped: StoryPositionTranslation,
         input: StoryPositionTranslationInput,
-        sameBook: Bool,
-        allowDestinationFallback: Bool,
     ) -> StoryPositionTranslation {
-        var result = candidate
-
-        if allowDestinationFallback,
-            shouldPreferDestinationSaved(input: input, mappedProgression: result.progression)
-        {
-            let destProg = clampProgression(input.destinationSavedProgression ?? result.progression)
-            result = StoryPositionTranslation(
-                progression: destProg,
-                locator: input.destinationSavedLocator
-                    ?? locatorForDestination(
-                        category: input.destinationCategory,
-                        progression: destProg,
-                        sourceLocator: input.destinationSavedLocator,
-                    ),
-                precision: .destinationSaved,
-                shouldSeedDestination: false,
-            )
+        guard isImprecise(mapped.precision),
+            hasSignificantDestinationConflict(input: input, mappedProgression: mapped.progression),
+            let destProg = input.destinationSavedProgression
+        else {
+            return mapped
         }
 
-        // Same-book: PSA already holds the flushed source position — no extra seed.
-        // Cross-book (format link): seed so the destination restores the intentional place.
-        let needsSeed = !sameBook && result.precision != .destinationSaved
-        if needsSeed != result.shouldSeedDestination {
-            result = StoryPositionTranslation(
-                progression: result.progression,
-                locator: result.locator,
-                precision: result.precision,
-                shouldSeedDestination: needsSeed,
-            )
-        }
-        return result
+        let alternate = StoryPositionTranslation(
+            progression: clampProgression(destProg),
+            locator: input.destinationSavedLocator
+                ?? locatorForDestination(
+                    category: input.destinationCategory,
+                    progression: destProg,
+                    sourceLocator: input.destinationSavedLocator,
+                ),
+            precision: .destinationSaved,
+            shouldApplyHandoff: true,
+            conflictingDestinationSaved: nil,
+        )
+        return StoryPositionTranslation(
+            progression: mapped.progression,
+            locator: mapped.locator,
+            precision: mapped.precision,
+            shouldApplyHandoff: true,
+            conflictingDestinationSaved: alternate,
+        )
     }
 
-    private static func shouldPreferDestinationSaved(
+    private static func hasSignificantDestinationConflict(
         input: StoryPositionTranslationInput,
         mappedProgression: Double,
     ) -> Bool {
         guard let destProg = input.destinationSavedProgression else { return false }
         let gap = abs(clampProgression(mappedProgression) - clampProgression(destProg))
         guard gap >= input.discrepancyThreshold else { return false }
-        // Prefer destination only when it looks like a real, possibly newer place —
-        // not an empty/near-zero slot overshadowing an intentional mid-book switch.
         guard destProg > 0.02 else { return false }
         if let destTs = input.destinationSavedTimestamp, let sourceTs = input.sourceTimestamp {
             return destTs > sourceTs
         }
-        // No timestamps: still allow fallback when the mapped % is only a coarse estimate
-        // and destination already has a substantial place.
         return destProg > 0.05
     }
 
@@ -477,5 +517,10 @@ public enum FormatSwitchLabels {
             case .audio: return "headphones"
             case .synced: return "text.book.closed"
         }
+    }
+
+    public static func progressPercentLabel(_ progression: Double) -> String {
+        let clamped = min(max(progression, 0), 1)
+        return "\(Int((clamped * 100).rounded()))%"
     }
 }

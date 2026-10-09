@@ -292,7 +292,15 @@ public final class ReadingSession {
         guard lastOpenResult == .openedFresh else { return }
 
         var locatorToUse: BookLocator? = nil
-        if let psaProgress = await ProgressSyncActor.shared.getBookProgress(for: bookID),
+        if let handoff = await FormatSwitchHandoffStore.shared.consume(
+            bookID: bookID,
+            category: category,
+        ) {
+            debugLog(
+                "[ReadingSession] Using format-switch handoff prog=\(handoff.progression) precision=\(handoff.precision.rawValue)"
+            )
+            locatorToUse = handoff.locator
+        } else if let psaProgress = await ProgressSyncActor.shared.getBookProgress(for: bookID),
             let psaLocator = psaProgress.locator
         {
             debugLog("[ReadingSession] Got SMIL position from PSA (source: \(psaProgress.source))")
