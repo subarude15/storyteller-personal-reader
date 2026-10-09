@@ -228,7 +228,13 @@ public enum StoryPositionTranslator {
                 with: "",
                 options: .regularExpression
             )
-        let scalars = stripped.unicodeScalars.map { scalar -> Character in
+        let cleaned = Self.alphanumericWords(stripped)
+        // "Chapter 4" alone strips to empty — keep the full token so equals still match.
+        return cleaned.isEmpty ? Self.alphanumericWords(folded) : cleaned
+    }
+
+    private static func alphanumericWords(_ value: String) -> String {
+        let scalars = value.unicodeScalars.map { scalar -> Character in
             CharacterSet.alphanumerics.contains(scalar) || scalar == " " ? Character(scalar) : " "
         }
         return String(scalars)

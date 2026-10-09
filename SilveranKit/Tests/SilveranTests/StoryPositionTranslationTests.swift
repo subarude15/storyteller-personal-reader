@@ -168,6 +168,12 @@ struct StoryPositionTranslationTests {
             StoryPositionTranslator.normalizedChapterTitle("Chapter 3: Fire")
                 == StoryPositionTranslator.normalizedChapterTitle("CH. 3 Fire")
         )
+        // Number-only titles must still match (strip would otherwise leave empty).
+        #expect(
+            StoryPositionTranslator.normalizedChapterTitle("Chapter 4")
+                == StoryPositionTranslator.normalizedChapterTitle("CHAPTER 4")
+        )
+        #expect(!StoryPositionTranslator.normalizedChapterTitle("Chapter 4").isEmpty)
     }
 
     // MARK: - Discrepancy choice (no silent replace)
