@@ -3,13 +3,17 @@ import Testing
 
 @testable import SilveranKit
 
-private func sampleLocator(progress: Double) -> BookLocator {
+private func sampleLocator(
+    progress: Double,
+    href: String = "audiobook",
+    trackTime: TimeInterval? = nil,
+) -> BookLocator {
     BookLocator(
-        href: "audiobook",
+        href: href,
         type: "audio/mp4",
         title: "Ch",
         locations: BookLocator.Locations(
-            fragments: nil,
+            fragments: trackTime.map { ["t=\($0)"] },
             progression: progress,
             position: nil,
             totalProgression: progress,
@@ -295,6 +299,210 @@ private func sampleCheckpoint(
     )
     #expect(milestones.count == AudiobookProgressConflict.maxListeningMilestonesPerBook)
     #expect(milestones.first?.totalProgression == 0.2505)
+}
+
+private func sampleMilestone(
+    progress: Double,
+    timestamp: Double,
+    reason: SyncReason,
+    book: BookID = BookID(sourceID: "s", uuid: "hist"),
+    locator: BookLocator? = nil,
+    locationDescription: String = "Ch",
+) -> AudiobookListeningMilestone {
+    AudiobookListeningMilestone(
+        bookID: book,
+        locator: locator ?? sampleLocator(progress: progress),
+        totalProgression: progress,
+        timestamp: timestamp,
+        locationDescription: locationDescription,
+        reason: reason,
+    )
+}
+
+@Test func exactPositionUsesTrackFragmentPlusStartNotRoundedPercent() {
+    let context = AudiobookListeningHistoryDisplayContext(
+        totalDuration: 10 * 3600,
+        trackStartByHref: ["track-a": 2 * 3600],
+    )
+    // 35% rounded label would be wrong; fragment says 52m45s into a track that starts at 2h.
+    let locator = sampleLocator(progress: 0.351, href: "track-a", trackTime: 52 * 60 + 45)
+    let seconds = AudiobookListeningHistoryFormatting.exactPositionSeconds(
+        locator: locator,
+        totalProgression: 0.351,
+        context: context,
+    )
+    #expect(seconds == 2 * 3600 + 52 * 60 + 45)
+    #expect(
+        AudiobookListeningHistoryFormatting.formatPositionTimestamp(seconds) == "02:52:45"
+    )
+}
+
+@Test func exactPositionFallsBackToProgressionTimesDuration() {
+    let context = AudiobookListeningHistoryDisplayContext(totalDuration: 3600)
+    let locator = sampleLocator(progress: 0.5)
+    let seconds = AudiobookListeningHistoryFormatting.exactPositionSeconds(
+        locator: locator,
+        totalProgression: 0.5,
+        context: context,
+    )
+    #expect(seconds == 1800)
+    #expect(AudiobookListeningHistoryFormatting.formatPositionTimestamp(seconds) == "00:30:00")
+}
+
+@Test func exactPositionReturnsNilWithoutReliableMetadata() {
+    let locator = sampleLocator(progress: 0.35)
+    #expect(
+        AudiobookListeningHistoryFormatting.exactPositionSeconds(
+            locator: locator,
+            totalProgression: 0.35,
+            context: nil,
+        ) == nil
+    )
+    #expect(
+        AudiobookListeningHistoryFormatting.exactPositionSeconds(
+            locator: locator,
+            totalProgression: 0.35,
+            context: AudiobookListeningHistoryDisplayContext(totalDuration: 0),
+        ) == nil
+    )
+    #expect(AudiobookListeningHistoryFormatting.formatPositionTimestamp(nil) == nil)
+    // Track fragment without a matching track start must not invent a time.
+    let withFragment = sampleLocator(progress: 0.2, href: "missing", trackTime: 90)
+    #expect(
+        AudiobookListeningHistoryFormatting.exactPositionSeconds(
+            locator: withFragment,
+            totalProgression: 0.2,
+            context: AudiobookListeningHistoryDisplayContext(
+                totalDuration: 0,
+                trackStartByHref: [:],
+            ),
+        ) == nil
+    )
+}
+
+@Test func historicalExactPositionUnaffectedByLaterProgression() {
+    let context = AudiobookListeningHistoryDisplayContext(totalDuration: 7200)
+    let historical = sampleMilestone(progress: 0.25, timestamp: 1_000, reason: .appBackgrounding)
+    let laterListeningProgress = 0.80
+    let historicalSeconds = AudiobookListeningHistoryFormatting.exactPositionSeconds(
+        locator: historical.locator,
+        totalProgression: historical.totalProgression,
+        context: context,
+    )
+    #expect(historicalSeconds == 1800)
+    #expect(historical.totalProgression != laterListeningProgress)
+}
+
+@Test func relativeDayTimeUsesTodayYesterdayAndMonthDay() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let locale = Locale(identifier: "en_US_POSIX")
+    let now = calendar.date(from: DateComponents(year: 2026, month: 10, day: 9, hour: 15))!
+    let today = calendar.date(from: DateComponents(year: 2026, month: 10, day: 9, hour: 21, minute: 17))!
+    let yesterday = calendar.date(from: DateComponents(year: 2026, month: 10, day: 8, hour: 21, minute: 17))!
+    let older = calendar.date(from: DateComponents(year: 2026, month: 10, day: 6, hour: 21, minute: 17))!
+
+    let todayLabel = AudiobookListeningHistoryFormatting.relativeDayTime(
+        today, now: now, calendar: calendar, locale: locale,
+    )
+    let yesterdayLabel = AudiobookListeningHistoryFormatting.relativeDayTime(
+        yesterday, now: now, calendar: calendar, locale: locale,
+    )
+    let olderLabel = AudiobookListeningHistoryFormatting.relativeDayTime(
+        older, now: now, calendar: calendar, locale: locale,
+    )
+    #expect(todayLabel.hasPrefix("Today,"))
+    #expect(yesterdayLabel.hasPrefix("Yesterday,"))
+    #expect(olderLabel.hasPrefix("Oct 6,"))
+    #expect(!olderLabel.contains("2026"))
+}
+
+@Test func fallbackLocationLabelStripsLegacyPercentSuffix() {
+    #expect(
+        AudiobookListeningHistoryFormatting.fallbackLocationLabel("The Troop, 35%")
+            == "The Troop"
+    )
+    #expect(AudiobookListeningHistoryFormatting.fallbackLocationLabel("Chapter 3") == "Chapter 3")
+}
+
+@Test func routineBackgroundEventsCoalesceAtSamePosition() {
+    let first = sampleMilestone(progress: 0.35, timestamp: 1_000, reason: .appBackgrounding)
+    var history = AudiobookProgressConflict.appendMilestone(existing: [], new: first)
+    let pause = sampleMilestone(progress: 0.3505, timestamp: 30 * 60 * 1_000, reason: .userPausedPlayback)
+    history = AudiobookProgressConflict.appendMilestone(existing: history, new: pause)
+    #expect(history.count == 1)
+    #expect(history[0].reason == .userPausedPlayback)
+    #expect(history[0].totalProgression == 0.3505)
+
+    let laterBackground = sampleMilestone(
+        progress: 0.351,
+        timestamp: 45 * 60 * 1_000,
+        reason: .appBackgrounding,
+    )
+    history = AudiobookProgressConflict.appendMilestone(existing: history, new: laterBackground)
+    #expect(history.count == 1)
+    #expect(history[0].reason == .appBackgrounding)
+}
+
+@Test func meaningfulSeekAndRewindAreNotCoalescedAway() {
+    var history = AudiobookProgressConflict.appendMilestone(
+        existing: [],
+        new: sampleMilestone(progress: 0.50, timestamp: 1_000, reason: .appBackgrounding),
+    )
+    history = AudiobookProgressConflict.appendMilestone(
+        existing: history,
+        new: sampleMilestone(progress: 0.20, timestamp: 2_000, reason: .userDraggedSeekBar),
+    )
+    history = AudiobookProgressConflict.appendMilestone(
+        existing: history,
+        new: sampleMilestone(progress: 0.205, timestamp: 3_000, reason: .userPausedPlayback),
+    )
+    #expect(history.count == 3)
+    #expect(history.map(\.reason) == [
+        .userPausedPlayback, .userDraggedSeekBar, .appBackgrounding,
+    ])
+
+    // Same position seek must remain distinct from a prior pause (not routine-routine).
+    history = AudiobookProgressConflict.appendMilestone(
+        existing: history,
+        new: sampleMilestone(progress: 0.205, timestamp: 4_000, reason: .userSkippedBackward),
+    )
+    #expect(history.count == 4)
+    #expect(history.first?.reason == .userSkippedBackward)
+}
+
+@Test func sessionBoundaryKeepsDistantRoutineEntries() {
+    var history = AudiobookProgressConflict.appendMilestone(
+        existing: [],
+        new: sampleMilestone(progress: 0.40, timestamp: 1_000, reason: .appBackgrounding),
+    )
+    // Beyond the 2h routine coalesce window — treat as a separate session.
+    let nextSession = sampleMilestone(
+        progress: 0.40,
+        timestamp: 1_000 + (3 * 60 * 60 * 1_000),
+        reason: .userPausedPlayback,
+    )
+    history = AudiobookProgressConflict.appendMilestone(existing: history, new: nextSession)
+    #expect(history.count == 2)
+}
+
+@Test func listeningHistoryRetentionStillBoundedAfterCoalesce() {
+    let book = BookID(sourceID: "s", uuid: "retain")
+    var milestones: [AudiobookListeningMilestone] = []
+    for i in 1...30 {
+        milestones = AudiobookProgressConflict.appendMilestone(
+            existing: milestones,
+            new: sampleMilestone(
+                progress: Double(i) / 100,
+                timestamp: Double(i * 10_000),
+                reason: .userDraggedSeekBar,
+                book: book,
+            ),
+        )
+    }
+    #expect(milestones.count == AudiobookProgressConflict.maxListeningMilestonesPerBook)
+    #expect(milestones.first?.totalProgression == 0.30)
+    #expect(milestones.last?.totalProgression == 0.11)
 }
 
 @Test func delayedServerDoesNotNavigatePastNewerUserAction() {

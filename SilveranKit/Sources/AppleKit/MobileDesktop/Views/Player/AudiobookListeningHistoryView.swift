@@ -11,6 +11,7 @@ public struct AudiobookListeningHistoryView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var milestones: [AudiobookListeningMilestone] = []
+    @State private var displayContext: AudiobookListeningHistoryDisplayContext?
     @State private var isLoading = true
     @State private var pendingResume: AudiobookListeningMilestone?
     @State private var showResumeConfirmation = false
@@ -108,9 +109,7 @@ public struct AudiobookListeningHistoryView: View {
                 }
             } message: {
                 if let milestone = pendingResume {
-                    Text(
-                        "Jump to \(milestone.locationDescription) (\(milestone.percentLabel)) from \(milestone.humanTimestamp)?"
-                    )
+                    Text(resumeConfirmationMessage(for: milestone))
                 }
             }
             .alert(
@@ -130,19 +129,36 @@ public struct AudiobookListeningHistoryView: View {
 
     @ViewBuilder
     private func milestoneRow(_ milestone: AudiobookListeningMilestone) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(milestone.humanTimestamp)
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Text(milestone.percentLabel)
-                    .font(.subheadline.monospacedDigit().weight(.medium))
-                    .foregroundStyle(.secondary)
+        let dayTime = AudiobookListeningHistoryFormatting.relativeDayTime(
+            epochMillis: milestone.timestamp
+        )
+        let exactTime = AudiobookListeningHistoryFormatting.formatPositionTimestamp(
+            AudiobookListeningHistoryFormatting.exactPositionSeconds(
+                locator: milestone.locator,
+                totalProgression: milestone.totalProgression,
+                context: displayContext,
+            )
+        )
+        let fallbackLocation = AudiobookListeningHistoryFormatting.fallbackLocationLabel(
+            milestone.locationDescription
+        )
+
+        VStack(alignment: .leading, spacing: 6) {
+            Text(dayTime)
+                .font(.subheadline.weight(.semibold))
+            if let exactTime {
+                Text(exactTime)
+                    .font(.body.monospacedDigit().weight(.medium))
+                    .accessibilityLabel("Position \(exactTime)")
+            } else if !fallbackLocation.isEmpty {
+                Text(fallbackLocation)
+                    .font(.body)
             }
-            Text(milestone.locationDescription)
-                .font(.body)
             Text(formatReason(milestone.reason))
                 .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(milestone.percentLabel)
+                .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
             Button {
                 pendingResume = milestone
@@ -158,8 +174,31 @@ public struct AudiobookListeningHistoryView: View {
         .accessibilityElement(children: .contain)
     }
 
+    private func resumeConfirmationMessage(for milestone: AudiobookListeningMilestone) -> String {
+        let dayTime = AudiobookListeningHistoryFormatting.relativeDayTime(
+            epochMillis: milestone.timestamp
+        )
+        if let exact = AudiobookListeningHistoryFormatting.formatPositionTimestamp(
+            AudiobookListeningHistoryFormatting.exactPositionSeconds(
+                locator: milestone.locator,
+                totalProgression: milestone.totalProgression,
+                context: displayContext,
+            )
+        ) {
+            return "Jump to \(exact) (\(milestone.percentLabel)) from \(dayTime)?"
+        }
+        let location = AudiobookListeningHistoryFormatting.fallbackLocationLabel(
+            milestone.locationDescription
+        )
+        if location.isEmpty {
+            return "Jump to \(milestone.percentLabel) from \(dayTime)?"
+        }
+        return "Jump to \(location) (\(milestone.percentLabel)) from \(dayTime)?"
+    }
+
     private func refresh() async {
         isLoading = true
+        displayContext = await AudioSessionActor.shared.listeningHistoryDisplayContext()
         milestones = await ProgressSyncActor.shared.getListeningHistory(for: bookID)
         isLoading = false
     }
