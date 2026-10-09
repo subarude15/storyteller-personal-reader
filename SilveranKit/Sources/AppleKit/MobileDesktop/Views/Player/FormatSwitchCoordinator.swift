@@ -167,7 +167,7 @@ public enum FormatSwitchCoordinator {
                 onChooseDestination: {
                     await completeSwitch(
                         plan: plan,
-                        chosen: alternate,
+                        chosen: alternate.asTranslation,
                         mediaViewModel: mediaViewModel,
                     )
                 },

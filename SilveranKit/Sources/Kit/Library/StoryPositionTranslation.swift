@@ -146,6 +146,37 @@ public struct StoryPositionTranslationInput: Sendable, Equatable {
     }
 }
 
+/// Destination-saved alternate offered when an imprecise mapping disagrees.
+/// Separate from `StoryPositionTranslation` so the value type is not recursive.
+public struct StoryPositionAlternate: Sendable, Equatable {
+    public let progression: Double
+    public let locator: BookLocator?
+    public let precision: StoryPositionPrecision
+    public let shouldApplyHandoff: Bool
+
+    public init(
+        progression: Double,
+        locator: BookLocator?,
+        precision: StoryPositionPrecision = .destinationSaved,
+        shouldApplyHandoff: Bool = true,
+    ) {
+        self.progression = progression
+        self.locator = locator
+        self.precision = precision
+        self.shouldApplyHandoff = shouldApplyHandoff
+    }
+
+    public var asTranslation: StoryPositionTranslation {
+        StoryPositionTranslation(
+            progression: progression,
+            locator: locator,
+            precision: precision,
+            shouldApplyHandoff: shouldApplyHandoff,
+            conflictingDestinationSaved: nil,
+        )
+    }
+}
+
 public struct StoryPositionTranslation: Sendable, Equatable {
     public let progression: Double
     public let locator: BookLocator?
@@ -153,14 +184,14 @@ public struct StoryPositionTranslation: Sendable, Equatable {
     /// Always apply via `FormatSwitchHandoffStore` for intentional switches.
     public let shouldApplyHandoff: Bool
     /// When non-nil, present a choice: mapped (self) vs this destination-saved alternate.
-    public let conflictingDestinationSaved: StoryPositionTranslation?
+    public let conflictingDestinationSaved: StoryPositionAlternate?
 
     public init(
         progression: Double,
         locator: BookLocator?,
         precision: StoryPositionPrecision,
         shouldApplyHandoff: Bool = true,
-        conflictingDestinationSaved: StoryPositionTranslation? = nil,
+        conflictingDestinationSaved: StoryPositionAlternate? = nil,
     ) {
         self.progression = progression
         self.locator = locator
@@ -434,7 +465,7 @@ public enum StoryPositionTranslator {
             return mapped
         }
 
-        let alternate = StoryPositionTranslation(
+        let alternate = StoryPositionAlternate(
             progression: clampProgression(destProg),
             locator: input.destinationSavedLocator
                 ?? locatorForDestination(
@@ -444,7 +475,6 @@ public enum StoryPositionTranslator {
                 ),
             precision: .destinationSaved,
             shouldApplyHandoff: true,
-            conflictingDestinationSaved: nil,
         )
         return StoryPositionTranslation(
             progression: mapped.progression,
