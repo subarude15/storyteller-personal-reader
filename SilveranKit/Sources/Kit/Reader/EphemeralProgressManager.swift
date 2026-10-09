@@ -294,16 +294,19 @@ public final class EphemeralProgressManager {
                 if let bookID = self.bookID {
                     // Format-switch handoff wins over PSA / metadata (intentional place).
                     // Only consume reader destinations (.synced / .ebook) — never steal an audiobook handoff.
-                    let formatHandoff =
-                        await FormatSwitchHandoffStore.shared.consume(
-                            bookID: bookID,
-                            category: .synced,
-                        )
-                        ?? await FormatSwitchHandoffStore.shared.consume(
+                    // Sequential awaits: `await a() ?? await b()` is invalid Swift.
+                    let syncedHandoff = await FormatSwitchHandoffStore.shared.consume(
+                        bookID: bookID,
+                        category: .synced,
+                    )
+                    let ebookHandoff =
+                        syncedHandoff == nil
+                        ? await FormatSwitchHandoffStore.shared.consume(
                             bookID: bookID,
                             category: .ebook,
                         )
-                    if let handoff = formatHandoff {
+                        : nil
+                    if let handoff = syncedHandoff ?? ebookHandoff {
                         debugLog(
                             "[EPM] Using format-switch handoff prog=\(handoff.progression) precision=\(handoff.precision.rawValue)"
                         )
