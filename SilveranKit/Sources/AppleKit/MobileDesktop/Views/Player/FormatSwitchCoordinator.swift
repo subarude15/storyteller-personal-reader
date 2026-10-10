@@ -86,6 +86,44 @@ public enum FormatSwitchCoordinator {
             category: destinationCategory,
             localURL: media.url,
         )
+        let sourceProbe = await probeSourceTimeline(
+            book: sourceBook,
+            category: sourceCategory,
+        )
+
+        // When entering audiobook, peek destination duration for SMIL→audio gate.
+        var destinationAudiobookDuration: TimeInterval? = probe.audiobookDuration
+        if destinationCategory == .audio, destinationAudiobookDuration == nil {
+            if let audioMedia = await BookServiceActor.shared.resolveLocalMedia(
+                for: destinationBook.id,
+                category: .audio,
+            ),
+                let meta = try? await AudiobookActor.shared.peekAudiobookMetadata(
+                    url: audioMedia.url
+                )
+            {
+                destinationAudiobookDuration = meta.totalDuration
+            }
+        }
+
+        // When leaving audiobook toward reader, ensure destination SMIL is probed even for ebook.
+        var destStructure = probe.bookStructure
+        var destSmilTotal = probe.smilTotalDuration
+        var destHasSMIL = probe.hasVerifiedMediaOverlay
+        if (destinationCategory == .ebook || destinationCategory == .synced),
+            !destHasSMIL,
+            sourceCategory == .audio,
+            let syncedMedia = await BookServiceActor.shared.resolveLocalMedia(
+                for: destinationBook.id,
+                category: .synced,
+            ),
+            let parsed = try? SMILParser.parseEPUB(at: syncedMedia.url)
+        {
+            // Use synced SMIL as alignment bridge into ebook when available.
+            destStructure = parsed.sections
+            destSmilTotal = StoryPositionChapter.smilTotalDuration(in: parsed.sections)
+            destHasSMIL = destSmilTotal > 0
+        }
 
         let translation = StoryPositionTranslator.translate(
             StoryPositionTranslationInput(
@@ -96,12 +134,24 @@ public enum FormatSwitchCoordinator {
                 sourceLocator: captured.locator,
                 sourceProgression: captured.progression,
                 sourceTimestamp: captured.timestamp,
+                sourceElapsedSeconds: captured.elapsedSeconds,
+                sourceAudiobookDuration: captured.audiobookDuration ?? sourceProbe.audiobookDuration,
+                destinationAudiobookDuration: destinationAudiobookDuration,
                 destinationChapters: probe.chapters,
+                destinationChaptersTimingVerified: probe.chaptersTimingVerified,
+                destinationBookStructure: destStructure,
+                destinationSmilTotalDuration: destSmilTotal,
+                sourceBookStructure: sourceProbe.bookStructure,
+                sourceSmilTotalDuration: sourceProbe.smilTotalDuration,
                 destinationSavedProgression: destRestore?.progression,
                 destinationSavedTimestamp: destRestore?.timestamp,
                 destinationSavedLocator: destRestore?.locator,
-                hasVerifiedMediaOverlay: probe.hasVerifiedMediaOverlay,
+                hasVerifiedMediaOverlay: destHasSMIL || probe.hasVerifiedMediaOverlay,
             )
+        )
+
+        debugLog(
+            "[FormatSwitch] plan method=\(translation.mappingMethod) precision=\(translation.precision.rawValue) srcAudioDur=\(captured.audiobookDuration?.description ?? "nil") destSmil=\(destSmilTotal?.description ?? "nil") timingVerified=\(probe.chaptersTimingVerified)"
         )
 
         return FormatSwitchPlan(
@@ -110,7 +160,7 @@ public enum FormatSwitchCoordinator {
             destinationBook: destinationBook,
             destinationCategory: destinationCategory,
             translation: translation,
-            verifiedMediaOverlay: probe.hasVerifiedMediaOverlay,
+            verifiedMediaOverlay: destHasSMIL || probe.hasVerifiedMediaOverlay,
             destinationChapterCount: probe.chapters.count,
         )
     }
@@ -142,10 +192,11 @@ public enum FormatSwitchCoordinator {
         }
 
         debugLog(
-            "[FormatSwitch] \(sourceCategory.rawValue)→\(destinationCategory.rawValue) precision=\(plan.translation.precision.rawValue) prog=\(plan.translation.progression) chapters=\(plan.destinationChapterCount) verifiedMO=\(plan.verifiedMediaOverlay) discrepancy=\(plan.needsDiscrepancyChoice)"
+            "[FormatSwitch] \(sourceCategory.rawValue)→\(destinationCategory.rawValue) method=\(plan.translation.mappingMethod) precision=\(plan.translation.precision.rawValue) prog=\(plan.translation.progression) chapters=\(plan.destinationChapterCount) verifiedMO=\(plan.verifiedMediaOverlay) discrepancy=\(plan.needsDiscrepancyChoice)"
         )
 
         if let alternate = plan.translation.conflictingDestinationSaved {
+            let approxNote = FormatSwitchLabels.precisionLabel(for: plan.translation.precision)
             FormatSwitchPromptState.shared.presentDiscrepancy(
                 prompt: .init(
                     bookTitle: destinationBook.title,
@@ -156,6 +207,7 @@ public enum FormatSwitchCoordinator {
                     destinationPercentLabel: FormatSwitchLabels.progressPercentLabel(
                         alternate.progression
                     ),
+                    mappingQualityLabel: approxNote,
                 ),
                 onChooseMapped: {
                     await completeSwitch(
@@ -275,7 +327,26 @@ public enum FormatSwitchCoordinator {
 
     private struct DestinationProbe: Sendable {
         var chapters: [StoryPositionChapter]
+        var chaptersTimingVerified: Bool
         var hasVerifiedMediaOverlay: Bool
+        var bookStructure: [SectionInfo]
+        var smilTotalDuration: TimeInterval?
+        var audiobookDuration: TimeInterval?
+
+        static let empty = DestinationProbe(
+            chapters: [],
+            chaptersTimingVerified: false,
+            hasVerifiedMediaOverlay: false,
+            bookStructure: [],
+            smilTotalDuration: nil,
+            audiobookDuration: nil,
+        )
+    }
+
+    private struct SourceTimelineProbe: Sendable {
+        var bookStructure: [SectionInfo]
+        var smilTotalDuration: TimeInterval?
+        var audiobookDuration: TimeInterval?
     }
 
     private static func probeDestination(
@@ -291,7 +362,11 @@ public enum FormatSwitchCoordinator {
                             meta.chapters,
                             totalDuration: meta.totalDuration,
                         ),
+                        chaptersTimingVerified: meta.totalDuration > 0,
                         hasVerifiedMediaOverlay: false,
+                        bookStructure: [],
+                        smilTotalDuration: nil,
+                        audiobookDuration: meta.totalDuration,
                     )
                 }
                 if let live = await AudioSessionActor.shared.currentAudiobookSessionState(),
@@ -302,31 +377,123 @@ public enum FormatSwitchCoordinator {
                             live.chapters,
                             totalDuration: live.duration,
                         ),
+                        chaptersTimingVerified: live.duration > 0,
                         hasVerifiedMediaOverlay: false,
+                        bookStructure: [],
+                        smilTotalDuration: nil,
+                        audiobookDuration: live.duration,
                     )
                 }
-                return DestinationProbe(chapters: [], hasVerifiedMediaOverlay: false)
+                return .empty
 
             case .ebook, .synced:
                 // Prefer live reading session structure (already parsed).
                 if let session = ReadingSessionStore.shared.activeSession(for: book.id),
                     !session.bookStructure.isEmpty
                 {
-                    let hasSMIL = session.bookStructure.contains { !$0.mediaOverlay.isEmpty }
-                    return DestinationProbe(
-                        chapters: StoryPositionChapter.fromLabeledSections(session.bookStructure),
-                        hasVerifiedMediaOverlay: hasSMIL,
-                    )
+                    return readerProbe(from: session.bookStructure)
                 }
                 if let parsed = try? SMILParser.parseEPUB(at: localURL) {
-                    let hasSMIL = parsed.sections.contains { !$0.mediaOverlay.isEmpty }
-                    return DestinationProbe(
-                        chapters: StoryPositionChapter.fromLabeledSections(parsed.sections),
-                        hasVerifiedMediaOverlay: hasSMIL,
-                    )
+                    return readerProbe(from: parsed.sections)
                 }
                 // ALIGNED status alone is not verified local media-overlay.
-                return DestinationProbe(chapters: [], hasVerifiedMediaOverlay: false)
+                return .empty
+        }
+    }
+
+    private static func readerProbe(from sections: [SectionInfo]) -> DestinationProbe {
+        let hasSMIL = sections.contains { !$0.mediaOverlay.isEmpty }
+        let smilTotal = StoryPositionChapter.smilTotalDuration(in: sections)
+        let (chapters, timingVerified) = StoryPositionChapter.fromSectionsPreferringSmilTiming(
+            sections
+        )
+        return DestinationProbe(
+            chapters: chapters,
+            chaptersTimingVerified: timingVerified,
+            hasVerifiedMediaOverlay: hasSMIL && smilTotal > 0,
+            bookStructure: sections,
+            smilTotalDuration: smilTotal > 0 ? smilTotal : nil,
+            audiobookDuration: nil,
+        )
+    }
+
+    /// Source-side timeline metadata for audiobook↔SMIL gates (does not mutate sessions).
+    private static func probeSourceTimeline(
+        book: BookMetadata,
+        category: LocalMediaCategory,
+    ) async -> SourceTimelineProbe {
+        switch category {
+            case .audio:
+                if let live = await AudioSessionActor.shared.currentAudiobookSessionState(),
+                    live.bookID == book.uuid, live.duration > 0
+                {
+                    return SourceTimelineProbe(
+                        bookStructure: [],
+                        smilTotalDuration: nil,
+                        audiobookDuration: live.duration,
+                    )
+                }
+                if let media = await BookServiceActor.shared.resolveLocalMedia(
+                    for: book.id,
+                    category: .audio,
+                ),
+                    let meta = try? await AudiobookActor.shared.peekAudiobookMetadata(url: media.url)
+                {
+                    return SourceTimelineProbe(
+                        bookStructure: [],
+                        smilTotalDuration: nil,
+                        audiobookDuration: meta.totalDuration,
+                    )
+                }
+                return SourceTimelineProbe(
+                    bookStructure: [],
+                    smilTotalDuration: nil,
+                    audiobookDuration: nil,
+                )
+
+            case .synced, .ebook:
+                if let session = ReadingSessionStore.shared.activeSession(for: book.id),
+                    !session.bookStructure.isEmpty
+                {
+                    let total = StoryPositionChapter.smilTotalDuration(in: session.bookStructure)
+                    return SourceTimelineProbe(
+                        bookStructure: session.bookStructure,
+                        smilTotalDuration: total > 0 ? total : nil,
+                        audiobookDuration: nil,
+                    )
+                }
+                if let media = await BookServiceActor.shared.resolveLocalMedia(
+                    for: book.id,
+                    category: category == .ebook ? .synced : category,
+                ),
+                    let parsed = try? SMILParser.parseEPUB(at: media.url)
+                {
+                    let total = StoryPositionChapter.smilTotalDuration(in: parsed.sections)
+                    return SourceTimelineProbe(
+                        bookStructure: parsed.sections,
+                        smilTotalDuration: total > 0 ? total : nil,
+                        audiobookDuration: nil,
+                    )
+                }
+                if category == .ebook,
+                    let media = await BookServiceActor.shared.resolveLocalMedia(
+                        for: book.id,
+                        category: .ebook,
+                    ),
+                    let parsed = try? SMILParser.parseEPUB(at: media.url)
+                {
+                    let total = StoryPositionChapter.smilTotalDuration(in: parsed.sections)
+                    return SourceTimelineProbe(
+                        bookStructure: parsed.sections,
+                        smilTotalDuration: total > 0 ? total : nil,
+                        audiobookDuration: nil,
+                    )
+                }
+                return SourceTimelineProbe(
+                    bookStructure: [],
+                    smilTotalDuration: nil,
+                    audiobookDuration: nil,
+                )
         }
     }
 
@@ -353,7 +520,9 @@ public enum FormatSwitchCoordinator {
     ) async -> (
         progression: Double,
         locator: BookLocator?,
-        timestamp: Double?
+        timestamp: Double?,
+        elapsedSeconds: TimeInterval?,
+        audiobookDuration: TimeInterval?
     ) {
         let now = floor(Date().timeIntervalSince1970 * 1000)
 
@@ -362,8 +531,10 @@ public enum FormatSwitchCoordinator {
             let state = await AudioSessionActor.shared.currentAudiobookSessionState(),
             state.bookID == bookID.uuid
         {
+            let elapsed = state.currentTime
+            let duration = state.duration > 0 ? state.duration : nil
             if let locator = await AudioSessionActor.shared.currentAudiobookLocator() {
-                return (state.bookProgress, locator, now)
+                return (state.bookProgress, locator, now, elapsed, duration)
             }
             let locator = StoryPositionTranslator.locatorForDestination(
                 category: .audio,
@@ -372,7 +543,7 @@ public enum FormatSwitchCoordinator {
                 chapterHref: state.currentChapterID,
                 chapterProgression: state.chapterProgress,
             )
-            return (state.bookProgress, locator, now)
+            return (state.bookProgress, locator, now, elapsed, duration)
         }
 
         // Live readaloud / SMIL: prefer fragment-bearing locator.
@@ -410,7 +581,7 @@ public enum FormatSwitchCoordinator {
                 ),
                 text: nil,
             )
-            return (prog, locator, now)
+            return (prog, locator, now, smil.bookElapsed, smil.bookTotal > 0 ? smil.bookTotal : nil)
         }
 
         // Live ebook / readaloud session managers.
@@ -452,11 +623,11 @@ public enum FormatSwitchCoordinator {
                     progression: fraction,
                 )
             }
-            return (fraction, locator, now)
+            return (fraction, locator, now, nil, nil)
         }
 
         if let progress = await ProgressSyncActor.shared.getBookProgress(for: bookID) {
-            return (progress.progressFraction, progress.locator, progress.timestamp ?? now)
+            return (progress.progressFraction, progress.locator, progress.timestamp ?? now, nil, nil)
         }
 
         let restore = await ProgressSyncActor.shared.bestRestorePosition(
@@ -466,7 +637,9 @@ public enum FormatSwitchCoordinator {
         return (
             restore?.progression ?? 0,
             restore?.locator,
-            restore?.timestamp ?? now
+            restore?.timestamp ?? now,
+            nil,
+            nil
         )
     }
 

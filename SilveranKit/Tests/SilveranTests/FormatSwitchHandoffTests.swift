@@ -95,6 +95,7 @@ struct FormatSwitchHandoffTests {
                 sourceLocator: source,
                 sourceProgression: 0.625,
                 destinationChapters: chapters,
+                destinationChaptersTimingVerified: true,
             )
         )
         #expect(result.precision == .chapterRelative)
@@ -139,6 +140,7 @@ struct FormatSwitchHandoffTests {
                 sourceProgression: 0.61,
                 sourceTimestamp: 5_000,
                 destinationChapters: chapters,
+                destinationChaptersTimingVerified: true,
                 destinationSavedProgression: 0.05,
                 destinationSavedTimestamp: 1_000,
             )
@@ -146,7 +148,8 @@ struct FormatSwitchHandoffTests {
         #expect(result.precision == .chapterRelative)
         #expect(abs(result.progression - 0.61) < 0.0001)
         #expect(result.locator.map { StoryPositionTranslator.isAudioLocator($0) } == true)
-        #expect(result.conflictingDestinationSaved == nil)
+        // Chapter-relative + large gap vs saved place → offer choice (no silent overwrite).
+        #expect(result.conflictingDestinationSaved != nil)
     }
 
     @Test func readaloudFragmentToAudiobookFallsBackToPercentageOrChapter() {
@@ -168,10 +171,11 @@ struct FormatSwitchHandoffTests {
                 sourceLocator: source,
                 sourceProgression: 0.45,
                 destinationChapters: chapters,
+                destinationChaptersTimingVerified: true,
                 hasVerifiedMediaOverlay: true,
             )
         )
-        // Fragment→audio is not mediaOverlayAlignment; chapter title match applies.
+        // Fragment→audio needs SMIL↔audiobook duration gate; without durations, chapter title match.
         #expect(result.precision == .contentReference || result.precision == .chapterRelative)
         #expect(result.precision != .mediaOverlayAlignment)
         #expect(result.locator?.href == "ch-night")
@@ -295,7 +299,7 @@ struct FormatSwitchHandoffTests {
         #expect(cross?.progression == 0.41)
     }
 
-    @Test func audiobookToEbookIgnoresStaleSavedWhenHandoffApplies() {
+    @Test func audiobookToEbookApproximateOffersSavedChoiceWithoutInventingChapter() {
         let chapters = [
             StoryPositionChapter(
                 title: "Mid",
@@ -320,10 +324,13 @@ struct FormatSwitchHandoffTests {
             )
         )
         #expect(result.shouldApplyHandoff)
-        #expect(result.conflictingDestinationSaved == nil)
+        #expect(result.precision == .wholeBookPercentage)
+        // Mapped side keeps live listen progression; saved place is offered, not invented TOC href.
         #expect(abs(result.progression - 0.55) < 0.0001)
-        #expect(result.locator?.href == "OEBPS/mid.xhtml")
+        #expect(result.locator?.href == "ebook")
         #expect(result.locator?.locations?.totalProgression == 0.55)
+        #expect(result.conflictingDestinationSaved != nil)
+        #expect(abs((result.conflictingDestinationSaved?.progression ?? 0) - 0.12) < 0.0001)
     }
 
     @Test func readaloudToEbookKeepsFragmentAcrossSeparateBookIDs() {

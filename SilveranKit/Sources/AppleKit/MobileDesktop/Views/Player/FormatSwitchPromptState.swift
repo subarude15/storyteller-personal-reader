@@ -15,6 +15,8 @@ public final class FormatSwitchPromptState {
         public let destinationLabel: String
         public let mappedPercentLabel: String
         public let destinationPercentLabel: String
+        /// Human label for mapping quality (e.g. "approximate percentage").
+        public let mappingQualityLabel: String
 
         public init(
             id: UUID = UUID(),
@@ -22,12 +24,14 @@ public final class FormatSwitchPromptState {
             destinationLabel: String,
             mappedPercentLabel: String,
             destinationPercentLabel: String,
+            mappingQualityLabel: String = "approximate location",
         ) {
             self.id = id
             self.bookTitle = bookTitle
             self.destinationLabel = destinationLabel
             self.mappedPercentLabel = mappedPercentLabel
             self.destinationPercentLabel = destinationPercentLabel
+            self.mappingQualityLabel = mappingQualityLabel
         }
     }
 

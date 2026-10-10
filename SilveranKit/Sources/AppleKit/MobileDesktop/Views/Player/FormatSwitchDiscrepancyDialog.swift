@@ -15,7 +15,7 @@ extension View {
             titleVisibility: .visible,
         ) {
             if let prompt = discrepancy {
-                Button("Continue from here (\(prompt.mappedPercentLabel))") {
+                Button("Approximate location (\(prompt.mappedPercentLabel))") {
                     FormatSwitchPromptState.shared.chooseMapped()
                 }
                 Button("Use saved \(prompt.destinationLabel) place (\(prompt.destinationPercentLabel))") {
@@ -28,7 +28,7 @@ extension View {
         } message: {
             if let prompt = discrepancy {
                 Text(
-                    "\(prompt.bookTitle): this format’s saved place differs from where you are. Exact alignment wasn’t available, so choose which position to keep."
+                    "\(prompt.bookTitle): exact sync wasn’t available (\(prompt.mappingQualityLabel)). Choose the approximate mapped place or this format’s saved location."
                 )
             }
         }
