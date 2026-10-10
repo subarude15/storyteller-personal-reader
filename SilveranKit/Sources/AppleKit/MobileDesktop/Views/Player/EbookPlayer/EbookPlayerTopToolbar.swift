@@ -32,6 +32,10 @@ struct EbookPlayerTopToolbar: View {
 
     let settingsVM: SettingsViewModel
 
+    /// Other downloaded formats for this title (excludes the current category).
+    var switchableFormats: [(label: String, category: LocalMediaCategory)] = []
+    var onSwitchFormat: ((LocalMediaCategory) -> Void)?
+
     @State private var showSleepTimerSheet = false
     @State private var showOptionsSheet = false
 
@@ -196,6 +200,7 @@ struct EbookPlayerTopToolbar: View {
                             .contentShape(Rectangle())
                     }
                     .frame(width: 44, height: 44)
+                    .accessibilityLabel("Display Options")
                     .sheet(isPresented: $showOptionsSheet) {
                         optionsSheet
                     }
@@ -252,6 +257,23 @@ struct EbookPlayerTopToolbar: View {
     private var optionsSheet: some View {
         NavigationStack {
             List {
+                if !switchableFormats.isEmpty {
+                    Section("Switch Format") {
+                        ForEach(switchableFormats, id: \.category) { format in
+                            Button {
+                                showOptionsSheet = false
+                                onSwitchFormat?(format.category)
+                            } label: {
+                                Label(
+                                    format.label,
+                                    systemImage: FormatSwitchLabels.systemImage(for: format.category),
+                                )
+                            }
+                            .accessibilityLabel("Switch to \(format.label)")
+                        }
+                    }
+                }
+
                 if hasAudioNarration {
                     Section("Playback") {
                         Toggle(

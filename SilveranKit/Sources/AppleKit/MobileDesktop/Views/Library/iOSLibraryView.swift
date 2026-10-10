@@ -196,7 +196,9 @@ public struct iOSLibraryView: View {
             NavigationStack {
                 playerView(for: wrapper.data)
             }
+            .formatSwitchDiscrepancyDialog()
         }
+        .formatSwitchDiscrepancyDialog()
         .sheet(item: $shortcutDetailBook) { book in
             NavigationStack {
                 iOSBookDetailView(item: book, mediaKind: .ebook)

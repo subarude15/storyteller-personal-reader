@@ -60,6 +60,9 @@ public final class EphemeralProgressManager {
     /// Initial reading position (typ. from server sync)
     private var initialLocator: BookLocator?
 
+    /// Intentional format-switch target; wins over PSA / metadata for this open.
+    private var formatSwitchHandoff: FormatSwitchHandoff?
+
     /// Track whether we've performed initial seek to server location.
     /// This happens when the book is first opened and has been
     /// read in a previous session.
@@ -117,16 +120,27 @@ public final class EphemeralProgressManager {
         settingsVM: any ReaderSettingsReading,
         bookID: BookID? = nil,
         initialLocator: BookLocator? = nil,
+        formatSwitchHandoff: FormatSwitchHandoff? = nil,
     ) {
         self.commsBridge = bridge
         self.settingsVM = settingsVM
         self.bookID = bookID
-        self.initialLocator = initialLocator
+        self.formatSwitchHandoff = formatSwitchHandoff
+        self.initialLocator = formatSwitchHandoff?.locator ?? initialLocator
         debugLog(
-            "[EPM] EbookProgressManager initialized with bookID: \(bookID?.description ?? "none"), locator: \(initialLocator?.href ?? "none")"
+            "[EPM] EbookProgressManager initialized with bookID: \(bookID?.description ?? "none"), locator: \(self.initialLocator?.href ?? "none"), formatSwitch=\(formatSwitchHandoff?.precision.rawValue ?? "nil")"
         )
 
         installRelocateHandler(on: bridge)
+    }
+
+    /// Apply / refresh a pinned format-switch target (survives late claim after init).
+    public func applyFormatSwitchHandoff(_ handoff: FormatSwitchHandoff) {
+        formatSwitchHandoff = handoff
+        initialLocator = handoff.locator
+        debugLog(
+            "[EPM] Applied format-switch handoff prog=\(handoff.progression) precision=\(handoff.precision.rawValue) href=\(handoff.locator.href)"
+        )
     }
 
     /// Webview recovery: the fresh bridge needs the relocate handler reinstalled.
@@ -147,8 +161,17 @@ public final class EphemeralProgressManager {
         guard !hasPerformedInitialSeek else { return }
         hasPerformedInitialSeek = true
 
-        let restoredIndex = nativeInitialSectionIndex(pageCount: pageCount) ?? 0
-        applyNativePageSelection(restoredIndex, syncReason: nil)
+        Task { @SilveranUIActor in
+            await self.claimFormatSwitchHandoffFromStoreIfNeeded()
+            let restoredIndex = self.nativeInitialSectionIndex(pageCount: pageCount) ?? 0
+            debugLog(
+                "[EPM] Native initial page index=\(restoredIndex)/\(pageCount) formatSwitch=\(self.formatSwitchHandoff != nil) href=\(self.initialLocator?.href ?? "nil")"
+            )
+            self.applyNativePageSelection(restoredIndex, syncReason: nil)
+            if self.formatSwitchHandoff != nil {
+                self.formatSwitchHandoff = nil
+            }
+        }
     }
 
     public func handleNativePageSelected(_ index: Int) {
@@ -177,18 +200,31 @@ public final class EphemeralProgressManager {
 
     private func nativeInitialSectionIndex(pageCount: Int) -> Int? {
         guard pageCount > 0 else { return nil }
+        let progression =
+            formatSwitchHandoff?.progression
+            ?? initialLocator?.locations?.totalProgression
+            ?? initialLocator?.locations?.progression
+
         if let locator = initialLocator,
+            !StoryPositionTranslator.isPlaceholderReaderHref(locator.href),
             let sectionIndex = findSectionIndex(for: locator.href, in: bookStructure)
         {
             return sectionIndex
         }
 
-        if let totalProgression = initialLocator?.locations?.totalProgression {
-            let clamped = max(0.0, min(1.0, totalProgression))
+        if let progression {
+            let clamped = max(0.0, min(1.0, progression))
             return min(max(Int((clamped * Double(pageCount)).rounded(.down)), 0), pageCount - 1)
         }
 
         return nil
+    }
+
+    private func claimFormatSwitchHandoffFromStoreIfNeeded() async {
+        guard formatSwitchHandoff == nil, let bookID else { return }
+        if let handoff = await FormatSwitchHandoffStore.shared.consumeReaderHandoff(bookID: bookID) {
+            applyFormatSwitchHandoff(handoff)
+        }
     }
 
     private func applyNativePageSelection(_ index: Int, syncReason: SyncReason?) {
@@ -289,9 +325,18 @@ public final class EphemeralProgressManager {
 
         Task { @SilveranUIActor in
             do {
-                var locatorToUse = initialLocator
+                await self.claimFormatSwitchHandoffFromStoreIfNeeded()
 
-                if let bookID = self.bookID {
+                let usingFormatSwitch = self.formatSwitchHandoff != nil
+                var locatorToUse = self.formatSwitchHandoff?.locator ?? self.initialLocator
+                var progressionHint =
+                    self.formatSwitchHandoff?.progression
+                    ?? locatorToUse?.locations?.totalProgression
+                    ?? locatorToUse?.locations?.progression
+                    ?? 0
+
+                // Intentional format switch must never fall through to stale PSA / metadata.
+                if !usingFormatSwitch, let bookID = self.bookID {
                     if let psaProgress = await ProgressSyncActor.shared.getBookProgress(
                         for: bookID
                     ),
@@ -299,103 +344,130 @@ public final class EphemeralProgressManager {
                     {
                         debugLog("[EPM] Got locator from PSA (source: \(psaProgress.source))")
                         locatorToUse = psaLocator
+                        progressionHint =
+                            psaLocator.locations?.totalProgression
+                            ?? psaLocator.locations?.progression
+                            ?? progressionHint
                     }
                 }
 
+                debugLog(
+                    "[EPM] Initial seek incoming formatSwitch=\(usingFormatSwitch) precision=\(self.formatSwitchHandoff?.precision.rawValue ?? "n/a") href=\(locatorToUse?.href ?? "nil") prog=\(progressionHint) sections=\(self.bookStructure.count)"
+                )
+
                 if let locator = locatorToUse {
-                    let isAudioLocator =
-                        locator.type.contains("audio") || locator.href.hasPrefix("audiobook://")
+                    let resolved = StoryPositionTranslator.resolveReaderNavigationTarget(
+                        locator: locator,
+                        progression: progressionHint,
+                        bookStructure: self.bookStructure,
+                    )
+                    let navLocator = resolved.locator
+                    let strategy = resolved.navigation
+                    let totalProg =
+                        navLocator.locations?.totalProgression
+                        ?? progressionHint
 
-                    if isAudioLocator {
-                        if let totalProg = locator.locations?.totalProgression, totalProg > 0 {
-                            debugLog(
-                                "[EPM] Translating audio locator (totalProgression: \(totalProg)) to text position"
-                            )
+                    debugLog(
+                        "[EPM] Resolved EPUB nav strategy=\(strategy.rawValue) href=\(navLocator.href) total=\(totalProg) sectionProg=\(navLocator.locations?.progression?.description ?? "nil") fragment=\(navLocator.locations?.fragments?.first ?? "nil")"
+                    )
+
+                    let hasSMIL = self.mediaOverlayManager?.hasMediaOverlay == true
+                    var navigated = false
+
+                    switch strategy {
+                        case .fragment:
+                            if let fragment = navLocator.locations?.fragments?.first {
+                                try await bridge.sendJsGoToLocatorCommand(locator: navLocator)
+                                navigated = true
+                                if hasSMIL,
+                                    let mom = self.mediaOverlayManager,
+                                    let sectionIndex = findSectionIndex(
+                                        for: navLocator.href,
+                                        in: self.bookStructure,
+                                    )
+                                {
+                                    await mom.handleSeekEvent(
+                                        sectionIndex: sectionIndex,
+                                        anchor: fragment,
+                                    )
+                                }
+                            }
+                        case .sectionFraction:
+                            if let progression = navLocator.locations?.progression,
+                                let sectionIndex = findSectionIndex(
+                                    for: navLocator.href,
+                                    in: self.bookStructure,
+                                )
+                            {
+                                try await bridge.sendJsGoToFractionInSectionCommand(
+                                    sectionIndex: sectionIndex,
+                                    fraction: progression,
+                                )
+                                navigated = true
+                                if hasSMIL,
+                                    let mom = self.mediaOverlayManager,
+                                    let anchor = self.findSmilEntryBySectionFraction(
+                                        sectionIndex,
+                                        fraction: progression,
+                                    )
+                                {
+                                    await mom.handleSeekEvent(
+                                        sectionIndex: sectionIndex,
+                                        anchor: anchor,
+                                    )
+                                }
+                            }
+                        case .bookFraction:
                             try await bridge.sendJsGoToBookFractionCommand(fraction: totalProg)
-
-                            if let mom = mediaOverlayManager,
-                                let (sectionIndex, anchor) = await findSmilEntryByBookFraction(
+                            navigated = true
+                            if hasSMIL,
+                                let mom = self.mediaOverlayManager,
+                                let (smilSection, anchor) = await self.findSmilEntryByBookFraction(
                                     totalProg
                                 )
                             {
-                                debugLog(
-                                    "[EPM] Seeking media overlay to section \(sectionIndex), anchor: \(anchor)"
-                                )
                                 await mom.handleSeekEvent(
-                                    sectionIndex: sectionIndex,
+                                    sectionIndex: smilSection,
                                     anchor: anchor,
                                 )
                             }
-                        } else {
-                            debugLog("[EPM] Audio locator has no totalProgression, going to start")
-                            try await bridge.sendJsGoRightCommand()
-                        }
-                        return
+                        case .href:
+                            try await bridge.sendJsGoToHrefCommand(href: navLocator.href)
+                            navigated = true
                     }
 
-                    let hasSMIL = mediaOverlayManager?.hasMediaOverlay == true
-
-                    if let fragment = locator.locations?.fragments?.first, hasSMIL {
+                    if !navigated {
                         debugLog(
-                            "[EPM] Seeking to saved position with fragment: \(locator.href)#\(fragment)"
+                            "[EPM] Primary nav strategy \(strategy.rawValue) failed; falling back to book fraction \(totalProg)"
                         )
-                        try await bridge.sendJsGoToLocatorCommand(locator: locator)
-
-                        if let mom = mediaOverlayManager,
-                            let sectionIndex = findSectionIndex(
-                                for: locator.href,
-                                in: bookStructure,
-                            )
-                        {
-                            debugLog(
-                                "[EPM] Also seeking media overlay to section \(sectionIndex), fragment: \(fragment)"
-                            )
-                            await mom.handleSeekEvent(sectionIndex: sectionIndex, anchor: fragment)
-                        }
-                    } else if let progression = locator.locations?.progression,
-                        let sectionIndex = findSectionIndex(for: locator.href, in: bookStructure)
-                    {
-                        debugLog("[EPM] Using section \(sectionIndex) progression: \(progression)")
-                        try await bridge.sendJsGoToFractionInSectionCommand(
-                            sectionIndex: sectionIndex,
-                            fraction: progression,
-                        )
-
-                        if hasSMIL,
-                            let mom = mediaOverlayManager,
-                            let anchor = findSmilEntryBySectionFraction(
-                                sectionIndex,
-                                fraction: progression,
-                            )
-                        {
-                            debugLog(
-                                "[EPM] Also seeking media overlay to section \(sectionIndex), anchor: \(anchor)"
-                            )
-                            await mom.handleSeekEvent(sectionIndex: sectionIndex, anchor: anchor)
-                        }
-                    } else if let totalProg = locator.locations?.totalProgression, totalProg > 0 {
-                        debugLog("[EPM] Fallback to book fraction: \(totalProg)")
                         try await bridge.sendJsGoToBookFractionCommand(fraction: totalProg)
-
-                        if hasSMIL,
-                            let mom = mediaOverlayManager,
-                            let (smilSection, anchor) = await findSmilEntryByBookFraction(totalProg)
-                        {
-                            debugLog(
-                                "[EPM] Also seeking media overlay to section \(smilSection), anchor: \(anchor)"
-                            )
-                            await mom.handleSeekEvent(sectionIndex: smilSection, anchor: anchor)
-                        }
-                    } else {
-                        debugLog("[EPM] Fallback to href: \(locator.href)")
-                        try await bridge.sendJsGoToHrefCommand(href: locator.href)
+                        navigated = true
                     }
+
+                    debugLog(
+                        "[EPM] Initial seek completed navigated=\(navigated) finalHref=\(navLocator.href) finalProg=\(totalProg)"
+                    )
                 } else {
                     debugLog("[EPM] No saved position, navigating to first page")
                     try await bridge.sendJsGoRightCommand()
                 }
+
+                self.formatSwitchHandoff = nil
             } catch {
                 debugLog("[EPM] Failed to perform initial seek: \(error)")
+                // Last-resort percentage navigation when Foliate rejects the primary target.
+                if let prog = self.formatSwitchHandoff?.progression ?? self.initialLocator?
+                    .locations?.totalProgression,
+                    prog > 0
+                {
+                    do {
+                        try await bridge.sendJsGoToBookFractionCommand(fraction: prog)
+                        debugLog("[EPM] Fallback book-fraction seek after error → \(prog)")
+                    } catch {
+                        debugLog("[EPM] Fallback book-fraction seek also failed: \(error)")
+                    }
+                }
+                self.formatSwitchHandoff = nil
             }
         }
     }

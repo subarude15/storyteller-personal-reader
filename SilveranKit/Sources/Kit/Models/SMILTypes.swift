@@ -1,7 +1,7 @@
 import Foundation
 
 /// Section info combining TOC data and SMIL metadata
-public struct SectionInfo: Codable, Identifiable, Sendable {
+public struct SectionInfo: Codable, Identifiable, Sendable, Equatable {
     public let index: Int
     public let id: String
     public let label: String?
@@ -62,7 +62,7 @@ public struct TocEntry: Sendable {
 }
 
 /// SMIL media overlay entry with cumulative timing
-public struct SMILEntry: Codable, Sendable {
+public struct SMILEntry: Codable, Sendable, Equatable {
     public let textId: String
     public let textHref: String
     public let audioFile: String
