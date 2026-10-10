@@ -121,8 +121,9 @@ public enum FormatSwitchCoordinator {
         {
             // Use synced SMIL as alignment bridge into ebook when available.
             destStructure = parsed.sections
-            destSmilTotal = StoryPositionChapter.smilTotalDuration(in: parsed.sections)
-            destHasSMIL = destSmilTotal > 0
+            let bridgedTotal = StoryPositionChapter.smilTotalDuration(in: parsed.sections)
+            destSmilTotal = bridgedTotal > 0 ? bridgedTotal : nil
+            destHasSMIL = bridgedTotal > 0
         }
 
         let translation = StoryPositionTranslator.translate(
