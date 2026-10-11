@@ -17,9 +17,13 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
     public var lazyLibrarianEnabled: Bool = false
     public var lazyLibrarianBaseURL: String = ""
     public var bookRequestProvider: String = BookRequestProviderKind.automatic.rawValue
-    /// Optional LAN-only book search helper. Never a core dependency.
+    /// Self-hosted RaveBSD (native book search). Local URL reuses the historical
+    /// `bookSearchLAN*` keys so existing installs keep their LAN endpoint.
     public var bookSearchLANEnabled: Bool = false
-    public var bookSearchLANBaseURL: String = ""
+    public var bookSearchLANBaseURL: String = RaveBSDURL.defaultLocal
+    public var raveBSDRemoteURL: String = RaveBSDURL.defaultRemote
+    /// Default surface for book search sheets (`BookSearchProviderKind`).
+    public var bookSearchDefaultProvider: String = BookSearchProviderKind.raveBSD.rawValue
     /// Optional read-only Prowlarr diagnostics. API key stays in the keychain.
     public var prowlarrEnabled: Bool = false
     public var prowlarrBaseURL: String = ""
@@ -62,7 +66,13 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
             (try? container.decode(String.self, forKey: .bookRequestProvider))
             ?? BookRequestProviderKind.automatic.rawValue
         bookSearchLANEnabled = (try? container.decode(Bool.self, forKey: .bookSearchLANEnabled)) ?? false
-        bookSearchLANBaseURL = (try? container.decode(String.self, forKey: .bookSearchLANBaseURL)) ?? ""
+        let decodedLAN = (try? container.decode(String.self, forKey: .bookSearchLANBaseURL)) ?? ""
+        bookSearchLANBaseURL = decodedLAN.isEmpty ? RaveBSDURL.defaultLocal : decodedLAN
+        let decodedRemote = (try? container.decode(String.self, forKey: .raveBSDRemoteURL)) ?? ""
+        raveBSDRemoteURL = decodedRemote.isEmpty ? RaveBSDURL.defaultRemote : decodedRemote
+        bookSearchDefaultProvider =
+            (try? container.decode(String.self, forKey: .bookSearchDefaultProvider))
+            ?? BookSearchProviderKind.raveBSD.rawValue
         prowlarrEnabled = (try? container.decode(Bool.self, forKey: .prowlarrEnabled)) ?? false
         prowlarrBaseURL = (try? container.decode(String.self, forKey: .prowlarrBaseURL)) ?? ""
         jackettEnabled = (try? container.decode(Bool.self, forKey: .jackettEnabled)) ?? false
@@ -74,7 +84,7 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
     private enum TopLevelCodingKeys: String, CodingKey {
         case reading, playback, readingBar, sync, library, themes, shelfarrBaseURL, shelfarrAPIToken,
             lazyLibrarianEnabled, lazyLibrarianBaseURL, bookRequestProvider,
-            bookSearchLANEnabled, bookSearchLANBaseURL,
+            bookSearchLANEnabled, bookSearchLANBaseURL, raveBSDRemoteURL, bookSearchDefaultProvider,
             prowlarrEnabled, prowlarrBaseURL, jackettEnabled, jackettBaseURL,
             delugeEnabled, delugeBaseURL
     }
@@ -786,6 +796,8 @@ public actor SettingsActor {
         bookRequestProvider: String? = nil,
         bookSearchLANEnabled: Bool? = nil,
         bookSearchLANBaseURL: String? = nil,
+        raveBSDRemoteURL: String? = nil,
+        bookSearchDefaultProvider: String? = nil,
         prowlarrEnabled: Bool? = nil,
         prowlarrBaseURL: String? = nil,
         jackettEnabled: Bool? = nil,
@@ -967,6 +979,12 @@ public actor SettingsActor {
         }
         if let bookSearchLANBaseURL {
             updated.bookSearchLANBaseURL = bookSearchLANBaseURL
+        }
+        if let raveBSDRemoteURL {
+            updated.raveBSDRemoteURL = raveBSDRemoteURL
+        }
+        if let bookSearchDefaultProvider {
+            updated.bookSearchDefaultProvider = bookSearchDefaultProvider
         }
         if let prowlarrEnabled {
             updated.prowlarrEnabled = prowlarrEnabled

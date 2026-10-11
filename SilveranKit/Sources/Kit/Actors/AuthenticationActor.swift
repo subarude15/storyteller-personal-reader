@@ -12,6 +12,7 @@ public actor AuthenticationActor {
     private let lazyLibrarianAPIKey = "lazyLibrarianAPIKey"
     private let prowlarrAPIKey = "prowlarrAPIKey"
     private let jackettAPIKey = "jackettAPIKey"
+    private let raveBSDAPIKey = "raveBSDAPIKey"
     private let delugePassword = "delugePassword"
     private let qbittorrentPassword = "qbittorrentPassword"
     private let synologyPassword = "synologyPassword"
@@ -181,6 +182,28 @@ public actor AuthenticationActor {
         return !key.isEmpty
     }
 
+    public func saveRaveBSDAPIKey(_ key: String) async throws {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            try await deleteRaveBSDAPIKey()
+            return
+        }
+        try await saveString(trimmed, for: raveBSDAPIKey)
+    }
+
+    public func loadRaveBSDAPIKey() async throws -> String? {
+        try await loadString(for: raveBSDAPIKey)
+    }
+
+    public func deleteRaveBSDAPIKey() async throws {
+        try await keychain.removeItem(account: raveBSDAPIKey)
+    }
+
+    public func hasRaveBSDAPIKey() async -> Bool {
+        guard let key = try? await loadRaveBSDAPIKey() else { return false }
+        return !key.isEmpty
+    }
+
     public func saveDelugePassword(_ password: String) async throws {
         let trimmed = password.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
@@ -337,6 +360,7 @@ public actor AuthenticationActor {
         public var lazyLibrarianAPIKey: String?
         public var prowlarrAPIKey: String?
         public var jackettAPIKey: String?
+        public var raveBSDAPIKey: String?
         public var delugePassword: String?
         public var qbittorrentPassword: String?
         public var synologyPassword: String?
@@ -350,6 +374,7 @@ public actor AuthenticationActor {
             lazyLibrarianAPIKey: String? = nil,
             prowlarrAPIKey: String? = nil,
             jackettAPIKey: String? = nil,
+            raveBSDAPIKey: String? = nil,
             delugePassword: String? = nil,
             qbittorrentPassword: String? = nil,
             synologyPassword: String? = nil,
@@ -362,6 +387,7 @@ public actor AuthenticationActor {
             self.lazyLibrarianAPIKey = lazyLibrarianAPIKey
             self.prowlarrAPIKey = prowlarrAPIKey
             self.jackettAPIKey = jackettAPIKey
+            self.raveBSDAPIKey = raveBSDAPIKey
             self.delugePassword = delugePassword
             self.qbittorrentPassword = qbittorrentPassword
             self.synologyPassword = synologyPassword
@@ -403,6 +429,7 @@ public actor AuthenticationActor {
             lazyLibrarianAPIKey: try await loadLazyLibrarianAPIKey(),
             prowlarrAPIKey: try await loadProwlarrAPIKey(),
             jackettAPIKey: try await loadJackettAPIKey(),
+            raveBSDAPIKey: try await loadRaveBSDAPIKey(),
             delugePassword: try await loadDelugePassword(),
             qbittorrentPassword: try await loadQBittorrentPassword(),
             synologyPassword: try await loadSynologyPassword(),
@@ -433,6 +460,7 @@ public actor AuthenticationActor {
         if let value = backup.lazyLibrarianAPIKey { try await saveLazyLibrarianAPIKey(value) }
         if let value = backup.prowlarrAPIKey { try await saveProwlarrAPIKey(value) }
         if let value = backup.jackettAPIKey { try await saveJackettAPIKey(value) }
+        if let value = backup.raveBSDAPIKey { try await saveRaveBSDAPIKey(value) }
         if let value = backup.delugePassword { try await saveDelugePassword(value) }
         if let value = backup.qbittorrentPassword { try await saveQBittorrentPassword(value) }
         if let value = backup.synologyPassword { try await saveSynologyPassword(value) }

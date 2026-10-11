@@ -79,11 +79,11 @@ struct BookRequestSheet: View {
                     Button {
                         showingManualSearch = true
                     } label: {
-                        Label("Search manually", systemImage: "globe")
+                        Label("Book Search", systemImage: "magnifyingglass")
                     }
                     .accessibilityIdentifier("search-manually")
                 } footer: {
-                    Text("Look on a website yourself if LazyLibrarian or Shelfarr cannot find it.")
+                    Text("Search RaveBSD by default, or switch to Manual Search / LazyLibrarian without losing your query.")
                 }
                 if sending {
                     Section {
@@ -128,7 +128,7 @@ struct BookRequestSheet: View {
             }
         }
         .sheet(isPresented: $showingManualSearch) {
-            ManualSearchView(book: ManualSearchBookContext.from(work))
+            BookSearchView(book: ManualSearchBookContext.from(work))
             #if os(iOS)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)

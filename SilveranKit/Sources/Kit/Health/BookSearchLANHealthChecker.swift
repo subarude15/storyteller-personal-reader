@@ -6,9 +6,13 @@ import FoundationNetworking
 
 public struct BookSearchLANHTTP: Sendable {
     public var status: Int
+    public var data: Data
+    public var contentType: String?
 
-    public init(status: Int) {
+    public init(status: Int, data: Data = Data(), contentType: String? = nil) {
         self.status = status
+        self.data = data
+        self.contentType = contentType
     }
 }
 
@@ -24,13 +28,17 @@ public struct LiveBookSearchLANTransport: BookSearchLANTransport {
         request.httpMethod = "GET"
         request.setValue("inkamp/book-search-health", forHTTPHeaderField: "User-Agent")
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        let (_, response) = try await URLSession.shared.data(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        return BookSearchLANHTTP(status: status)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let http = response as? HTTPURLResponse
+        return BookSearchLANHTTP(
+            status: http?.statusCode ?? 0,
+            data: data,
+            contentType: http?.value(forHTTPHeaderField: "Content-Type"),
+        )
     }
 }
 
-/// Optional LAN-only book search. Off-network unavailability is Local only, never a warning.
+/// RaveBSD health via `/health`. Tries local first, then remote.
 public struct BookSearchLANHealthChecker: ServiceHealthChecking {
     public var serviceID: ServiceHealthID { .bookSearchLAN }
     private let transport: any BookSearchLANTransport
@@ -42,63 +50,125 @@ public struct BookSearchLANHealthChecker: ServiceHealthChecking {
     public func check(settings: ServiceHealthSettingsSnapshot) async -> ServiceHealthResult {
         let now = Date()
         let enabled = settings.bookSearchLANEnabled
-        let base = settings.bookSearchLANBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        let host = ServiceHealthURLSanitizer.sanitize(base)
+        let local = settings.bookSearchLANBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let remote = settings.raveBSDRemoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let host = ServiceHealthURLSanitizer.sanitize(
+            local.isEmpty ? remote : local
+        )
 
         guard enabled else {
             return ServiceHealthResult(
                 serviceID: .bookSearchLAN,
                 status: .disabled,
                 summary: "Not configured",
-                detail: "Book Search (LAN-only) is turned off",
+                detail: "RaveBSD is turned off",
                 lastChecked: now,
                 sanitizedHost: host,
                 isActionableIssue: false,
             )
         }
 
-        guard !base.isEmpty, let url = normalizedURL(from: base) else {
+        let bases = RaveBSDEndpointRouting.orderedBases(localURL: local, remoteURL: remote)
+        guard !bases.isEmpty else {
             return ServiceHealthResult(
                 serviceID: .bookSearchLAN,
                 status: .disabled,
                 summary: "Not configured",
-                detail: "Base URL is missing",
+                detail: "Local and remote URLs are missing",
                 lastChecked: now,
                 sanitizedHost: host,
                 isActionableIssue: false,
             )
         }
 
-        do {
-            let http = try await transport.ping(url, timeout: 4)
-            // Any HTTP response means the host answered on this network.
-            if http.status > 0 {
-                return ServiceHealthResult(
-                    serviceID: .bookSearchLAN,
-                    status: .healthy,
-                    summary: "Reachable on local network",
-                    detail: "HTTP \(http.status)",
-                    lastChecked: now,
-                    lastSuccess: now,
-                    sanitizedHost: host ?? ServiceHealthURLSanitizer.sanitize(url.absoluteString),
-                    metadata: ["httpStatus": String(http.status)],
-                    isActionableIssue: false,
-                )
+        var lastFailure: (selection: RaveBSDEndpointSelection, technical: String, cloudflare: Bool)?
+        for selection in bases {
+            guard let root = RaveBSDURL.normalizeBase(selection.baseURL),
+                let healthURL = URL(string: root.appendingPathComponent("health").absoluteString)
+            else { continue }
+            do {
+                let http = try await transport.ping(healthURL, timeout: 4)
+                let sanitized = ServiceHealthURLSanitizer.sanitize(selection.baseURL)
+                if RaveBSDCloudflare.isChallenge(
+                    status: http.status,
+                    contentType: http.contentType,
+                    data: http.data,
+                ) {
+                    lastFailure = (selection, "cloudflareChallenge", true)
+                    // Prefer trying the other endpoint before failing.
+                    continue
+                }
+                if RaveBSDResponseParsing.isHealthOK(http.data, status: http.status)
+                    || ((200..<300).contains(http.status) && http.status > 0)
+                {
+                    return ServiceHealthResult(
+                        serviceID: .bookSearchLAN,
+                        status: .healthy,
+                        summary: "Connected · \(selection.route.settingsStatusLabel)",
+                        detail: "HTTP \(http.status) · \(selection.route.rawValue)",
+                        lastChecked: now,
+                        lastSuccess: now,
+                        sanitizedHost: sanitized,
+                        metadata: [
+                            "httpStatus": String(http.status),
+                            "route": selection.route.rawValue,
+                        ],
+                        isActionableIssue: false,
+                    )
+                }
+                if http.status > 0 {
+                    lastFailure = (selection, "HTTP \(http.status)", false)
+                } else {
+                    lastFailure = (selection, "emptyStatus", false)
+                }
+            } catch let error as URLError {
+                let code: String
+                switch error.code {
+                    case .timedOut: code = "URLError timedOut"
+                    case .cannotConnectToHost: code = "URLError cannotConnectToHost"
+                    case .notConnectedToInternet: code = "URLError notConnectedToInternet"
+                    case .networkConnectionLost: code = "URLError networkConnectionLost"
+                    default: code = "URLError \(error.code.rawValue)"
+                }
+                lastFailure = (selection, code, false)
+            } catch {
+                lastFailure = (selection, "unreachable", false)
             }
-            return localOnly(host: host, now: now, technical: "emptyStatus")
-        } catch let error as URLError {
-            let code: String
-            switch error.code {
-                case .timedOut: code = "URLError timedOut"
-                case .cannotConnectToHost: code = "URLError cannotConnectToHost"
-                case .notConnectedToInternet: code = "URLError notConnectedToInternet"
-                case .networkConnectionLost: code = "URLError networkConnectionLost"
-                default: code = "URLError \(error.code.rawValue)"
-            }
-            return localOnly(host: host, now: now, technical: code)
-        } catch {
-            return localOnly(host: host, now: now, technical: "unreachable")
         }
+
+        if let lastFailure, lastFailure.cloudflare {
+            let sanitized = ServiceHealthURLSanitizer.sanitize(lastFailure.selection.baseURL)
+            return ServiceHealthResult(
+                serviceID: .bookSearchLAN,
+                status: .unavailable,
+                summary: "Cloudflare Access blocked",
+                detail: "API clients cannot solve the Access challenge",
+                lastChecked: now,
+                sanitizedHost: sanitized,
+                lastError: "Cloudflare Access / browser challenge",
+                technicalDetail: lastFailure.technical,
+                suggestedAction: "Allow /health and search API paths through Access, or use the local URL on home Wi‑Fi",
+                isActionableIssue: true,
+            )
+        }
+
+        // Offline from every configured endpoint: informational when only local mattered historically.
+        let onlyLocal = bases.count == 1 && bases[0].route == .local
+        if onlyLocal {
+            return localOnly(host: host, now: now, technical: lastFailure?.technical ?? "unreachable")
+        }
+        return ServiceHealthResult(
+            serviceID: .bookSearchLAN,
+            status: .unavailable,
+            summary: "Could not reach RaveBSD",
+            detail: "Local and remote endpoints failed",
+            lastChecked: now,
+            sanitizedHost: host,
+            lastError: "Could not reach RaveBSD",
+            technicalDetail: lastFailure?.technical ?? "unreachable",
+            suggestedAction: "Check the local/remote URLs and that RaveBSD is running",
+            isActionableIssue: true,
+        )
     }
 
     private func localOnly(host: String?, now: Date, technical: String) -> ServiceHealthResult {
@@ -114,23 +184,5 @@ public struct BookSearchLANHealthChecker: ServiceHealthChecking {
             suggestedAction: nil,
             isActionableIssue: false,
         )
-    }
-
-    private func normalizedURL(from raw: String) -> URL? {
-        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return nil }
-        while text.hasSuffix("/") { text.removeLast() }
-        guard var components = URLComponents(string: text),
-            let scheme = components.scheme?.lowercased(),
-            scheme == "http" || scheme == "https",
-            let host = components.host, !host.isEmpty
-        else { return nil }
-        components.scheme = scheme
-        components.user = nil
-        components.password = nil
-        components.query = nil
-        components.fragment = nil
-        if components.path.isEmpty { components.path = "/" }
-        return components.url
     }
 }

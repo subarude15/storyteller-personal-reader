@@ -250,6 +250,8 @@ public struct SettingsView: View {
                         bookRequestProvider: newValue.bookRequestProvider,
                         bookSearchLANEnabled: newValue.bookSearchLANEnabled,
                         bookSearchLANBaseURL: newValue.bookSearchLANBaseURL,
+                        raveBSDRemoteURL: newValue.raveBSDRemoteURL,
+                        bookSearchDefaultProvider: newValue.bookSearchDefaultProvider,
                         prowlarrEnabled: newValue.prowlarrEnabled,
                         prowlarrBaseURL: newValue.prowlarrBaseURL,
                         jackettEnabled: newValue.jackettEnabled,
@@ -320,6 +322,8 @@ extension SettingsView {
                     bookRequestProvider: $config.bookRequestProvider,
                     bookSearchLANEnabled: $config.bookSearchLANEnabled,
                     bookSearchLANBaseURL: $config.bookSearchLANBaseURL,
+                    raveBSDRemoteURL: $config.raveBSDRemoteURL,
+                    bookSearchDefaultProvider: $config.bookSearchDefaultProvider,
                     prowlarrEnabled: $config.prowlarrEnabled,
                     prowlarrBaseURL: $config.prowlarrBaseURL,
                     jackettEnabled: $config.jackettEnabled,
@@ -604,24 +608,12 @@ extension SettingsView {
 
                 RequestAutomaticFallbackSettingsSection()
 
-                Section {
-                    Toggle("Enabled", isOn: $config.bookSearchLANEnabled)
-                    TextField(
-                        "Base URL",
-                        text: $config.bookSearchLANBaseURL,
-                        prompt: Text("http://192.168.1.2:3010"),
-                    )
-                    .textContentType(.URL)
-                    .keyboardType(.URL)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                } header: {
-                    Text("Book Search (LAN-only)")
-                } footer: {
-                    Text(
-                        "Optional helper on your home network only. It has no authentication and is never exposed publicly. Off-network unavailability is informational, not an error."
-                    )
-                }
+                RaveBSDSettingsSection(
+                    enabled: $config.bookSearchLANEnabled,
+                    localURL: $config.bookSearchLANBaseURL,
+                    remoteURL: $config.raveBSDRemoteURL,
+                    defaultProvider: $config.bookSearchDefaultProvider,
+                )
 
                 ManualSearchSettingsSection()
 

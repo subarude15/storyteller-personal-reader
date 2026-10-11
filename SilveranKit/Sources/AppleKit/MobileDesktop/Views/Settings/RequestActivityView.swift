@@ -379,32 +379,50 @@ final class RequestActivityViewModel: ObservableObject {
                 RequestActivityExternalLinks.bookSearchLAN(
                     baseURL: actionContext.bookSearchLANBaseURL
                 )
+                    ?? RequestActivityExternalLinks.bookSearchLAN(
+                        baseURL: actionContext.raveBSDRemoteURL
+                    )
         }
     }
 
-    /// Open LAN helper after a lightweight reachability ping.
-    /// Unreachable / off-LAN is informational — never Needs Attention.
+    /// Open RaveBSD web UI after a lightweight reachability ping (local preferred).
     func prepareAlternateSearchOpen() async -> URL? {
         actionError = nil
         actionInfo = nil
         await reloadActionContext()
-        guard actionContext.bookSearchLANEnabled,
-            let url = RequestActivityExternalLinks.bookSearchLAN(
-                baseURL: actionContext.bookSearchLANBaseURL
-            )
-        else {
-            actionInfo = "Could not open the local book-search helper."
+        guard actionContext.bookSearchLANEnabled else {
+            actionInfo = "RaveBSD is turned off in Settings."
             return nil
         }
         let snapshot = ServiceHealthSettingsSnapshot(
             bookSearchLANEnabled: actionContext.bookSearchLANEnabled,
             bookSearchLANBaseURL: actionContext.bookSearchLANBaseURL,
+            raveBSDRemoteURL: actionContext.raveBSDRemoteURL,
         )
         let result = await BookSearchLANHealthChecker().check(settings: snapshot)
         if result.status == .healthy {
-            return url
+            let route = result.metadata["route"]
+            if route == RaveBSDNetworkRoute.remote.rawValue,
+                let remote = RequestActivityExternalLinks.bookSearchLAN(
+                    baseURL: actionContext.raveBSDRemoteURL
+                )
+            {
+                return remote
+            }
+            if let local = RequestActivityExternalLinks.bookSearchLAN(
+                baseURL: actionContext.bookSearchLANBaseURL
+            ) {
+                return local
+            }
+            return RequestActivityExternalLinks.bookSearchLAN(
+                baseURL: actionContext.raveBSDRemoteURL
+            )
         }
-        actionInfo = "Book Search is only available on your home network."
+        if result.status == .localOnly {
+            actionInfo = "RaveBSD local URL is not reachable from this network."
+            return nil
+        }
+        actionInfo = result.summary
         return nil
     }
 
@@ -712,7 +730,7 @@ struct RequestActivityChainDetailView: View {
         } message: {
             Text(model.actionError ?? "")
         }
-        .alert("Book Search", isPresented: actionInfoBinding) {
+        .alert("RaveBSD", isPresented: actionInfoBinding) {
             Button("OK", role: .cancel) { model.actionInfo = nil }
         } message: {
             Text(model.actionInfo ?? "")
@@ -771,7 +789,7 @@ struct RequestActivityChainDetailView: View {
         }
         .sheet(isPresented: $showingManualSearch) {
             if let item = actionItem {
-                ManualSearchView(book: manualSearchBook(from: item))
+                BookSearchView(book: manualSearchBook(from: item))
                 #if os(iOS)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
@@ -1184,7 +1202,7 @@ struct RequestActivityDetailView: View {
         } message: {
             Text(model.actionError ?? "")
         }
-        .alert("Book Search", isPresented: actionInfoBinding) {
+        .alert("RaveBSD", isPresented: actionInfoBinding) {
             Button("OK", role: .cancel) { model.actionInfo = nil }
         } message: {
             Text(model.actionInfo ?? "")
@@ -1241,7 +1259,7 @@ struct RequestActivityDetailView: View {
         }
         .sheet(isPresented: $showingManualSearch) {
             if let item {
-                ManualSearchView(book: manualSearchBook(from: item))
+                BookSearchView(book: manualSearchBook(from: item))
                 #if os(iOS)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
@@ -1725,11 +1743,11 @@ private struct RequestFallbackSheet: View {
             Button {
                 onManualSearch()
             } label: {
-                Label("Search manually", systemImage: "globe")
+                Label("Book Search", systemImage: "magnifyingglass")
             }
             .accessibilityIdentifier("search-manually")
         } footer: {
-            Text("Open a website in the app and look yourself. Detected downloads are not sent to the NAS yet.")
+            Text("Search RaveBSD by default, or switch to Manual Search / LazyLibrarian. Downloads start only after you confirm.")
         }
     }
 

@@ -447,7 +447,7 @@ struct IndexerHealthTests {
         let results = await diagnostics.runAll()
         #expect(results.map(\.serviceID) == ServiceHealthID.allCases)
         #expect(results.map(\.displayName).contains("LazyLibrarian"))
-        #expect(results.map(\.displayName).contains("Book Search (LAN-only)"))
+        #expect(results.map(\.displayName).contains("RaveBSD"))
         let attention = ServiceHealthAttention.items(from: results)
         #expect(attention.map(\.serviceID) == [.prowlarr])
         #expect(attention.first?.problem == "1 enabled indexer is failing")

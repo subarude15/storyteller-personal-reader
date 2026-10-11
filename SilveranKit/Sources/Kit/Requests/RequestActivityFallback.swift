@@ -95,7 +95,10 @@ public enum RequestActivityFallbackPolicy {
 
     public static func isAlternateSearchConfigured(_ context: RequestActivityActionContext) -> Bool {
         context.bookSearchLANEnabled
-            && RequestActivityExternalLinks.browseURL(from: context.bookSearchLANBaseURL) != nil
+            && (
+                RequestActivityExternalLinks.browseURL(from: context.bookSearchLANBaseURL) != nil
+                    || RequestActivityExternalLinks.browseURL(from: context.raveBSDRemoteURL) != nil
+            )
     }
 
     /// Formats that still need attention, plus configured alternates. Does not read history.
