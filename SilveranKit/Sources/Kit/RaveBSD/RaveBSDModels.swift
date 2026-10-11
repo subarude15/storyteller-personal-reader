@@ -106,7 +106,8 @@ public struct RaveBSDSearchResult: Equatable, Sendable, Identifiable, Hashable {
     public var acquisitionMethod: RaveBSDAcquisitionMethod {
         if !normalizedMagnet.isEmpty { return .magnet }
         if !normalizedDirectURL.isEmpty { return .directHTTP }
-        if !id.isEmpty { return .unresolved }
+        // Server-assigned ids can be resolved; synthetic `local-*` keys cannot.
+        if !id.isEmpty, !id.hasPrefix("local-") { return .unresolved }
         if !downloadURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .pageOnly }
         return .pageOnly
     }
