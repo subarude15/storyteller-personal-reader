@@ -155,6 +155,10 @@ public enum RaveBSDAcquisition {
             let author = result.author.trimmingCharacters(in: .whitespacesAndNewlines)
             if !author.isEmpty { copy.authors = [author] }
         }
+        // Prefer the mode stamped when the row was searched — not a later UI picker change.
+        if let mode = result.searchMode {
+            copy.requestedMediaType = mode.mediaType
+        }
         return copy
     }
 

@@ -100,12 +100,12 @@ struct BookSearchView: View {
                     provider = BookSearchProviderKind.preference(from: config.bookSearchDefaultProvider)
                 }
             }
-            .onChange(of: provider) { _, newValue in
-                Task {
-                    try? await SettingsActor.shared.updateConfig(
-                        bookSearchDefaultProvider: newValue.rawValue
-                    )
-                }
+            // Temporary provider switches must not overwrite Settings → default provider.
+            .onChange(of: titleField) { _, newValue in
+                query = RaveBSDSearchQueryBuilding.syncedFreeText(title: newValue, author: authorField)
+            }
+            .onChange(of: authorField) { _, newValue in
+                query = RaveBSDSearchQueryBuilding.syncedFreeText(title: titleField, author: newValue)
             }
             .confirmationDialog(
                 "Send to NAS download?",
@@ -315,24 +315,12 @@ struct BookSearchView: View {
         activeBaseURL = selection.baseURL
         activeRoute = selection.route
 
-        let free = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let composed = ManualSearchQueryValues.make(
-            from: ManualSearchBookContext(
-                title: titleField,
-                authors: authorField.isEmpty ? [] : [authorField],
-            )
-        ).query
-        // Prefer structured title/author when the free-text field still matches them.
-        let searchQuery: RaveBSDSearchQuery
-        if !free.isEmpty, free != composed {
-            searchQuery = RaveBSDSearchQuery(freeText: free, mode: mediaMode)
-        } else {
-            searchQuery = RaveBSDSearchQuery(
-                title: titleField,
-                author: authorField,
-                mode: mediaMode,
-            )
-        }
+        let searchQuery = RaveBSDSearchQueryBuilding.make(
+            title: titleField,
+            author: authorField,
+            freeText: query,
+            mode: mediaMode,
+        )
 
         let client = RaveBSDClient()
         do {
@@ -349,8 +337,12 @@ struct BookSearchView: View {
             }
         } catch let error as RaveBSDClientError {
             if case .cancelled = error { return }
+            results = []
+            meta = RaveBSDSearchMeta()
             errorMessage = error.message
         } catch {
+            results = []
+            meta = RaveBSDSearchMeta()
             errorMessage = "RaveBSD search failed."
         }
     }
@@ -359,12 +351,19 @@ struct BookSearchView: View {
         var parts = [result.title]
         if !result.source.isEmpty { parts.append(result.source) }
         if let format = result.formatDisplay { parts.append(format) }
+        if let mode = result.searchMode {
+            parts.append(mode.label)
+        }
         parts.append(result.acquisitionMethod.label)
         return parts.joined(separator: " · ")
     }
 
     private func confirmDownload(_ result: RaveBSDSearchResult) async {
         pendingDownload = nil
+        guard result.canAttemptDownload else {
+            downloadMessage = result.warning ?? "This result has no downloadable link."
+            return
+        }
         guard let activeBaseURL else {
             downloadMessage = "No active RaveBSD endpoint."
             return
@@ -373,7 +372,8 @@ struct BookSearchView: View {
         defer { downloadBusy = false }
         let client = RaveBSDClient()
         var bookContext = book
-        bookContext.requestedMediaType = mediaMode.mediaType
+        // Stamp from the search that produced the row — ignore a later format picker change.
+        bookContext.requestedMediaType = result.searchMode?.mediaType ?? mediaMode.mediaType
         do {
             let candidate = try await RaveBSDAcquisition.prepareCandidate(
                 result: result,

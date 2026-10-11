@@ -66,6 +66,8 @@ public struct RaveBSDSearchResult: Equatable, Sendable, Identifiable, Hashable {
     public var md5: String
     public var directFrom: String
     public var directReady: Bool
+    /// Media mode from the search that produced this row. Survives later UI picker changes.
+    public var searchMode: RaveBSDMediaMode?
 
     public init(
         id: String,
@@ -84,6 +86,7 @@ public struct RaveBSDSearchResult: Equatable, Sendable, Identifiable, Hashable {
         md5: String = "",
         directFrom: String = "",
         directReady: Bool = false,
+        searchMode: RaveBSDMediaMode? = nil,
     ) {
         self.id = id
         self.title = title
@@ -101,6 +104,7 @@ public struct RaveBSDSearchResult: Equatable, Sendable, Identifiable, Hashable {
         self.md5 = md5
         self.directFrom = directFrom
         self.directReady = directReady
+        self.searchMode = searchMode
     }
 
     public var acquisitionMethod: RaveBSDAcquisitionMethod {
@@ -283,16 +287,23 @@ enum RaveBSDJSON {
 
 public enum RaveBSDResponseParsing {
     public static func search(data: Data) throws -> RaveBSDSearchResponse {
-        let object = try JSONSerialization.jsonObject(with: data)
+        let object: Any
+        do {
+            object = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw RaveBSDClientError.unsupportedAPIResponse("Search response was not valid JSON")
+        }
         guard let root = object as? [String: Any] else {
             throw RaveBSDClientError.unsupportedAPIResponse("Root JSON was not an object")
         }
-        if let error = root["error"] as? String, !error.isEmpty,
-            (root["results"] as? [Any])?.isEmpty != false
-        {
-            // Error-only payloads still decode so callers can surface the message.
+        let errorText = (root["error"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if root.keys.contains("results"), !(root["results"] is [Any]) {
+            throw RaveBSDClientError.unsupportedAPIResponse("Search results field was not an array")
         }
         let rawResults = root["results"] as? [Any] ?? []
+        if !errorText.isEmpty, rawResults.isEmpty {
+            throw RaveBSDClientError.unsupportedAPIResponse(errorText)
+        }
         var results: [RaveBSDSearchResult] = []
         results.reserveCapacity(rawResults.count)
         for (index, item) in rawResults.enumerated() {

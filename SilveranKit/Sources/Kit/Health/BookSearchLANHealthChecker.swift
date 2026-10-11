@@ -98,9 +98,11 @@ public struct BookSearchLANHealthChecker: ServiceHealthChecking {
                     // Prefer trying the other endpoint before failing.
                     continue
                 }
-                if RaveBSDResponseParsing.isHealthOK(http.data, status: http.status)
-                    || ((200..<300).contains(http.status) && http.status > 0)
-                {
+                if http.status == 401 || http.status == 403 {
+                    lastFailure = (selection, "HTTP \(http.status)", false)
+                    continue
+                }
+                if RaveBSDResponseParsing.isHealthOK(http.data, status: http.status) {
                     return ServiceHealthResult(
                         serviceID: .bookSearchLAN,
                         status: .healthy,
@@ -116,7 +118,9 @@ public struct BookSearchLANHealthChecker: ServiceHealthChecking {
                         isActionableIssue: false,
                     )
                 }
-                if http.status > 0 {
+                if (200..<300).contains(http.status) {
+                    lastFailure = (selection, "unsupportedHealthPayload", false)
+                } else if http.status > 0 {
                     lastFailure = (selection, "HTTP \(http.status)", false)
                 } else {
                     lastFailure = (selection, "emptyStatus", false)
@@ -148,6 +152,40 @@ public struct BookSearchLANHealthChecker: ServiceHealthChecking {
                 lastError: "Cloudflare Access / browser challenge",
                 technicalDetail: lastFailure.technical,
                 suggestedAction: "Allow /health and search API paths through Access, or use the local URL on home Wi‑Fi",
+                isActionableIssue: true,
+            )
+        }
+
+        if let lastFailure,
+            lastFailure.technical == "HTTP 401" || lastFailure.technical == "HTTP 403"
+        {
+            let sanitized = ServiceHealthURLSanitizer.sanitize(lastFailure.selection.baseURL)
+            return ServiceHealthResult(
+                serviceID: .bookSearchLAN,
+                status: .unavailable,
+                summary: "Auth / Access denied",
+                detail: lastFailure.technical,
+                lastChecked: now,
+                sanitizedHost: sanitized,
+                lastError: "Authentication or Access policy denied /health",
+                technicalDetail: lastFailure.technical,
+                suggestedAction: "Check Cloudflare Access policy or use the local URL on home Wi‑Fi",
+                isActionableIssue: true,
+            )
+        }
+
+        if let lastFailure, lastFailure.technical == "unsupportedHealthPayload" {
+            let sanitized = ServiceHealthURLSanitizer.sanitize(lastFailure.selection.baseURL)
+            return ServiceHealthResult(
+                serviceID: .bookSearchLAN,
+                status: .warning,
+                summary: "Unsupported API response",
+                detail: "Host answered, but /health was not RaveBSD’s plain “ok”",
+                lastChecked: now,
+                sanitizedHost: sanitized,
+                lastError: "Unexpected /health payload",
+                technicalDetail: lastFailure.technical,
+                suggestedAction: "Confirm the URL points at RaveBSD",
                 isActionableIssue: true,
             )
         }

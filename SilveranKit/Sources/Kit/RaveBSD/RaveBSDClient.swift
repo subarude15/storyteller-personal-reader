@@ -241,13 +241,37 @@ public struct RaveBSDClient: Sendable {
         if http.status == 401 {
             throw RaveBSDClientError.unauthorized("Missing or invalid X-API-Key")
         }
+        if http.status == 403 {
+            throw RaveBSDClientError.authOrCloudflare(
+                "Authentication or Access policy denied the search (HTTP 403)"
+            )
+        }
+        if !(200..<300).contains(http.status) {
+            if let message = Self.errorMessage(from: http.data), !message.isEmpty {
+                throw RaveBSDClientError.unsupportedAPIResponse(message)
+            }
+            throw RaveBSDClientError.unavailable("Search failed (HTTP \(http.status))")
+        }
         let parsed = try RaveBSDResponseParsing.search(data: http.data)
-        let filtered = RaveBSDResultFiltering.matching(parsed.results, mode: query.mode)
+        let stamped = parsed.results.map { row -> RaveBSDSearchResult in
+            var copy = row
+            copy.searchMode = query.mode
+            return copy
+        }
+        let filtered = RaveBSDResultFiltering.matching(stamped, mode: query.mode)
         return RaveBSDSearchResponse(
             source: parsed.source,
             results: RaveBSDResultFiltering.deduplicated(filtered),
             meta: parsed.meta,
         )
+    }
+
+    private static func errorMessage(from data: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        let text = (object["error"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (text?.isEmpty == false) ? text : nil
     }
 
     public func resolve(

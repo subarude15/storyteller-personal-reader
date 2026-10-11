@@ -3,7 +3,7 @@
 //  SilveranKit
 //
 //  Prefer LAN RaveBSD when reachable; otherwise use the remote URL.
-//  Same idea as StorytellerLANRouting — probe is any HTTP answer to /health.
+//  Reachable means /health returned RaveBSD’s plain “ok”, not any HTTP status.
 //
 //  SPDX-License-Identifier: AGPL-3.0-only
 
@@ -95,7 +95,17 @@ public enum RaveBSDEndpointRouting {
         request.cachePolicy = .reloadIgnoringLocalCacheData
         do {
             let http = try await transport.send(request)
-            return http.status > 0
+            if RaveBSDCloudflare.isChallenge(
+                status: http.status,
+                contentType: http.contentType,
+                data: http.data,
+            ) {
+                return false
+            }
+            if http.status == 401 || http.status == 403 {
+                return false
+            }
+            return RaveBSDResponseParsing.isHealthOK(http.data, status: http.status)
         } catch {
             return false
         }

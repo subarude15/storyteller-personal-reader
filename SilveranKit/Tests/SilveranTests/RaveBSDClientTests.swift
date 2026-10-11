@@ -133,6 +133,88 @@ struct RaveBSDClientTests {
         )
         #expect(response.results.count == 1)
         #expect(response.results[0].title == "Hobbit")
+        #expect(response.results[0].searchMode == .ebooks)
+    }
+
+    @Test func searchStampsAudiobookModeOnResults() async throws {
+        let transport = RaveScript()
+        transport.handler = { _ in
+            let body = """
+            {"source":"all","results":[{"id":"a1","title":"Dune","author":"Herbert","format":"m4b","magnet":"magnet:?xt=urn:btih:aa","source":"ABB"}],"meta":{}}
+            """.data(using: .utf8)!
+            return RaveBSDHTTPResponse(status: 200, data: body)
+        }
+        let response = try await RaveBSDClient(transport: transport).search(
+            baseURL: "http://192.168.1.2:8686",
+            query: RaveBSDSearchQuery(freeText: "dune", mode: .audiobooks),
+        )
+        #expect(response.results.count == 1)
+        #expect(response.results[0].searchMode == .audiobooks)
+    }
+
+    @Test func errorOnlySearchPayloadThrows() {
+        let data = #"{"error":"upstream failed","results":[]}"#.data(using: .utf8)!
+        do {
+            _ = try RaveBSDResponseParsing.search(data: data)
+            Issue.record("expected error-only payload to throw")
+        } catch let error as RaveBSDClientError {
+            guard case .unsupportedAPIResponse(let message) = error else {
+                Issue.record("wrong error \(error)")
+                return
+            }
+            #expect(message.contains("upstream failed"))
+        } catch {
+            Issue.record("unexpected \(error)")
+        }
+    }
+
+    @Test func malformedResultsFieldThrows() {
+        let data = #"{"results":{"not":"an array"}}"#.data(using: .utf8)!
+        #expect(throws: RaveBSDClientError.self) {
+            _ = try RaveBSDResponseParsing.search(data: data)
+        }
+    }
+
+    @Test func searchHTTPErrorSurfacesMessage() async {
+        let transport = RaveScript()
+        transport.handler = { _ in
+            RaveBSDHTTPResponse(
+                status: 502,
+                data: Data(#"{"error":"bad gateway from index"}"#.utf8),
+            )
+        }
+        do {
+            _ = try await RaveBSDClient(transport: transport).search(
+                baseURL: "http://192.168.1.2:8686",
+                query: RaveBSDSearchQuery(freeText: "x", mode: .ebooks),
+            )
+            Issue.record("expected HTTP error to throw")
+        } catch let error as RaveBSDClientError {
+            #expect(error.message.contains("bad gateway from index"))
+        } catch {
+            Issue.record("unexpected \(error)")
+        }
+    }
+
+    @Test func searchForbiddenIsAuthError() async {
+        let transport = RaveScript()
+        transport.handler = { _ in
+            RaveBSDHTTPResponse(status: 403, data: Data("denied".utf8))
+        }
+        do {
+            _ = try await RaveBSDClient(transport: transport).search(
+                baseURL: "http://192.168.1.2:8686",
+                query: RaveBSDSearchQuery(freeText: "x", mode: .ebooks),
+            )
+            Issue.record("expected 403 to throw")
+        } catch let error as RaveBSDClientError {
+            guard case .authOrCloudflare = error else {
+                Issue.record("wrong \(error)")
+                return
+            }
+        } catch {
+            Issue.record("unexpected \(error)")
+        }
     }
 
     @Test func searchUsesSearchAllWithoutKey() async throws {
@@ -227,6 +309,65 @@ struct RaveBSDNormalizationTests {
         #expect(selected?.route == .remote)
     }
 
+    @Test func probeRequiresPlainHealthOK() async {
+        let transport = RaveScript()
+        transport.handler = { _ in
+            RaveBSDHTTPResponse(status: 200, data: Data("welcome".utf8), contentType: "text/plain")
+        }
+        let anyHTTP = await RaveBSDEndpointRouting.probeReachability(
+            baseURL: "http://192.168.1.2:8686",
+            transport: transport,
+        )
+        #expect(anyHTTP == false)
+
+        transport.handler = { _ in
+            RaveBSDHTTPResponse(status: 200, data: Data("ok".utf8), contentType: "text/plain")
+        }
+        let ok = await RaveBSDEndpointRouting.probeReachability(
+            baseURL: "http://192.168.1.2:8686",
+            transport: transport,
+        )
+        #expect(ok == true)
+
+        transport.handler = { _ in
+            RaveBSDHTTPResponse(
+                status: 403,
+                data: Data("<html>Just a moment... challenges.cloudflare.com</html>".utf8),
+                contentType: "text/html",
+            )
+        }
+        let cf = await RaveBSDEndpointRouting.probeReachability(
+            baseURL: "https://rave.punkandrally.com",
+            transport: transport,
+        )
+        #expect(cf == false)
+
+        transport.handler = { _ in
+            RaveBSDHTTPResponse(status: 401, data: Data("auth".utf8))
+        }
+        let unauthorized = await RaveBSDEndpointRouting.probeReachability(
+            baseURL: "https://rave.punkandrally.com",
+            transport: transport,
+        )
+        #expect(unauthorized == false)
+    }
+
+    @Test func resolveLiveSkipsLocalWhenHealthNotOK() async {
+        let transport = RaveScript()
+        transport.handler = { request in
+            if request.url?.host == "192.168.1.2" {
+                return RaveBSDHTTPResponse(status: 200, data: Data("<html>nginx</html>".utf8))
+            }
+            return RaveBSDHTTPResponse(status: 200, data: Data("ok".utf8))
+        }
+        let selected = await RaveBSDEndpointRouting.resolveLive(
+            localURL: "http://192.168.1.2:8686",
+            remoteURL: "https://rave.punkandrally.com",
+            transport: transport,
+        )
+        #expect(selected?.route == .remote)
+    }
+
     @Test func providerPreferenceDefaultsToRaveBSD() {
         #expect(BookSearchProviderKind.preference(from: "") == .raveBSD)
         #expect(BookSearchProviderKind.preference(from: "manual") == .manual)
@@ -243,6 +384,41 @@ struct RaveBSDNormalizationTests {
         #expect(query.title == "The Hobbit")
         #expect(query.author.contains("Tolkien"))
         #expect(query.mode == .audiobooks)
+    }
+
+    @Test func titleAuthorEditInvalidatesStaleFreeText() {
+        let stale = RaveBSDSearchQueryBuilding.make(
+            title: "Dune",
+            author: "Herbert",
+            freeText: "pride and prejudice",
+            mode: .ebooks,
+        )
+        #expect(stale.freeText == "pride and prejudice")
+        #expect(stale.title.isEmpty)
+
+        let synced = RaveBSDSearchQueryBuilding.syncedFreeText(title: "Dune", author: "Herbert")
+        let next = RaveBSDSearchQueryBuilding.make(
+            title: "Dune",
+            author: "Herbert",
+            freeText: synced,
+            mode: .ebooks,
+        )
+        #expect(next.title == "Dune")
+        #expect(next.author == "Herbert")
+        #expect(next.freeText.isEmpty)
+    }
+
+    @Test func matchingComposedFreeTextUsesStructuredFields() {
+        let composed = RaveBSDSearchQueryBuilding.composedQuery(title: "The Hobbit", author: "Tolkien")
+        let query = RaveBSDSearchQueryBuilding.make(
+            title: "The Hobbit",
+            author: "Tolkien",
+            freeText: composed,
+            mode: .ebooks,
+        )
+        #expect(query.title == "The Hobbit")
+        #expect(query.author == "Tolkien")
+        #expect(query.freeText.isEmpty)
     }
 }
 
@@ -277,6 +453,26 @@ struct RaveBSDAcquisitionTests {
         #expect(candidate.transportKind == .magnet)
     }
 
+    @Test func stampedSearchModeSurvivesLaterUIMediaChange() throws {
+        // Row came from an audiobook search; UI picker later flipped to ebooks.
+        let result = RaveBSDSearchResult(
+            id: "2",
+            title: "Dune",
+            format: "m4b",
+            source: "AudiobookBay",
+            magnet: "magnet:?xt=urn:btih:deadbeef",
+            searchMode: .audiobooks,
+        )
+        let uiChangedBook = ManualSearchBookContext(
+            title: "Dune",
+            authors: ["Herbert"],
+            requestedMediaType: .ebook,
+        )
+        let candidate = try RaveBSDAcquisition.candidate(from: result, book: uiChangedBook)
+        #expect(candidate.bookMetadata.requestedMediaType == .audiobook)
+        #expect(candidate.transportKind == .magnet)
+    }
+
     @Test func pageOnlyCannotDownload() {
         let result = RaveBSDSearchResult(
             id: "local-0-x",
@@ -286,6 +482,20 @@ struct RaveBSDAcquisitionTests {
         )
         #expect(result.canAttemptDownload == false)
         #expect(throws: RaveBSDAcquisitionError.self) {
+            _ = try RaveBSDAcquisition.candidate(from: result, book: book)
+        }
+    }
+
+    @Test func unresolvedWithoutLinksCannotBecomeCandidate() {
+        let result = RaveBSDSearchResult(
+            id: "need-resolve",
+            title: "Needs resolve",
+            source: "LibGen",
+            downloadURL: "https://libgen.example/ads.php?md5=1",
+        )
+        #expect(result.canAttemptDownload == true)
+        #expect(throws: RaveBSDAcquisitionError.self) {
+            // Without calling prepareCandidate/resolve, direct candidate build fails safely.
             _ = try RaveBSDAcquisition.candidate(from: result, book: book)
         }
     }
@@ -328,7 +538,44 @@ struct RaveBSDSettingsDefaultsTests {
         #expect(
             BookSearchProviderKind.preference(from: config.bookSearchDefaultProvider) == .raveBSD
         )
+        #expect(config.bookSearchLANEnabled == true)
+    }
+
+    @Test func missingKeysMigrateToIntendedDefaults() throws {
+        let config = try JSONDecoder().decode(SilveranGlobalConfig.self, from: Data("{}".utf8))
+        #expect(config.bookSearchLANEnabled == true)
+        #expect(config.bookSearchLANBaseURL == RaveBSDURL.defaultLocal)
+        #expect(config.raveBSDRemoteURL == RaveBSDURL.defaultRemote)
+        #expect(config.bookSearchDefaultProvider == BookSearchProviderKind.raveBSD.rawValue)
+    }
+
+    @Test func savedDisabledIsPreservedOnDecode() throws {
+        let json = #"{"bookSearchLANEnabled":false}"#.data(using: .utf8)!
+        let config = try JSONDecoder().decode(SilveranGlobalConfig.self, from: json)
         #expect(config.bookSearchLANEnabled == false)
+    }
+
+    @Test func customizedURLsAreNotOverwritten() throws {
+        let json = """
+        {
+          "bookSearchLANBaseURL": "http://10.0.0.5:9999",
+          "raveBSDRemoteURL": "https://books.example.com",
+          "bookSearchDefaultProvider": "manual"
+        }
+        """.data(using: .utf8)!
+        let config = try JSONDecoder().decode(SilveranGlobalConfig.self, from: json)
+        #expect(config.bookSearchLANBaseURL == "http://10.0.0.5:9999")
+        #expect(config.raveBSDRemoteURL == "https://books.example.com")
+        #expect(config.bookSearchDefaultProvider == "manual")
+    }
+
+    @Test func intentionallyEmptyURLsArePreserved() throws {
+        let json = """
+        {"bookSearchLANBaseURL":"","raveBSDRemoteURL":""}
+        """.data(using: .utf8)!
+        let config = try JSONDecoder().decode(SilveranGlobalConfig.self, from: json)
+        #expect(config.bookSearchLANBaseURL == "")
+        #expect(config.raveBSDRemoteURL == "")
     }
 
     @Test func lazyLibrarianProviderKindStillExists() {

@@ -19,7 +19,8 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
     public var bookRequestProvider: String = BookRequestProviderKind.automatic.rawValue
     /// Self-hosted RaveBSD (native book search). Local URL reuses the historical
     /// `bookSearchLAN*` keys so existing installs keep their LAN endpoint.
-    public var bookSearchLANEnabled: Bool = false
+    /// New installs default on; an explicit saved `false` stays off.
+    public var bookSearchLANEnabled: Bool = true
     public var bookSearchLANBaseURL: String = RaveBSDURL.defaultLocal
     public var raveBSDRemoteURL: String = RaveBSDURL.defaultRemote
     /// Default surface for book search sheets (`BookSearchProviderKind`).
@@ -65,14 +66,28 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
         bookRequestProvider =
             (try? container.decode(String.self, forKey: .bookRequestProvider))
             ?? BookRequestProviderKind.automatic.rawValue
-        bookSearchLANEnabled = (try? container.decode(Bool.self, forKey: .bookSearchLANEnabled)) ?? false
-        let decodedLAN = (try? container.decode(String.self, forKey: .bookSearchLANBaseURL)) ?? ""
-        bookSearchLANBaseURL = decodedLAN.isEmpty ? RaveBSDURL.defaultLocal : decodedLAN
-        let decodedRemote = (try? container.decode(String.self, forKey: .raveBSDRemoteURL)) ?? ""
-        raveBSDRemoteURL = decodedRemote.isEmpty ? RaveBSDURL.defaultRemote : decodedRemote
-        bookSearchDefaultProvider =
-            (try? container.decode(String.self, forKey: .bookSearchDefaultProvider))
-            ?? BookSearchProviderKind.raveBSD.rawValue
+        // Missing key → new defaults. Present key (including "") → keep as saved so
+        // intentional clears / disables are not overwritten on upgrade.
+        if let enabled = try? container.decodeIfPresent(Bool.self, forKey: .bookSearchLANEnabled) {
+            bookSearchLANEnabled = enabled
+        } else {
+            bookSearchLANEnabled = true
+        }
+        if let lan = try? container.decodeIfPresent(String.self, forKey: .bookSearchLANBaseURL) {
+            bookSearchLANBaseURL = lan
+        } else {
+            bookSearchLANBaseURL = RaveBSDURL.defaultLocal
+        }
+        if let remote = try? container.decodeIfPresent(String.self, forKey: .raveBSDRemoteURL) {
+            raveBSDRemoteURL = remote
+        } else {
+            raveBSDRemoteURL = RaveBSDURL.defaultRemote
+        }
+        if let provider = try? container.decodeIfPresent(String.self, forKey: .bookSearchDefaultProvider) {
+            bookSearchDefaultProvider = provider
+        } else {
+            bookSearchDefaultProvider = BookSearchProviderKind.raveBSD.rawValue
+        }
         prowlarrEnabled = (try? container.decode(Bool.self, forKey: .prowlarrEnabled)) ?? false
         prowlarrBaseURL = (try? container.decode(String.self, forKey: .prowlarrBaseURL)) ?? ""
         jackettEnabled = (try? container.decode(Bool.self, forKey: .jackettEnabled)) ?? false
