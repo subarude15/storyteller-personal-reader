@@ -102,7 +102,7 @@ struct BookSearchView: View {
             }
             .onChange(of: provider) { _, newValue in
                 Task {
-                    try? await SettingsActor.shared.update(
+                    try? await SettingsActor.shared.updateConfig(
                         bookSearchDefaultProvider: newValue.rawValue
                     )
                 }
