@@ -40,6 +40,7 @@ public struct RequestActivityActionContext: Equatable, Sendable {
     public var shelfarrBaseURL: String
     public var bookSearchLANEnabled: Bool
     public var bookSearchLANBaseURL: String
+    public var raveBSDRemoteURL: String
     /// True when a key is stored. The key itself is never copied here.
     public var lazyLibrarianHasAPIKey: Bool
     /// True when a token is stored. The token itself is never copied here.
@@ -51,6 +52,7 @@ public struct RequestActivityActionContext: Equatable, Sendable {
         shelfarrBaseURL: String = "",
         bookSearchLANEnabled: Bool = false,
         bookSearchLANBaseURL: String = "",
+        raveBSDRemoteURL: String = "",
         lazyLibrarianHasAPIKey: Bool = false,
         shelfarrHasToken: Bool = false,
     ) {
@@ -59,6 +61,7 @@ public struct RequestActivityActionContext: Equatable, Sendable {
         self.shelfarrBaseURL = shelfarrBaseURL
         self.bookSearchLANEnabled = bookSearchLANEnabled
         self.bookSearchLANBaseURL = bookSearchLANBaseURL
+        self.raveBSDRemoteURL = raveBSDRemoteURL
         self.lazyLibrarianHasAPIKey = lazyLibrarianHasAPIKey
         self.shelfarrHasToken = shelfarrHasToken
     }
@@ -71,6 +74,7 @@ public struct RequestActivityActionContext: Equatable, Sendable {
             shelfarrBaseURL: config.shelfarrBaseURL,
             bookSearchLANEnabled: config.bookSearchLANEnabled,
             bookSearchLANBaseURL: config.bookSearchLANBaseURL,
+            raveBSDRemoteURL: config.raveBSDRemoteURL,
             lazyLibrarianHasAPIKey: lazyLibrarianHasAPIKey,
             shelfarrHasToken: !token.isEmpty,
         )
@@ -120,6 +124,7 @@ public enum RequestActivityActions {
         let llURL = RequestActivityExternalLinks.browseURL(from: context.lazyLibrarianBaseURL)
         let shelfURL = RequestActivityExternalLinks.browseURL(from: context.shelfarrBaseURL)
         let lanURL = RequestActivityExternalLinks.browseURL(from: context.bookSearchLANBaseURL)
+        let remoteURL = RequestActivityExternalLinks.browseURL(from: context.raveBSDRemoteURL)
 
         // Open LL when this request is (or was) LazyLibrarian-backed.
         // Automatic rows that still carry a providerBookID came from LL.
@@ -133,7 +138,7 @@ public enum RequestActivityActions {
             && item.provider == .shelfarr
         let openLAN =
             context.bookSearchLANEnabled
-            && lanURL != nil
+            && (lanURL != nil || remoteURL != nil)
         let fallback = RequestActivityFallbackPolicy.offer(for: item, context: context)
 
         return RequestActivityActionAvailability(

@@ -177,6 +177,8 @@ struct MacBookSourcesSettingsView: View {
     @Binding var bookRequestProvider: String
     @Binding var bookSearchLANEnabled: Bool
     @Binding var bookSearchLANBaseURL: String
+    @Binding var raveBSDRemoteURL: String
+    @Binding var bookSearchDefaultProvider: String
     @Binding var prowlarrEnabled: Bool
     @Binding var prowlarrBaseURL: String
     @Binding var jackettEnabled: Bool
@@ -289,22 +291,12 @@ struct MacBookSourcesSettingsView: View {
                 }
                 RequestNotificationsSettingsSection()
                 RequestAutomaticFallbackSettingsSection()
-                Section {
-                    Toggle("Enabled", isOn: $bookSearchLANEnabled)
-                    TextField(
-                        "Base URL",
-                        text: $bookSearchLANBaseURL,
-                        prompt: Text("http://192.168.1.2:3010"),
-                    )
-                    .textContentType(.URL)
-                    .autocorrectionDisabled()
-                } header: {
-                    Text("Book Search (LAN-only)")
-                } footer: {
-                    Text(
-                        "Optional helper on your home network only. Off-network unavailability is informational, not an error."
-                    )
-                }
+                RaveBSDSettingsSection(
+                    enabled: $bookSearchLANEnabled,
+                    localURL: $bookSearchLANBaseURL,
+                    remoteURL: $raveBSDRemoteURL,
+                    defaultProvider: $bookSearchDefaultProvider,
+                )
                 ManualSearchSettingsSection()
 
                 NASDownloadsSettingsSection()

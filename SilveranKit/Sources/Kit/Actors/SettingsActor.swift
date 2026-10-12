@@ -17,9 +17,14 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
     public var lazyLibrarianEnabled: Bool = false
     public var lazyLibrarianBaseURL: String = ""
     public var bookRequestProvider: String = BookRequestProviderKind.automatic.rawValue
-    /// Optional LAN-only book search helper. Never a core dependency.
-    public var bookSearchLANEnabled: Bool = false
-    public var bookSearchLANBaseURL: String = ""
+    /// Self-hosted RaveBSD (native book search). Local URL reuses the historical
+    /// `bookSearchLAN*` keys so existing installs keep their LAN endpoint.
+    /// New installs default on; an explicit saved `false` stays off.
+    public var bookSearchLANEnabled: Bool = true
+    public var bookSearchLANBaseURL: String = RaveBSDURL.defaultLocal
+    public var raveBSDRemoteURL: String = RaveBSDURL.defaultRemote
+    /// Default surface for book search sheets (`BookSearchProviderKind`).
+    public var bookSearchDefaultProvider: String = BookSearchProviderKind.raveBSD.rawValue
     /// Optional read-only Prowlarr diagnostics. API key stays in the keychain.
     public var prowlarrEnabled: Bool = false
     public var prowlarrBaseURL: String = ""
@@ -61,8 +66,28 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
         bookRequestProvider =
             (try? container.decode(String.self, forKey: .bookRequestProvider))
             ?? BookRequestProviderKind.automatic.rawValue
-        bookSearchLANEnabled = (try? container.decode(Bool.self, forKey: .bookSearchLANEnabled)) ?? false
-        bookSearchLANBaseURL = (try? container.decode(String.self, forKey: .bookSearchLANBaseURL)) ?? ""
+        // Missing key → new defaults. Present key (including "") → keep as saved so
+        // intentional clears / disables are not overwritten on upgrade.
+        if let enabled = try? container.decodeIfPresent(Bool.self, forKey: .bookSearchLANEnabled) {
+            bookSearchLANEnabled = enabled
+        } else {
+            bookSearchLANEnabled = true
+        }
+        if let lan = try? container.decodeIfPresent(String.self, forKey: .bookSearchLANBaseURL) {
+            bookSearchLANBaseURL = lan
+        } else {
+            bookSearchLANBaseURL = RaveBSDURL.defaultLocal
+        }
+        if let remote = try? container.decodeIfPresent(String.self, forKey: .raveBSDRemoteURL) {
+            raveBSDRemoteURL = remote
+        } else {
+            raveBSDRemoteURL = RaveBSDURL.defaultRemote
+        }
+        if let provider = try? container.decodeIfPresent(String.self, forKey: .bookSearchDefaultProvider) {
+            bookSearchDefaultProvider = provider
+        } else {
+            bookSearchDefaultProvider = BookSearchProviderKind.raveBSD.rawValue
+        }
         prowlarrEnabled = (try? container.decode(Bool.self, forKey: .prowlarrEnabled)) ?? false
         prowlarrBaseURL = (try? container.decode(String.self, forKey: .prowlarrBaseURL)) ?? ""
         jackettEnabled = (try? container.decode(Bool.self, forKey: .jackettEnabled)) ?? false
@@ -74,7 +99,7 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
     private enum TopLevelCodingKeys: String, CodingKey {
         case reading, playback, readingBar, sync, library, themes, shelfarrBaseURL, shelfarrAPIToken,
             lazyLibrarianEnabled, lazyLibrarianBaseURL, bookRequestProvider,
-            bookSearchLANEnabled, bookSearchLANBaseURL,
+            bookSearchLANEnabled, bookSearchLANBaseURL, raveBSDRemoteURL, bookSearchDefaultProvider,
             prowlarrEnabled, prowlarrBaseURL, jackettEnabled, jackettBaseURL,
             delugeEnabled, delugeBaseURL
     }
@@ -786,6 +811,8 @@ public actor SettingsActor {
         bookRequestProvider: String? = nil,
         bookSearchLANEnabled: Bool? = nil,
         bookSearchLANBaseURL: String? = nil,
+        raveBSDRemoteURL: String? = nil,
+        bookSearchDefaultProvider: String? = nil,
         prowlarrEnabled: Bool? = nil,
         prowlarrBaseURL: String? = nil,
         jackettEnabled: Bool? = nil,
@@ -967,6 +994,12 @@ public actor SettingsActor {
         }
         if let bookSearchLANBaseURL {
             updated.bookSearchLANBaseURL = bookSearchLANBaseURL
+        }
+        if let raveBSDRemoteURL {
+            updated.raveBSDRemoteURL = raveBSDRemoteURL
+        }
+        if let bookSearchDefaultProvider {
+            updated.bookSearchDefaultProvider = bookSearchDefaultProvider
         }
         if let prowlarrEnabled {
             updated.prowlarrEnabled = prowlarrEnabled

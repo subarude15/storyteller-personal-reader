@@ -190,14 +190,15 @@ struct ServiceHealthTests {
     @Test func bookSearchReachable() async {
         let transport = BookSearchScript()
         transport.status = 200
+        transport.body = Data("ok".utf8)
         let result = await BookSearchLANHealthChecker(transport: transport).check(
             settings: .init(
                 bookSearchLANEnabled: true,
-                bookSearchLANBaseURL: "http://192.168.1.2:3010",
+                bookSearchLANBaseURL: "http://192.168.1.2:8686",
             )
         )
         #expect(result.status == .healthy)
-        #expect(result.summary == "Reachable on local network")
+        #expect(result.summary == "Connected · Using local")
         #expect(result.isActionableIssue == false)
     }
 
@@ -207,12 +208,64 @@ struct ServiceHealthTests {
         let result = await BookSearchLANHealthChecker(transport: transport).check(
             settings: .init(
                 bookSearchLANEnabled: true,
-                bookSearchLANBaseURL: "http://192.168.1.2:3010",
+                bookSearchLANBaseURL: "http://192.168.1.2:8686",
+                raveBSDRemoteURL: "",
             )
         )
         #expect(result.status == .localOnly)
         #expect(result.isActionableIssue == false)
         #expect(result.summary == "Not reachable from this network")
+    }
+
+    @Test func bookSearchRemoteCloudflareIsActionable() async {
+        let transport = BookSearchScript()
+        transport.status = 403
+        transport.contentType = "text/html"
+        transport.body = Data("<html>Just a moment... challenges.cloudflare.com</html>".utf8)
+        let result = await BookSearchLANHealthChecker(transport: transport).check(
+            settings: .init(
+                bookSearchLANEnabled: true,
+                bookSearchLANBaseURL: "",
+                raveBSDRemoteURL: "https://rave.punkandrally.com",
+            )
+        )
+        #expect(result.status == .unavailable)
+        #expect(result.isActionableIssue == true)
+        #expect(result.summary == "Cloudflare Access blocked")
+    }
+
+    @Test func bookSearchHTTP200WithoutOKIsNotHealthy() async {
+        let transport = BookSearchScript()
+        transport.status = 200
+        transport.body = Data("<html>nginx</html>".utf8)
+        transport.contentType = "text/html"
+        let result = await BookSearchLANHealthChecker(transport: transport).check(
+            settings: .init(
+                bookSearchLANEnabled: true,
+                bookSearchLANBaseURL: "http://192.168.1.2:8686",
+                raveBSDRemoteURL: "",
+            )
+        )
+        #expect(result.status == .warning)
+        #expect(result.summary == "Unsupported API response")
+        #expect(result.isActionableIssue == true)
+        #expect(result.technicalDetail == "unsupportedHealthPayload")
+    }
+
+    @Test func bookSearchAuthDeniedIsActionable() async {
+        let transport = BookSearchScript()
+        transport.status = 401
+        transport.body = Data("unauthorized".utf8)
+        let result = await BookSearchLANHealthChecker(transport: transport).check(
+            settings: .init(
+                bookSearchLANEnabled: true,
+                bookSearchLANBaseURL: "",
+                raveBSDRemoteURL: "https://rave.punkandrally.com",
+            )
+        )
+        #expect(result.status == .unavailable)
+        #expect(result.summary == "Auth / Access denied")
+        #expect(result.isActionableIssue == true)
     }
 
     // MARK: - Storyteller
@@ -440,12 +493,14 @@ private final class LLScript: LazyLibrarianTransport, @unchecked Sendable {
 
 private final class BookSearchScript: BookSearchLANTransport, @unchecked Sendable {
     var status = 200
+    var body = Data()
+    var contentType: String?
     var error: URLError?
 
     func ping(_ url: URL, timeout _: TimeInterval) async throws -> BookSearchLANHTTP {
         _ = url
         if let error { throw error }
-        return BookSearchLANHTTP(status: status)
+        return BookSearchLANHTTP(status: status, data: body, contentType: contentType)
     }
 }
 

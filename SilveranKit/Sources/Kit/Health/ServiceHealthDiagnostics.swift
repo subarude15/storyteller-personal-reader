@@ -14,6 +14,7 @@ public struct ServiceHealthSettingsSnapshot: Sendable {
     public var shelfarrAPIToken: String
     public var bookSearchLANEnabled: Bool
     public var bookSearchLANBaseURL: String
+    public var raveBSDRemoteURL: String
     public var prowlarrEnabled: Bool
     public var prowlarrBaseURL: String
     public var prowlarrAPIKey: String
@@ -32,6 +33,7 @@ public struct ServiceHealthSettingsSnapshot: Sendable {
         shelfarrAPIToken: String = "",
         bookSearchLANEnabled: Bool = false,
         bookSearchLANBaseURL: String = "",
+        raveBSDRemoteURL: String = "",
         prowlarrEnabled: Bool = false,
         prowlarrBaseURL: String = "",
         prowlarrAPIKey: String = "",
@@ -49,6 +51,7 @@ public struct ServiceHealthSettingsSnapshot: Sendable {
         self.shelfarrAPIToken = shelfarrAPIToken
         self.bookSearchLANEnabled = bookSearchLANEnabled
         self.bookSearchLANBaseURL = bookSearchLANBaseURL
+        self.raveBSDRemoteURL = raveBSDRemoteURL
         self.prowlarrEnabled = prowlarrEnabled
         self.prowlarrBaseURL = prowlarrBaseURL
         self.prowlarrAPIKey = prowlarrAPIKey
@@ -121,6 +124,7 @@ public struct ServiceHealthDiagnostics: Sendable {
             shelfarrAPIToken: config.shelfarrAPIToken,
             bookSearchLANEnabled: config.bookSearchLANEnabled,
             bookSearchLANBaseURL: config.bookSearchLANBaseURL,
+            raveBSDRemoteURL: config.raveBSDRemoteURL,
             prowlarrEnabled: config.prowlarrEnabled,
             prowlarrBaseURL: config.prowlarrBaseURL,
             prowlarrAPIKey: prowlarrKey,

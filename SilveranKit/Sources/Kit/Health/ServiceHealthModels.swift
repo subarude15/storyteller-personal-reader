@@ -71,7 +71,7 @@ public enum ServiceHealthID: String, Codable, Equatable, Sendable, CaseIterable 
             case .prowlarr: "Prowlarr"
             case .jackett: "Jackett"
             case .deluge: "Deluge"
-            case .bookSearchLAN: "Book Search (LAN-only)"
+            case .bookSearchLAN: "RaveBSD"
         }
     }
 }
