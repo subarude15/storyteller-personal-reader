@@ -29,6 +29,12 @@ import AppKit
 struct SilveranReaderWidgets: WidgetBundle {
     var body: some Widget {
         InkAmpContinueWidget()
+        // The Library tile (shelf progress + pinned book). It was compiled into
+        // the macOS extension but never registered here, and never compiled
+        // into the iOS extension at all — so "Add Widget" only offered the
+        // Continue tile in its family shapes. Registering it makes both tiles
+        // available on iPhone and Mac. Same App Group, so no new entitlement.
+        SilveranReadingWidget()
     }
 }
 
