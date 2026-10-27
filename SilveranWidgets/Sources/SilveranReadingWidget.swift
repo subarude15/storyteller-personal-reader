@@ -260,9 +260,11 @@ struct SilveranReadingWidget: Widget {
     }
 }
 
-// @main WidgetBundle lives in InkAmpContinueWidget.swift (registers the
-// Continue tile). This Library widget stays in-tree for paid / SideStore
-// later — it is not part of the Sideload iOS extension.
+// @main WidgetBundle lives in InkAmpContinueWidget.swift and now registers
+// both the ink+amp Continue tile (Small/Medium + Lock Screen accessories) and
+// this Library widget (Small/Medium/Large/ExtraLarge + accessories) for iOS
+// and macOS. iOS Sideload users get both tiles; no extra App Group needed
+// since both share group.com.punkrally.reader.
 
 private struct SilveranReadingWidgetView: View {
     let entry: SilveranReadingEntry

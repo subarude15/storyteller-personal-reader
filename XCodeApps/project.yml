@@ -271,6 +271,12 @@ targets:
       # the AppIntents the buttons use; both are also linked into the app so the
       # system can perform the AudioPlaybackIntents in the app's process.
       - path: SilveranWidgets/Sources/InkAmpContinueWidget.swift
+      # Library (Shelf) progress + pinned-book widget. Same App Group as the
+      # Continue tile (group.com.punkrally.reader), so no extra App ID on a free
+      # team — the appex just gains one more registered Widget. Added 2026-10:
+      # macOS compiled it, iOS didn't, which is why "Add Widget" only offered the
+      # same Continue tile in 4 family shapes.
+      - path: SilveranWidgets/Sources/SilveranReadingWidget.swift
     dependencies:
       - package: Silveran
         product: SilveranAppleWidgets
