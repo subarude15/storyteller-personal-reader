@@ -7,6 +7,7 @@
 //  Playback transport intents are intentionally not surfaced here.
 //
 
+import OSLog
 import SilveranAppleWidgets
 import SwiftUI
 import WidgetKit
@@ -106,12 +107,16 @@ struct InkAmpContinueEntry: TimelineEntry {
 }
 
 struct InkAmpContinueTimelineProvider: TimelineProvider {
+    private static let logger = Logger(subsystem: "com.punkrally.reader", category: "ContinueWidget")
+    private static let bundleRole = Bundle.main.bundleURL.pathExtension == "appex" ? "widget" : "app"
+
     /// Logged only. Not passed to the snapshot store.
     let kind: String
     /// Logged only. Live entries do not branch on this.
     let theme: InkAmpWidgetTheme
 
     func placeholder(in context: Context) -> InkAmpContinueEntry {
+        Self.logger.notice("provider bundle=\(Self.bundleRole, privacy: .public) phase=placeholder event=start")
         let entry = InkAmpContinueEntry.placeholder
         log(
             phase: .placeholder,
@@ -121,6 +126,7 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
             entryDate: entry.date,
             refreshAfter: nil,
         )
+        Self.logger.notice("provider bundle=\(Self.bundleRole, privacy: .public) phase=placeholder event=success")
         return entry
     }
 
@@ -128,6 +134,7 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
         in context: Context,
         completion: @escaping (InkAmpContinueEntry) -> Void,
     ) {
+        Self.logger.notice("provider bundle=\(Self.bundleRole, privacy: .public) phase=snapshot event=start")
         // Gallery preview included. `isPreview` must not swap in the redacted
         // sample — that sample is what made the light compact tile look like a
         // skeleton while a live entry was available.
@@ -141,6 +148,7 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
             entryDate: update.entryDate,
             refreshAfter: update.refreshAfter,
         )
+        Self.logger.notice("provider bundle=\(Self.bundleRole, privacy: .public) phase=snapshot event=success hasItem=\(update.snapshot.hasItem, privacy: .public)")
         completion(InkAmpContinueEntry(date: update.entryDate, resolved: update.resolved))
     }
 
@@ -148,6 +156,7 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
         in context: Context,
         completion: @escaping (Timeline<InkAmpContinueEntry>) -> Void,
     ) {
+        Self.logger.notice("provider bundle=\(Self.bundleRole, privacy: .public) phase=timeline event=start")
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "continue.timeline")
         let update = liveUpdate(phase: .timeline)
         log(
@@ -165,6 +174,7 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
             policy = .atEnd
         }
         let entry = InkAmpContinueEntry(date: update.entryDate, resolved: update.resolved)
+        Self.logger.notice("provider bundle=\(Self.bundleRole, privacy: .public) phase=timeline event=success hasItem=\(update.snapshot.hasItem, privacy: .public)")
         completion(Timeline(entries: [entry], policy: policy))
     }
 

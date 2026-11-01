@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import SilveranKit
 
 #if canImport(WidgetKit) && (os(iOS) || os(macOS))
@@ -286,6 +287,7 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
 }
 
 public enum ContinueWidgetSnapshotStore {
+    private static let logger = Logger(subsystem: "com.punkrally.reader", category: "ContinueWidget")
     private static let snapshotFilename = ContinueWidgetCurrentSnapshot.storageKey
     private static let coversDirectoryName = "ContinueCovers"
     private static let lastTitleDefaultsKey = "inkamp.continueWidget.lastTitle"
@@ -295,23 +297,38 @@ public enum ContinueWidgetSnapshotStore {
     nonisolated(unsafe) private static var lastReloadDate: Date = .distantPast
 
     public static func loadSnapshot(bundle: Bundle = .main) -> ContinueWidgetSnapshot {
+        let bundleRole = bundle.bundleURL.pathExtension == "appex" ? "widget" : "app"
         let fallback = localFallbackSnapshot()
         guard let container = SilveranWidgetSnapshotStore.sharedContainerURL(bundle: bundle)
         else {
-            return ContinueWidgetCurrentSnapshot.select(
+            logger.notice("snapshot bundle=\(bundleRole, privacy: .public) container=false")
+            let snapshot = ContinueWidgetCurrentSnapshot.select(
                 shared: nil,
                 localFallback: fallback,
                 sharedContainerReachable: false,
             )
+            logger.notice("snapshot bundle=\(bundleRole, privacy: .public) selectedHasItem=\(snapshot.hasItem, privacy: .public)")
+            return snapshot
         }
         let url = snapshotURL(in: container)
+        let exists = FileManager.default.fileExists(atPath: url.path)
+        logger.notice("snapshot bundle=\(bundleRole, privacy: .public) container=true exists=\(exists, privacy: .public)")
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let shared: ContinueWidgetSnapshot?
-        if let data = try? Data(contentsOf: url) {
-            shared = try? decoder.decode(ContinueWidgetSnapshot.self, from: data)
-        } else {
+        do {
+            let data = try Data(contentsOf: url)
+            logger.notice("snapshot bundle=\(bundleRole, privacy: .public) read=success")
+            do {
+                shared = try decoder.decode(ContinueWidgetSnapshot.self, from: data)
+                logger.notice("snapshot bundle=\(bundleRole, privacy: .public) decode=success")
+            } catch {
+                shared = nil
+                logger.error("snapshot bundle=\(bundleRole, privacy: .public) decode=failure errorType=\(String(describing: type(of: error)), privacy: .public)")
+            }
+        } catch {
             shared = nil
+            logger.error("snapshot bundle=\(bundleRole, privacy: .public) read=failure errorType=\(String(describing: type(of: error)), privacy: .public)")
         }
         // Reachable container is authoritative: compact tiles must not keep an
         // older process-local audiobook after the shared file has moved on.
@@ -320,6 +337,7 @@ public enum ContinueWidgetSnapshotStore {
             localFallback: fallback,
             sharedContainerReachable: true,
         )
+        logger.notice("snapshot bundle=\(bundleRole, privacy: .public) selectedHasItem=\(snapshot.hasItem, privacy: .public)")
         if snapshot.hasItem {
             rememberLastSnapshot(snapshot)
         }
@@ -399,6 +417,7 @@ public enum ContinueWidgetSnapshotStore {
     ) {
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "publish")
         guard let container = SilveranWidgetSnapshotStore.sharedContainerURL() else {
+            logger.notice("publish outcome=skipped reason=containerUnavailable")
             print("[ContinueWidget] publish skipped — App group container unavailable")
             return
         }
@@ -464,7 +483,10 @@ public enum ContinueWidgetSnapshotStore {
             guard ContinueWidgetReloadPolicy.shouldWrite(
                 previous: previousSnapshot,
                 next: snapshot,
-            ) else { return }
+            ) else {
+                logger.notice("publish outcome=skipped reason=unchanged")
+                return
+            }
 
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
@@ -485,9 +507,14 @@ public enum ContinueWidgetSnapshotStore {
             if reloadNow { lastReloadDate = now }
             publishLock.unlock()
 
-            guard reloadNow else { return }
+            guard reloadNow else {
+                logger.notice("publish outcome=success hasItem=\(snapshot.hasItem, privacy: .public) reloaded=false")
+                return
+            }
             reloadTimelines()
+            logger.notice("publish outcome=success hasItem=\(snapshot.hasItem, privacy: .public) reloaded=true")
         } catch {
+            logger.error("publish outcome=failure errorType=\(String(describing: type(of: error)), privacy: .public)")
             print("[ContinueWidget] publish failed: \(error)")
         }
     }
