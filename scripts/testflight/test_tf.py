@@ -392,30 +392,30 @@ class GateTests(unittest.TestCase):
                     "refs/tags/v1", "refs/tags/testflight/../x/y", "", None):
             self.assertFalse(tf.is_trusted_ref(ref), ref)
 
-    def test_feature_branch_signed_archive_only(self):
+    def test_signed_modes_release_refs_only(self):
         feature = "refs/heads/feature/private-testflight"
+        self.assertFalse(hasattr(tf, "SIGNED_ARCHIVE_ONLY_REF"))
         ok = lambda ref, mode: tf.check_inputs("0.1", tf.DEFAULT_GROUP, ref, TEAM, signed=True, mode=mode)
-        ok(feature, "signed-archive")
-        for ref in ("refs/heads/punk-rally-ios", "refs/tags/testflight/0.1-42"):
+        releases = ("refs/heads/punk-rally-ios", "refs/tags/testflight/0.1-42", "refs/tags/testflight/rc_1.2")
+        for ref in releases:
             for mode in (None, "signed-archive", "upload"):
                 ok(ref, mode)
-        for ref, mode in ((feature, "upload"), (feature, None), (feature, ""), (feature, "validate"),
-                          (feature, "Signed-Archive"), (feature + "-x", "signed-archive"),
-                          ("refs/heads/feature/private-testflight/x", "signed-archive"),
-                          ("refs/tags/feature/private-testflight", "signed-archive"),
-                          ("refs/heads/main", "signed-archive"), ("refs/heads/main", "upload"),
-                          ("refs/pull/1/merge", "signed-archive"), (None, "signed-archive")):
-            with self.subTest(ref=ref, mode=mode), self.assertRaises(tf.Fail):
-                ok(ref, mode)
-        with self.assertRaises(tf.Fail):
-            tf.check_inputs("0.1", tf.DEFAULT_GROUP, feature, "", signed=True, mode="signed-archive")
-        cli = ["check-inputs", "--signed", "--ref", feature, "--team", TEAM, "--marketing", "0.1", "--group", tf.DEFAULT_GROUP]
+        for ref in (feature, feature + "-x", feature + "/x", "refs/tags/feature/private-testflight",
+                    "refs/heads/Feature/private-testflight", "feature/private-testflight",
+                    "refs/heads/testflight/x", "refs/tags/testflight/", "refs/heads/main", "refs/pull/1/merge", None):
+            for mode in (None, "", "signed-archive", "Signed-Archive", "upload", "validate"):
+                with self.subTest(ref=ref, mode=mode), self.assertRaises(tf.Fail):
+                    ok(ref, mode)
+        cli = lambda ref: ["check-inputs", "--signed", "--ref", ref, "--team", TEAM, "--marketing", "0.1",
+                           "--group", tf.DEFAULT_GROUP]
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            self.assertEqual(tf.main(cli + ["--mode", "signed-archive"]), 0)
-            self.assertNotEqual(tf.main(cli + ["--mode", "upload"]), 0)
-            self.assertNotEqual(tf.main(cli), 0)
+            for mode in ("signed-archive", "upload"):
+                self.assertNotEqual(tf.main(cli(feature) + ["--mode", mode]), 0, mode)
+                for ref in releases:
+                    self.assertEqual(tf.main(cli(ref) + ["--mode", mode]), 0, (ref, mode))
+            self.assertNotEqual(tf.main(cli(feature)), 0)
             with self.assertRaises(SystemExit):
-                tf.main(cli + ["--mode", "validate"])
+                tf.main(cli(feature) + ["--mode", "validate"])
 
     def test_inputs(self):
         tf.check_inputs("0.1", tf.DEFAULT_GROUP)

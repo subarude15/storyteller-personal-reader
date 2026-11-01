@@ -3,9 +3,8 @@
 #   signed-archive  sign + export with preinstalled user assets; no upload
 #   upload          signed-archive + internal-only TestFlight upload
 # Signed modes run in the protected "testflight" environment from trusted refs only
-# (punk-rally-ios, testflight/* tags; temporarily feature/private-testflight for
-# signed-archive only, never upload). workflow_dispatch only lists workflows present
-# on the default branch; the selected ref must also contain this file.
+# (refs/heads/punk-rally-ios, refs/tags/testflight/<name>). workflow_dispatch only lists
+# workflows present on the default branch; the selected ref must also contain this file.
 name: ink+amp iOS TestFlight (private)
 
 on:
