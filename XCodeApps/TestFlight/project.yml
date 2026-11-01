@@ -1,0 +1,197 @@
+# TestFlight-only XcodeGen spec (iOS app + WidgetKit + Share extensions).
+# Generate from the repo root:  xcodegen -r . -p . -s XCodeApps/TestFlight/project.yml
+# Mirrors the "Silveran Reader (iOS)" targets in XCodeApps/project.yml, minus
+# CarPlay (no carplay-audio entitlement, no CarPlay scene role). Info plists are
+# written under .build-testflight/ (gitignored) so tracked plists stay untouched.
+# scripts/testflight/test_tf.py fails if this drifts from the shipping spec.
+name: SilveranTestFlight
+options:
+  minimumXcodeGenVersion: 2.38.0
+  deploymentTarget:
+    iOS: "18.0"
+configs:
+  Debug: debug
+  Release: release
+packages:
+  Silveran:
+    path: .
+targetTemplates:
+  testFlightBase:
+    platform: iOS
+    configFiles:
+      Debug: XCodeApps/TestFlight/TestFlight.xcconfig
+      Release: XCodeApps/TestFlight/TestFlight.xcconfig
+    settings:
+      base:
+        IPHONEOS_DEPLOYMENT_TARGET: 18.0
+        CODE_SIGN_STYLE: Manual
+        CURRENT_PROJECT_VERSION: 1
+        GENERATE_INFOPLIST_FILE: NO
+        MARKETING_VERSION: 0.1
+        SWIFT_VERSION: 5.10
+
+targets:
+  Silveran Reader (iOS):
+    type: application
+    templates:
+      - testFlightBase
+    settings:
+      base:
+        CODE_SIGN_ENTITLEMENTS: XCodeApps/TestFlight/App.entitlements
+        INFOPLIST_FILE: .build-testflight/Info-App.plist
+        PRODUCT_BUNDLE_IDENTIFIER: "$(APP_BUNDLE_ID)"
+        PROVISIONING_PROFILE_SPECIFIER: "$(TF_PROFILE_APP)"
+        PRODUCT_NAME: Silveran Reader
+        INFOPLIST_KEY_CFBundleDisplayName: "ink+amp"
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+    info:
+      path: .build-testflight/Info-App.plist
+      properties:
+        CFBundleName: "ink+amp"
+        CFBundleDisplayName: "ink+amp"
+        CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundlePackageType: "$(PRODUCT_BUNDLE_PACKAGE_TYPE)"
+        CFBundleExecutable: "$(EXECUTABLE_NAME)"
+        KEYCHAIN_ACCESS_GROUP: "$(KEYCHAIN_ACCESS_GROUP)"
+        KEYCHAIN_SERVICE: "$(KEYCHAIN_SERVICE)"
+        SILVERAN_WIDGET_APP_GROUP: "$(APP_GROUP_ID)"
+        LSApplicationCategoryType: "public.app-category.books"
+        NSLocalNetworkUsageDescription: "ink+amp needs local network access to connect to your Storyteller server and ad-strip worker."
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        CFBundleURLTypes:
+          - CFBundleURLName: com.punkrally.reader
+            CFBundleURLSchemes:
+              - punkrally
+              - magnet
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIBackgroundModes:
+          - audio
+          - fetch
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.kyonifer.silveran.progresssync.refresh
+        ITSAppUsesNonExemptEncryption: false
+        # CPTemplateApplicationSceneSessionRoleApplication intentionally omitted.
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+    sources:
+      - path: XCodeApps
+        includes:
+          - "**/*.swift"
+        excludes:
+          - "ShareExtension/**"
+      - path: XCodeApps/Assets.xcassets
+        type: assetcatalog
+      - path: XCodeApps/PrivacyInfo.xcprivacy
+        buildPhase: resources
+    dependencies:
+      - package: Silveran
+        product: SilveranAppleKit
+      - package: Silveran
+        product: SilveranReadaloud
+      - target: "Silveran Reader Widgets (iOS)"
+        embed: true
+      - target: "Silveran Reader Share (iOS)"
+        embed: true
+
+  Silveran Reader Share (iOS):
+    type: app-extension
+    templates:
+      - testFlightBase
+    settings:
+      base:
+        APPLICATION_EXTENSION_API_ONLY: YES
+        CODE_SIGN_ENTITLEMENTS: XCodeApps/TestFlight/Share.entitlements
+        INFOPLIST_FILE: .build-testflight/Info-Share.plist
+        PRODUCT_BUNDLE_IDENTIFIER: "$(APP_BUNDLE_ID).share"
+        PROVISIONING_PROFILE_SPECIFIER: "$(TF_PROFILE_SHARE)"
+        PRODUCT_NAME: Silveran Reader Share
+    info:
+      path: .build-testflight/Info-Share.plist
+      properties:
+        CFBundleName: "ink+amp Share"
+        CFBundleDisplayName: "ink+amp"
+        CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundlePackageType: "$(PRODUCT_BUNDLE_PACKAGE_TYPE)"
+        CFBundleExecutable: "$(EXECUTABLE_NAME)"
+        SILVERAN_WIDGET_APP_GROUP: "$(APP_GROUP_ID)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).ShareViewController"
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsText: true
+              NSExtensionActivationSupportsFileWithMaxCount: 1
+    sources:
+      - path: XCodeApps/ShareExtension
+        includes:
+          - "**/*.swift"
+    dependencies:
+      - package: Silveran
+        product: SilveranKit
+
+  Silveran Reader Widgets (iOS):
+    type: app-extension
+    templates:
+      - testFlightBase
+    settings:
+      base:
+        APPLICATION_EXTENSION_API_ONLY: YES
+        CODE_SIGN_ENTITLEMENTS: XCodeApps/TestFlight/Widgets.entitlements
+        INFOPLIST_FILE: .build-testflight/Info-Widgets.plist
+        PRODUCT_BUNDLE_IDENTIFIER: "$(APP_BUNDLE_ID).widgets"
+        PROVISIONING_PROFILE_SPECIFIER: "$(TF_PROFILE_WIDGETS)"
+        PRODUCT_NAME: Silveran Reader Widgets
+    info:
+      path: .build-testflight/Info-Widgets.plist
+      properties:
+        CFBundleName: "Silveran Reader Widgets"
+        CFBundleDisplayName: "ink+amp"
+        CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundlePackageType: "$(PRODUCT_BUNDLE_PACKAGE_TYPE)"
+        CFBundleExecutable: "$(EXECUTABLE_NAME)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        SILVERAN_WIDGET_APP_GROUP: "$(APP_GROUP_ID)"
+    sources:
+      - path: SilveranWidgets/Sources/InkAmpContinueWidget.swift
+    dependencies:
+      - package: Silveran
+        product: SilveranAppleWidgets
+
+schemes:
+  "ink+amp TestFlight (iOS)":
+    shared: true
+    build:
+      targets:
+        "Silveran Reader (iOS)": all
+        "Silveran Reader Widgets (iOS)": all
+        "Silveran Reader Share (iOS)": all
+    run:
+      config: Debug
+      executable: "Silveran Reader (iOS)"
+    test:
+      config: Debug
+      targets: []
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

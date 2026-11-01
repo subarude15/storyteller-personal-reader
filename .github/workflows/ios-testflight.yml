@@ -1,0 +1,234 @@
+# Private TestFlight pipeline (manual only). See docs/TESTFLIGHT.md.
+#   validate        unsigned archive; signing disabled, no secrets/team vars, no Apple calls (default)
+#   signed-archive  sign + export with preinstalled user assets; no upload
+#   upload          signed-archive + internal-only TestFlight upload
+# Signed modes run in the protected "testflight" environment from trusted refs only
+# (punk-rally-ios, testflight/* tags). workflow_dispatch only lists workflows present
+# on the default branch; the selected ref must also contain this file.
+name: ink+amp iOS TestFlight (private)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "validate (unsigned) | signed-archive | upload (internal TestFlight)"
+        type: choice
+        options: [validate, signed-archive, upload]
+        default: validate
+      marketing_version:
+        description: "CFBundleShortVersionString"
+        type: string
+        default: "0.1"
+
+permissions:
+  contents: read
+
+env:
+  XCODE_VERSION: "26.3"
+  XCODEGEN_VERSION: "2.46.0"
+  XCODEGEN_SHA256: "4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806"
+  MAIN_BUNDLE_ID: com.punkrally.reader.ZN8HWD257P
+  APP_GROUP_ID: ${{ vars.TESTFLIGHT_APP_GROUP_ID || 'group.com.punkrally.reader.ZN8HWD257P' }}
+  MARKETING_VERSION: ${{ inputs.marketing_version }}
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+
+jobs:
+  checks:
+    name: Offline config / gate tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Pinned test dependency
+        run: |
+          python3 -m venv "$RUNNER_TEMP/tf-venv"
+          "$RUNNER_TEMP/tf-venv/bin/pip" install --quiet --require-hashes --only-binary=:all: --no-deps \
+            -r scripts/testflight/requirements-test.txt
+          echo "$RUNNER_TEMP/tf-venv/bin" >> "$GITHUB_PATH"
+      - name: Inputs
+        run: python3 scripts/testflight/tf.py check-inputs --marketing "$MARKETING_VERSION" --group "$APP_GROUP_ID"
+      - name: Unit tests
+        env:
+          TF_REQUIRE_ALL_TESTS: "1"
+        run: python3 -m unittest discover -s scripts/testflight -p "test_*.py" -v
+      - name: Shell syntax
+        run: for f in scripts/testflight/*.sh; do bash -n "$f"; done
+
+  unsigned-archive:
+    name: Unsigned archive (validation)
+    needs: checks
+    if: inputs.mode == 'validate'
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Toolchain (pinned Xcode + XcodeGen, icons)
+        run: bash scripts/testflight/setup-tools.sh
+      - name: Build number
+        id: version
+        run: python3 scripts/testflight/tf.py build-number --run-number "$GITHUB_RUN_NUMBER" --run-attempt "$GITHUB_RUN_ATTEMPT"
+      - name: Archive (unsigned)
+        id: build
+        env:
+          BUILD_NUMBER: ${{ steps.version.outputs.build_number }}
+        run: bash scripts/testflight/build.sh unsigned
+      - name: Verify bundles, identities, CarPlay omission
+        env:
+          APP: ${{ steps.build.outputs.app }}
+          BUILD_NUMBER: ${{ steps.version.outputs.build_number }}
+        run: |
+          python3 scripts/testflight/tf.py verify-app --app "$APP" --marketing "$MARKETING_VERSION" \
+            --build "$BUILD_NUMBER" --group "$APP_GROUP_ID"
+      - name: Summary
+        env:
+          BUILD_NUMBER: ${{ steps.version.outputs.build_number }}
+        run: |
+          {
+            echo "### TestFlight validation (unsigned, not uploadable)"
+            echo "- commit: \`$GITHUB_SHA\`"
+            echo "- version: $MARKETING_VERSION ($BUILD_NUMBER)"
+            echo "- bundles: $MAIN_BUNDLE_ID, .widgets, .share; App Group $APP_GROUP_ID"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  signed:
+    name: Signed archive / TestFlight upload
+    needs: checks
+    if: inputs.mode == 'signed-archive' || inputs.mode == 'upload'
+    runs-on: macos-15
+    timeout-minutes: 150
+    environment: testflight
+    concurrency:
+      group: ios-testflight-release
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+    env:
+      MODE: ${{ inputs.mode }}
+      # Verified paid team; a conflicting vars.APPLE_TEAM_ID fails the gate (tf.py VERIFIED_TEAM).
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID || 'ZN8HWD257P' }}
+      APPSTORE_ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
+      APPSTORE_API_KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Gate (trusted ref, verified team, protected environment)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/testflight/tf.py check-inputs --signed --ref "$GITHUB_REF" --team "$APPLE_TEAM_ID" \
+            --marketing "$MARKETING_VERSION" --group "$APP_GROUP_ID"
+          gh api "repos/$GITHUB_REPOSITORY/environments/testflight" > "$RUNNER_TEMP/environment.json" \
+            || { echo "::error::cannot read environment 'testflight' protection rules"; exit 1; }
+          python3 scripts/testflight/tf.py check-environment "$RUNNER_TEMP/environment.json"
+      - name: Toolchain (pinned Xcode + XcodeGen, icons)
+        run: bash scripts/testflight/setup-tools.sh
+      - name: Import signing material (temporary keychain)
+        id: sign
+        env:
+          APPLE_DISTRIBUTION_P12_BASE64: ${{ secrets.APPLE_DISTRIBUTION_P12_BASE64 }}
+          APPLE_DISTRIBUTION_P12_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_P12_PASSWORD }}
+          APPLE_PROFILE_APP_BASE64: ${{ secrets.APPLE_PROFILE_APP_BASE64 }}
+          APPLE_PROFILE_WIDGETS_BASE64: ${{ secrets.APPLE_PROFILE_WIDGETS_BASE64 }}
+          APPLE_PROFILE_SHARE_BASE64: ${{ secrets.APPLE_PROFILE_SHARE_BASE64 }}
+          APPSTORE_API_PRIVATE_KEY: ${{ inputs.mode == 'upload' && secrets.APPSTORE_API_PRIVATE_KEY || '' }}
+        run: bash scripts/testflight/signing.sh setup
+      - name: Validate certificate + profiles
+        id: profiles
+        env:
+          WORK: ${{ steps.sign.outputs.work }}
+          IDENTITY: ${{ steps.sign.outputs.identity_sha1 }}
+        run: |
+          OPENSSL=openssl
+          [[ -x /opt/homebrew/opt/openssl@3/bin/openssl ]] && OPENSSL=/opt/homebrew/opt/openssl@3/bin/openssl
+          OPENSSL="$OPENSSL" python3 scripts/testflight/tf.py validate-signing --team "$APPLE_TEAM_ID" --group "$APP_GROUP_ID" \
+            --identity-sha1 "$IDENTITY" --certs-pem "$WORK/certs.pem" --roots "$WORK/apple-roots.pem" \
+            --app "$WORK/app.mobileprovision" --widgets "$WORK/widgets.mobileprovision" --share "$WORK/share.mobileprovision"
+      - name: Install validated profiles
+        env:
+          UUID_APP: ${{ steps.profiles.outputs.uuid_app }}
+          UUID_WIDGETS: ${{ steps.profiles.outputs.uuid_widgets }}
+          UUID_SHARE: ${{ steps.profiles.outputs.uuid_share }}
+        run: bash scripts/testflight/signing.sh install "$UUID_APP" "$UUID_WIDGETS" "$UUID_SHARE"
+      - name: App record + build number
+        id: version
+        env:
+          ASC_KEY_PATH: ${{ steps.sign.outputs.asc_key_path }}
+        run: |
+          ASC=()
+          [[ "$MODE" == upload ]] && ASC=(--asc)
+          python3 scripts/testflight/tf.py build-number --run-number "$GITHUB_RUN_NUMBER" --run-attempt "$GITHUB_RUN_ATTEMPT" "${ASC[@]}"
+      - name: Archive + export (manual signing)
+        id: build
+        env:
+          BUILD_NUMBER: ${{ steps.version.outputs.build_number }}
+          SIGNING_IDENTITY_SHA1: ${{ steps.sign.outputs.identity_sha1 }}
+          TF_KEYCHAIN: ${{ steps.sign.outputs.keychain }}
+          UUID_APP: ${{ steps.profiles.outputs.uuid_app }}
+          UUID_WIDGETS: ${{ steps.profiles.outputs.uuid_widgets }}
+          UUID_SHARE: ${{ steps.profiles.outputs.uuid_share }}
+        run: bash scripts/testflight/build.sh signed
+      - name: Verify signatures + entitlements (archive and IPA)
+        env:
+          APP: ${{ steps.build.outputs.app }}
+          BUILD_NUMBER: ${{ steps.version.outputs.build_number }}
+          IDENTITY: ${{ steps.sign.outputs.identity_sha1 }}
+          PREFIX: ${{ steps.profiles.outputs.prefix }}
+          UUID_APP: ${{ steps.profiles.outputs.uuid_app }}
+          UUID_WIDGETS: ${{ steps.profiles.outputs.uuid_widgets }}
+          UUID_SHARE: ${{ steps.profiles.outputs.uuid_share }}
+        run: |
+          for TARGET in "$APP" ".build-testflight/ipa/Payload/Silveran Reader.app"; do
+            python3 scripts/testflight/tf.py verify-app --app "$TARGET" --marketing "$MARKETING_VERSION" \
+              --build "$BUILD_NUMBER" --group "$APP_GROUP_ID" --team "$APPLE_TEAM_ID" --prefix "$PREFIX" \
+              --identity-sha1 "$IDENTITY" \
+              --uuid-app "$UUID_APP" --uuid-widgets "$UUID_WIDGETS" --uuid-share "$UUID_SHARE"
+          done
+      - name: Upload to TestFlight (internal only)
+        if: inputs.mode == 'upload'
+        env:
+          IPA: ${{ steps.build.outputs.ipa }}
+          APP_ID: ${{ steps.version.outputs.app_id }}
+          BUILD_NUMBER: ${{ steps.version.outputs.build_number }}
+        run: |
+          xcrun altool --help 2>&1 | grep -q -- "--upload-package" \
+            || { echo "::error::altool in Xcode $XCODE_VERSION lacks --upload-package"; exit 1; }
+          xcrun altool --upload-package "$IPA" --type ios --apple-id "$APP_ID" --bundle-id "$MAIN_BUNDLE_ID" \
+            --bundle-version "$BUILD_NUMBER" --bundle-short-version-string "$MARKETING_VERSION" \
+            --apiKey "$APPSTORE_API_KEY_ID" --apiIssuer "$APPSTORE_ISSUER_ID"
+      - name: Wait for App Store Connect processing
+        id: processing
+        if: inputs.mode == 'upload'
+        env:
+          ASC_KEY_PATH: ${{ steps.sign.outputs.asc_key_path }}
+          APP_ID: ${{ steps.version.outputs.app_id }}
+          BUILD_NUMBER: ${{ steps.version.outputs.build_number }}
+        run: |
+          python3 scripts/testflight/tf.py asc-wait --app-id "$APP_ID" --marketing "$MARKETING_VERSION" --build "$BUILD_NUMBER"
+      - name: Summary
+        if: always()
+        env:
+          BUILD_NUMBER: ${{ steps.version.outputs.build_number }}
+          STATE: ${{ steps.processing.outputs.processing_state }}
+        run: |
+          {
+            echo "### TestFlight $MODE"
+            echo "- commit: \`$GITHUB_SHA\` ($GITHUB_REF)"
+            echo "- version: $MARKETING_VERSION (${BUILD_NUMBER:-not assigned})"
+            echo "- bundles: $MAIN_BUNDLE_ID, .widgets, .share; App Group $APP_GROUP_ID"
+            if [[ "$MODE" == upload ]]; then
+              echo "- App Store Connect processing: ${STATE:-unknown}"
+              [[ "$STATE" == VALID ]] || echo "- Not confirmed processed; an upload is not availability. Check App Store Connect."
+              echo "- Internal testing only; tester access depends on the preconfigured internal group."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$MODE" == upload && "$STATE" != VALID ]]; then echo "::warning::Build not confirmed VALID (state: ${STATE:-unknown})"; fi
+      - name: Remove signing material
+        if: always()
+        run: bash scripts/testflight/signing.sh cleanup

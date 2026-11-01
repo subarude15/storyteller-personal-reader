@@ -1,0 +1,23 @@
+// TestFlight-only identity. Used exclusively by XCodeApps/TestFlight/project.yml;
+// the shipping/AltStore project never includes this file (and Local.xcconfig is
+// deliberately not included here so CI output is reproducible).
+#include "../Configs/Common.xcconfig"
+
+// Verified paid team (overrides the repository default 9CJ7KG7UKQ from Common).
+// project.yml must not re-declare DEVELOPMENT_TEAM, or this value is masked.
+// Unsigned CI clears it on the command line along with CODE_SIGNING_ALLOWED=NO.
+DEVELOPMENT_TEAM = ZN8HWD257P
+CODE_SIGN_STYLE = Manual
+
+// Registered in App Store Connect. Extensions derive .widgets / .share.
+APP_BUNDLE_ID = com.punkrally.reader.ZN8HWD257P
+
+// One App Group for app + widgets + share (entitlements AND the
+// SILVERAN_WIDGET_APP_GROUP Info key all reference this setting).
+// CI may override it with vars.TESTFLIGHT_APP_GROUP_ID; see docs/TESTFLIGHT.md.
+APP_GROUP_ID = group.com.punkrally.reader.ZN8HWD257P
+
+// Per-target manual profile mapping (UUIDs supplied by CI after validation).
+TF_PROFILE_APP =
+TF_PROFILE_WIDGETS =
+TF_PROFILE_SHARE =
