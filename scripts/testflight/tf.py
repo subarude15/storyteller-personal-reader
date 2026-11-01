@@ -34,6 +34,8 @@ KEYCHAIN_SERVICE = "com.kyonifer.silveran.storyteller"
 CARPLAY_ENTITLEMENT = "com.apple.developer.carplay-audio"
 CARPLAY_SCENE_ROLE = "CPTemplateApplicationSceneSessionRoleApplication"
 TRUSTED_REFS = (r"refs/heads/punk-rally-ios", r"refs/tags/testflight/[0-9A-Za-z._-]+")
+# Temporary validation-only exception: signed-archive (never upload) from this exact branch.
+SIGNED_ARCHIVE_ONLY_REF = "refs/heads/feature/private-testflight"
 TEAM_RE = re.compile(r"[A-Z0-9]{10}")
 GROUP_RE = re.compile(r"group\.[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+")
 MARKETING_RE = re.compile(r"[0-9]+(\.[0-9]+){0,2}")
@@ -80,7 +82,9 @@ def openssl():
 
 # ---------------------------------------------------------------- inputs / gate
 
-def is_trusted_ref(ref):
+def is_trusted_ref(ref, mode=None):
+    if mode == "signed-archive" and ref == SIGNED_ARCHIVE_ONLY_REF:
+        return True
     return any(re.fullmatch(p, ref or "") for p in TRUSTED_REFS)
 
 
@@ -88,11 +92,11 @@ def check_team(team):
     require(team == VERIFIED_TEAM, f"Team ID {team!r} is not the verified paid team {VERIFIED_TEAM}")
 
 
-def check_inputs(marketing, group, ref=None, team=None, signed=False):
+def check_inputs(marketing, group, ref=None, team=None, signed=False, mode=None):
     require(MARKETING_RE.fullmatch(marketing or ""), f"marketing version {marketing!r} must be 1-3 numeric components")
     require(GROUP_RE.fullmatch(group or ""), f"App Group {group!r} is not a valid group.* identifier")
     if signed:
-        require(is_trusted_ref(ref), f"ref {ref!r} is not a trusted release ref {TRUSTED_REFS}")
+        require(is_trusted_ref(ref, mode), f"ref {ref!r} is not a trusted release ref for mode {mode!r} {TRUSTED_REFS}")
         check_team(team)
 
 
@@ -427,6 +431,7 @@ def main(argv=None):
     c.add_argument("--ref")
     c.add_argument("--team")
     c.add_argument("--signed", action="store_true")
+    c.add_argument("--mode", choices=("signed-archive", "upload"))
     c = sub.add_parser("check-environment")
     c.add_argument("json_path")
     c = sub.add_parser("build-number")
@@ -460,7 +465,7 @@ def main(argv=None):
 
     try:
         if args.cmd == "check-inputs":
-            check_inputs(args.marketing, args.group, args.ref, args.team, args.signed)
+            check_inputs(args.marketing, args.group, args.ref, args.team, args.signed, args.mode)
             print("inputs ok")
         elif args.cmd == "check-environment":
             check_environment(json.loads(Path(args.json_path).read_text(encoding="utf-8")))
