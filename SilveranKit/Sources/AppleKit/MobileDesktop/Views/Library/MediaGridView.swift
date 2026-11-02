@@ -718,7 +718,9 @@ struct MediaGridView: View {
             }
             #endif
             .frame(width: contentWidth)
+            #if os(macOS)
             .scrollClipDisabled(true)
+            #endif
             .modifier(SoftScrollEdgeModifier())
             .contentShape(Rectangle())
             .onTapGesture {
@@ -737,21 +739,21 @@ struct MediaGridView: View {
             .contentMargins(.trailing, 6, for: .scrollIndicators)
             #endif
             #if os(iOS)
-            .contentMargins(.bottom, bottomFadeHeight, for: .scrollContent)
-            .overlay(alignment: .bottom) {
-                if !reduceTransparency {
-                    LinearGradient(
-                        colors: [
-                            InkAmpAppTheme.resolve(for: colorScheme).background.opacity(0),
-                            InkAmpAppTheme.resolve(for: colorScheme).background,
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom,
-                    )
-                    .frame(height: bottomFadeHeight)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-                }
+            // A safe-area inset (not an overlay) so the scroll view adds the fade height to its
+            // content inset and the last row can always scroll fully above the tab bar.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                LinearGradient(
+                    colors: [
+                        InkAmpAppTheme.resolve(for: colorScheme).background.opacity(0),
+                        InkAmpAppTheme.resolve(for: colorScheme).background,
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom,
+                )
+                .opacity(reduceTransparency ? 0 : 1)
+                .frame(height: bottomFadeHeight)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
             }
             .overlay(alignment: .trailing) {
                 if shouldShowAlphabetScrubber {
