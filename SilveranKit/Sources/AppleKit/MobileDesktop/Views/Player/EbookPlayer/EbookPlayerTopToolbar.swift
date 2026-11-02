@@ -8,8 +8,8 @@ struct EbookPlayerTopToolbar: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @AppStorage(CoverTintSettings.enabledKey) private var coverTintEnabled = CoverTintSettings.defaultEnabled
-    private var coverTintModel = CoverTintModel.shared
-    private var audioMonitor = AudioSessionMonitor.shared
+    private var coverTintModel: CoverTintModel { .shared }
+    private var audioMonitor: AudioSessionMonitor { .shared }
 
     let hasAudioNarration: Bool
     let playbackSpeed: Double
