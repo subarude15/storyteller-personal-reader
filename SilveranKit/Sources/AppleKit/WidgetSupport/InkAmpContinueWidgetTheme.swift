@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import OSLog
 
 /// Light / dark Continue + Next Up Home Screen tiles.
 public enum InkAmpWidgetTheme: String, Sendable, CaseIterable {
@@ -357,7 +358,114 @@ public enum ContinueWidgetTimelineFamily: String, Sendable, CaseIterable {
 public enum ContinueWidgetCurrentSnapshot {
     public static let storageKey = "continue-now.json"
 
+    private static let logger = Logger(subsystem: "com.punkrally.reader", category: "ContinueWidget")
+
+    /// Pure formatting for the selection decision. Returns a diagnostic line
+    /// without logging — tests pass a bundle role explicitly.
+    public static func selectionDecisionLine(
+        shared: ContinueWidgetSnapshot?,
+        localFallback: ContinueWidgetSnapshot?,
+        sharedContainerReachable: Bool,
+        selected: ContinueWidgetSnapshot,
+        bundleRole: String,
+    ) -> String {
+        let sharedState: String
+        if shared == nil {
+            sharedState = "nil"
+        } else if let shared, !shared.hasItem {
+            sharedState = "empty"
+        } else {
+            sharedState = "item"
+        }
+        let fallbackState: String
+        if localFallback == nil {
+            fallbackState = "nil"
+        } else if let localFallback, !localFallback.hasItem {
+            fallbackState = "empty"
+        } else {
+            fallbackState = "item"
+        }
+        let winner: String
+        let reason: String
+        let winnerSnapshot: ContinueWidgetSnapshot?
+        if sharedContainerReachable {
+            if selected.hasItem {
+                winner = "shared"
+                reason = "containerReachable"
+                winnerSnapshot = selected
+            } else {
+                winner = "empty"
+                reason = shared == nil ? "sharedNil" : "sharedEmpty"
+                winnerSnapshot = nil
+            }
+        } else {
+            if selected.hasItem {
+                winner = "fallback"
+                reason = "containerUnreachable"
+                winnerSnapshot = selected
+            } else {
+                winner = "empty"
+                reason = localFallback == nil ? "fallbackNil" : "fallbackEmpty"
+                winnerSnapshot = nil
+            }
+        }
+        let item: String
+        let title: String
+        let progress: String
+        if let winnerSnapshot {
+            let trimmed =
+                winnerSnapshot.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            title = trimmed.isEmpty ? "nil" : trimmed
+            progress = winnerSnapshot.clampedProgress.map { String(format: "%.2f", $0) } ?? "nil"
+            item = winnerSnapshot.mediaIdentity.isEmpty ? "nil" : winnerSnapshot.mediaIdentity
+        } else {
+            title = "nil"
+            progress = "nil"
+            item = "nil"
+        }
+        let line =
+            "[ContinueWidget] select bundle=\(bundleRole) reachable=\(sharedContainerReachable) shared=\(sharedState) fallback=\(fallbackState) winner=\(winner) reason=\(reason) item=\(item) title=\"\(title)\" progress=\(progress)"
+        return line
+    }
+
+    /// Pure formatting for the family resolve step. Same fields for every family.
+    public static func familyResolveLine(
+        family: ContinueWidgetTimelineFamily,
+        selected: ContinueWidgetSnapshot,
+        bundleRole: String,
+    ) -> String {
+        let trimmed = selected.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let title = trimmed.isEmpty ? "nil" : trimmed
+        let progress = selected.clampedProgress.map { String(format: "%.2f", $0) } ?? "nil"
+        let item = selected.mediaIdentity.isEmpty ? "nil" : selected.mediaIdentity
+        return "[ContinueWidget] familyResolve bundle=\(bundleRole) family=\(family.rawValue) item=\(item) title=\"\(title)\" progress=\(progress)"
+    }
+
     public static func select(
+        shared: ContinueWidgetSnapshot?,
+        localFallback: ContinueWidgetSnapshot?,
+        sharedContainerReachable: Bool,
+    ) -> ContinueWidgetSnapshot {
+        let selected = decide(
+            shared: shared,
+            localFallback: localFallback,
+            sharedContainerReachable: sharedContainerReachable,
+        )
+        let bundleRole = Bundle.main.bundleURL.pathExtension == "appex" ? "widget" : "app"
+        let decision = selectionDecisionLine(
+            shared: shared,
+            localFallback: localFallback,
+            sharedContainerReachable: sharedContainerReachable,
+            selected: selected,
+            bundleRole: bundleRole,
+        )
+        logger.notice("\(decision, privacy: .public)")
+        return selected
+    }
+
+    /// Selection logic only. Logging lives in `select` so tests can call this
+    /// without touching Bundle.main.
+    private static func decide(
         shared: ContinueWidgetSnapshot?,
         localFallback: ContinueWidgetSnapshot?,
         sharedContainerReachable: Bool,
@@ -379,14 +487,23 @@ public enum ContinueWidgetCurrentSnapshot {
         localFallback: ContinueWidgetSnapshot?,
         sharedContainerReachable: Bool,
     ) -> ContinueWidgetSnapshot {
+        let selected: ContinueWidgetSnapshot
         switch family {
             case .systemSmall, .systemMedium, .systemLarge:
-                return select(
+                selected = select(
                     shared: shared,
                     localFallback: localFallback,
                     sharedContainerReachable: sharedContainerReachable,
                 )
         }
+        let bundleRole = Bundle.main.bundleURL.pathExtension == "appex" ? "widget" : "app"
+        let resolveLine = familyResolveLine(
+            family: family,
+            selected: selected,
+            bundleRole: bundleRole,
+        )
+        logger.notice("\(resolveLine, privacy: .public)")
+        return selected
     }
 }
 

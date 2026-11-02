@@ -199,21 +199,21 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
         entryDate: Date,
         refreshAfter: Date?,
     ) {
-        #if DEBUG
-        print(
-            InkAmpContinueTimelineResolver.logLine(
-                kind: kind,
-                family: String(describing: family),
-                theme: theme,
-                phase: phase,
-                isPreview: preview,
-                snapshot: snapshot,
-                generatedAt: snapshot.generatedAt,
-                entryDate: entryDate,
-                refreshAfter: refreshAfter,
-            )
+        let line = InkAmpContinueTimelineResolver.logLine(
+            kind: kind,
+            family: String(describing: family),
+            theme: theme,
+            phase: phase,
+            isPreview: preview,
+            snapshot: snapshot,
+            generatedAt: snapshot.generatedAt,
+            entryDate: entryDate,
+            refreshAfter: refreshAfter,
         )
+        #if DEBUG
+        print(line)
         #endif
+        Self.logger.notice("\(line, privacy: .public)")
     }
 }
 

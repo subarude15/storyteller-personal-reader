@@ -931,3 +931,266 @@ struct ContinueWidgetCurrentSnapshotTests {
         )
     }
 }
+
+@Suite("Continue widget selection diagnostics")
+struct ContinueWidgetSelectionDiagnosticsTests {
+    private var vergecast: ContinueWidgetSnapshot {
+        ContinueWidgetSnapshot(
+            title: "Dots get up...",
+            isPlaying: true,
+            kind: .podcast,
+            deepLink: InkAmpContinueLink.continueURL.absoluteString,
+            progress: 0.18,
+            itemID: "pod:vergecast-123",
+        )
+    }
+
+    private var troop: ContinueWidgetSnapshot {
+        ContinueWidgetSnapshot(
+            title: "The Troop",
+            isPlaying: true,
+            kind: .audiobook,
+            deepLink: InkAmpContinueLink.continueURL.absoluteString,
+            progress: 0.04,
+            itemID: "book:storyteller/troop",
+        )
+    }
+
+    @Test func selectionDecisionLineCoversAllSixBranches() {
+        let reachableSharedItem = ContinueWidgetCurrentSnapshot.selectionDecisionLine(
+            shared: vergecast,
+            localFallback: troop,
+            sharedContainerReachable: true,
+            selected: vergecast,
+            bundleRole: "widget",
+        )
+        #expect(reachableSharedItem.contains("reachable=true"))
+        #expect(reachableSharedItem.contains("shared=item"))
+        #expect(reachableSharedItem.contains("fallback=item"))
+        #expect(reachableSharedItem.contains("winner=shared"))
+        #expect(reachableSharedItem.contains("reason=containerReachable"))
+        #expect(reachableSharedItem.contains("item=pod:vergecast-123"))
+        #expect(reachableSharedItem.contains("title=\"Dots get up...\""))
+        #expect(reachableSharedItem.contains("progress=0.18"))
+        #expect(reachableSharedItem.contains("bundle=widget"))
+
+        let reachableSharedEmpty = ContinueWidgetCurrentSnapshot.selectionDecisionLine(
+            shared: ContinueWidgetSnapshot.empty,
+            localFallback: troop,
+            sharedContainerReachable: true,
+            selected: .empty,
+            bundleRole: "widget",
+        )
+        #expect(reachableSharedEmpty.contains("shared=empty"))
+        #expect(reachableSharedEmpty.contains("winner=empty"))
+        #expect(reachableSharedEmpty.contains("reason=sharedEmpty"))
+        #expect(reachableSharedEmpty.contains("item=nil"))
+        #expect(reachableSharedEmpty.contains("title=\"nil\""))
+        #expect(reachableSharedEmpty.contains("progress=nil"))
+
+        let reachableSharedNil = ContinueWidgetCurrentSnapshot.selectionDecisionLine(
+            shared: nil,
+            localFallback: troop,
+            sharedContainerReachable: true,
+            selected: .empty,
+            bundleRole: "widget",
+        )
+        #expect(reachableSharedNil.contains("shared=nil"))
+        #expect(reachableSharedNil.contains("winner=empty"))
+        #expect(reachableSharedNil.contains("reason=sharedNil"))
+
+        let unreachableFallbackItem = ContinueWidgetCurrentSnapshot.selectionDecisionLine(
+            shared: nil,
+            localFallback: troop,
+            sharedContainerReachable: false,
+            selected: troop,
+            bundleRole: "app",
+        )
+        #expect(unreachableFallbackItem.contains("reachable=false"))
+        #expect(unreachableFallbackItem.contains("fallback=item"))
+        #expect(unreachableFallbackItem.contains("winner=fallback"))
+        #expect(unreachableFallbackItem.contains("reason=containerUnreachable"))
+        #expect(unreachableFallbackItem.contains("item=book:storyteller/troop"))
+        #expect(unreachableFallbackItem.contains("title=\"The Troop\""))
+        #expect(unreachableFallbackItem.contains("progress=0.04"))
+        #expect(unreachableFallbackItem.contains("bundle=app"))
+
+        let unreachableFallbackEmpty = ContinueWidgetCurrentSnapshot.selectionDecisionLine(
+            shared: nil,
+            localFallback: ContinueWidgetSnapshot.empty,
+            sharedContainerReachable: false,
+            selected: .empty,
+            bundleRole: "widget",
+        )
+        #expect(unreachableFallbackEmpty.contains("fallback=empty"))
+        #expect(unreachableFallbackEmpty.contains("winner=empty"))
+        #expect(unreachableFallbackEmpty.contains("reason=fallbackEmpty"))
+
+        let unreachableFallbackNil = ContinueWidgetCurrentSnapshot.selectionDecisionLine(
+            shared: nil,
+            localFallback: nil,
+            sharedContainerReachable: false,
+            selected: .empty,
+            bundleRole: "widget",
+        )
+        #expect(unreachableFallbackNil.contains("fallback=nil"))
+        #expect(unreachableFallbackNil.contains("winner=empty"))
+        #expect(unreachableFallbackNil.contains("reason=fallbackNil"))
+    }
+
+    @Test func selectionDecisionLineTracksTheRealSelection() {
+        // Reachable: shared item wins, empty and nil shared both degrade to .empty.
+        let sharedItem = ContinueWidgetCurrentSnapshot.select(
+            shared: vergecast,
+            localFallback: troop,
+            sharedContainerReachable: true,
+        )
+        let sharedItemLine = ContinueWidgetCurrentSnapshot.selectionDecisionLine(
+            shared: vergecast,
+            localFallback: troop,
+            sharedContainerReachable: true,
+            selected: sharedItem,
+            bundleRole: "widget",
+        )
+        #expect(sharedItemLine.contains("winner=shared"))
+        #expect(sharedItemLine.contains("reason=containerReachable"))
+        #expect(sharedItemLine.contains("item=\(vergecast.mediaIdentity)"))
+
+        let sharedEmpty = ContinueWidgetCurrentSnapshot.select(
+            shared: ContinueWidgetSnapshot.empty,
+            localFallback: troop,
+            sharedContainerReachable: true,
+        )
+        let sharedEmptyLine = ContinueWidgetCurrentSnapshot.selectionDecisionLine(
+            shared: ContinueWidgetSnapshot.empty,
+            localFallback: troop,
+            sharedContainerReachable: true,
+            selected: sharedEmpty,
+            bundleRole: "widget",
+        )
+        #expect(sharedEmptyLine.contains("winner=empty"))
+        #expect(sharedEmptyLine.contains("reason=sharedEmpty"))
+
+        let sharedNil = ContinueWidgetCurrentSnapshot.select(
+            shared: nil,
+            localFallback: troop,
+            sharedContainerReachable: true,
+        )
+        let sharedNilLine = ContinueWidgetCurrentSnapshot.selectionDecisionLine(
+            shared: nil,
+            localFallback: troop,
+            sharedContainerReachable: true,
+            selected: sharedNil,
+            bundleRole: "widget",
+        )
+        #expect(sharedNilLine.contains("winner=empty"))
+        #expect(sharedNilLine.contains("reason=sharedNil"))
+
+        // Unreachable mirror: local fallback wins when it has an item.
+        let fallbackItem = ContinueWidgetCurrentSnapshot.select(
+            shared: nil,
+            localFallback: troop,
+            sharedContainerReachable: false,
+        )
+        let fallbackItemLine = ContinueWidgetCurrentSnapshot.selectionDecisionLine(
+            shared: nil,
+            localFallback: troop,
+            sharedContainerReachable: false,
+            selected: fallbackItem,
+            bundleRole: "widget",
+        )
+        #expect(fallbackItemLine.contains("winner=fallback"))
+        #expect(fallbackItemLine.contains("reason=containerUnreachable"))
+        #expect(fallbackItemLine.contains("item=\(troop.mediaIdentity)"))
+
+        let fallbackEmpty = ContinueWidgetCurrentSnapshot.select(
+            shared: nil,
+            localFallback: ContinueWidgetSnapshot.empty,
+            sharedContainerReachable: false,
+        )
+        let fallbackEmptyLine = ContinueWidgetCurrentSnapshot.selectionDecisionLine(
+            shared: nil,
+            localFallback: ContinueWidgetSnapshot.empty,
+            sharedContainerReachable: false,
+            selected: fallbackEmpty,
+            bundleRole: "widget",
+        )
+        #expect(fallbackEmptyLine.contains("winner=empty"))
+        #expect(fallbackEmptyLine.contains("reason=fallbackEmpty"))
+
+        let fallbackNil = ContinueWidgetCurrentSnapshot.select(
+            shared: nil,
+            localFallback: nil,
+            sharedContainerReachable: false,
+        )
+        let fallbackNilLine = ContinueWidgetCurrentSnapshot.selectionDecisionLine(
+            shared: nil,
+            localFallback: nil,
+            sharedContainerReachable: false,
+            selected: fallbackNil,
+            bundleRole: "widget",
+        )
+        #expect(fallbackNilLine.contains("winner=empty"))
+        #expect(fallbackNilLine.contains("reason=fallbackNil"))
+    }
+
+    @Test func familyResolveLineNamesFamilyAndIdenticalItemForBothFamilies() {
+        let medium = ContinueWidgetCurrentSnapshot.familyResolveLine(
+            family: .systemMedium,
+            selected: vergecast,
+            bundleRole: "widget",
+        )
+        let large = ContinueWidgetCurrentSnapshot.familyResolveLine(
+            family: .systemLarge,
+            selected: vergecast,
+            bundleRole: "widget",
+        )
+        #expect(medium.contains("family=systemMedium"))
+        #expect(medium.contains("item=pod:vergecast-123"))
+        #expect(medium.contains("title=\"Dots get up...\""))
+        #expect(medium.contains("progress=0.18"))
+        #expect(large.contains("family=systemLarge"))
+        #expect(large.contains("title=\"Dots get up...\""))
+        #expect(large.contains("progress=0.18"))
+        // Same item field for medium/large — family is layout only.
+        let mediumItem = medium.components(separatedBy: " ").first { $0.hasPrefix("item=") }
+        let largeItem = large.components(separatedBy: " ").first { $0.hasPrefix("item=") }
+        #expect(mediumItem == "item=pod:vergecast-123")
+        #expect(largeItem == "item=pod:vergecast-123")
+        #expect(mediumItem == largeItem)
+    }
+
+    @Test func timelineLogLineCarriesItemAndProgress() {
+        let loaded = ContinueWidgetSnapshot(
+            title: "Dots get up...",
+            isPlaying: true,
+            kind: .podcast,
+            deepLink: InkAmpContinueLink.continueURL.absoluteString,
+            progress: 0.18,
+            itemID: "pod:vergecast-123",
+        )
+        let line = InkAmpContinueTimelineResolver.logLine(
+            kind: "inkamp.continue.light.medium.v3",
+            family: "systemMedium",
+            theme: .light,
+            phase: .timeline,
+            isPreview: false,
+            snapshot: loaded,
+        )
+        #expect(line.contains("item=pod:vergecast-123"))
+        #expect(line.contains("progress=0.18"))
+        #expect(line.contains("title=\"Dots get up...\""))
+        #expect(line.contains("queue=0"))
+
+        let empty = InkAmpContinueTimelineResolver.logLine(
+            kind: "inkamp.continue.dark.large.v1",
+            family: "systemLarge",
+            theme: .dark,
+            phase: .timeline,
+            isPreview: false,
+            snapshot: .empty,
+        )
+        #expect(empty.contains("item=nil"))
+        #expect(empty.contains("progress=nil"))
+    }
+}
