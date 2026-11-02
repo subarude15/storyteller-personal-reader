@@ -282,6 +282,13 @@ struct MediaGridView: View {
     private let horizontalSpacing: CGFloat = MediaGridView.defaultHorizontalSpacing
     private let verticalSpacing: CGFloat = 24
     private let gridHorizontalPadding: CGFloat = 16
+    #if os(iOS)
+    // AlphabetScrubber is 22pt wide (20pt letters + 2pt trailing pad); this extra trailing
+    // inset keeps grid cards clear of it when it is visible.
+    private let alphabetScrubberInset: CGFloat = 8
+    private let bottomFadeHeight: CGFloat = 32
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    #endif
     private let sidebarWidth: CGFloat = 340
     private let headerFontSize: CGFloat = 32
 
@@ -509,6 +516,21 @@ struct MediaGridView: View {
         return usableWidth / CGFloat(columnCount)
     }
 
+    private func coverGridLayout(
+        containerWidth: CGFloat,
+        minimumTileWidth: CGFloat,
+        minimumCount: Int,
+        spacing: CGFloat,
+    ) -> LayoutConfiguration {
+        let resolved = MediaGridViewUtilities.coverColumnLayout(
+            availableWidth: max(0, containerWidth - gridHorizontalPadding * 2),
+            minimumTileWidth: minimumTileWidth,
+            minimumCount: minimumCount,
+            spacing: spacing,
+        )
+        return LayoutConfiguration(columns: resolved.columns, tileWidth: resolved.tileWidth)
+    }
+
     #if os(macOS)
     // Fixed columns resolve once from the settled width, so the grid does not reflow
     // against the live frame while the detail sidebar animates the width.
@@ -715,6 +737,22 @@ struct MediaGridView: View {
             .contentMargins(.trailing, 6, for: .scrollIndicators)
             #endif
             #if os(iOS)
+            .contentMargins(.bottom, bottomFadeHeight, for: .scrollContent)
+            .overlay(alignment: .bottom) {
+                if !reduceTransparency {
+                    LinearGradient(
+                        colors: [
+                            InkAmpAppTheme.resolve(for: colorScheme).background.opacity(0),
+                            InkAmpAppTheme.resolve(for: colorScheme).background,
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom,
+                    )
+                    .frame(height: bottomFadeHeight)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                }
+            }
             .overlay(alignment: .trailing) {
                 if shouldShowAlphabetScrubber {
                     AlphabetScrubber(
@@ -1276,7 +1314,42 @@ struct MediaGridView: View {
             mediaKind: mediaKind,
             coverPreference: coverPreference,
         )
-        let columnCount = max(layout.columns.count, 1)
+        #if os(iOS)
+        let scrubberInset: CGFloat = shouldShowAlphabetScrubber ? alphabetScrubberInset : 0
+        #else
+        let scrubberInset: CGFloat = 0
+        #endif
+        // Phones pin 2 columns (3 when the cover-size slider is small) in
+        // portrait and only add columns when the width allows (landscape).
+        #if os(iOS)
+        let isPhone = UIDevice.current.userInterfaceIdiom == .phone
+        let isPhoneSmall = isPhone && coverSize < 90
+        let gridMinimumTileWidth: CGFloat = isPhone ? (isPhoneSmall ? 100 : 150) : coverSize
+        let gridMinimumCount = isPhone ? (isPhoneSmall ? 3 : 2) : 1
+        let gridColumnSpacing = horizontalSpacing
+        let gridRowSpacing = verticalSpacing
+        #else
+        let gridMinimumTileWidth = coverSize
+        let gridMinimumCount = 1
+        let gridColumnSpacing: CGFloat = 0
+        let gridRowSpacing: CGFloat = 0
+        #endif
+        let gridLayout = coverGridLayout(
+            containerWidth: containerWidth - scrubberInset,
+            minimumTileWidth: gridMinimumTileWidth,
+            minimumCount: gridMinimumCount,
+            spacing: gridColumnSpacing,
+        )
+        let gridMetrics = MediaItemCardMetrics.make(
+            for: gridLayout.tileWidth,
+            mediaKind: mediaKind,
+            coverPreference: coverPreference,
+        )
+        // Keyboard navigation reads this via lastKnownColumnCount, so grid/fan must report the
+        // columns it actually renders.
+        let columnCount =
+            layoutStyle == .grid || layoutStyle == .fan
+            ? max(gridLayout.columns.count, 1) : max(layout.columns.count, 1)
 
         VStack(alignment: .leading, spacing: verticalSpacing) {
             VStack(alignment: .leading, spacing: 8) {
@@ -1286,7 +1359,9 @@ struct MediaGridView: View {
                 contentFilterBar
             }
             .padding(.horizontal, gridHorizontalPadding)
+            #if os(macOS)
             .padding(.leading, 8)
+            #endif
 
             if cachedDisplayItems.isEmpty && requestLibraryPendingRows.isEmpty {
                 VStack(spacing: 12) {
@@ -1329,46 +1404,22 @@ struct MediaGridView: View {
                 switch layoutStyle {
                     case .grid, .fan:
                         #if os(iOS)
-                        let isPhoneSmall =
-                            UIDevice.current.userInterfaceIdiom == .phone && coverSize < 90
-                        let gridTileSize = isPhoneSmall ? 75.0 : coverSize
-                        let gridMaxSize = isPhoneSmall ? 85.0 : gridTileSize + 40
-                        #else
-                        let gridTileSize = coverSize
-                        let gridMaxSize = gridTileSize + 40
-                        #endif
-                        #if os(macOS)
-                        let gridColumns = fixedGridColumns(
-                            containerWidth: containerWidth,
-                            tileSize: gridTileSize,
-                            maxSize: gridMaxSize,
-                            spacing: 0,
-                        )
-                        #else
-                        let gridColumns = [
-                            GridItem(
-                                .adaptive(minimum: gridTileSize, maximum: gridMaxSize),
-                                spacing: 0,
-                            )
-                        ]
-                        #endif
-                        let gridMetrics = MediaItemCardMetrics.make(
-                            for: gridTileSize,
-                            mediaKind: mediaKind,
-                            coverPreference: coverPreference,
-                        )
-                        #if os(iOS)
                         let gridAlignment: HorizontalAlignment = .center
                         #else
                         let gridAlignment: HorizontalAlignment = .leading
                         #endif
-                        LazyVGrid(columns: gridColumns, alignment: gridAlignment, spacing: 0) {
+                        LazyVGrid(
+                            columns: gridLayout.columns,
+                            alignment: gridAlignment,
+                            spacing: gridRowSpacing,
+                        ) {
                             ForEach(cachedDisplayItems) { item in
                                 card(for: item, metrics: gridMetrics)
                             }
                         }
                         .scrollTargetLayout()
-                        .padding(.horizontal, gridHorizontalPadding)
+                        .padding(.leading, gridHorizontalPadding)
+                        .padding(.trailing, gridHorizontalPadding + scrubberInset)
                     case .compactGrid:
                         #if os(iOS)
                         let isCompactPhoneSmall =
@@ -1427,7 +1478,8 @@ struct MediaGridView: View {
                             }
                         }
                         .scrollTargetLayout()
-                        .padding(.horizontal, gridHorizontalPadding)
+                        .padding(.leading, gridHorizontalPadding)
+                        .padding(.trailing, gridHorizontalPadding + scrubberInset)
                     case .table:
                         LazyVStack(alignment: .leading, spacing: 1) {
                             ForEach(cachedDisplayItems) { item in

@@ -696,7 +696,6 @@ public struct PunkRallyLibraryView: View {
     @State private var ideasSearchText = ""
     @State private var showSettings = false
     @State private var showOfflineSheet = false
-    @State private var showImport = false
     @State private var navigationPath = NavigationPath()
 
     public init() {}
@@ -724,7 +723,8 @@ public struct PunkRallyLibraryView: View {
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, InkAmpMetrics.screenInset)
-                .padding(.vertical, 8)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
                 .tint(theme.accent)
 
                 Group {
@@ -744,20 +744,6 @@ public struct PunkRallyLibraryView: View {
                 showOfflineSheet: $showOfflineSheet,
                 includeDownloadsAndSettingsShortcuts: false
             )
-            .toolbar {
-                if segment == .library {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button {
-                            showImport = true
-                        } label: {
-                            Label("Import", systemImage: "square.and.arrow.down")
-                        }
-                        .accessibilityHint(
-                            "Upload EPUB and audiobook to Storyteller, then generate read-aloud"
-                        )
-                    }
-                }
-            }
             .searchable(
                 text: searchBinding,
                 placement: .navigationBarDrawer(displayMode: .always),
@@ -770,12 +756,6 @@ public struct PunkRallyLibraryView: View {
                 showSettings: $showSettings,
                 showOfflineSheet: $showOfflineSheet
             )
-            .sheet(isPresented: $showImport) {
-                NavigationStack {
-                    UploadNewBookView()
-                }
-                .punkRallyMiniPlayerInset()
-            }
         }
         .punkRallySheets(
             showSettings: $showSettings,
