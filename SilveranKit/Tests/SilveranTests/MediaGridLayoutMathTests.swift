@@ -92,6 +92,26 @@ struct MediaGridLayoutMathTests {
         #expect(layout.columns.allSatisfy { $0.spacing == 0 })
     }
 
+    @Test func cardCoverSpansTileWithNoBackdropPanel() {
+        for preference in CoverPreference.allCases {
+            let metrics = MediaItemCardMetrics.make(
+                for: 171,
+                mediaKind: .ebook,
+                coverPreference: preference,
+            )
+            #expect(metrics.coverWidth == metrics.tileWidth)
+            #if os(iOS)
+            #expect(!MediaItemCardMetrics.rendersDoubleCover(for: preference))
+            #expect(metrics.coverContainerHeight == 171 / preference.preferredContainerAspectRatio)
+            #else
+            #expect(
+                MediaItemCardMetrics.rendersDoubleCover(for: preference)
+                    == (preference == .storytellerDouble)
+            )
+            #endif
+        }
+    }
+
     @Test func invalidInputsFallBackToSingleColumn() {
         let zeroWidth = MediaGridViewUtilities.coverColumnLayout(
             availableWidth: 0,

@@ -39,6 +39,16 @@ struct MediaItemCardMetrics {
     static let baseSubheadlineLineHeight: CGFloat = 16
     #endif
 
+    /// iOS grid cards are cover-first: the Storyteller double-cover composition sits on a tinted
+    /// panel that reads as a tile box on phones, so iOS renders the single preferred cover.
+    static func rendersDoubleCover(for coverPreference: CoverPreference) -> Bool {
+        #if os(iOS)
+        return false
+        #else
+        return coverPreference == .storytellerDouble
+        #endif
+    }
+
     static func make(
         for tileWidth: CGFloat,
         mediaKind _: MediaKind,
@@ -48,7 +58,7 @@ struct MediaItemCardMetrics {
         let contentSpacing: CGFloat = 8
 
         let coverContainerHeight: CGFloat =
-            coverPreference == .storytellerDouble
+            rendersDoubleCover(for: coverPreference)
             ? DoubleCoverView.layoutHeight(for: coverWidth)
             : coverWidth / coverPreference.preferredContainerAspectRatio
 
@@ -477,7 +487,7 @@ struct MediaItemCardView: View {
     #endif
 
     private var isDoubleCover: Bool {
-        coverPreference == .storytellerDouble
+        MediaItemCardMetrics.rendersDoubleCover(for: coverPreference)
     }
 
     @ViewBuilder
