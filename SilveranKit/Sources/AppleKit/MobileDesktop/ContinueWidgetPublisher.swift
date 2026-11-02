@@ -41,6 +41,7 @@ public enum ContinueWidgetPublisher {
         )
 
         AudioSessionMonitor.shared.start()
+        LiveActivityController.shared.install()
         Task {
             await AudioSessionActor.shared.addSnapshotObserver { snapshot in
                 Task { @MainActor in

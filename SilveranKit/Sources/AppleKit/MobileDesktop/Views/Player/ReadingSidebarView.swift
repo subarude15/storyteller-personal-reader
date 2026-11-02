@@ -77,6 +77,7 @@ public struct ReadingSidebarView: View {
     @State private var seekDebounceUntil: Date?
     @AppStorage("showEbookCoverInAudioView") private var showEbookCover = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.coverTint) private var environmentCoverTint
 
     private let onPrevChapter: () -> Void
     private let onSkipBackward: () -> Void
@@ -144,8 +145,12 @@ public struct ReadingSidebarView: View {
         .padding(.bottom, 25)
         .frame(minHeight: 400)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(backgroundColor)
-        .tint(usesSystemChrome ? inkTheme.accent : primaryColor)
+        .background {
+            if usesSystemChrome {
+                Color.clear.coverTintBackground(themeBackground: inkTheme.background)
+            }
+        }
+        .tint(usesSystemChrome ? systemAccent : primaryColor)
         .onGeometryChange(for: CGFloat.self) { proxy in
             proxy.size.height
         } action: { height in
@@ -189,12 +194,23 @@ public struct ReadingSidebarView: View {
         VStack(spacing: 12) {
             if let coverArt = displayedCover, let scale = coverScale {
                 let coverView = GeometryReader { geo in
-                    let side = min(
-                        geo.size.width * InkAmpPlayerMetrics.coverWidthFraction,
-                        geo.size.width,
-                    )
+                    let side = usesSystemChrome
+                        ? InkAmpPlayerMetrics.tintedCoverSide(availableWidth: geo.size.width)
+                        : geo.size.width * InkAmpPlayerMetrics.coverWidthFraction
                     Group {
-                        if isSquareCover && !showEbookCover {
+                        if isSquareCover && !showEbookCover && usesSystemChrome {
+                            coverArt
+                                .resizable()
+                                .aspectRatio(1, contentMode: .fit)
+                                .clipShape(
+                                    RoundedRectangle(
+                                        cornerRadius: InkAmpPlayerMetrics.tintedCoverCornerRadius,
+                                        style: .continuous,
+                                    )
+                                )
+                                .coverTintShadow()
+                                .frame(width: side, height: side)
+                        } else if isSquareCover && !showEbookCover {
                             coverArt
                                 .resizable()
                                 .aspectRatio(1, contentMode: .fit)
@@ -353,7 +369,7 @@ public struct ReadingSidebarView: View {
                     }
                 },
             )
-            .tint(usesSystemChrome ? inkTheme.progress : primaryColor)
+            .tint(usesSystemChrome ? (coverTint?.control ?? inkTheme.progress) : primaryColor)
 
             HStack {
                 Text(formatOptionalTime(chapterElapsed))
@@ -494,7 +510,7 @@ public struct ReadingSidebarView: View {
                 PlaybackRateButton(
                     currentRate: model.playbackRate,
                     onRateChange: onPlaybackRateChange,
-                    backgroundColor: usesSystemChrome ? inkTheme.accent : secondaryColor,
+                    backgroundColor: usesSystemChrome ? systemAccent : secondaryColor,
                     foregroundColor: usesSystemChrome ? inkTheme.primaryText : primaryColor,
                     transparency: 1.0,
                     showLabel: true,
@@ -818,8 +834,13 @@ public struct ReadingSidebarView: View {
         foregroundColor == nil
     }
 
-    private var backgroundColor: Color {
-        usesSystemChrome ? inkTheme.background : Color.clear
+    /// Cover tint applies to system chrome only; the readaloud overlay follows the page theme.
+    private var coverTint: CoverTint? {
+        usesSystemChrome ? environmentCoverTint : nil
+    }
+
+    private var systemAccent: Color {
+        coverTint?.control ?? inkTheme.accent
     }
 
     // The sidebar draws over the reader theme background, which follows the user's

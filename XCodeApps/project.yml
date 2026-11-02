@@ -139,6 +139,7 @@ targets:
         BGTaskSchedulerPermittedIdentifiers:
           - com.kyonifer.silveran.progresssync.refresh
         ITSAppUsesNonExemptEncryption: false
+        NSSupportsLiveActivities: true
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: true
           UISceneConfigurations:

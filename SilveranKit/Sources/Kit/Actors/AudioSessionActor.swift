@@ -134,6 +134,8 @@ public struct AudioSessionSnapshot: Sendable {
     public let elapsedSeconds: TimeInterval
     /// Total duration of the current item; 0 when unknown.
     public let durationSeconds: TimeInterval
+    /// Media time left in the current chapter; nil when the item has no chapters.
+    public let chapterRemainingSeconds: TimeInterval?
 
     public init(
         kind: AudioSessionKind,
@@ -144,8 +146,10 @@ public struct AudioSessionSnapshot: Sendable {
         bookProgress: Double,
         playbackRate: Double,
         elapsedSeconds: TimeInterval = 0,
-        durationSeconds: TimeInterval = 0
+        durationSeconds: TimeInterval = 0,
+        chapterRemainingSeconds: TimeInterval? = nil
     ) {
+        self.chapterRemainingSeconds = chapterRemainingSeconds
         self.kind = kind
         self.title = title
         self.author = author
@@ -195,6 +199,7 @@ public actor AudioSessionActor {
     private var smilObserverID: UUID?
     private var attachments: Set<UUID> = []
     private var snapshotObservers: [UUID: @Sendable (AudioSessionSnapshot?) -> Void] = [:]
+    private var remoteSkipInterval: TimeInterval = AudioSessionActor.podcastSkipInterval
 
     private var book: BookMetadata?
     private var mediaURL: URL?
@@ -1551,7 +1556,9 @@ public actor AudioSessionActor {
             bookProgress: state.bookTotal > 0 ? state.bookElapsed / state.bookTotal : 0,
             playbackRate: state.playbackRate,
             elapsedSeconds: state.bookElapsed,
-            durationSeconds: state.bookTotal
+            durationSeconds: state.bookTotal,
+            chapterRemainingSeconds: state.chapterTotal > 0
+                ? max(0, state.chapterTotal - state.chapterElapsed) : nil
         )
     }
 
@@ -1567,7 +1574,9 @@ public actor AudioSessionActor {
             bookProgress: state.bookProgress,
             playbackRate: state.playbackRate,
             elapsedSeconds: state.currentTime,
-            durationSeconds: state.duration
+            durationSeconds: state.duration,
+            chapterRemainingSeconds: chapter != nil && state.chapterDuration > 0
+                ? max(0, state.chapterDuration - state.chapterElapsed) : nil
         )
     }
 
@@ -1858,6 +1867,19 @@ public actor AudioSessionActor {
         }
     }
 
+    /// Adds the current audiobook position to Previous Positions without changing
+    /// playback. Returns false for readaloud/podcast (no Previous Positions) or when the
+    /// checkpoint is rejected.
+    public func markListeningSpot() async -> Bool {
+        guard case .audiobook = currentKind else { return false }
+        let result = await persistRecoveryCheckpoint(
+            reason: SyncReason.userMarkedSpot.rawValue,
+            recordMilestone: true,
+        )
+        if case .saved = result { return true }
+        return false
+    }
+
     private func syncProgress(reason: SyncReason, isExplicitUserAction: Bool = false) async {
         if resolvedPlayback != nil {
             await persistResolvedResume()
@@ -1926,7 +1948,7 @@ public actor AudioSessionActor {
     private func isMilestoneReason(_ reason: SyncReason) -> Bool {
         switch reason {
             case .userPausedPlayback, .userClosedBook, .userDraggedSeekBar,
-                .userSkippedForward, .userSkippedBackward, .userSelectedChapter,
+                .userSkippedForward, .userSkippedBackward, .userMarkedSpot, .userSelectedChapter,
                 .userConfirmedRestart, .userRestoredFromHistory, .userSwitchedFormat,
                 .appBackgrounding, .appTerminating:
                 return true
@@ -2174,6 +2196,14 @@ public actor AudioSessionActor {
         }
     }
 
+    /// Remote skip interval (Lock Screen, headphones, CarPlay share one command center).
+    /// CarPlay raises it to 30s while connected and restores `podcastSkipInterval` after.
+    public func setRemoteSkipInterval(_ seconds: TimeInterval) async {
+        guard seconds.isFinite, seconds > 0, seconds != remoteSkipInterval else { return }
+        remoteSkipInterval = seconds
+        if let currentKind { await configureNowPlayingCommands(for: currentKind) }
+    }
+
     private func configureNowPlayingCommands(for kind: AudioSessionKind) async {
         guard let presenter = SilveranPlatform.nowPlaying else { return }
         let supportsChangePlaybackPosition: Bool
@@ -2183,7 +2213,7 @@ public actor AudioSessionActor {
             case .readaloud:
                 supportsChangePlaybackPosition = false
         }
-        let skip = Self.podcastSkipInterval
+        let skip = remoteSkipInterval
         await presenter.configureCommands(
             skipForwardInterval: skip,
             skipBackwardInterval: skip,

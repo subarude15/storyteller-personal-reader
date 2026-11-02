@@ -141,6 +141,7 @@ class ConfigIsolationTests(unittest.TestCase):
                 del want["UIApplicationSceneManifest"]["UISceneConfigurations"]
                 self.assertEqual(got["UIBackgroundModes"], ["audio", "fetch"])
                 self.assertEqual(got["UIApplicationSceneManifest"], {"UIApplicationSupportsMultipleScenes": True})
+                self.assertIs(got["NSSupportsLiveActivities"], True)
             self.assertEqual(got, want, f"{name} Info drifted from XCodeApps/project.yml")
             self.assertEqual(ours[name]["sources"], shipping[name]["sources"], name)
             self.assertEqual(ours[name]["dependencies"], shipping[name]["dependencies"], name)
@@ -322,7 +323,8 @@ class ArtifactTests(unittest.TestCase):
         if label == "app":
             info.update({"UIApplicationSceneManifest": {"UIApplicationSupportsMultipleScenes": True},
                          "UIBackgroundModes": ["audio", "fetch"], "KEYCHAIN_SERVICE": tf.KEYCHAIN_SERVICE,
-                         "KEYCHAIN_ACCESS_GROUP": f"{PREFIX}.{tf.KEYCHAIN_SUFFIX}", "ITSAppUsesNonExemptEncryption": False})
+                         "KEYCHAIN_ACCESS_GROUP": f"{PREFIX}.{tf.KEYCHAIN_SUFFIX}", "ITSAppUsesNonExemptEncryption": False,
+                         "NSSupportsLiveActivities": True})
         info.update(over)
         return info
 
@@ -339,6 +341,7 @@ class ArtifactTests(unittest.TestCase):
             "wrong bundle": ("widgets", {"CFBundleIdentifier": "com.punkrally.reader.widgets"}),
             "no audio": ("app", {"UIBackgroundModes": ["fetch"]}),
             "keychain service": ("app", {"KEYCHAIN_SERVICE": "x"}),
+            "no live activities": ("app", {"NSSupportsLiveActivities": False}),
         }
         for name, (label, over) in bad.items():
             with self.subTest(name), self.assertRaises(tf.Fail):

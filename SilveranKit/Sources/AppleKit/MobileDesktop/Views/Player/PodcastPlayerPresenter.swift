@@ -205,6 +205,7 @@ public final class PodcastPlayerPresenter {
             // existing mini bar stays visible (video included — audio-only mini).
             if snapshot?.isPlaying != true {
                 activeEpisode = nil
+                if let kind = snapshot?.kind { LiveActivityController.shared.noteUserClosedSession(kind) }
                 await AudioSessionActor.shared.closePodcast()
                 Self.endVideoPresentation()
                 if let closing {

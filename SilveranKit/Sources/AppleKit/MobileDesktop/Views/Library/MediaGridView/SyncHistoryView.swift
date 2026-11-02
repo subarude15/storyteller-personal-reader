@@ -357,6 +357,7 @@ struct SyncHistoryEntryRow: View {
             case .userStartedPlayback: return "Started"
             case .userSkippedForward: return "Skip forward"
             case .userSkippedBackward: return "Skip back"
+            case .userMarkedSpot: return "Marked spot"
             case .periodicDuringActivePlayback: return "Periodic (playing)"
             case .periodicWhileReading: return "Periodic (reading)"
             case .userClosedBook: return "Closed book"

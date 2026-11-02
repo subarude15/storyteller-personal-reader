@@ -310,6 +310,7 @@ export default class PageTurnAnimator {
   #style = "slide";
   #reduceMotion = false;
   #readAloudActive = false;
+  #nativeSpread = false;
   #originalAnimated = new WeakMap();
   #renderer = null;
   #host = null;
@@ -382,6 +383,14 @@ export default class PageTurnAnimator {
     }
   }
 
+  /** iPad spread: the native .mid-spine UIPageViewController owns curl; this sheet stays off. */
+  setNativeSpread(enabled) {
+    this.#nativeSpread = !!enabled;
+    if (this.#nativeSpread && this.#phase !== "idle") {
+      this.cancel({ reason: "native-spread", durationMs: 0 });
+    }
+  }
+
   get style() {
     return this.#style;
   }
@@ -421,6 +430,7 @@ export default class PageTurnAnimator {
   get canCurl() {
     if (this.effectiveStyle !== "curl") return false;
     if (this.#readAloudActive) return false;
+    if (this.#nativeSpread) return false;
     if (this.#renderer?.scrolled) return false;
     return true;
   }

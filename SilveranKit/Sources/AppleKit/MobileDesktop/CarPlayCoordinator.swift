@@ -1,5 +1,6 @@
 #if os(iOS)
 import Foundation
+import OSLog
 import UIKit
 
 public struct CarPlayChapter: Identifiable, Sendable {
@@ -25,11 +26,16 @@ private enum ActivePlayer {
 @Observable
 public final class CarPlayCoordinator {
     public static let shared = CarPlayCoordinator()
+    /// Titles, ids and URLs are never logged.
+    nonisolated static let logger = Logger(subsystem: "com.punkrally.reader", category: "CarPlay")
 
     public var onLibraryUpdated: (() -> Void)?
     public var onChaptersUpdated: (() -> Void)?
     public var onPlaybackStateChanged: (() -> Void)?
     public var isCarPlayConnected: Bool = false
+    /// The CarPlay scene delegate that connected last; a stale delegate's disconnect must not undo it.
+    @ObservationIgnored public var carPlayOwner: ObjectIdentifier?
+    @ObservationIgnored private var connectionReconcileTask: Task<Void, Never>?
 
     private var smilObserverId: UUID?
     private var audiobookObserverId: UUID?
@@ -78,11 +84,6 @@ public final class CarPlayCoordinator {
             guard let self else { return }
 
             let previousBookID = self.currentPlaybackState?.bookID
-            let previouslyPlaying = self.currentPlaybackState?.isPlaying ?? false
-
-            debugLog(
-                "[CarPlayCoordinator] State update: bookID=\(state.bookID?.description ?? "nil"), isPlaying=\(state.isPlaying), prev=\(previouslyPlaying)"
-            )
             self.currentPlaybackState = state
 
             if let bookID = state.bookID {
@@ -220,7 +221,7 @@ public final class CarPlayCoordinator {
 
     public func loadAndPlayBook(_ metadata: BookMetadata, category: LocalMediaCategory) async throws
     {
-        debugLog("[CarPlayCoordinator] loadAndPlayBook: \(metadata.title), category: \(category)")
+        Self.logger.notice("load book category=\(category.rawValue, privacy: .public)")
 
         activePlayer = category == .audio ? .audiobook : .smil
         currentBookID = metadata.id
@@ -228,13 +229,8 @@ public final class CarPlayCoordinator {
         currentAudiobookHref = nil
         wasPlaying = false
 
-        if category == .audio, audiobookObserverId == nil {
-            audiobookObserverId = await AudiobookActor.shared.addStateObserver {
-                [weak self] state in
-                Task { @MainActor [weak self] in
-                    self?.handleAudiobookStateChange(state)
-                }
-            }
+        if category == .audio {
+            await ensureAudiobookObserver()
         }
 
         try await HeadlessAudioSession.open(bookID: metadata.id, category: category)
@@ -247,7 +243,49 @@ public final class CarPlayCoordinator {
         } else {
             await refreshBookStructure()
         }
-        debugLog("[CarPlayCoordinator] Playback started for \(metadata.title)")
+        Self.logger.notice("book playback started")
+    }
+
+    /// Chapters for an audiobook started on the phone rather than from CarPlay.
+    public func adoptAudiobookSession(_ bookID: BookID) async {
+        guard activePlayer != .audiobook || currentBookID != bookID else { return }
+        activePlayer = .audiobook
+        currentBookID = bookID
+        currentAudiobookHref = nil
+        await ensureAudiobookObserver()
+        cachedAudiobookChapters = (await AudioSessionActor.shared.currentState())?.chapters ?? []
+        onChaptersUpdated?()
+    }
+
+    private func ensureAudiobookObserver() async {
+        guard audiobookObserverId == nil else { return }
+        audiobookObserverId = await AudiobookActor.shared.addStateObserver { [weak self] state in
+            Task { @MainActor [weak self] in
+                self?.handleAudiobookStateChange(state)
+            }
+        }
+    }
+
+    /// Plays an RSS episode through the shared podcast player (audio only in the car).
+    /// Prefers the downloaded file; removes it from Up Next like a manual phone play.
+    @discardableResult
+    public func playPodcast(_ item: PodcastPlaybackQueueItem) async -> Bool {
+        let audioURL = PodcastDownloadStore.shared.localAudioURL(for: item.episodeID) ?? item.audioURL
+        PodcastPlaybackQueueStore.shared.noteManualPlay(episodeID: item.episodeID)
+        let started = await PodcastPlayerPresenter.shared.play(
+            PodcastPlayerPresenter.Episode(
+                id: item.episodeID,
+                title: item.title,
+                showTitle: item.showTitle,
+                summary: item.summary,
+                audioURL: audioURL,
+                duration: item.durationSeconds,
+                isVideo: false,
+                coverURL: item.coverURL,
+            )
+        )
+        Self.logger.notice("podcast playback started=\(started, privacy: .public)")
+        return started
     }
 
     public var isPlaying: Bool {
@@ -293,7 +331,23 @@ public final class CarPlayCoordinator {
 
     public func setPlaybackRate(_ rate: Double) async {
         await AudioSessionActor.shared.setPlaybackRate(rate)
-        debugLog("[CarPlayCoordinator] Playback rate set to \(rate)x")
+    }
+
+    /// Global CarPlay side effects, one run at a time across every scene delegate and
+    /// always from `carPlayOwner` at run time, so the last run reflects the latest
+    /// connect/disconnect even when an older delegate's work resumes after an await.
+    public func reconcileCarPlayConnection() {
+        let previous = connectionReconcileTask
+        connectionReconcileTask = Task { @MainActor in
+            await previous?.value
+            guard await SilveranRuntime.start() else { return }
+            let connected = self.carPlayOwner != nil
+            self.isCarPlayConnected = connected
+            await AudioSessionActor.shared.setRemoteSkipInterval(
+                connected ? CarPlayBrowse.remoteSkipSeconds : AudioSessionActor.podcastSkipInterval
+            )
+            await BookServiceActor.shared.setActive(connected, source: .carPlay)
+        }
     }
 
 }

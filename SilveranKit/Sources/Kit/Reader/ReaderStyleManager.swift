@@ -16,6 +16,7 @@ public final class ReaderStyleManager {
     private var styleUpdateTask: Task<Void, Never>?
     private var fontFaceCSS: String = ""
     private var hasAudioNarration = false
+    private var spreadMode = false
     @ObservationIgnored private var fontObserverID: UUID?
 
     public init(settingsVM: any ReaderSettingsReading, bridge: ReaderCommsBridge) {
@@ -51,6 +52,14 @@ public final class ReaderStyleManager {
     public func setReadaloudModeAvailable(_ available: Bool) {
         guard hasAudioNarration != available else { return }
         hasAudioNarration = available
+        scheduleStyleUpdate()
+    }
+
+    /// iPad landscape two-page spread, decided natively by `ReaderSpreadPolicy`. Sent with
+    /// every style update so a reloaded web view picks it up again.
+    public func setSpreadMode(_ enabled: Bool) {
+        guard spreadMode != enabled else { return }
+        spreadMode = enabled
         scheduleStyleUpdate()
     }
 
@@ -151,6 +160,7 @@ public final class ReaderStyleManager {
             userHighlightMode: settingsVM.userHighlightMode,
             readaloudHighlightMode: settingsVM.readaloudHighlightMode,
             reduceMotion: Self.systemReduceMotionEnabled,
+            spreadMode: spreadMode,
         )
     }
 

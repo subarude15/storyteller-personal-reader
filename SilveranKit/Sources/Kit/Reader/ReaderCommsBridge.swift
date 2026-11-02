@@ -338,6 +338,7 @@ public final class ReaderCommsBridge {
         userHighlightMode: String,
         readaloudHighlightMode: String,
         reduceMotion: Bool = false,
+        spreadMode: Bool = false,
     ) async throws {
         guard let js else {
             throw ReaderCommsBridgeError.jsNotAvailable
@@ -363,6 +364,7 @@ public final class ReaderCommsBridge {
             "userHighlightMode": userHighlightMode,
             "readaloudHighlightMode": readaloudHighlightMode,
             "reduceMotion": reduceMotion,
+            "spreadMode": spreadMode,
         ]
 
         styles["backgroundColor"] = backgroundColor ?? NSNull()

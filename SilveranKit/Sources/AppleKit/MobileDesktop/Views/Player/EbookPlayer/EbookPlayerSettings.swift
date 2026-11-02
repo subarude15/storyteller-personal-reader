@@ -13,6 +13,8 @@ struct EbookPlayerSettings: View {
     @State private var fontSizeInput: String = "20"
     @State private var customFamilies: [CustomFontFamily] = []
     @State private var showFontManager = false
+    @AppStorage(CoverTintSettings.enabledKey) private var coverTintEnabled = CoverTintSettings.defaultEnabled
+    @AppStorage(ReaderSpreadPolicy.settingKey) private var twoPagesInLandscape = true
 
     var body: some View {
         iOSBody
@@ -110,6 +112,11 @@ struct EbookPlayerSettings: View {
                     settingsVM.save()
                 }
                 .disabled(settingsVM.scrollingMode)
+
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                Toggle("Two pages in landscape", isOn: $twoPagesInLandscape)
+                    .disabled(settingsVM.scrollingMode)
+            }
 
             Toggle("Scrolling Mode", isOn: $settingsVM.scrollingMode)
                 .onChange(of: settingsVM.scrollingMode) { _, _ in
@@ -246,6 +253,9 @@ struct EbookPlayerSettings: View {
             } label: {
                 Label("Manage Themes...", systemImage: "paintpalette")
             }
+
+            Toggle("Tint player from cover", isOn: $coverTintEnabled)
+                .font(.subheadline)
         }
         .onAppear {
             fontSizeInput = String(Int(settingsVM.fontSize))
@@ -304,6 +314,7 @@ struct EbookPlayerSettings: View {
         settingsVM.showOverlaySkipForward = kDefaultShowOverlaySkipForward
         settingsVM.showOverlayPlayPause = kDefaultShowOverlayPlayPause
         settingsVM.lockViewToAudio = kDefaultLockViewToAudio
+        twoPagesInLandscape = true
 
         settingsVM.save()
     }

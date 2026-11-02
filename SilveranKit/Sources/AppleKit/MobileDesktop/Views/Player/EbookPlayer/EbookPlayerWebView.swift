@@ -142,6 +142,9 @@ private class WebViewCoordinator2: NSObject, WKNavigationDelegate, WKScriptMessa
     var onReaderReady: (() -> Void)?
     /// Latest page-curl snapshot request id; older in-flight captures are dropped.
     var latestPageSnapshotRequestId: Int = 0
+    #if os(iOS)
+    private var spreadCurl: SpreadCurlOverlay?
+    #endif
 
     init(onNavigationFinished: @escaping () -> Void) {
         self.onNavigationFinished = onNavigationFinished
@@ -187,6 +190,13 @@ private class WebViewCoordinator2: NSObject, WKNavigationDelegate, WKScriptMessa
                         requestId: requestId,
                         fillColor: fillColor,
                     )
+
+                #if os(iOS)
+                case "SpreadCurl":
+                    guard let webView = message.webView else { return }
+                    if spreadCurl == nil { spreadCurl = SpreadCurlOverlay(webView: webView) }
+                    spreadCurl?.handle(message.body)
+                #endif
 
                 case "SelectionDefine":
                     let data = try JSONSerialization.data(withJSONObject: message.body)
@@ -385,7 +395,7 @@ private class WebViewCoordinator2: NSObject, WKNavigationDelegate, WKScriptMessa
     }
 
     #if os(iOS)
-    private static func uiColor(fromCSS css: String?) -> UIColor {
+    fileprivate static func uiColor(fromCSS css: String?) -> UIColor {
         guard let css, let color = parseCSSColor(css) else {
             return UIColor(red: 0.969, green: 0.953, blue: 0.918, alpha: 1) // #f7f3ea
         }
@@ -519,6 +529,195 @@ private class WebViewCoordinator2: NSObject, WKNavigationDelegate, WKScriptMessa
 }
 
 #if os(iOS)
+/// Whole-spread page curl for the iPad two-page layout: a UIPageViewController with a
+/// `.mid` spine (double-sided, so it shows [left, right]) laid over the one live web view
+/// and fed with snapshot halves. Foliate commits the turn before `commit` arrives, so the
+/// overlay only animates between two real positions and cancel/resize just lifts it.
+/// Message protocol: SpreadLayout.js `NativeSpreadCurl`.
+@available(iOS 17.0, *)
+@MainActor
+private final class SpreadCurlOverlay {
+    private static let watchdog: Duration = .seconds(3)
+
+    private weak var webView: WKWebView?
+    private var id = 0
+    private var fill = UIColor.white
+    private var before: (left: UIImage, right: UIImage)?
+    private var pendingShowFromRight: Bool?
+    private var fromRight = true
+    private var pager: UIPageViewController?
+    private var mountedSize: CGSize = .zero
+    private var watchdogTask: Task<Void, Never>?
+
+    init(webView: WKWebView) {
+        self.webView = webView
+    }
+
+    func handle(_ body: Any) {
+        guard let dict = body as? [String: Any],
+            let phase = dict["phase"] as? String,
+            let id = (dict["id"] as? NSNumber)?.intValue
+        else { return }
+        switch phase {
+            case "capture":
+                teardown()
+                self.id = id
+                fill = WebViewCoordinator2.uiColor(fromCSS: dict["fillColor"] as? String)
+                Task { await self.capture(id) }
+            case "show":
+                guard id == self.id else { return }
+                let fromRight = dict["fromRight"] as? Bool ?? true
+                if before != nil { mount(fromRight: fromRight) } else { pendingShowFromRight = fromRight }
+            case "commit":
+                guard id == self.id else { return }
+                Task { await self.commit(id) }
+            default:
+                if id == self.id { teardown() }
+        }
+    }
+
+    private func capture(_ id: Int) async {
+        let halves = await snapshotHalves()
+        guard id == self.id else { return }
+        before = halves
+        reply(id, ok: halves != nil)
+        let pendingShow = pendingShowFromRight
+        pendingShowFromRight = nil
+        if let pendingShow {
+            if halves != nil { mount(fromRight: pendingShow) } else { teardown() }
+        }
+    }
+
+    private func mount(fromRight: Bool) {
+        // A sibling above the web view (never inside it) so the post-turn snapshot
+        // cannot capture the old overlay.
+        guard pager == nil, let webView, let before, let host = webView.superview,
+            let parent = Self.owningViewController(of: webView)
+        else { return }
+        let pager = UIPageViewController(
+            transitionStyle: .pageCurl,
+            navigationOrientation: .horizontal,
+            options: [.spineLocation: NSNumber(value: UIPageViewController.SpineLocation.mid.rawValue)],
+        )
+        // `.mid` requires double-sided pages; the pair is always [left, right].
+        pager.isDoubleSided = true
+        pager.setViewControllers(
+            [SpreadPageController(image: before.left), SpreadPageController(image: before.right)],
+            direction: .forward,
+            animated: false,
+        )
+        parent.addChild(pager)
+        pager.view.frame = webView.frame
+        pager.view.isUserInteractionEnabled = false
+        host.insertSubview(pager.view, aboveSubview: webView)
+        pager.didMove(toParent: parent)
+        self.pager = pager
+        self.fromRight = fromRight
+        mountedSize = webView.bounds.size
+        armWatchdog()
+    }
+
+    private func commit(_ id: Int) async {
+        guard let pager, let webView, webView.bounds.size == mountedSize else {
+            teardown()
+            return
+        }
+        armWatchdog()
+        let halves = await snapshotHalves()
+        guard id == self.id, self.pager === pager else { return }
+        guard let halves, webView.bounds.size == mountedSize else {
+            teardown()
+            return
+        }
+        pager.setViewControllers(
+            [SpreadPageController(image: halves.left), SpreadPageController(image: halves.right)],
+            direction: fromRight ? .forward : .reverse,
+            animated: true,
+        ) { [weak self] _ in
+            guard let self, id == self.id else { return }
+            self.teardown()
+        }
+    }
+
+    /// Also invalidates `id`, so a capture or commit still in flight cannot revive the overlay.
+    private func teardown() {
+        id = 0
+        watchdogTask?.cancel()
+        watchdogTask = nil
+        if let pager {
+            pager.willMove(toParent: nil)
+            pager.view.removeFromSuperview()
+            pager.removeFromParent()
+        }
+        pager = nil
+        before = nil
+        pendingShowFromRight = nil
+    }
+
+    private static func owningViewController(of view: UIView) -> UIViewController? {
+        var responder: UIResponder? = view
+        while let next = responder?.next {
+            if let controller = next as? UIViewController { return controller }
+            responder = next
+        }
+        return nil
+    }
+
+    private func armWatchdog() {
+        watchdogTask?.cancel()
+        let id = id
+        watchdogTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.watchdog)
+            guard !Task.isCancelled, let self, id == self.id else { return }
+            self.teardown()
+        }
+    }
+
+    private func reply(_ id: Int, ok: Bool) {
+        webView?.evaluateJavaScript("window.foliateManager?.spreadCurlCaptured?.(\(id), \(ok))", completionHandler: nil)
+    }
+
+    /// Live web-view pixels split at the spine, painted over the reader paper so
+    /// transparent margins never show the page underneath.
+    private func snapshotHalves() async -> (left: UIImage, right: UIImage)? {
+        guard let webView, webView.bounds.width > 1, webView.bounds.height > 1 else { return nil }
+        let config = WKSnapshotConfiguration()
+        config.rect = webView.bounds
+        guard let image = try? await webView.takeSnapshot(configuration: config) else { return nil }
+        let half = CGSize(width: image.size.width / 2, height: image.size.height)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.opaque = true
+        format.scale = image.scale
+        let renderer = UIGraphicsImageRenderer(size: half, format: format)
+        let fill = fill
+        func side(_ originX: CGFloat) -> UIImage {
+            renderer.image { ctx in
+                fill.setFill()
+                ctx.fill(CGRect(origin: .zero, size: half))
+                image.draw(at: CGPoint(x: -originX, y: 0))
+            }
+        }
+        return (side(0), side(half.width))
+    }
+}
+
+private final class SpreadPageController: UIViewController {
+    private let image: UIImage
+
+    init(image: UIImage) {
+        self.image = image
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { return nil }
+
+    override func loadView() {
+        let imageView = UIImageView(image: image)
+        imageView.contentMode = .scaleToFill
+        view = imageView
+    }
+}
+
 @available(iOS 17.0, *)
 class HighlightableWebView: WKWebView {
     var commsBridge: ReaderCommsBridge?
@@ -648,6 +847,9 @@ private func makeWebViewConfiguration2(
     contentController.add(coordinator, name: "FileAccessDiagnostic")
     contentController.add(coordinator, name: "ReaderReady")
     contentController.add(coordinator, name: "RequestPageSnapshot")
+    #if os(iOS)
+    contentController.add(coordinator, name: "SpreadCurl")
+    #endif
 
     contentController.addUserScript(consoleOverrideScript)
     contentController.addUserScript(makeBookOpenScript(ebookPath: ebookPath))

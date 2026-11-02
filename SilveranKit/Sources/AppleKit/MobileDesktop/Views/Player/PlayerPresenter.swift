@@ -131,6 +131,7 @@ public final class PlayerPresenter {
         Task { @MainActor in
             guard let kind = await AudioSessionActor.shared.currentSessionKind() else { return }
             debugLog("[PlayerPresenter] Stopping session for \(kind.bookID)")
+            LiveActivityController.shared.noteUserClosedSession(kind)
             LastOpenBookStore.clearIfMatching(
                 bookId: kind.bookID,
                 category: Self.category(for: kind),

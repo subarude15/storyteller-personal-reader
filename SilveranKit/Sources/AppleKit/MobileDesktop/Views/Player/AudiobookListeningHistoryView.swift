@@ -209,6 +209,7 @@ public struct AudiobookListeningHistoryView: View {
             case .userDraggedSeekBar: return "Seek"
             case .userSkippedForward: return "Skipped forward"
             case .userSkippedBackward: return "Skipped back"
+            case .userMarkedSpot: return "Marked spot"
             case .userSelectedChapter: return "Chapter change"
             case .userClosedBook: return "Closed"
             case .userRestoredFromHistory: return "Restored from history"

@@ -54,6 +54,8 @@ jobs:
         run: python3 -m unittest discover -s scripts/testflight -p "test_*.py" -v
       - name: Shell syntax
         run: for f in scripts/testflight/*.sh; do bash -n "$f"; done
+      - name: Reader spread self-check
+        run: node scripts/spread-layout-selfcheck.mjs
 
   unsigned-archive:
     name: Unsigned archive (validation)
@@ -68,6 +70,10 @@ jobs:
           persist-credentials: false
       - name: Toolchain (pinned Xcode + XcodeGen, icons)
         run: bash scripts/testflight/setup-tools.sh
+      - name: Focused Swift tests (cover tint, Live Activity, CarPlay browse, spread)
+        run: >-
+          swift test --filter
+          'coverTint|InkAmpPlaybackActivityTests|InkAmpLiveActivityGateTests|CarPlayBrowseTests|ReaderSpreadPolicyTests'
       - name: Build number
         id: version
         run: python3 scripts/testflight/tf.py build-number --run-number "$GITHUB_RUN_NUMBER" --run-attempt "$GITHUB_RUN_ATTEMPT"

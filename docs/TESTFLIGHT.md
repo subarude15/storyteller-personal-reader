@@ -67,6 +67,16 @@ gh workflow run ios-testflight.yml --repo subarude15/storyteller-personal-reader
 - **Export options:** `app-store-connect`, manual, `manageAppVersionAndBuildNumber=false`, `testFlightInternalTestingOnly=true`. These keys are checked against `xcodebuild -help` for the pinned Xcode.
 - **Upload:** a read-only lookup must find exactly one ASC app whose `bundleId` matches. The upload uses `xcrun altool --upload-package` with the API key, never an Apple ID password or 2FA. Fastlane is not used, which avoids a Ruby toolchain and lockfile. The job then polls processing state (up to 45 minutes) and reports it. **A finished upload does not mean testers have the build.** Testers get it only if a preconfigured internal group has automatic distribution. The workflow does not create groups, add testers, enable external testing, or submit for beta review.
 
+## Feature validation notes
+
+The `validate` mode also runs feature checks. Neither check uses signing or makes Apple calls.
+
+- **Offline checks job (ubuntu):** `node scripts/spread-layout-selfcheck.mjs`. This checks the iPad spread paginator geometry against the pinned foliate-js grid math: 48pt outer margins, a 32pt gutter, and one turn equals one spread. It also checks the native curl message protocol and that the JS curl stays off while the native curl owns turns.
+- **Unsigned archive job (after `setup-tools.sh` selects the pinned Xcode):** `swift test --filter 'coverTint|InkAmpPlaybackActivityTests|InkAmpLiveActivityGateTests|CarPlayBrowseTests|ReaderSpreadPolicyTests'`. This covers cover-tint math, the Live Activity content state and lifecycle gate, the CarPlay browse model, and the spread policy (thresholds, page pairs, rotation and sidebar sizes, spine opacity).
+- **Run locally:** `python -m unittest discover -s scripts/testflight -p "test_*.py" -v`, `node scripts/page-turn-animator-selfcheck.mjs`, `node scripts/spread-layout-selfcheck.mjs`.
+
+These checks do not replace device QA. Nothing has been run on a device yet: the native spread curl, CarPlay, and Live Activity are all unverified on hardware.
+
 Secret handling: secrets are written with `umask 077` under `$RUNNER_TEMP`. The keychain password is random and masked. There is no `set -x`, no environment dumps, no artifacts, and no caches. The cleanup step runs on `always()` and deletes the keychain, profiles, and API key file. One exception: `security import` only accepts the P12 password as an argument, so it is briefly visible in the process list of the single-tenant hosted VM.
 
 ## One-time bootstrap (supervised, Windows/Linux, no Mac)

@@ -15,6 +15,7 @@ public struct PodcastPlayerView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.coverTint) private var coverTint
     private var theme: InkAmpAppTheme { .resolve(for: colorScheme) }
     private let episode: PodcastPlayerPresenter.Episode
     private let onClose: () -> Void
@@ -303,8 +304,8 @@ public struct PodcastPlayerView: View {
         .padding(.horizontal, InkAmpMetrics.screenInset)
         .padding(.vertical, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(theme.background)
-        .tint(theme.accent)
+        .coverTintBackground(themeBackground: theme.background)
+        .tint(coverTint?.control ?? theme.accent)
     }
 
     /// Pause only when audio is truly playing — never while opening/buffering.
@@ -372,7 +373,7 @@ public struct PodcastPlayerView: View {
         } else {
             GeometryReader { geo in
                 let side = min(
-                    geo.size.width * InkAmpPlayerMetrics.coverWidthFraction,
+                    InkAmpPlayerMetrics.tintedCoverSide(availableWidth: geo.size.width),
                     geo.size.height,
                 )
                 Group {
@@ -396,20 +397,16 @@ public struct PodcastPlayerView: View {
                 .frame(width: side, height: side)
                 .clipShape(
                     RoundedRectangle(
-                        cornerRadius: InkAmpPlayerMetrics.coverCornerRadius,
+                        cornerRadius: InkAmpPlayerMetrics.tintedCoverCornerRadius,
                         style: .continuous,
                     )
                 )
-                .shadow(
-                    color: colorScheme == .dark ? .clear : .black.opacity(0.08),
-                    radius: 10,
-                    y: 3,
-                )
+                .coverTintShadow()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .aspectRatio(1, contentMode: .fit)
             .frame(maxWidth: .infinity)
-            .frame(maxHeight: 280)
+            .frame(maxHeight: InkAmpPlayerMetrics.tintedCoverMaxSide)
         }
     }
 
@@ -443,7 +440,7 @@ public struct PodcastPlayerView: View {
                     Task { await AudioSessionActor.shared.seekPlayback(toFraction: target) }
                 }
             }
-            .tint(theme.progress)
+            .tint(coverTint?.control ?? theme.progress)
             .accessibilityValue("\(Int((fraction * 100).rounded())) percent")
 
             HStack {
@@ -501,7 +498,7 @@ public struct PodcastPlayerView: View {
                 onRateChange: { rate in
                     Task { await AudioSessionActor.shared.setPlaybackRate(rate) }
                 },
-                backgroundColor: theme.accent,
+                backgroundColor: coverTint?.control ?? theme.accent,
                 foregroundColor: theme.primaryText,
                 transparency: 1.0,
                 showLabel: true,

@@ -4,6 +4,13 @@ import { SpanHighlighter } from "./SpanHighlighter.js";
 import { debugLog } from "./DebugConfig.js";
 import BookmarkManager from "./BookmarkManager.js";
 import PageTurnAnimator from "./PageTurnAnimator.js";
+import {
+  COVER_RECTO_ATTRIBUTE,
+  COVER_RECTO_CSS,
+  NativeSpreadCurl,
+  reportedPages,
+  spreadRendererAttributes,
+} from "./SpreadLayout.js";
 
 const getCSS = ({
   lineSpacing = 1.4,
@@ -116,6 +123,7 @@ const getCSS = ({
         position: relative !important;
         z-index: 1 !important;
     }
+    ${COVER_RECTO_CSS}
     ${customCSS || ""}
 `;
 };
@@ -155,6 +163,12 @@ class FoliateManager {
   #scrollingMode = false;
   #pageTurnStyle = "slide";
   #pageTurnAnimator = new PageTurnAnimator();
+  #spreadMode = false;
+  #spreadCurl = new NativeSpreadCurl();
+  #swipeCurlId = 0;
+  #swipeCommitPending = false;
+  #sectionDoc = null;
+  #sectionIndex = null;
   #hasAudioNarration = false;
   #enableMarginClickNavigation = true;
   #lastRelocateRange = null;
@@ -214,12 +228,59 @@ class FoliateManager {
     this.#bookmarkManager?.hideSelectionToolbar?.();
   }
 
+  /** Native reply: the pre-turn spread snapshot is ready (or failed). */
+  spreadCurlCaptured(id, ok) {
+    this.#spreadCurl.captured(id, ok);
+  }
+
+  get #nativeSpreadCurl() {
+    return this.#usesSpread
+      && this.#pageTurnAnimator.effectiveStyle === "curl"
+      && !this.#pageTurnAnimator.readAloudActive
+      && this.#spreadCurl.available;
+  }
+
+  #applyCoverRecto() {
+    const on = this.#usesSpread && this.#sectionIndex === 0;
+    this.#sectionDoc?.documentElement?.toggleAttribute?.(COVER_RECTO_ATTRIBUTE, on);
+  }
+
+  #spreadPosition() {
+    return `${this.#sectionIndex}:${Math.round(this.#view?.renderer?.start ?? 0)}`;
+  }
+
+  /**
+   * Foliate fires page-flip before relocate. Commit a swipe curl only once it rests
+   * on a real page (not a section-edge pad); a snap with no flip is a cancelled turn.
+   */
+  #settleSwipeCurl(detail) {
+    if (!this.#swipeCurlId) return;
+    if (!this.#swipeCommitPending) {
+      if (detail?.reason === "snap") this.#endSwipeCurl(false);
+      return;
+    }
+    const renderer = this.#view?.renderer;
+    const page = renderer?.page ?? 1;
+    const pages = renderer?.pages ?? 3;
+    if (page >= 1 && page <= pages - 2) this.#endSwipeCurl(true);
+  }
+
+  #endSwipeCurl(commit) {
+    const id = this.#swipeCurlId;
+    this.#swipeCurlId = 0;
+    this.#swipeCommitPending = false;
+    if (commit) this.#spreadCurl.commit(id);
+    else this.#spreadCurl.cancel(id);
+  }
+
   #attachEventListeners() {
     this.#view.addEventListener("relocate", ({ detail }) => {
+      this.#settleSwipeCurl(detail);
       this.#reportRelocate(detail);
     });
 
     this.#view.addEventListener("page-flip", ({ detail }) => {
+      if (this.#swipeCurlId) this.#swipeCommitPending = true;
       this.#reportPageFlip(detail);
     });
 
@@ -228,25 +289,37 @@ class FoliateManager {
     this.#view.addEventListener("load", ({ detail }) => {
       const { doc, index } = detail;
       if (doc) {
+        this.#sectionDoc = doc;
+        this.#sectionIndex = index;
+        this.#applyCoverRecto();
+
         let isDragging = false;
         // iOS synthesizes click after touchend; mouse-only isDragging misses swipes,
         // so a page-turn was toggling reader chrome (progress/footer) mid-gesture.
         let touchMoved = false;
         let touchStartX = 0;
         let touchStartY = 0;
+        let swipeShown = false;
 
         doc.addEventListener("touchstart", (event) => {
           touchMoved = false;
+          swipeShown = false;
           const t = event.touches?.[0];
           if (t) {
             touchStartX = t.clientX;
             touchStartY = t.clientY;
           }
+          // Snapshot the spread before Foliate starts scrolling under the finger.
+          if (this.#nativeSpreadCurl && event.touches?.length === 1) {
+            this.#swipeCommitPending = false;
+            this.#swipeCurlId = this.#spreadCurl.capture();
+          }
         }, { passive: true });
 
         doc.addEventListener("touchmove", (event) => {
           const selection = doc.getSelection?.();
-          if (selection && !selection.isCollapsed) {
+          const selecting = selection && !selection.isCollapsed;
+          if (selecting) {
             event.stopPropagation();
           }
           const t = event.touches?.[0];
@@ -254,8 +327,18 @@ class FoliateManager {
             const dx = t.clientX - touchStartX;
             const dy = t.clientY - touchStartY;
             if (dx * dx + dy * dy > 25) touchMoved = true;
+            if (touchMoved && !swipeShown && this.#swipeCurlId) {
+              swipeShown = true;
+              if (selecting || Math.abs(dx) <= Math.abs(dy)) this.#endSwipeCurl(false);
+              // Dragging left always reveals the page on the right, in LTR and RTL.
+              else this.#spreadCurl.show(this.#swipeCurlId, dx < 0);
+            }
           }
         }, { capture: true, passive: true });
+
+        doc.addEventListener("touchend", () => {
+          if (this.#swipeCurlId && !swipeShown) this.#endSwipeCurl(false);
+        }, { passive: true });
 
         doc.addEventListener("keydown", (event) => {
           this.#handleKeyDown(event);
@@ -415,15 +498,7 @@ class FoliateManager {
     const rawPage = isScrolled ? null : this.#view?.renderer?.page;
     const rawPages = isScrolled ? null : this.#view?.renderer?.pages;
 
-    const textPages = typeof rawPages === 'number' && Number.isFinite(rawPages) && rawPages > 0
-        ? Math.max(1, Math.round(rawPages - 2))
-        : null;
-
-    const pageIndex = typeof rawPage === 'number' && Number.isFinite(rawPage) && textPages != null
-        ? Math.max(0, Math.min(textPages - 1, Math.round(rawPage - 1))) + 1
-        : null;
-
-    const totalPages = textPages;
+    const { pageIndex, totalPages } = reportedPages(rawPage, rawPages, this.#usesSpread);
 
     // Let the toolbar dismiss itself only on a genuine page/section move; the
     // "anchor" / "snap" relocate stream that fires while selecting must not.
@@ -593,6 +668,9 @@ class FoliateManager {
       console.warn("[FM2] goLeft() called but view not initialized");
       return;
     }
+    if (this.#nativeSpreadCurl) {
+      void this.#spreadCurl.turn(false, () => this.#view.goLeft(), () => this.#spreadPosition());
+    }
     this.#view.goLeft();
   }
 
@@ -601,6 +679,9 @@ class FoliateManager {
     if (!this.#view) {
       console.warn("[FM2] goRight() called but view not initialized");
       return;
+    }
+    if (this.#nativeSpreadCurl) {
+      void this.#spreadCurl.turn(true, () => this.#view.goRight(), () => this.#spreadPosition());
     }
     this.#view.goRight();
   }
@@ -770,6 +851,14 @@ class FoliateManager {
     if (styles.userHighlightMode !== undefined && styles.userHighlightMode !== null) {
       this.#bookmarkManager.setHighlightMode(styles.userHighlightMode);
     }
+    // Native decides the iPad landscape spread from the measured reader container.
+    // Re-rendering keeps Foliate's anchor, so the CFI survives rotation.
+    if (styles.spreadMode !== undefined && styles.spreadMode !== null && !!styles.spreadMode !== this.#spreadMode) {
+      this.#spreadMode = !!styles.spreadMode;
+      this.#spreadCurl.cancel();
+      this.#pageTurnAnimator.setNativeSpread(this.#spreadMode);
+    }
+    this.#spreadCurl.fillColor = this.#backgroundColor;
 
     this.#applyStylesToRenderer();
     this.#refreshReadaloudHighlight();
@@ -799,7 +888,8 @@ class FoliateManager {
         mediaActiveClass,
         fontSize: this.#fontSize,
         fontFamily: this.#fontFamily,
-        marginLeftRight: this.#marginLeftRight,
+        // Spread margins come from the paginator (48 outer / 32 gutter), not per-column padding.
+        marginLeftRight: this.#usesSpread ? 0 : this.#marginLeftRight,
         marginTopBottom: this.#marginTopBottom,
         wordSpacing: this.#wordSpacing,
         letterSpacing: this.#letterSpacing,
@@ -821,7 +911,10 @@ class FoliateManager {
       this.#pageTurnAnimator.cancel({ reason: "scrolling-mode", durationMs: 0 });
     }
 
-    const columnCount = (this.#singleColumnMode || this.#scrollingMode) ? "1" : "2";
+    this.#applyCoverRecto();
+    const columnCount = this.#usesSpread
+      ? "2"
+      : (this.#singleColumnMode || this.#scrollingMode) ? "1" : "2";
     this.#view.renderer.setAttribute("max-column-count", columnCount);
     debugLog("FoliateManager", `Set max-column-count to ${columnCount}`);
 
@@ -839,17 +932,30 @@ class FoliateManager {
     this.#updateMaxInlineSize();
 
     if (!this.#resizeHandler) {
-      this.#resizeHandler = () => this.#updateMaxInlineSize();
+      this.#resizeHandler = () => {
+        this.#spreadCurl.cancel();
+        this.#updateMaxInlineSize();
+      };
       window.addEventListener("resize", this.#resizeHandler);
     }
 
     this.#view.renderer.render?.();
   }
 
+  get #usesSpread() {
+    return this.#spreadMode && !this.#scrollingMode;
+  }
+
   #updateMaxInlineSize() {
     if (!this.#view?.renderer) return;
 
-    if (this.#singleColumnMode || this.#scrollingMode) {
+    if (this.#usesSpread) {
+      // max-inline-size last: it is the attribute that triggers a re-render.
+      const attrs = spreadRendererAttributes(window.innerWidth);
+      for (const name of ["gap", "max-column-count", "max-inline-size"]) {
+        this.#view.renderer.setAttribute(name, attrs[name]);
+      }
+    } else if (this.#singleColumnMode || this.#scrollingMode) {
       this.#view.renderer.setAttribute("max-inline-size", `${window.innerWidth}px`);
     } else {
       this.#view.renderer.setAttribute("max-inline-size", `${Math.floor(window.innerWidth / 2)}px`);
@@ -1119,6 +1225,11 @@ class FoliateManager {
     // Read-aloud / page-follow is driving the UI — never curl, and drop any
     // in-flight manual curl so narration navigation stays untouched.
     this.#pageTurnAnimator.setReadAloudActive(true);
+    if (this.#spreadCurl.open) {
+      this.#swipeCurlId = 0;
+      this.#swipeCommitPending = false;
+      this.#spreadCurl.cancel();
+    }
 
     const prevHighlightEl = this.#highlightedElement?.deref?.();
 

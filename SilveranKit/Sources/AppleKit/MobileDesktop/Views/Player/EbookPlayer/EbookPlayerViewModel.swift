@@ -131,6 +131,10 @@ class EbookPlayerViewModel {
     /// for the curl lifetime without permanently toggling overlay preferences.
     var isPageCurlActive = false
     var collapseCardTrigger = 0
+    /// iPad landscape two-page spread, measured by the view (`ReaderSpreadPolicy`).
+    var isSpreadLayout = false {
+        didSet { styleManager?.setSpreadMode(isSpreadLayout) }
+    }
     #endif
     var showCustomizePopover = false
     var commsBridge: ReaderCommsBridge? = nil
@@ -649,6 +653,9 @@ class EbookPlayerViewModel {
             settingsVM: settingsVM,
             bridge: bridge,
         )
+        #if os(iOS)
+        styleManager?.setSpreadMode(isSpreadLayout)
+        #endif
 
         setupBridgeCallbacks(bridge)
     }

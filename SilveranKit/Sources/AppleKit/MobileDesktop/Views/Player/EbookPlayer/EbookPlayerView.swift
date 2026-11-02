@@ -49,6 +49,10 @@ public struct EbookPlayerView: View {
     #else
     @Environment(\.dismiss) private var dismiss
     @Environment(MediaViewModel.self) private var mediaViewModel: MediaViewModel?
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @AppStorage(ReaderSpreadPolicy.settingKey) private var twoPagesInLandscape = true
+    /// Reader container after the iPad audio sidebar (not the screen).
+    @State private var readerSize: CGSize = .zero
     #endif
     @State private var viewModel: EbookPlayerViewModel
     @State private var isComicScrubberVisible = false
@@ -375,6 +379,10 @@ public struct EbookPlayerView: View {
         HStack(spacing: 0) {
             readerContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onGeometryChange(for: CGSize.self) { $0.size } action: { readerSize = $0 }
+                .onChange(of: isSpread, initial: true) { _, spread in
+                    viewModel.isSpreadLayout = spread
+                }
 
             if isPad && viewModel.showAudioSidebar {
                 Rectangle()
@@ -508,6 +516,10 @@ public struct EbookPlayerView: View {
                         )
                     )
                     .ignoresSafeArea(.all)
+
+                    if isSpread {
+                        spreadSpine
+                    }
                     #else
                     AnyView(
                         EbookPlayerWebView(
@@ -649,7 +661,10 @@ public struct EbookPlayerView: View {
             }
 
             if !(isPad && viewModel.showAudioSidebar) {
+                // Spread: the card sits bottom-trailing on the right page.
                 draggableAudioCard
+                    .frame(width: isSpread ? readerSize.width / 2 : nil)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
 
             // Thin bottom scrub indicator is for narration/audio; keep ebook pages
@@ -708,6 +723,46 @@ public struct EbookPlayerView: View {
     #if os(iOS)
     private var isPad: Bool {
         UIDevice.current.userInterfaceIdiom == .pad
+    }
+
+    private var isSpread: Bool {
+        !viewModel.isComicBook
+            && ReaderSpreadPolicy.showsSpread(
+                enabled: twoPagesInLandscape,
+                regularWidth: horizontalSizeClass == .regular,
+                scrolling: viewModel.settingsVM.scrollingMode,
+                width: readerSize.width,
+                height: readerSize.height
+            )
+    }
+
+    /// Book gutter: soft shadow either side of a 1pt hairline, centered on the spread.
+    private var spreadSpine: some View {
+        let background =
+            viewModel.settingsVM.backgroundColor.flatMap { $0.isEmpty ? nil : $0 }
+            ?? (colorScheme == .dark ? kDefaultBackgroundColorDark : kDefaultBackgroundColorLight)
+        let shade = ReaderSpreadPolicy.spineOpacity(isDark: ReaderSpreadPolicy.isDark(backgroundHex: background))
+        return HStack(spacing: 0) {
+            LinearGradient(
+                colors: [.black.opacity(0), .black.opacity(shade)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: ReaderSpreadPolicy.spineShadowWidth)
+            Rectangle()
+                .fill(readerForegroundColor.opacity(ReaderSpreadPolicy.hairlineOpacity))
+                .frame(width: 1)
+            LinearGradient(
+                colors: [.black.opacity(shade), .black.opacity(0)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: ReaderSpreadPolicy.spineShadowWidth)
+        }
+        .frame(maxHeight: .infinity)
+        .ignoresSafeArea(.all)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     private var safeAreaInsets: EdgeInsets {

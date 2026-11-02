@@ -239,6 +239,7 @@ def check_info(label, info, *, marketing, build, group, prefix=None):
     else:  # unsigned: no App ID prefix is known
         require(kag == KEYCHAIN_SUFFIX or kag.endswith("." + KEYCHAIN_SUFFIX), f"{i}: KEYCHAIN_ACCESS_GROUP suffix changed")
     require(info.get("ITSAppUsesNonExemptEncryption") is False, f"{i}: ITSAppUsesNonExemptEncryption must be false")
+    require(info.get("NSSupportsLiveActivities") is True, f"{i}: NSSupportsLiveActivities must be true")
 
 
 def check_signed_entitlements(label, ent, *, team, prefix, group):

@@ -133,6 +133,7 @@ struct GlobalMiniPlayerBar: View {
         InkAmpMiniPlayerChrome(
             title: snapshot.title ?? "Now Playing",
             isPlaying: snapshot.isPlaying,
+            progress: snapshot.bookProgress,
             cover: { coverThumb(for: snapshot) },
             onExpand: { presenter.expandMiniPlayer() },
             onTogglePlayPause: {
@@ -185,10 +186,13 @@ struct GlobalMiniPlayerBar: View {
 /// Shared visual chrome for the live mini-player and SwiftUI previews.
 struct InkAmpMiniPlayerChrome<Cover: View>: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.coverTint) private var coverTint
     private var theme: InkAmpAppTheme { .resolve(for: colorScheme) }
+    private var controlColor: Color { coverTint?.control ?? theme.accent }
 
     let title: String
     let isPlaying: Bool
+    var progress: Double? = nil
     let cover: () -> Cover
     let onExpand: () -> Void
     let onTogglePlayPause: () -> Void
@@ -211,10 +215,10 @@ struct InkAmpMiniPlayerChrome<Cover: View>: View {
             Button(action: onTogglePlayPause) {
                 Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                     .font(.title3)
-                    .foregroundStyle(theme.accent)
+                    .foregroundStyle(controlColor)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
-                    .background(Circle().fill(theme.accent.opacity(0.14)))
+                    .background(Circle().fill(controlColor.opacity(0.14)))
             }
             .buttonStyle(.plain)
             .accessibilityLabel(isPlaying ? "Pause" : "Play")
@@ -230,7 +234,25 @@ struct InkAmpMiniPlayerChrome<Cover: View>: View {
             .accessibilityLabel("Stop playback")
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .frame(height: 56)
+        .background {
+            if let coverTint {
+                coverTint.gradient(startPoint: .leading, endPoint: .trailing)
+                    .opacity(CoverTintMath.miniPlayerWashOpacity)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if let progress {
+                GeometryReader { geo in
+                    Rectangle()
+                        .fill(controlColor)
+                        .frame(width: geo.size.width * min(max(progress, 0), 1))
+                }
+                .frame(height: 2)
+                .accessibilityHidden(true)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: InkAmpMetrics.cardRadius, style: .continuous))
         .inkAmpSurface(elevated: true, radius: InkAmpMetrics.cardRadius)
         .padding(.horizontal, 8)
         .padding(.bottom, 4)

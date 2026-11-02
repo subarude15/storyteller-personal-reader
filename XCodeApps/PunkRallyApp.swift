@@ -75,6 +75,7 @@ public struct PunkRallyTabView: View {
                     )
                 }
             }
+            .coverTintEnvironment()
     }
 
     /// Five-tab host only — kept separate so `rootShell` type-checks.

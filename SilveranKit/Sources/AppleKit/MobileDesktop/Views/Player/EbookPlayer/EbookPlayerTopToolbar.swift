@@ -6,6 +6,10 @@ import UIKit
 
 struct EbookPlayerTopToolbar: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @AppStorage(CoverTintSettings.enabledKey) private var coverTintEnabled = CoverTintSettings.defaultEnabled
+    private var coverTintModel = CoverTintModel.shared
+    private var audioMonitor = AudioSessionMonitor.shared
 
     let hasAudioNarration: Bool
     let playbackSpeed: Double
@@ -43,11 +47,28 @@ struct EbookPlayerTopToolbar: View {
         UIDevice.current.userInterfaceIdiom == .pad
     }
 
-    private var toolbarForegroundColor: Color {
-        let bgHex =
-            settingsVM.backgroundColor
+    private var backgroundHex: String {
+        settingsVM.backgroundColor
             ?? (colorScheme == .dark ? kDefaultBackgroundColorDark : kDefaultBackgroundColorLight)
-        return isLightColor(hex: bgHex) ? .black : .white
+    }
+
+    private var toolbarForegroundColor: Color {
+        isLightColor(hex: backgroundHex) ? .black : .white
+    }
+
+    /// Chrome icons pick up the cover tint only while readaloud narration is the active
+    /// session, and only when the tint keeps 3:1 against this reader page background.
+    private var iconColor: Color {
+        guard coverTintEnabled,
+            colorSchemeContrast != .increased,
+            case .readaloud? = audioMonitor.snapshot?.kind,
+            let palette = coverTintModel.palette,
+            let background = CoverRGB8(hex: backgroundHex)
+        else { return toolbarForegroundColor }
+        let control = palette.colors(dark: CoverTintMath.relativeLuminance(background) < 0.18).control
+        guard CoverTintMath.contrast(control, background) >= CoverTintMath.controlMinimumContrast
+        else { return toolbarForegroundColor }
+        return Color(coverRGB: control)
     }
 
     private var toolbarBackgroundColor: Color {
@@ -78,7 +99,7 @@ struct EbookPlayerTopToolbar: View {
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(toolbarForegroundColor)
+                        .foregroundStyle(iconColor)
                         .contentShape(Rectangle())
                 }
                 .frame(width: 44, height: 44)
@@ -94,8 +115,8 @@ struct EbookPlayerTopToolbar: View {
                         chapters: chapters,
                         selectedChapterId: selectedChapterId,
                         onChapterSelected: onChapterSelected,
-                        backgroundColor: toolbarForegroundColor,
-                        foregroundColor: toolbarForegroundColor,
+                        backgroundColor: iconColor,
+                        foregroundColor: iconColor,
                         transparency: 1.0,
                         showLabel: false,
                         buttonSize: 44,
@@ -107,7 +128,7 @@ struct EbookPlayerTopToolbar: View {
                     } label: {
                         Image(systemName: "bookmark")
                             .font(.system(size: 20, weight: .regular))
-                            .foregroundStyle(toolbarForegroundColor)
+                            .foregroundStyle(iconColor)
                             .contentShape(Rectangle())
                     }
                     .frame(width: 44, height: 44)
@@ -117,7 +138,7 @@ struct EbookPlayerTopToolbar: View {
                     } label: {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 20, weight: .regular))
-                            .foregroundStyle(toolbarForegroundColor)
+                            .foregroundStyle(iconColor)
                             .contentShape(Rectangle())
                     }
                     .frame(width: 44, height: 44)
@@ -151,7 +172,7 @@ struct EbookPlayerTopToolbar: View {
                     } label: {
                         Image(systemName: "textformat.size")
                             .font(.system(size: 20, weight: .regular))
-                            .foregroundStyle(toolbarForegroundColor)
+                            .foregroundStyle(iconColor)
                             .contentShape(Rectangle())
                     }
                     .frame(width: 44, height: 44)
@@ -185,7 +206,7 @@ struct EbookPlayerTopToolbar: View {
                             Image(systemName: "sidebar.trailing")
                                 .font(.system(size: 20, weight: .regular))
                                 .symbolVariant(showAudioSidebar ? .fill : .none)
-                                .foregroundStyle(toolbarForegroundColor)
+                                .foregroundStyle(iconColor)
                                 .contentShape(Rectangle())
                         }
                         .frame(width: 44, height: 44)
@@ -196,7 +217,7 @@ struct EbookPlayerTopToolbar: View {
                     } label: {
                         Image(systemName: "ellipsis.circle")
                             .font(.system(size: 20, weight: .regular))
-                            .foregroundStyle(toolbarForegroundColor)
+                            .foregroundStyle(iconColor)
                             .contentShape(Rectangle())
                     }
                     .frame(width: 44, height: 44)
@@ -227,7 +248,7 @@ struct EbookPlayerTopToolbar: View {
         }) {
             Image(systemName: sleepTimerActive ? "moon.zzz.fill" : "moon.zzz")
                 .font(.system(size: 20, weight: .regular))
-                .foregroundStyle(sleepTimerActive ? .accentColor : toolbarForegroundColor)
+                .foregroundStyle(sleepTimerActive ? .accentColor : iconColor)
                 .contentShape(Rectangle())
         }
         .frame(width: 44, height: 44)

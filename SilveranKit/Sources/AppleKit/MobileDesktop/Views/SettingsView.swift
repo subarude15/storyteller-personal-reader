@@ -421,6 +421,8 @@ extension SettingsView {
                     )
                 }
 
+                PlayerAppearanceSettingsSection()
+
                 Section("Tab Bar") {
                     Picker("First Tab", selection: $config.library.tabBarSlot1) {
                         ForEach(ConfigurableTab.allCases) { tab in
@@ -645,6 +647,23 @@ extension SettingsView {
                 }
             }
             .navigationTitle("Settings")
+        }
+    }
+}
+
+private struct PlayerAppearanceSettingsSection: View {
+    @AppStorage(CoverTintSettings.enabledKey) private var coverTintEnabled = CoverTintSettings.defaultEnabled
+    @AppStorage(InkAmpLiveActivitySettings.enabledKey) private var liveActivityEnabled =
+        InkAmpLiveActivitySettings.defaultEnabled
+
+    var body: some View {
+        Section {
+            Toggle("Tint player from cover", isOn: $coverTintEnabled)
+            Toggle("Show on Lock Screen & Dynamic Island", isOn: $liveActivityEnabled)
+        } header: {
+            Text("Player")
+        } footer: {
+            Text("Uses the cover's color for player controls. Increase Contrast always uses the app accent. Lock Screen playback controls appear while listening.")
         }
     }
 }
