@@ -85,6 +85,36 @@ struct RoundedCoverArtwork: View {
 }
 
 enum MediaGridViewUtilities {
+    /// Equal-width cover columns: fits as many `minimumTileWidth` tiles as `availableWidth`
+    /// allows (never fewer than `minimumCount`) and stretches them evenly, so every card is
+    /// exactly its column's width.
+    static func coverColumnLayout(
+        availableWidth: CGFloat,
+        minimumTileWidth: CGFloat,
+        minimumCount: Int,
+        spacing: CGFloat,
+    ) -> (columns: [GridItem], tileWidth: CGFloat, columnCount: Int) {
+        guard availableWidth > 0, minimumTileWidth > 0 else {
+            return (
+                [GridItem(.fixed(minimumTileWidth), spacing: spacing, alignment: .top)],
+                minimumTileWidth,
+                1,
+            )
+        }
+        let fitCount = Int((availableWidth + spacing) / (minimumTileWidth + spacing))
+        let count = max(minimumCount, fitCount, 1)
+        let totalSpacing = spacing * CGFloat(count - 1)
+        let tileWidth = max(1, ((availableWidth - totalSpacing) / CGFloat(count)).rounded(.down))
+        return (
+            Array(
+                repeating: GridItem(.fixed(tileWidth), spacing: spacing, alignment: .top),
+                count: count,
+            ),
+            tileWidth,
+            count,
+        )
+    }
+
     #if os(macOS)
     static func nextSelectableItem(
         from direction: MoveCommandDirection,

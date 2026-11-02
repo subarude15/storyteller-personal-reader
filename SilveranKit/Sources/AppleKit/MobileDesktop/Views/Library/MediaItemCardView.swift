@@ -1,6 +1,9 @@
 #if os(iOS) || os(macOS)
 import SwiftUI
 import SilveranKit
+#if os(iOS)
+import UIKit
+#endif
 
 #if os(iOS)
 private struct MediaNavigationPathKey: EnvironmentKey {
@@ -17,50 +20,65 @@ extension EnvironmentValues {
 
 struct MediaItemCardMetrics {
     let tileWidth: CGFloat
-    let cardPadding: CGFloat
     let coverCornerRadius: CGFloat
     let contentSpacing: CGFloat
     let coverWidth: CGFloat
     let maxCardHeight: CGFloat
     let coverContainerHeight: CGFloat
     let titleContainerHeight: CGFloat
+    let authorRowHeight: CGFloat
     let titleToAuthorGap: CGFloat
+
+    /// `.subheadline` line height at the default (Large) text size, where it is 15pt system.
+    /// `@ScaledMetric` scales from this base, so it must not already include the user's
+    /// Dynamic Type adjustment.
+    #if os(iOS)
+    static let baseSubheadlineLineHeight: CGFloat =
+        UIFont.systemFont(ofSize: 15).lineHeight.rounded(.up)
+    #else
+    static let baseSubheadlineLineHeight: CGFloat = 16
+    #endif
 
     static func make(
         for tileWidth: CGFloat,
         mediaKind _: MediaKind,
         coverPreference: CoverPreference = .preferEbook,
     ) -> MediaItemCardMetrics {
-        let cardPadding = 2.0
-        let coverWidth = max(tileWidth - (cardPadding * 2), tileWidth * 0.90)
-        let contentSpacing = max(4, tileWidth * 0.03)
+        let coverWidth = tileWidth
+        let contentSpacing: CGFloat = 8
 
         let coverContainerHeight: CGFloat =
             coverPreference == .storytellerDouble
             ? DoubleCoverView.layoutHeight(for: coverWidth)
             : coverWidth / coverPreference.preferredContainerAspectRatio
 
-        let estimatedLineHeight: CGFloat = 16
+        // Title and author both render in `.subheadline`; size their slots from the live
+        // Dynamic Type line height so two title lines never clip at larger text sizes.
+        #if os(iOS)
+        let lineHeight = UIFont.preferredFont(forTextStyle: .subheadline).lineHeight.rounded(.up)
+        #else
+        let lineHeight: CGFloat = 16
+        #endif
         let maxTitleLines: CGFloat = 2
-        let titleContainerHeight = estimatedLineHeight * maxTitleLines
+        let titleContainerHeight = lineHeight * maxTitleLines
 
-        let authorRowHeight: CGFloat = 20
+        let authorRowHeight = lineHeight + 2
         let titleBottomSpacing: CGFloat = 4
         let titleToAuthorGap: CGFloat = 0
 
         let maxCardHeight =
-            (cardPadding * 2) + coverContainerHeight + contentSpacing + titleContainerHeight
+            coverContainerHeight + contentSpacing + titleContainerHeight
             + titleToAuthorGap + authorRowHeight + titleBottomSpacing
 
         return MediaItemCardMetrics(
             tileWidth: tileWidth,
-            cardPadding: cardPadding,
             coverCornerRadius: max(10, min(16, tileWidth * 0.055)),
             contentSpacing: contentSpacing,
             coverWidth: coverWidth,
             maxCardHeight: maxCardHeight,
             coverContainerHeight: coverContainerHeight,
             titleContainerHeight: titleContainerHeight,
+            authorRowHeight: authorRowHeight,
             titleToAuthorGap: titleToAuthorGap,
         )
     }
@@ -84,6 +102,10 @@ struct MediaItemCardView: View {
     @Environment(MediaViewModel.self) private var mediaViewModel
     @Environment(\.colorScheme) private var colorScheme
     private var theme: InkAmpAppTheme { .resolve(for: colorScheme) }
+    // Tracks Dynamic Type live, so the title/author slots stay correct even when the grid's
+    // metrics were computed before a text-size change.
+    @ScaledMetric(relativeTo: .subheadline)
+    private var scaledLineHeight: CGFloat = MediaItemCardMetrics.baseSubheadlineLineHeight
     #if os(macOS)
     @State private var doubleCoverSwapping = false
     #endif
@@ -620,45 +642,35 @@ struct MediaItemCardView: View {
                 .frame(height: metrics.contentSpacing)
 
             VStack(alignment: .leading, spacing: 0) {
-                authorRow
-                    .padding(.bottom, metrics.titleToAuthorGap)
-
                 Text(item.title)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(theme.primaryText)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
+                    .truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .padding(.horizontal, 8)
-                    .frame(height: metrics.titleContainerHeight, alignment: .top)
+                    .frame(height: titleContainerHeight, alignment: .top)
+                    .padding(.bottom, metrics.titleToAuthorGap)
+
+                authorRow
+                    .frame(height: authorRowHeight, alignment: .top)
             }
         }
-        .padding(
-            EdgeInsets(
-                top: metrics.cardPadding,
-                leading: metrics.cardPadding,
-                bottom: metrics.cardPadding,
-                trailing: metrics.cardPadding,
-            )
-        )
-        .frame(width: metrics.tileWidth, height: metrics.maxCardHeight, alignment: .top)
-        .background(
-            RoundedRectangle(cornerRadius: InkAmpMetrics.cardRadius, style: .continuous)
-                .fill(theme.surfaceElevated)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: InkAmpMetrics.cardRadius, style: .continuous)
-                .strokeBorder(
-                    theme.border.opacity(colorScheme == .dark ? 0.9 : 0.65),
-                    lineWidth: 1,
-                )
-        )
-        .shadow(
-            color: colorScheme == .dark ? .clear : .black.opacity(0.05),
-            radius: 6,
-            y: 2,
-        )
+        .frame(width: metrics.tileWidth, height: cardHeight, alignment: .top)
+    }
+
+    private var titleContainerHeight: CGFloat {
+        (scaledLineHeight * 2).rounded(.up)
+    }
+
+    private var authorRowHeight: CGFloat {
+        scaledLineHeight.rounded(.up) + 2
+    }
+
+    private var cardHeight: CGFloat {
+        metrics.maxCardHeight - metrics.titleContainerHeight - metrics.authorRowHeight
+            + titleContainerHeight + authorRowHeight
     }
 
     private var cardContent: some View {
@@ -702,12 +714,10 @@ struct MediaItemCardView: View {
                 .truncationMode(.tail)
             Spacer(minLength: 4)
         }
-        .padding(.leading, 8)
-        .padding(.trailing, 2)
         .padding(.bottom, 1)
     }
 
-    // The top line normally shows the author. When sorting by a different field, it
+    // The secondary line normally shows the author. When sorting by a different field, it
     // surfaces that field's value instead, so the active sort is visible on each card.
     private var topLineText: String {
         let author = item.authors?.first?.name ?? ""
@@ -1382,25 +1392,16 @@ private struct MediaItemCardPreviewHost: View {
                 .overlay(alignment: .bottom) {
                     InkAmpProgressBar(progress: 0.42, height: 3)
                 }
-            Text(author)
-                .font(.subheadline)
-                .foregroundStyle(theme.secondaryText)
-                .lineLimit(1)
             Text(title)
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(theme.primaryText)
                 .lineLimit(2)
+            Text(author)
+                .font(.subheadline)
+                .foregroundStyle(theme.secondaryText)
+                .lineLimit(1)
         }
-        .padding(8)
         .frame(width: metrics.tileWidth, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: InkAmpMetrics.cardRadius, style: .continuous)
-                .fill(theme.surfaceElevated)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: InkAmpMetrics.cardRadius, style: .continuous)
-                .strokeBorder(theme.border, lineWidth: 1)
-        )
     }
 }
 
