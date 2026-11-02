@@ -1190,7 +1190,10 @@ struct ContinueWidgetSelectionDiagnosticsTests {
             isPreview: false,
             snapshot: .empty,
         )
-        #expect(empty.contains("item=nil"))
+        // An empty snapshot has no item id, so mediaIdentity falls back to the
+        // kind|title|deepLink join ("||") rather than the literal "nil".
+        #expect(empty.contains("item=||"))
         #expect(empty.contains("progress=nil"))
+        #expect(empty.contains("title=\"nil\""))
     }
 }
