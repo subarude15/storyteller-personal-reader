@@ -1309,11 +1309,6 @@ struct MediaGridView: View {
     @ViewBuilder
     private func content(for containerWidth: CGFloat) -> some View {
         let layout = resolvedLayout(for: containerWidth)
-        let tileMetrics = MediaItemCardMetrics.make(
-            for: layout.tileWidth,
-            mediaKind: mediaKind,
-            coverPreference: coverPreference,
-        )
         #if os(iOS)
         let scrubberInset: CGFloat = shouldShowAlphabetScrubber ? alphabetScrubberInset : 0
         #else
