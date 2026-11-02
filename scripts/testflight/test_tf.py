@@ -544,6 +544,9 @@ class WorkflowTests(unittest.TestCase):
             self.assertRegex(u, r"^[\w.-]+/[\w.-]+@[0-9a-f]{40}$")
         self.assertRegex(self.wf["env"]["XCODEGEN_SHA256"], r"^[0-9a-f]{64}$")
         self.assertGreaterEqual(int(self.wf["env"]["XCODE_VERSION"].split(".")[0]), 26)
+        self.assertEqual(self.wf["env"]["XCODE_VERSION"], "26.3")
+        for name in ("unsigned-archive", "signed"):
+            self.assertEqual(self.jobs[name]["runs-on"], "macos-15-intel", name)
         for path in SCRIPTS + [ROOT / "scripts" / "testflight" / "tf.py"]:
             text = path.read_text(encoding="utf-8")
             for bad in ("-allowProvisioningUpdates", "set -x", "package-ipa", "printenv", "upload-artifact",
