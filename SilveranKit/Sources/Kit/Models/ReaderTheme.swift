@@ -141,6 +141,28 @@ extension ReaderTheme {
         readaloudHighlightMode: "text",
     )
 
+    public static let builtInSepia = ReaderTheme(
+        id: "builtin-sepia",
+        name: "Sepia",
+        isBuiltIn: true,
+        appearance: .light,
+        backgroundColor: "#F6EEDB",
+        foregroundColor: "#3B2E1E",
+        highlightColor: "#A04814",
+        readaloudHighlightMode: "text",
+    )
+
+    public static let builtInQuiet = ReaderTheme(
+        id: "builtin-quiet",
+        name: "Quiet",
+        isBuiltIn: true,
+        appearance: .light,
+        backgroundColor: "#ECEEEB",
+        foregroundColor: "#242826",
+        highlightColor: "#265C82",
+        readaloudHighlightMode: "text",
+    )
+
     public static let builtInDark = ReaderTheme(
         id: "builtin-dark",
         name: "Dark",
@@ -158,9 +180,47 @@ extension ReaderTheme {
         userHighlightColor6: kDefaultUserHighlightColorsDark[5],
     )
 
+    public static let builtInOLED = ReaderTheme(
+        id: "builtin-oled",
+        name: "OLED Black",
+        isBuiltIn: true,
+        appearance: .dark,
+        backgroundColor: "#000000",
+        foregroundColor: "#CFCFCF",
+        highlightColor: "#5B9EFF",
+        readaloudHighlightMode: "text",
+        userHighlightColor1: kDefaultUserHighlightColorsDark[0],
+        userHighlightColor2: kDefaultUserHighlightColorsDark[1],
+        userHighlightColor3: kDefaultUserHighlightColorsDark[2],
+        userHighlightColor4: kDefaultUserHighlightColorsDark[3],
+        userHighlightColor5: kDefaultUserHighlightColorsDark[4],
+        userHighlightColor6: kDefaultUserHighlightColorsDark[5],
+    )
+
+    public static let builtInDusk = ReaderTheme(
+        id: "builtin-dusk",
+        name: "Dusk",
+        isBuiltIn: true,
+        appearance: .dark,
+        backgroundColor: "#1B1613",
+        foregroundColor: "#DFD1C4",
+        highlightColor: "#E09F5A",
+        readaloudHighlightMode: "text",
+        userHighlightColor1: kDefaultUserHighlightColorsDark[0],
+        userHighlightColor2: kDefaultUserHighlightColorsDark[1],
+        userHighlightColor3: kDefaultUserHighlightColorsDark[2],
+        userHighlightColor4: kDefaultUserHighlightColorsDark[3],
+        userHighlightColor5: kDefaultUserHighlightColorsDark[4],
+        userHighlightColor6: kDefaultUserHighlightColorsDark[5],
+    )
+
     public static let allBuiltIn: [ReaderTheme] = [
         .builtInLight,
+        .builtInSepia,
+        .builtInQuiet,
         .builtInDark,
+        .builtInOLED,
+        .builtInDusk,
     ]
 
     public static func effectiveBuiltIn(overrides: [ReaderTheme]) -> [ReaderTheme] {

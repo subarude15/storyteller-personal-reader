@@ -13,65 +13,289 @@ struct EbookPlayerSettings: View {
     @State private var fontSizeInput: String = "20"
     @State private var customFamilies: [CustomFontFamily] = []
     @State private var showFontManager = false
+    @State private var showFineTuning = false
     @AppStorage(CoverTintSettings.enabledKey) private var coverTintEnabled = CoverTintSettings.defaultEnabled
     @AppStorage(ReaderSpreadPolicy.settingKey) private var twoPagesInLandscape = true
+
+    private var activeThemesForCurrentScheme: [ReaderTheme] {
+        colorScheme == .dark ? settingsVM.darkThemes : settingsVM.lightThemes
+    }
+
+    private var activeThemeIdForCurrentScheme: String {
+        settingsVM.activeThemeId(for: colorScheme)
+    }
+
+    private var activePreset: ReaderTypographyPolicy.LayoutPreset? {
+        ReaderTypographyPolicy.activePreset(
+            lineSpacing: settingsVM.lineSpacing,
+            marginLeftRight: settingsVM.marginLeftRight,
+            marginTopBottom: settingsVM.marginTopBottom,
+            wordSpacing: settingsVM.wordSpacing,
+            letterSpacing: settingsVM.letterSpacing
+        )
+    }
 
     var body: some View {
         iOSBody
     }
 
     private var iOSBody: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 16) {
+            themeSwatchSection
+
+            Divider()
+
+            typographySection
+
+            Divider()
+
+            layoutPresetsAndSpacingSection
+
+            Divider()
+
+            pageTurnAndFlowSection
+
+            Divider()
+
+            HStack {
                 Button {
+                    ReaderHaptics.selectionTick()
                     resetToDefaults()
                 } label: {
                     Label("Reset to Defaults", systemImage: "arrow.counterclockwise")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+
+                Spacer()
             }
+        }
+        .onAppear {
+            fontSizeInput = String(Int(settingsVM.fontSize))
+            Task {
+                await loadCustomFonts()
+            }
+        }
+    }
 
-            Divider()
+    // MARK: - Visual Theme Swatch Strip
 
-            Text("Reader")
-                .font(.headline)
-                .foregroundStyle(.primary)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Font Size")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                HStack(spacing: 8) {
-                    Slider(value: $settingsVM.fontSize, in: 8...60, step: 1)
-                        .onChange(of: settingsVM.fontSize) { _, newValue in
-                            fontSizeInput = String(Int(newValue))
-                            settingsVM.save()
-                        }
-                    TextField("Size", text: $fontSizeInput)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 50)
-                        .multilineTextAlignment(.trailing)
-                        .onSubmit {
-                            if let val = Double(fontSizeInput), val >= 8, val <= 60 {
-                                settingsVM.fontSize = val
-                                settingsVM.save()
-                            } else {
-                                fontSizeInput = String(Int(settingsVM.fontSize))
-                            }
-                        }
+    private var themeSwatchSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Themes")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Spacer()
+                NavigationLink {
+                    ManageThemesView(settingsVM: settingsVM)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "paintpalette")
+                        Text("Manage")
+                    }
+                    .font(.caption.weight(.medium))
                 }
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Font")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(activeThemesForCurrentScheme) { theme in
+                        let isSelected = activeThemeIdForCurrentScheme == theme.id
+                        Button {
+                            ReaderHaptics.selectionTick()
+                            settingsVM.selectTheme(id: theme.id, for: colorScheme)
+                        } label: {
+                            VStack(spacing: 6) {
+                                ZStack(alignment: .topTrailing) {
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(Color(hex: theme.backgroundColor) ?? .white)
+                                        .frame(width: 68, height: 48)
+                                        .overlay {
+                                            Text("Aa")
+                                                .font(.system(size: 18, weight: .semibold, design: .serif))
+                                                .foregroundStyle(Color(hex: theme.foregroundColor) ?? .black)
+                                        }
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 10)
+                                                .strokeBorder(
+                                                    isSelected
+                                                        ? Color.accentColor
+                                                        : Color.secondary.opacity(0.3),
+                                                    lineWidth: isSelected ? 2.5 : 1
+                                                )
+                                        )
+
+                                    if isSelected {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.caption2)
+                                            .foregroundStyle(Color.accentColor)
+                                            .background(Circle().fill(Color(uiColor: .systemBackground)))
+                                            .offset(x: -4, y: 4)
+                                    }
+                                }
+
+                                Text(theme.name)
+                                    .font(.caption2.weight(isSelected ? .semibold : .regular))
+                                    .foregroundStyle(isSelected ? .primary : .secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+
+            HStack(spacing: 12) {
+                if colorScheme == .dark {
+                    HStack(spacing: 4) {
+                        Image(systemName: "sun.max")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("Day theme:")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Picker("Light Mode Theme", selection: $settingsVM.selectedLightThemeId) {
+                            ForEach(settingsVM.lightThemes) { theme in
+                                Text(theme.name).tag(theme.id)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .controlSize(.small)
+                        .onChange(of: settingsVM.selectedLightThemeId) { _, _ in
+                            settingsVM.applyActiveTheme(for: colorScheme)
+                        }
+                    }
+                } else {
+                    HStack(spacing: 4) {
+                        Image(systemName: "moon")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("Night theme:")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Picker("Dark Mode Theme", selection: $settingsVM.selectedDarkThemeId) {
+                            ForEach(settingsVM.darkThemes) { theme in
+                                Text(theme.name).tag(theme.id)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .controlSize(.small)
+                        .onChange(of: settingsVM.selectedDarkThemeId) { _, _ in
+                            settingsVM.applyActiveTheme(for: colorScheme)
+                        }
+                    }
+                }
+                Spacer()
+            }
+
+            Toggle("Tint player from cover", isOn: $coverTintEnabled)
+                .font(.subheadline)
+        }
+    }
+
+    // MARK: - Typography (Font Size & Typeface)
+
+    private var typographySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Typography")
+                .font(.headline)
+                .foregroundStyle(.primary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Font Size")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    HStack(spacing: 6) {
+                        Button {
+                            let next = max(8, settingsVM.fontSize - 1)
+                            guard next != settingsVM.fontSize else { return }
+                            ReaderHaptics.selectionTick()
+                            settingsVM.fontSize = next
+                            fontSizeInput = String(Int(next))
+                            settingsVM.save()
+                        } label: {
+                            Text("A−")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(width: 38, height: 28)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(Color.secondary.opacity(0.14))
+                                )
+                        }
+                        .buttonStyle(.plain)
+
+                        TextField("Size", text: $fontSizeInput)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 48)
+                            .multilineTextAlignment(.center)
+                            .font(.caption.monospacedDigit())
+                            .onSubmit {
+                                if let val = Double(fontSizeInput), val >= 8, val <= 60 {
+                                    settingsVM.fontSize = val
+                                    settingsVM.save()
+                                } else {
+                                    fontSizeInput = String(Int(settingsVM.fontSize))
+                                }
+                            }
+
+                        Button {
+                            let next = min(60, settingsVM.fontSize + 1)
+                            guard next != settingsVM.fontSize else { return }
+                            ReaderHaptics.selectionTick()
+                            settingsVM.fontSize = next
+                            fontSizeInput = String(Int(next))
+                            settingsVM.save()
+                        } label: {
+                            Text("A+")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(width: 38, height: 28)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(Color.secondary.opacity(0.14))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                Slider(value: $settingsVM.fontSize, in: 8...60, step: 1)
+                    .onChange(of: settingsVM.fontSize) { _, newValue in
+                        fontSizeInput = String(Int(newValue))
+                        settingsVM.save()
+                    }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Font Family")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Manage Custom Fonts...") {
+                        showFontManager = true
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.blue)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .sheet(isPresented: $showFontManager) {
+                        IOSFontManagerView(
+                            customFamilies: $customFamilies,
+                            selectedFont: $settingsVM.fontFamily,
+                            onSave: { settingsVM.save() },
+                        )
+                    }
+                }
+
                 Picker("Font", selection: $settingsVM.fontFamily) {
-                    Text("System Default").tag("System Default")
-                    Text("Serif").tag("serif")
-                    Text("Sans-Serif").tag("sans-serif")
-                    Text("Monospace").tag("monospace")
+                    ForEach(ReaderTypographyPolicy.builtInFontOptions) { option in
+                        Text(option.label).tag(option.id)
+                    }
 
                     if !customFamilies.isEmpty {
                         Divider()
@@ -89,74 +313,10 @@ struct EbookPlayerSettings: View {
                 .labelsHidden()
                 .pickerStyle(.menu)
                 .onChange(of: settingsVM.fontFamily) { _, _ in
+                    ReaderHaptics.selectionTick()
                     settingsVM.save()
-                }
-
-                Button("Manage Fonts...") {
-                    showFontManager = true
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.blue)
-                .font(.caption)
-                .sheet(isPresented: $showFontManager) {
-                    IOSFontManagerView(
-                        customFamilies: $customFamilies,
-                        selectedFont: $settingsVM.fontFamily,
-                        onSave: { settingsVM.save() },
-                    )
                 }
             }
-
-            Toggle("Single Column", isOn: singleColumnBinding)
-                .onChange(of: settingsVM.singleColumnMode) { _, _ in
-                    settingsVM.save()
-                }
-                .disabled(settingsVM.scrollingMode)
-
-            if UIDevice.current.userInterfaceIdiom == .pad {
-                Toggle("Two pages in landscape", isOn: $twoPagesInLandscape)
-                    .disabled(settingsVM.scrollingMode)
-            }
-
-            Toggle("Scrolling Mode", isOn: $settingsVM.scrollingMode)
-                .onChange(of: settingsVM.scrollingMode) { _, _ in
-                    settingsVM.save()
-                }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Page Turn")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Picker("Page Turn", selection: $settingsVM.pageTurnStyle) {
-                    ForEach(PageTurnStyle.allCases) { style in
-                        Text(style.label).tag(style)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .disabled(settingsVM.scrollingMode)
-                .onChange(of: settingsVM.pageTurnStyle) { _, _ in
-                    settingsVM.save()
-                }
-                if settingsVM.scrollingMode {
-                    Text("Page turn style applies in paginated mode.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-
-            Toggle("Margin Tap to Turn Pages", isOn: $settingsVM.enableMarginClickNavigation)
-                .onChange(of: settingsVM.enableMarginClickNavigation) { _, _ in
-                    settingsVM.save()
-                }
-
-            labeledSlider(
-                label: "Line Spacing",
-                value: $settingsVM.lineSpacing,
-                range: 1.0...2.5,
-                step: 0.1,
-                formatter: { String(format: "%.1f", $0) },
-            )
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Text Alignment")
@@ -170,11 +330,59 @@ struct EbookPlayerSettings: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .onChange(of: settingsVM.textAlignment) { _, _ in
+                    ReaderHaptics.selectionTick()
                     settingsVM.save()
                 }
             }
+        }
+    }
 
-            Divider()
+    // MARK: - Layout Presets & Spacing
+
+    private var layoutPresetsAndSpacingSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Layout & Spacing")
+                .font(.headline)
+                .foregroundStyle(.primary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(ReaderTypographyPolicy.layoutPresets) { preset in
+                        let isSelected = activePreset?.id == preset.id
+                        Button {
+                            ReaderHaptics.selectionTick()
+                            applyPreset(preset)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: preset.systemImage)
+                                    .font(.caption)
+                                Text(preset.title)
+                                    .font(.caption.weight(.semibold))
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(
+                                Capsule()
+                                    .fill(
+                                        isSelected
+                                            ? Color.accentColor
+                                            : Color.secondary.opacity(0.12)
+                                    )
+                            )
+                            .foregroundStyle(isSelected ? Color.white : Color.primary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            labeledSlider(
+                label: "Line Spacing",
+                value: $settingsVM.lineSpacing,
+                range: 1.0...2.5,
+                step: 0.1,
+                formatter: { String(format: "%.1f", $0) },
+            )
 
             labeledSlider(
                 label: "Margins (Left/Right)",
@@ -184,85 +392,100 @@ struct EbookPlayerSettings: View {
                 formatter: { "\(Int($0))%" },
             )
 
-            labeledSlider(
-                label: "Margins (Top/Bottom)",
-                value: $settingsVM.marginTopBottom,
-                range: 0...30,
-                step: 1,
-                formatter: { "\(Int($0))%" },
-            )
+            DisclosureGroup("Fine-Tune Margins & Character Spacing", isExpanded: $showFineTuning) {
+                VStack(alignment: .leading, spacing: 10) {
+                    labeledSlider(
+                        label: "Margins (Top/Bottom)",
+                        value: $settingsVM.marginTopBottom,
+                        range: 0...30,
+                        step: 1,
+                        formatter: { "\(Int($0))%" },
+                    )
 
-            Divider()
+                    labeledSlider(
+                        label: "Word Spacing",
+                        value: $settingsVM.wordSpacing,
+                        range: -0.5...2.0,
+                        step: 0.1,
+                        formatter: { String(format: "%.1fem", $0) },
+                    )
 
-            labeledSlider(
-                label: "Word Spacing",
-                value: $settingsVM.wordSpacing,
-                range: -0.5...2.0,
-                step: 0.1,
-                formatter: { String(format: "%.1fem", $0) },
-            )
+                    labeledSlider(
+                        label: "Letter Spacing",
+                        value: $settingsVM.letterSpacing,
+                        range: -0.1...0.5,
+                        step: 0.01,
+                        formatter: { String(format: "%.2fem", $0) },
+                    )
+                }
+                .padding(.top, 8)
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+        }
+    }
 
-            labeledSlider(
-                label: "Letter Spacing",
-                value: $settingsVM.letterSpacing,
-                range: -0.1...0.5,
-                step: 0.01,
-                formatter: { String(format: "%.2fem", $0) },
-            )
+    // MARK: - Page Turn & Flow
 
-            Divider()
-
-            Text("Themes")
+    private var pageTurnAndFlowSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Page Turn & Navigation")
                 .font(.headline)
                 .foregroundStyle(.primary)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Light Mode Theme")
+                Text("Page Turn Style")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Picker("Light Mode Theme", selection: $settingsVM.selectedLightThemeId) {
-                    ForEach(settingsVM.lightThemes) { theme in
-                        Text(theme.name).tag(theme.id)
+                Picker("Page Turn", selection: $settingsVM.pageTurnStyle) {
+                    ForEach(PageTurnStyle.allCases) { style in
+                        Text(style.label).tag(style)
                     }
                 }
                 .labelsHidden()
-                .pickerStyle(.menu)
-                .onChange(of: settingsVM.selectedLightThemeId) { _, _ in
-                    settingsVM.applyActiveTheme(for: colorScheme)
+                .pickerStyle(.segmented)
+                .disabled(settingsVM.scrollingMode)
+                .onChange(of: settingsVM.pageTurnStyle) { _, _ in
+                    ReaderHaptics.selectionTick()
+                    settingsVM.save()
+                }
+                if settingsVM.scrollingMode {
+                    Text("Page turn style applies in paginated mode.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Dark Mode Theme")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Picker("Dark Mode Theme", selection: $settingsVM.selectedDarkThemeId) {
-                    ForEach(settingsVM.darkThemes) { theme in
-                        Text(theme.name).tag(theme.id)
-                    }
+            Toggle("Scrolling Mode", isOn: $settingsVM.scrollingMode)
+                .onChange(of: settingsVM.scrollingMode) { _, _ in
+                    settingsVM.save()
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .onChange(of: settingsVM.selectedDarkThemeId) { _, _ in
-                    settingsVM.applyActiveTheme(for: colorScheme)
+
+            Toggle("Single Column", isOn: singleColumnBinding)
+                .onChange(of: settingsVM.singleColumnMode) { _, _ in
+                    settingsVM.save()
                 }
+                .disabled(settingsVM.scrollingMode)
+
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                Toggle("Two pages in landscape", isOn: $twoPagesInLandscape)
+                    .disabled(settingsVM.scrollingMode)
             }
 
-            NavigationLink {
-                ManageThemesView(settingsVM: settingsVM)
-            } label: {
-                Label("Manage Themes...", systemImage: "paintpalette")
-            }
-
-            Toggle("Tint player from cover", isOn: $coverTintEnabled)
-                .font(.subheadline)
+            Toggle("Margin Tap to Turn Pages", isOn: $settingsVM.enableMarginClickNavigation)
+                .onChange(of: settingsVM.enableMarginClickNavigation) { _, _ in
+                    settingsVM.save()
+                }
         }
-        .onAppear {
-            fontSizeInput = String(Int(settingsVM.fontSize))
-            Task {
-                await loadCustomFonts()
-            }
-        }
+    }
+
+    private func applyPreset(_ preset: ReaderTypographyPolicy.LayoutPreset) {
+        settingsVM.lineSpacing = preset.lineSpacing
+        settingsVM.marginLeftRight = preset.marginLeftRight
+        settingsVM.marginTopBottom = preset.marginTopBottom
+        settingsVM.wordSpacing = preset.wordSpacing
+        settingsVM.letterSpacing = preset.letterSpacing
+        settingsVM.save()
     }
 
     private func loadCustomFonts() async {
@@ -315,12 +538,13 @@ struct EbookPlayerSettings: View {
         settingsVM.showOverlayPlayPause = kDefaultShowOverlayPlayPause
         settingsVM.lockViewToAudio = kDefaultLockViewToAudio
         twoPagesInLandscape = true
+        fontSizeInput = String(Int(kDefaultFontSize))
 
         settingsVM.save()
     }
 
     private func isCustomFont(_ fontFamily: String) -> Bool {
-        !["System Default", "serif", "sans-serif", "monospace"].contains(fontFamily)
+        !ReaderTypographyPolicy.isBuiltInFont(fontFamily)
     }
 
     private var singleColumnBinding: Binding<Bool> {

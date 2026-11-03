@@ -139,7 +139,7 @@ public final class ReaderStyleManager {
 
         try? await bridge.sendJsUpdateStyles(
             fontSize: settingsVM.fontSize,
-            fontFamily: settingsVM.fontFamily,
+            fontFamily: ReaderTypographyPolicy.cssFontFamily(for: settingsVM.fontFamily),
             lineSpacing: settingsVM.lineSpacing,
             isDarkMode: isDarkMode,
             marginLeftRight: settingsVM.marginLeftRight,

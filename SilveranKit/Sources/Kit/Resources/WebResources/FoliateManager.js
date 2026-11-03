@@ -30,7 +30,15 @@ const getCSS = ({
   customCSS = null,
 }) => {
   const activeClass = mediaActiveClass || "epub-media-overlay-active";
-  const resolvedFontFamily = fontFamily === "System Default" ? "serif" : fontFamily;
+  const rawFont = fontFamily === "System Default" ? "serif" : fontFamily;
+  const resolvedFontFamily =
+    rawFont &&
+    rawFont.includes(" ") &&
+    !rawFont.includes(",") &&
+    !rawFont.includes('"') &&
+    !rawFont.includes("'")
+      ? `"${rawFont}", serif`
+      : rawFont;
   const fontFamilyCSS = resolvedFontFamily
     ? `font-family: ${resolvedFontFamily} !important;`
     : "";
