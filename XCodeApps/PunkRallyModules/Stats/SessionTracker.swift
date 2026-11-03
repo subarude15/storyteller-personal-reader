@@ -182,9 +182,28 @@ final class SessionTracker {
             today: todayStart,
             activeCountsToday: live > 0
         )
+        let longestStreakDays = Swift.max(
+            streakDays,
+            computeLongestStreak(
+                calendar: calendar,
+                today: todayStart,
+                activeCountsToday: live > 0
+            )
+        )
 
         let thirtyDaysAgo = calendar.date(byAdding: .day, value: -30, to: now) ?? now
         let finished30d = finished.filter { $0.finishedAt >= thirtyDaysAgo }.count
+
+        let sessions30d = sessions.filter { $0.endedAt >= thirtyDaysAgo }
+        var monthSeconds = sessions30d.reduce(0) { $0 + $1.durationSeconds }
+        if live > 0, let liveStartedAt, liveStartedAt >= thirtyDaysAgo {
+            monthSeconds += live
+        }
+        var activeBookIDs = Set(sessions30d.map(\.mediaID))
+        if live > 0, let activeMediaID = activeSession?.mediaID {
+            activeBookIDs.insert(activeMediaID)
+        }
+        let activeBooks30d = activeBookIDs.count
 
         let allDurations = sessions.map(\.durationSeconds) + (live > 0 ? [live] : [])
         let avgSession = allDurations.isEmpty
@@ -211,8 +230,11 @@ final class SessionTracker {
         return PRStatsSnapshot(
             todaySeconds: todaySeconds,
             weekSeconds: weekSeconds,
+            monthSeconds: monthSeconds,
             streakDays: streakDays,
+            longestStreakDays: longestStreakDays,
             finishedBooks30d: finished30d,
+            activeBooks30d: activeBooks30d,
             averageSessionSeconds: avgSession,
             recentDays: recentDays
         )
@@ -285,6 +307,37 @@ final class SessionTracker {
             cursor = prev
         }
         return streak
+    }
+
+    private func computeLongestStreak(
+        calendar: Calendar,
+        today: Date,
+        activeCountsToday: Bool
+    ) -> Int {
+        var daysWithSessions = Set(
+            sessions.map { calendar.startOfDay(for: $0.endedAt) }
+        )
+        if activeCountsToday {
+            daysWithSessions.insert(today)
+        }
+        let sortedDays = daysWithSessions.sorted()
+        guard !sortedDays.isEmpty else { return 0 }
+
+        var longest = 1
+        var current = 1
+        for idx in 1..<sortedDays.count {
+            let prev = sortedDays[idx - 1]
+            let day = sortedDays[idx]
+            if let expectedNext = calendar.date(byAdding: .day, value: 1, to: prev),
+                calendar.isDate(expectedNext, inSameDayAs: day)
+            {
+                current += 1
+                longest = Swift.max(longest, current)
+            } else {
+                current = 1
+            }
+        }
+        return longest
     }
 
     private func closeActiveIfNeeded() {

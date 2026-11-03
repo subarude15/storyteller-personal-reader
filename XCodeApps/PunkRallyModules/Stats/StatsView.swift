@@ -11,15 +11,18 @@
 
 import SwiftUI
 
-/// Stats destination — reading/listening time, streak, finished count, average session.
+/// Stats destination — reading/listening time, daily goal, streak, finished count, average session.
 /// Hosted under More (not a primary tab). Expects an enclosing NavigationStack.
 struct StatsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("punkRally.stats.dailyGoalMinutes") private var dailyGoalMinutes: Int = 30
     @State private var tracker = SessionTracker.shared
     @State private var sync = StatsSyncCoordinator.shared
     @State private var tick = 0
     @State private var segment: Segment = .stats
+
+    private static let goalOptionsMinutes = [15, 30, 45, 60, 90]
 
     private enum Segment: String, CaseIterable, Identifiable {
         case stats = "Stats"
@@ -75,12 +78,107 @@ struct StatsView: View {
     }
 
     private var statsBody: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        VStack(alignment: .leading, spacing: 20) {
+            dailyGoalCard
             heroCard
             streakAndFinishedRow
             weekChart
+            monthlySummaryCard
             syncFooter
         }
+    }
+
+    // MARK: - Daily Goal Card
+
+    private var dailyGoalCard: some View {
+        let snapshot = tracker.snapshot
+        let goalSeconds = Double(Swift.max(dailyGoalMinutes, 5) * 60)
+        let progress = Swift.min(Swift.max(snapshot.todaySeconds / goalSeconds, 0), 1)
+        let remainingSeconds = Swift.max(goalSeconds - snapshot.todaySeconds, 0)
+        let isGoalMet = snapshot.todaySeconds >= goalSeconds
+
+        return HStack(spacing: 16) {
+            ZStack {
+                Circle()
+                    .stroke(chrome.border, lineWidth: 7)
+                    .frame(width: 64, height: 64)
+
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(
+                        isGoalMet ? PunkRallyTheme.Accent.success : PunkRallyTheme.Accent.primary,
+                        style: StrokeStyle(lineWidth: 7, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                    .frame(width: 64, height: 64)
+                    .animation(.easeOut(duration: 0.35), value: progress)
+
+                if isGoalMet {
+                    Image(systemName: "checkmark")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(PunkRallyTheme.Accent.success)
+                } else {
+                    Text("\(Int((progress * 100).rounded()))%")
+                        .font(.caption.weight(.bold).monospacedDigit())
+                        .foregroundStyle(chrome.text)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Today's Goal")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(chrome.text)
+                    Spacer()
+                    Menu {
+                        ForEach(Self.goalOptionsMinutes, id: \.self) { mins in
+                            Button {
+                                dailyGoalMinutes = mins
+                            } label: {
+                                if dailyGoalMinutes == mins {
+                                    Label("\(mins) min / day", systemImage: "checkmark")
+                                } else {
+                                    Text("\(mins) min / day")
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("\(dailyGoalMinutes)m goal")
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.system(size: 9, weight: .semibold))
+                        }
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(PunkRallyTheme.Accent.primary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule()
+                                .fill(PunkRallyTheme.Accent.primary.opacity(0.14))
+                        )
+                    }
+                }
+
+                Text(snapshot.todaySeconds.hoursMinutes)
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .foregroundStyle(chrome.text)
+
+                Text(
+                    isGoalMet
+                        ? "Daily goal reached — keep the streak going!"
+                        : "\(remainingSeconds.hoursMinutes) left to reach your \(dailyGoalMinutes)m goal"
+                )
+                .font(.caption)
+                .foregroundStyle(isGoalMet ? PunkRallyTheme.Accent.success : chrome.textMuted)
+            }
+        }
+        .padding(PunkRallyTheme.Metric.cardPadding)
+        .background(chrome.surface)
+        .clipShape(RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius)
+                .stroke(chrome.border, lineWidth: 1)
+        )
     }
 
     // MARK: - Hero
@@ -101,11 +199,11 @@ struct StatsView: View {
                 let read = snapshot.recentDays.reduce(0.0) { $0 + $1.readSeconds }
                 legendDot(
                     color: PunkRallyTheme.Accent.primary,
-                    label: "Listen \(listen.minutesShort)"
+                    label: "Listen \(listen.hoursMinutes)"
                 )
                 legendDot(
                     color: PunkRallyTheme.Accent.gold,
-                    label: "Read \(read.minutesShort)"
+                    label: "Read \(read.hoursMinutes)"
                 )
                 Spacer()
             }
@@ -150,27 +248,6 @@ struct StatsView: View {
         }
     }
 
-    private var statPods: [StatPod] {
-        let s = tracker.snapshot
-        return [
-            StatPod(value: "\(s.streakDays)", label: "Day streak",
-                    symbol: "flame.fill", tint: PunkRallyTheme.Accent.primary),
-            StatPod(value: "\(s.finishedBooks30d)", label: "Finished · 30d",
-                    symbol: "checkmark.seal.fill", tint: PunkRallyTheme.Accent.success),
-            StatPod(value: s.averageSessionSeconds == 0
-                    ? "–" : s.averageSessionSeconds.minutesShort,
-                    label: "Avg session", symbol: "timer", tint: PunkRallyTheme.Accent.gold),
-        ]
-    }
-
-    private struct StatPod: Identifiable {
-        let value: String
-        let label: String
-        let symbol: String
-        let tint: Color
-        var id: String { label }
-    }
-
     private func statTile(value: String, label: String, symbol: String, tint: Color) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Image(systemName: symbol)
@@ -204,9 +281,18 @@ struct StatsView: View {
         formatter.dateFormat = "E"
 
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Last 7 days")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(chrome.text)
+            HStack {
+                Text("Last 7 days")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(chrome.text)
+                Spacer()
+                HStack(spacing: 10) {
+                    legendDot(color: PunkRallyTheme.Accent.primary, label: "Listen")
+                    legendDot(color: PunkRallyTheme.Accent.gold, label: "Read")
+                }
+                .font(.caption2)
+                .foregroundStyle(chrome.textMuted)
+            }
 
             HStack(alignment: .bottom, spacing: 8) {
                 ForEach(snapshot.recentDays) { day in
@@ -216,11 +302,7 @@ struct StatsView: View {
                                 .font(.system(size: 9, weight: .medium))
                                 .foregroundStyle(chrome.textFaint)
                         }
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(barColor(for: day))
-                            .frame(
-                                height: barHeight(day.totalSeconds, max: maxSeconds)
-                            )
+                        stackedBar(for: day, maxSeconds: maxSeconds)
                             .frame(maxWidth: 24)
                         Text(formatter.string(from: day.day))
                             .font(.caption2)
@@ -240,16 +322,103 @@ struct StatsView: View {
         )
     }
 
+    @ViewBuilder
+    private func stackedBar(for day: PRDailyAggregate, maxSeconds: TimeInterval) -> some View {
+        let totalHeight = barHeight(day.totalSeconds, max: maxSeconds)
+        if day.totalSeconds <= 0 {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(chrome.border)
+                .frame(height: 4)
+        } else {
+            let readFraction = day.readSeconds / day.totalSeconds
+            let readHeight = CGFloat(readFraction) * totalHeight
+            let listenHeight = max(0, totalHeight - readHeight)
+            VStack(spacing: 0) {
+                if readHeight > 0 {
+                    Rectangle()
+                        .fill(PunkRallyTheme.Accent.gold)
+                        .frame(height: readHeight)
+                }
+                if listenHeight > 0 {
+                    Rectangle()
+                        .fill(PunkRallyTheme.Accent.primary)
+                        .frame(height: listenHeight)
+                }
+            }
+            .frame(height: totalHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+        }
+    }
+
     private func barHeight(_ seconds: TimeInterval, max maxVal: TimeInterval) -> CGFloat {
         guard maxVal > 0 else { return 4 }
         return Swift.max(4, 100 * seconds / maxVal)
     }
 
-    private func barColor(for day: PRDailyAggregate) -> Color {
-        if day.readSeconds > day.listenSeconds {
-            return PunkRallyTheme.Accent.gold
+    // MARK: - 30-Day Summary
+
+    private var monthlySummaryCard: some View {
+        let snapshot = tracker.snapshot
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Last 30 days")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(chrome.text)
+
+            HStack(spacing: 16) {
+                summaryMetric(
+                    title: "Total time",
+                    value: snapshot.monthSeconds.hoursMinutes,
+                    icon: "clock.fill",
+                    tint: PunkRallyTheme.Accent.primary
+                )
+                Divider()
+                    .frame(height: 32)
+                summaryMetric(
+                    title: "Active books",
+                    value: "\(snapshot.activeBooks30d)",
+                    icon: "books.vertical.fill",
+                    tint: PunkRallyTheme.Accent.gold
+                )
+                Divider()
+                    .frame(height: 32)
+                summaryMetric(
+                    title: "Best streak",
+                    value: "\(snapshot.longestStreakDays)d",
+                    icon: "trophy.fill",
+                    tint: PunkRallyTheme.Accent.success
+                )
+            }
         }
-        return PunkRallyTheme.Accent.primary
+        .padding(PunkRallyTheme.Metric.cardPadding)
+        .background(chrome.surface)
+        .clipShape(RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius)
+                .stroke(chrome.border, lineWidth: 1)
+        )
+    }
+
+    private func summaryMetric(
+        title: String,
+        value: String,
+        icon: String,
+        tint: Color
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.caption2)
+                    .foregroundStyle(tint)
+                Text(title)
+                    .font(.caption2)
+                    .foregroundStyle(chrome.textMuted)
+                    .lineLimit(1)
+            }
+            Text(value)
+                .font(.headline.weight(.bold).monospacedDigit())
+                .foregroundStyle(chrome.text)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Footer

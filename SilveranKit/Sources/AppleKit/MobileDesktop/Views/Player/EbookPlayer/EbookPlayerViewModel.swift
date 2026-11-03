@@ -943,9 +943,9 @@ class EbookPlayerViewModel {
             title: selection.title,
             locations: BookLocator.Locations(
                 fragments: [selection.cfi],
-                progression: nil,
+                progression: progressManager?.chapterSeekBarValue,
                 position: nil,
-                totalProgression: nil,
+                totalProgression: progressManager?.bookFraction,
                 cssSelector: selection.startCssSelector,
                 partialCfi: selection.cfi,
                 domRange: BookLocator.Locations.DomRange(
@@ -1138,6 +1138,7 @@ class EbookPlayerViewModel {
         await BookmarkActor.shared.updateHighlight(updated)
         highlights = await BookmarkActor.shared.getHighlights(bookID: bookID)
         await sendHighlightsToJS()
+        rememberLastUsedColor(colorId)
     }
 
     func handleHighlightDelete(id: String) async {
@@ -1198,7 +1199,7 @@ class EbookPlayerViewModel {
             title: position.title,
             locations: BookLocator.Locations(
                 fragments: position.elementId.map { [$0] },
-                progression: nil,
+                progression: progressManager?.chapterSeekBarValue,
                 position: nil,
                 totalProgression: progressManager?.bookFraction,
                 cssSelector: nil,

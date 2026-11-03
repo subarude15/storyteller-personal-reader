@@ -1,5 +1,10 @@
 #if os(iOS) || os(macOS)
 import SwiftUI
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 @available(macOS 14.0, iOS 17.0, *)
 struct HighlightCreationSheet: View {
@@ -14,6 +19,14 @@ struct HighlightCreationSheet: View {
     @State private var selectedColor: HighlightColor? = .yellow
     @State private var note: String = ""
     @State private var isBookmarkOnly: Bool = false
+    @State private var didCopyText: Bool = false
+
+    private var previewAccentColor: Color {
+        if isBookmarkOnly {
+            return .blue
+        }
+        return colorForHighlight(selectedColor)
+    }
 
     var body: some View {
         NavigationStack {
@@ -40,6 +53,9 @@ struct HighlightCreationSheet: View {
 
                 Toggle("Bookmark only (no highlight color)", isOn: $isBookmarkOnly)
                     .font(.subheadline)
+                    .onChange(of: isBookmarkOnly) { _, _ in
+                        ReaderHaptics.selectionTick()
+                    }
 
                 Spacer()
             }
@@ -58,6 +74,7 @@ struct HighlightCreationSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        ReaderHaptics.selectionTick()
                         let color = isBookmarkOnly ? nil : selectedColor
                         let noteText = note.isEmpty ? nil : note
                         onSave(color, noteText)
@@ -81,7 +98,7 @@ struct HighlightCreationSheet: View {
             #endif
         }
         #if os(iOS)
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
         #else
         .frame(width: 400, height: 450)
         #endif
@@ -89,20 +106,59 @@ struct HighlightCreationSheet: View {
 
     private var selectedTextPreview: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Selected Text")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack {
+                Text("Selected Text")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    #if os(iOS)
+                    UIPasteboard.general.string = selectedText
+                    #elseif os(macOS)
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(selectedText, forType: .string)
+                    #endif
+                    ReaderHaptics.selectionTick()
+                    withAnimation {
+                        didCopyText = true
+                    }
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(1.5))
+                        withAnimation {
+                            didCopyText = false
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: didCopyText ? "checkmark.circle.fill" : "doc.on.doc")
+                        Text(didCopyText ? "Copied" : "Copy")
+                    }
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(didCopyText ? .green : .secondary)
+                }
+                .buttonStyle(.plain)
+            }
 
-            Text(selectedText)
-                .font(.body)
-                .foregroundStyle(.primary)
-                .lineLimit(4)
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
-                )
+            HStack(alignment: .top, spacing: 10) {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(previewAccentColor)
+                    .frame(width: 5)
+
+                Text(selectedText)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .lineLimit(4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(previewAccentColor.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(previewAccentColor.opacity(0.35), lineWidth: 1)
+            )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -111,6 +167,7 @@ struct HighlightCreationSheet: View {
         HStack(spacing: 12) {
             ForEach(HighlightColor.allCases, id: \.self) { color in
                 Button {
+                    ReaderHaptics.selectionTick()
                     selectedColor = color
                 } label: {
                     VStack(spacing: 4) {
