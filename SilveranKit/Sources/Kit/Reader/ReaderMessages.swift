@@ -22,6 +22,7 @@ public struct RelocatedMessage: Codable {
 /// Sent from JS when book structure is ready after opening a book
 public struct BookStructureReadyMessage: Codable {
     public let sections: [SectionInfo]
+    public let sectionFractions: [Double]?
 }
 
 /// Sent when foliate detects a user gesture that flips a page

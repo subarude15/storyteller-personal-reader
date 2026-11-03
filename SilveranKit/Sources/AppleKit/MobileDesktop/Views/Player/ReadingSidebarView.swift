@@ -371,19 +371,38 @@ public struct ReadingSidebarView: View {
             )
             .tint(usesSystemChrome ? (coverTint?.control ?? inkTheme.progress) : primaryColor)
 
-            HStack {
-                Text(formatOptionalTime(chapterElapsed))
-                Spacer()
-                Text(
-                    "-\(formatOptionalTime(chapterRemainingAtRate ?? rawRemaining)) (\(playbackRateDescription))"
-                )
-                .font(.footnote)
+            if mode == .ebook {
+                HStack {
+                    if let current = progressData?.chapterCurrentPage,
+                        let total = progressData?.chapterTotalPages,
+                        total > 0
+                    {
+                        Text("Page \(current) of \(total)")
+                    } else {
+                        Text("\(Int((sliderBinding.wrappedValue * 100).rounded()))% of chapter")
+                    }
+                    Spacer()
+                    if let bookFrac = progressData?.bookCurrentFraction {
+                        Text("\(Int((min(max(bookFrac, 0), 1) * 100).rounded()))% of book")
+                    }
+                }
+                .font(.footnote.monospacedDigit())
                 .foregroundStyle(secondaryColor)
-                Spacer()
-                Text(formatOptionalTime(chapterTotal))
+            } else {
+                HStack {
+                    Text(formatOptionalTime(chapterElapsed))
+                    Spacer()
+                    Text(
+                        "-\(formatOptionalTime(chapterRemainingAtRate ?? rawRemaining)) (\(playbackRateDescription))"
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(secondaryColor)
+                    Spacer()
+                    Text(formatOptionalTime(chapterTotal))
+                }
+                .font(.footnote.monospacedDigit())
+                .foregroundStyle(secondaryColor)
             }
-            .font(.footnote.monospacedDigit())
-            .foregroundStyle(secondaryColor)
         }
         .padding(.horizontal, 20)
     }

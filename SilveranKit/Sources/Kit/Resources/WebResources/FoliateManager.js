@@ -588,7 +588,14 @@ class FoliateManager {
 
     debugLog("FoliateManager", "Book structure ready -", sections.length, "sections");
 
-    const payload = { sections };
+    const rawFractions = this.#view?.getSectionFractions?.() || [];
+    const sectionFractions = Array.isArray(rawFractions)
+      ? rawFractions.map((value) =>
+          Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0,
+        )
+      : [];
+
+    const payload = { sections, sectionFractions };
     window.webkit?.messageHandlers?.BookStructureReady?.postMessage(payload);
   }
 

@@ -234,6 +234,35 @@ class EbookPlayerViewModel {
         highlights.filter { !$0.isBookmark }.sorted { $0.createdAt > $1.createdAt }
     }
 
+    var chapterTicks: [ReaderScrubberPolicy.ChapterTick] {
+        ReaderScrubberPolicy.buildChapterTicks(
+            tocEntries: tocEntries,
+            sections: bookStructure,
+            sectionFractions: session?.sectionFractions
+        )
+    }
+
+    var currentPageBookmark: Highlight? {
+        ReaderScrubberPolicy.matchingBookmark(
+            in: bookmarks,
+            sectionIndex: progressManager?.selectedChapterId,
+            cfi: progressManager?.currentCfi,
+            href: progressManager?.currentHref,
+            bookFraction: progressManager?.bookFraction,
+            totalPagesInSection: progressManager?.chapterTotalPages,
+            sections: bookStructure
+        )
+    }
+
+    var isCurrentPageBookmarked: Bool {
+        currentPageBookmark != nil
+    }
+
+    private(set) var jumpSnapshot: ReaderScrubberPolicy.JumpSnapshot? = nil
+    @ObservationIgnored private var isScrubJumpSessionActive = false
+    @ObservationIgnored private var jumpPillAutoDismissTask: Task<Void, Never>? = nil
+    @ObservationIgnored private var userFlipsSinceJump = 0
+
     init(bookData: PlayerBookData?, settingsVM: SettingsViewModel = SettingsViewModel()) {
         self.bookData = bookData
         self.settingsVM = settingsVM
@@ -255,6 +284,7 @@ class EbookPlayerViewModel {
     }
 
     func handleChapterSelection(_ chapter: ChapterItem) {
+        recordJumpSnapshotBeforeNavigation()
         userSelectedTocId = chapter.id
         if isComicBook, let index = Int(chapter.href) ?? Int(chapter.id) {
             progressManager?.handleNativePageSelected(index)
@@ -293,6 +323,7 @@ class EbookPlayerViewModel {
     }
 
     func handlePrevChapter() {
+        recordJumpSnapshotBeforeNavigation()
         userSelectedTocId = nil
         if isComicBook {
             progressManager?.handleNativeNavLeft()
@@ -335,6 +366,7 @@ class EbookPlayerViewModel {
     }
 
     func handleNextChapter() {
+        recordJumpSnapshotBeforeNavigation()
         userSelectedTocId = nil
         if isComicBook {
             progressManager?.handleNativeNavRight()
@@ -420,11 +452,123 @@ class EbookPlayerViewModel {
         mediaOverlayManager?.prevSentence()
     }
 
+    func beginScrubSession() {
+        if !isScrubJumpSessionActive {
+            recordJumpSnapshotBeforeNavigation()
+            isScrubJumpSessionActive = true
+        }
+        jumpPillAutoDismissTask?.cancel()
+    }
+
     func handleProgressSeek(_ fraction: Double) {
+        if !isScrubJumpSessionActive {
+            recordJumpSnapshotBeforeNavigation()
+        }
+        isScrubJumpSessionActive = false
+        scheduleJumpPillAutoDismiss()
         if isComicBook {
             progressManager?.handleNativeProgressSeek(fraction)
         } else {
             progressManager?.handleUserProgressSeek(fraction)
+        }
+    }
+
+    func handleBookProgressSeek(_ fraction: Double) {
+        if !isScrubJumpSessionActive {
+            recordJumpSnapshotBeforeNavigation()
+        }
+        isScrubJumpSessionActive = false
+        scheduleJumpPillAutoDismiss()
+        if isComicBook {
+            progressManager?.handleNativeProgressSeek(fraction)
+        } else {
+            progressManager?.handleUserBookProgressSeek(fraction)
+        }
+    }
+
+    func recordJumpSnapshotBeforeNavigation(isForwardTarget: Bool = false) {
+        guard let pm = progressManager else { return }
+        let sectionIndex = pm.selectedChapterId
+        let chapterTitle = sectionIndex.flatMap { bookStructure[safe: $0]?.label }
+        let candidate = ReaderScrubberPolicy.JumpSnapshot(
+            sectionIndex: sectionIndex,
+            cfi: pm.currentCfi,
+            href: pm.currentHref ?? sectionIndex.flatMap { bookStructure[safe: $0]?.id },
+            chapterFraction: pm.chapterSeekBarValue,
+            bookFraction: pm.bookFraction,
+            pageNumber: pm.chapterCurrentPage,
+            totalPages: pm.chapterTotalPages,
+            chapterTitle: chapterTitle,
+            isForwardTarget: isForwardTarget
+        )
+        guard candidate.sectionIndex != nil || candidate.bookFraction != nil || candidate.cfi != nil
+        else {
+            return
+        }
+        userFlipsSinceJump = 0
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+            jumpSnapshot = candidate
+        }
+        scheduleJumpPillAutoDismiss()
+    }
+
+    func dismissJumpSnapshot() {
+        jumpPillAutoDismissTask?.cancel()
+        jumpPillAutoDismissTask = nil
+        isScrubJumpSessionActive = false
+        userFlipsSinceJump = 0
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+            jumpSnapshot = nil
+        }
+    }
+
+    func returnToJumpSnapshot() {
+        guard let target = jumpSnapshot else { return }
+        ReaderHaptics.jumpNavigation()
+
+        // Capture the current position as the opposite direction so the user can bounce back if desired.
+        recordJumpSnapshotBeforeNavigation(isForwardTarget: !target.isForwardTarget)
+
+        if isComicBook, let page = target.pageNumber, page > 0 {
+            progressManager?.handleNativePageSelected(page - 1)
+            return
+        }
+
+        Task { @MainActor in
+            progressManager?.prepareForDirectJump(targetSection: target.sectionIndex)
+            if let cfi = target.cfi, !cfi.isEmpty, let bridge = commsBridge {
+                do {
+                    try await bridge.sendJsGoToCFICommand(cfi: cfi)
+                    return
+                } catch {
+                    debugLog("[EbookPlayerViewModel] Jump-back CFI failed, falling back: \(error)")
+                }
+            }
+            if let section = target.sectionIndex, let bridge = commsBridge {
+                do {
+                    try await bridge.sendJsGoToFractionInSectionCommand(
+                        sectionIndex: section,
+                        fraction: target.chapterFraction
+                    )
+                    return
+                } catch {
+                    debugLog(
+                        "[EbookPlayerViewModel] Jump-back section fraction failed, falling back: \(error)"
+                    )
+                }
+            }
+            if let bookFrac = target.bookFraction {
+                progressManager?.handleUserBookProgressSeek(bookFrac)
+            }
+        }
+    }
+
+    private func scheduleJumpPillAutoDismiss() {
+        jumpPillAutoDismissTask?.cancel()
+        jumpPillAutoDismissTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(10))
+            guard !Task.isCancelled, let self else { return }
+            self.dismissJumpSnapshot()
         }
     }
 
@@ -466,7 +610,14 @@ class EbookPlayerViewModel {
             self?.prepareComicPages(from: url)
         }
         session.onUserNavigation = { [weak self] in
-            self?.userSelectedTocId = nil
+            guard let self else { return }
+            self.userSelectedTocId = nil
+            if self.jumpSnapshot != nil && !self.isScrubJumpSessionActive {
+                self.userFlipsSinceJump += 1
+                if self.userFlipsSinceJump >= 2 {
+                    self.dismissJumpSnapshot()
+                }
+            }
         }
         #if os(iOS)
         session.isViewRecovering = { [weak self] in
@@ -486,6 +637,11 @@ class EbookPlayerViewModel {
         }
         session.onViewStructureReady = { [weak self] in
             guard let self else { return }
+            self.progressManager?.onChapterBoundaryCrossed = { _, _ in
+                Task { @MainActor in
+                    ReaderHaptics.chapterBoundaryCrossed()
+                }
+            }
             self.settingsVM.applyActiveTheme(for: self.bridgeInitialColorScheme)
             self.styleManager?.sendInitialStyles(
                 isDarkMode: self.bridgeInitialColorScheme == .dark
@@ -759,6 +915,7 @@ class EbookPlayerViewModel {
 
     /// Navigate to search result - view only, no audio sync
     func handleSearchResultNavigation(_ result: SearchResult) {
+        recordJumpSnapshotBeforeNavigation()
         Task { @MainActor in
             await searchManager?.navigateToResult(result)
         }
@@ -848,6 +1005,10 @@ class EbookPlayerViewModel {
 
     func navigateToHighlight(_ highlight: Highlight) async {
         guard let bridge = commsBridge else { return }
+        recordJumpSnapshotBeforeNavigation()
+        progressManager?.prepareForDirectJump(
+            targetSection: findSectionIndex(for: highlight.locator.href, in: bookStructure)
+        )
 
         if let cfi = highlight.locator.locations?.partialCfi {
             do {
@@ -1059,6 +1220,16 @@ class EbookPlayerViewModel {
         highlights = await BookmarkActor.shared.getHighlights(bookID: bookID)
 
         debugLog("[EbookPlayerViewModel] Added bookmark: \(position.text.prefix(50))...")
+    }
+
+    func toggleBookmarkAtCurrentPage() async {
+        if let existing = currentPageBookmark {
+            ReaderHaptics.bookmarkToggled(added: false)
+            await deleteHighlight(existing)
+        } else {
+            ReaderHaptics.bookmarkToggled(added: true)
+            await addBookmarkAtCurrentPage()
+        }
     }
 }
 

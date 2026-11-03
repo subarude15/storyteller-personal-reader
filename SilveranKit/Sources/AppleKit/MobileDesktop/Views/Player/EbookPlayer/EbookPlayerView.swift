@@ -542,6 +542,9 @@ public struct EbookPlayerView: View {
 
             #if os(iOS)
             let alwaysShowMini = viewModel.settingsVM.alwaysShowMiniPlayer
+            let isBottomCardPresented =
+                !(isPad && viewModel.showAudioSidebar)
+                && (alwaysShowMini || viewModel.isReadingBarVisible)
             let overlayBookFraction = viewModel.progressManager?.bookFraction
             let overlayBookTimeRemaining = viewModel.mediaOverlayManager?.bookTimeRemaining
             let overlayChapterTimeRemaining = viewModel.mediaOverlayManager?.chapterTimeRemaining
@@ -591,8 +594,12 @@ public struct EbookPlayerView: View {
                 .transition(.opacity)
             }
 
-            // Tap-revealed chrome: floating progress/page (no solid footer band).
-            if viewModel.isTopBarVisible && !viewModel.showAudioSidebar && !viewModel.isPageCurlActive {
+            // Tap-revealed chrome: floating progress/page when the bottom scrubber card is not covering the footer.
+            if viewModel.isTopBarVisible
+                && !viewModel.showAudioSidebar
+                && !viewModel.isPageCurlActive
+                && !isBottomCardPresented
+            {
                 EbookOverlayIos(
                     showProgress: viewModel.settingsVM.showProgress,
                     showTimeRemainingInBook: viewModel.hasAudioNarration
@@ -619,6 +626,19 @@ public struct EbookPlayerView: View {
                     onSkipForward: {},
                 )
                 .transition(.opacity)
+            }
+
+            if viewModel.isCurrentPageBookmarked
+                && !viewModel.isTopBarVisible
+                && !viewModel.isPageCurlActive
+            {
+                BookmarkPageRibbonView {
+                    Task { await viewModel.toggleBookmarkAtCurrentPage() }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .padding(.trailing, 20)
+                .ignoresSafeArea(edges: .top)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
 
             if viewModel.isTopBarVisible && !viewModel.isPageCurlActive {
@@ -656,6 +676,10 @@ public struct EbookPlayerView: View {
                     onSwitchFormat: { category in
                         Task { await switchEbookFormat(to: category) }
                     },
+                    isCurrentPageBookmarked: viewModel.isCurrentPageBookmarked,
+                    onTogglePageBookmark: {
+                        Task { await viewModel.toggleBookmarkAtCurrentPage() }
+                    },
                 )
                 .transition(.opacity)
             }
@@ -665,6 +689,32 @@ public struct EbookPlayerView: View {
                 draggableAudioCard
                     .frame(width: isSpread ? readerSize.width / 2 : nil)
                     .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+
+            if let snapshot = viewModel.jumpSnapshot, !viewModel.isPageCurlActive {
+                let isPureEbookDirectScrubber =
+                    !viewModel.hasAudioNarration && !viewModel.isComicBook && !alwaysShowMini
+                let cardLift: CGFloat =
+                    if isBottomCardPresented {
+                        isPureEbookDirectScrubber ? 142 : 70
+                    } else {
+                        24
+                    }
+                ReaderJumpBackPillView(
+                    snapshot: snapshot,
+                    foregroundColor: readerForegroundColor,
+                    backgroundColor: readerBackgroundColor,
+                    onReturn: {
+                        viewModel.returnToJumpSnapshot()
+                    },
+                    onDismiss: {
+                        viewModel.dismissJumpSnapshot()
+                    }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .padding(.leading, 18)
+                .padding(.bottom, cardLift)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
             // Thin bottom scrub indicator is for narration/audio; keep ebook pages
@@ -806,6 +856,11 @@ public struct EbookPlayerView: View {
             chapterTitle: currentChapterTitle,
             isPlaying: mom?.isPlaying ?? false,
             chapterProgress: viewModel.chapterProgressBinding.wrappedValue,
+            bookFraction: pm?.bookFraction,
+            currentPage: pm?.chapterCurrentPage,
+            totalPages: pm?.chapterTotalPages,
+            chapterTicks: viewModel.chapterTicks,
+            jumpOriginFraction: viewModel.jumpSnapshot?.bookFraction,
             chapterElapsedSeconds: mom?.chapterElapsedSeconds,
             chapterTotalSeconds: mom?.chapterTotalSeconds,
             bookTimeRemaining: mom?.bookTimeRemaining,
@@ -834,6 +889,10 @@ public struct EbookPlayerView: View {
                 viewModel.handleNextChapter()
             },
             onProgressSeek: viewModel.handleProgressSeek,
+            onBookProgressSeek: viewModel.handleBookProgressSeek,
+            onScrubBegan: {
+                viewModel.beginScrubSession()
+            },
             onPlaybackRateChange: viewModel.handlePlaybackRateChange,
             onChapterSelected: viewModel.handleChapterSelection,
             onSleepTimerStart: viewModel.handleSleepTimerStart,

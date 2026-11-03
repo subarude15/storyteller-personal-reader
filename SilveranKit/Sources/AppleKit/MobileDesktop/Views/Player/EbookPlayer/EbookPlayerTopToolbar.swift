@@ -39,6 +39,8 @@ struct EbookPlayerTopToolbar: View {
     /// Other downloaded formats for this title (excludes the current category).
     var switchableFormats: [(label: String, category: LocalMediaCategory)] = []
     var onSwitchFormat: ((LocalMediaCategory) -> Void)?
+    var isCurrentPageBookmarked: Bool = false
+    var onTogglePageBookmark: (() -> Void)? = nil
 
     @State private var showSleepTimerSheet = false
     @State private var showOptionsSheet = false
@@ -106,7 +108,7 @@ struct EbookPlayerTopToolbar: View {
 
                 Spacer(minLength: 0)
 
-                HStack(spacing: 4) {
+                HStack(spacing: 2) {
                     if hasAudioNarration {
                         sleepTimerButton
                     }
@@ -119,29 +121,30 @@ struct EbookPlayerTopToolbar: View {
                         foregroundColor: iconColor,
                         transparency: 1.0,
                         showLabel: false,
-                        buttonSize: 44,
+                        buttonSize: 42,
                         showBackground: false,
                     )
 
                     Button {
                         showBookmarksPanel = true
                     } label: {
-                        Image(systemName: "bookmark")
-                            .font(.system(size: 20, weight: .regular))
+                        Image(systemName: "highlighter")
+                            .font(.system(size: 19, weight: .regular))
                             .foregroundStyle(iconColor)
                             .contentShape(Rectangle())
                     }
-                    .frame(width: 44, height: 44)
+                    .frame(width: 42, height: 44)
+                    .accessibilityLabel("Bookmarks and Highlights")
 
                     Button {
                         showSearchSheet = true
                     } label: {
                         Image(systemName: "magnifyingglass")
-                            .font(.system(size: 20, weight: .regular))
+                            .font(.system(size: 19, weight: .regular))
                             .foregroundStyle(iconColor)
                             .contentShape(Rectangle())
                     }
-                    .frame(width: 44, height: 44)
+                    .frame(width: 42, height: 44)
                     .sheet(isPresented: $showSearchSheet) {
                         NavigationStack {
                             if let manager = searchManager {
@@ -216,14 +219,56 @@ struct EbookPlayerTopToolbar: View {
                         showOptionsSheet = true
                     } label: {
                         Image(systemName: "ellipsis.circle")
-                            .font(.system(size: 20, weight: .regular))
+                            .font(.system(size: 19, weight: .regular))
                             .foregroundStyle(iconColor)
                             .contentShape(Rectangle())
                     }
-                    .frame(width: 44, height: 44)
+                    .frame(width: 42, height: 44)
                     .accessibilityLabel("Display Options")
                     .sheet(isPresented: $showOptionsSheet) {
                         optionsSheet
+                    }
+
+                    Button {
+                        if let onTogglePageBookmark {
+                            onTogglePageBookmark()
+                        } else {
+                            showBookmarksPanel = true
+                        }
+                    } label: {
+                        Image(systemName: isCurrentPageBookmarked ? "bookmark.fill" : "bookmark")
+                            .font(.system(size: 20, weight: .regular))
+                            .foregroundStyle(
+                                isCurrentPageBookmarked
+                                    ? BookmarkPageRibbonView.ribbonColor
+                                    : iconColor
+                            )
+                            .scaleEffect(isCurrentPageBookmarked ? 1.08 : 1.0)
+                            .animation(
+                                .spring(response: 0.28, dampingFraction: 0.7),
+                                value: isCurrentPageBookmarked
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .frame(width: 42, height: 44)
+                    .accessibilityLabel(
+                        isCurrentPageBookmarked ? "Remove Page Bookmark" : "Bookmark Page"
+                    )
+                    .contextMenu {
+                        Button {
+                            onTogglePageBookmark?()
+                        } label: {
+                            Label(
+                                isCurrentPageBookmarked ? "Remove Bookmark" : "Bookmark This Page",
+                                systemImage: isCurrentPageBookmarked
+                                    ? "bookmark.slash" : "bookmark.fill"
+                            )
+                        }
+                        Button {
+                            showBookmarksPanel = true
+                        } label: {
+                            Label("All Bookmarks & Highlights", systemImage: "list.bullet")
+                        }
                     }
                 }
             }
