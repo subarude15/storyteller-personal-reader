@@ -122,7 +122,7 @@ public final class LiveActivityController {
             hasSession: hasSession,
         )
         for stale in existing where plan.end.contains(stale.id) {
-            await stale.end(nil, dismissalPolicy: .immediate)
+            await Self.endActivity(id: stale.id, final: nil, dismissAt: nil)
         }
         if let kept = existing.first(where: { $0.id == plan.keep }) {
             track(kept)
@@ -176,7 +176,7 @@ public final class LiveActivityController {
 
         if let activity, activity.activityState == .active {
             guard rendered?.needsUpdate(to: next) ?? true else { return }
-            await activity.update(ActivityContent(state: next, staleDate: nil))
+            await Self.updateActivity(id: activity.id, state: next)
             rendered = next
             return
         }
@@ -289,11 +289,29 @@ public final class LiveActivityController {
             final?.positionAt = now
             final?.isPlaying = false
         }
-        let policy: ActivityUIDismissalPolicy = gate.dismissalDate(renderedItemID: rendered?.itemID, now: now)
-            .map { ActivityUIDismissalPolicy.after($0) } ?? .immediate
+        let dismissAt = gate.dismissalDate(renderedItemID: rendered?.itemID, now: now)
         self.activity = nil
         rendered = nil
-        await activity.end(final.map { ActivityContent(state: $0, staleDate: nil) }, dismissalPolicy: policy)
+        await Self.endActivity(id: activity.id, final: final, dismissAt: dismissAt)
+    }
+
+    // `Activity` is not Sendable, so its nonisolated async APIs can't be called on a
+    // main-actor reference; resolve it by ID off the main actor instead.
+    private nonisolated static func updateActivity(id: String, state: InkAmpPlaybackActivityState) async {
+        for activity in Activity<InkAmpPlaybackAttributes>.activities where activity.id == id {
+            await activity.update(ActivityContent(state: state, staleDate: nil))
+        }
+    }
+
+    private nonisolated static func endActivity(
+        id: String,
+        final: InkAmpPlaybackActivityState?,
+        dismissAt: Date?,
+    ) async {
+        let policy: ActivityUIDismissalPolicy = dismissAt.map { .after($0) } ?? .immediate
+        for activity in Activity<InkAmpPlaybackAttributes>.activities where activity.id == id {
+            await activity.end(final.map { ActivityContent(state: $0, staleDate: nil) }, dismissalPolicy: policy)
+        }
     }
 
     private func endAll() async {
