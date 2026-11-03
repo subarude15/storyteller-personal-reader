@@ -15,7 +15,7 @@ final class AudioSessionMonitor {
     @ObservationIgnored private var started = false
     @ObservationIgnored private var coverBookID: BookID?
     @ObservationIgnored private var podcastCoverURL: URL?
-    @ObservationIgnored private var pollTask: Task<Void, Never>?
+    @ObservationIgnored private var foregroundObserver: NSObjectProtocol?
 
     private init() {}
 
@@ -29,10 +29,12 @@ final class AudioSessionMonitor {
                 }
             }
         }
-        pollTask = Task { @MainActor in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(500))
-                guard AudioSessionMonitor.shared.snapshot?.isPlaying == true else { continue }
+        foregroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main,
+        ) { _ in
+            Task { @MainActor in
                 let fresh = await AudioSessionActor.shared.currentSnapshot()
                 AudioSessionMonitor.shared.apply(fresh)
             }
@@ -130,38 +132,68 @@ struct GlobalMiniPlayerBar: View {
     }
 
     private func barContent(_ snapshot: AudioSessionSnapshot) -> some View {
-        InkAmpMiniPlayerChrome(
+        let subtitle = MiniPlayerPolicy.subtitle(
+            author: snapshot.author,
+            chapterLabel: snapshot.chapterLabel,
+            bookProgress: snapshot.bookProgress,
+            remainingSeconds: snapshot.chapterRemainingSeconds ?? snapshot.remainingSeconds,
+            playbackRate: snapshot.playbackRate,
+        )
+
+        return InkAmpMiniPlayerChrome(
             title: snapshot.title ?? "Now Playing",
+            subtitle: subtitle,
             isPlaying: snapshot.isPlaying,
             progress: snapshot.bookProgress,
             cover: { coverThumb(for: snapshot) },
-            onExpand: { presenter.expandMiniPlayer() },
+            onExpand: {
+                ReaderHaptics.jumpNavigation()
+                presenter.expandMiniPlayer()
+            },
+            onSkipBackward: {
+                ReaderHaptics.selectionTick()
+                Task { await AudioSessionActor.shared.skipPlayback(by: -15) }
+            },
             onTogglePlayPause: {
+                ReaderHaptics.bookmarkToggled(added: !snapshot.isPlaying)
                 Task { try? await AudioSessionActor.shared.transport(.togglePlayPause) }
             },
-            onStop: { presenter.stopSession() },
+            onStop: {
+                ReaderHaptics.selectionTick()
+                presenter.stopSession()
+            },
         )
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: snapshot.isPlaying)
+        .animation(.spring(response: 0.35, dampingFraction: 0.82), value: snapshot.isPlaying)
     }
 
     @ViewBuilder
     private func coverThumb(for snapshot: AudioSessionSnapshot) -> some View {
-        if let cover = monitor.coverImage {
-            Image(uiImage: cover)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: 40, height: 40)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        } else {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(theme.surface)
-                .frame(width: 40, height: 40)
-                .overlay(
-                    Image(systemName: placeholderIcon(for: snapshot.kind))
-                        .font(.body)
-                        .foregroundStyle(theme.secondaryText)
-                )
+        let thumbScale: CGFloat = snapshot.isPlaying ? 1.0 : 0.92
+        Group {
+            if let cover = monitor.coverImage {
+                Image(uiImage: cover)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 42, height: 42)
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            } else {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(theme.surface)
+                    .frame(width: 42, height: 42)
+                    .overlay(
+                        Image(systemName: placeholderIcon(for: snapshot.kind))
+                            .font(.body)
+                            .foregroundStyle(theme.secondaryText)
+                    )
+            }
         }
+        .scaleEffect(thumbScale)
+        .shadow(
+            color: .black.opacity(snapshot.isPlaying ? 0.18 : 0.06),
+            radius: snapshot.isPlaying ? 5 : 2,
+            y: snapshot.isPlaying ? 2 : 1,
+        )
+        .animation(.spring(response: 0.38, dampingFraction: 0.78), value: snapshot.isPlaying)
     }
 
     private func placeholderIcon(for kind: AudioSessionKind) -> String {
@@ -191,10 +223,12 @@ struct InkAmpMiniPlayerChrome<Cover: View>: View {
     private var controlColor: Color { coverTint?.control ?? theme.accent }
 
     let title: String
+    var subtitle: String? = nil
     let isPlaying: Bool
     var progress: Double? = nil
     let cover: () -> Cover
     let onExpand: () -> Void
+    var onSkipBackward: (() -> Void)? = nil
     let onTogglePlayPause: () -> Void
     let onStop: () -> Void
 
@@ -204,20 +238,41 @@ struct InkAmpMiniPlayerChrome<Cover: View>: View {
                 .contentShape(Rectangle())
                 .onTapGesture(perform: onExpand)
 
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(theme.primaryText)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-                .onTapGesture(perform: onExpand)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(theme.primaryText)
+                    .lineLimit(1)
+
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(theme.secondaryText)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onExpand)
+
+            if let onSkipBackward {
+                Button(action: onSkipBackward) {
+                    Image(systemName: "gobackward.15")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(theme.primaryText)
+                        .frame(width: 38, height: 38)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Rewind 15 seconds")
+            }
 
             Button(action: onTogglePlayPause) {
                 Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                     .font(.title3)
                     .foregroundStyle(controlColor)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+                    .frame(width: 42, height: 42)
+                    .contentShape(Circle())
                     .background(Circle().fill(controlColor.opacity(0.14)))
             }
             .buttonStyle(.plain)
@@ -225,16 +280,16 @@ struct InkAmpMiniPlayerChrome<Cover: View>: View {
 
             Button(action: onStop) {
                 Image(systemName: "xmark")
-                    .font(.body.weight(.semibold))
+                    .font(.callout.weight(.semibold))
                     .foregroundStyle(theme.secondaryText)
-                    .frame(width: 44, height: 44)
+                    .frame(width: 38, height: 38)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Stop playback")
         }
         .padding(.horizontal, 12)
-        .frame(height: 56)
+        .frame(height: 60)
         .background {
             if let coverTint {
                 coverTint.gradient(startPoint: .leading, endPoint: .trailing)
@@ -244,11 +299,16 @@ struct InkAmpMiniPlayerChrome<Cover: View>: View {
         .overlay(alignment: .bottom) {
             if let progress {
                 GeometryReader { geo in
-                    Rectangle()
-                        .fill(controlColor)
-                        .frame(width: geo.size.width * min(max(progress, 0), 1))
+                    ZStack(alignment: .leading) {
+                        Rectangle()
+                            .fill(controlColor.opacity(0.16))
+                        Rectangle()
+                            .fill(controlColor)
+                            .frame(width: geo.size.width * min(max(progress, 0), 1))
+                            .animation(.easeOut(duration: 0.25), value: progress)
+                    }
                 }
-                .frame(height: 2)
+                .frame(height: 2.5)
                 .accessibilityHidden(true)
             }
         }
@@ -256,6 +316,14 @@ struct InkAmpMiniPlayerChrome<Cover: View>: View {
         .inkAmpSurface(elevated: true, radius: InkAmpMetrics.cardRadius)
         .padding(.horizontal, 8)
         .padding(.bottom, 4)
+        .gesture(
+            DragGesture(minimumDistance: 18, coordinateSpace: .local)
+                .onEnded { value in
+                    if value.translation.height < -20 && abs(value.translation.width) < 60 {
+                        onExpand()
+                    }
+                }
+        )
     }
 }
 
@@ -263,13 +331,16 @@ struct InkAmpMiniPlayerChrome<Cover: View>: View {
 #Preview("Mini player · light") {
     InkAmpMiniPlayerChrome(
         title: "Piranesi — Susanna Clarke",
+        subtitle: "Part 1: Piranesi · 18m left",
         isPlaying: true,
+        progress: 0.42,
         cover: {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(Color.gray.opacity(0.35))
-                .frame(width: 40, height: 40)
+                .frame(width: 42, height: 42)
         },
         onExpand: {},
+        onSkipBackward: {},
         onTogglePlayPause: {},
         onStop: {},
     )
@@ -281,13 +352,16 @@ struct InkAmpMiniPlayerChrome<Cover: View>: View {
 #Preview("Mini player · dark") {
     InkAmpMiniPlayerChrome(
         title: "Piranesi — Susanna Clarke",
+        subtitle: "Susanna Clarke · 42%",
         isPlaying: false,
+        progress: 0.42,
         cover: {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(Color.gray.opacity(0.45))
-                .frame(width: 40, height: 40)
+                .frame(width: 42, height: 42)
         },
         onExpand: {},
+        onSkipBackward: {},
         onTogglePlayPause: {},
         onStop: {},
     )

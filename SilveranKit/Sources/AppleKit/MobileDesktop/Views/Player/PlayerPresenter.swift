@@ -75,20 +75,40 @@ public final class PlayerPresenter {
     public func dismissCard() {
         guard let current = card else { return }
         let bookID = current.data.metadata.id
+        let cardCategory = current.data.category
         BookRecentStore.shared.record(bookID)
         NotificationCenter.default.post(name: .punkRallyHomeQueueDidChange, object: nil)
+
+        let cachedSnapshot = AudioSessionMonitor.shared.snapshot
+        let fallbackKind: AudioSessionKind? =
+            cardCategory == .audio ? .audiobook(bookID) : cachedSnapshot?.kind
+        let immediateKeeps = MiniPlayerPolicy.shouldKeepSessionOnCardDismiss(
+            sessionKind: cachedSnapshot?.kind ?? fallbackKind,
+            cardBookID: bookID,
+            cardCategory: cardCategory,
+            isPlaying: cachedSnapshot?.isPlaying ?? false,
+        )
+        self.dismissalKeepsSession = immediateKeeps
+
         Task { @MainActor in
             let kind = await AudioSessionActor.shared.currentSessionKind()
             let snapshot = await AudioSessionActor.shared.currentSnapshot()
-            let keepsSession = kind?.bookID == bookID && snapshot?.isPlaying == true
+            let keepsSession = MiniPlayerPolicy.shouldKeepSessionOnCardDismiss(
+                sessionKind: kind,
+                cardBookID: bookID,
+                cardCategory: cardCategory,
+                isPlaying: snapshot?.isPlaying ?? false,
+            )
             debugLog(
                 "[PlayerPresenter] Dismissing card for \(bookID), keepsSession=\(keepsSession)"
             )
-            self.dismissalKeepsSession = keepsSession
+            if self.card != nil {
+                self.dismissalKeepsSession = keepsSession
+            }
             if !keepsSession, current.data.resolvedAudiobookID == nil {
                 LastOpenBookStore.clearIfMatching(
                     bookId: bookID,
-                    category: current.data.category,
+                    category: cardCategory,
                 )
                 PunkRallyStatsEvents.sessionEnd(
                     mediaID: "\(bookID)",

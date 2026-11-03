@@ -508,6 +508,8 @@ public actor AudioSessionActor {
         switch event {
             case .didFinishPlaying:
                 podcastIsPlaying = false
+                podcastNowPlayingTask?.cancel()
+                podcastNowPlayingTask = nil
                 await publishPodcastState()
                 NotificationCenter.default.post(
                     name: Notification.Name("punkRallyPodcastDidFinish"),
@@ -516,6 +518,8 @@ public actor AudioSessionActor {
                 )
             case .interruptionBegan, .routeChanged:
                 podcastIsPlaying = false
+                podcastNowPlayingTask?.cancel()
+                podcastNowPlayingTask = nil
                 await publishPodcastState()
                 if podcastYouTubeVideoID != nil {
                     NotificationCenter.default.post(
@@ -622,13 +626,12 @@ public actor AudioSessionActor {
         }
     }
 
-    /// Push elapsed/rate to the system Now Playing center while podcast/YouTube plays
-    /// (Lock Screen scrubber freezes without this — mini-player polls separately).
+    /// Push elapsed/rate to the system Now Playing center and snapshot observers while podcast/YouTube plays.
     private func startPodcastNowPlayingTicker() {
         podcastNowPlayingTask?.cancel()
         podcastNowPlayingTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(for: .milliseconds(500))
                 guard !Task.isCancelled, let self else { return }
                 guard case .podcast = await self.currentKind else { return }
                 guard await self.podcastIsPlaying else { continue }
@@ -856,7 +859,9 @@ public actor AudioSessionActor {
 
             nextPeriodicSync =
                 syncInterval > 0 ? Date().addingTimeInterval(syncInterval) : .distantFuture
-            startRefreshTask()
+            if lastObservedIsPlaying {
+                startRefreshTask()
+            }
             await configureNowPlayingCommands(for: .audiobook(book.id))
             await publishState()
             startCoverTask(for: book, sessionID: sessionID)
@@ -927,7 +932,9 @@ public actor AudioSessionActor {
 
             await installPlaybackObserver(for: sessionID)
             nextPeriodicSync = .distantFuture
-            startRefreshTask()
+            if lastObservedIsPlaying {
+                startRefreshTask()
+            }
             await configureNowPlayingCommands(for: .audiobook(book.id))
             await publishState()
             if let artworkURL = playback.artworkURL {
@@ -1310,6 +1317,8 @@ public actor AudioSessionActor {
                     case .pause:
                         await podcastPlayer?.pause()
                         podcastIsPlaying = false
+                        podcastNowPlayingTask?.cancel()
+                        podcastNowPlayingTask = nil
                         await publishPodcastState()
                         if podcastYouTubeVideoID != nil {
                             NotificationCenter.default.post(
@@ -1610,6 +1619,12 @@ public actor AudioSessionActor {
         let shouldSyncPause = lastObservedIsPlaying && !state.isPlaying
         lastObservedIsPlaying = state.isPlaying
 
+        if state.isPlaying {
+            startRefreshTaskIfNeeded()
+        } else {
+            stopRefreshTask()
+        }
+
         if shouldSyncPause {
             // Covers Bluetooth route loss and AVAudioSession interruptions —
             // AudiobookActor pauses and notifies here.
@@ -1729,8 +1744,14 @@ public actor AudioSessionActor {
         sleepTimerChapterID = nil
     }
 
+    private func startRefreshTaskIfNeeded() {
+        guard refreshTask == nil else { return }
+        startRefreshTask()
+    }
+
     private func startRefreshTask() {
         refreshTask?.cancel()
+        lastSleepTimerUpdate = Date()
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(250))
@@ -1738,6 +1759,11 @@ public actor AudioSessionActor {
                 await self.refresh()
             }
         }
+    }
+
+    private func stopRefreshTask() {
+        refreshTask?.cancel()
+        refreshTask = nil
     }
 
     private func refresh() async {

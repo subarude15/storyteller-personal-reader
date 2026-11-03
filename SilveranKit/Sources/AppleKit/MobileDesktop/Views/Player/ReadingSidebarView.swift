@@ -75,6 +75,7 @@ public struct ReadingSidebarView: View {
     @State private var isDraggingSlider = false
     @State private var draggedSliderValue: Double = 0.0
     @State private var seekDebounceUntil: Date?
+    @State private var lastScrubHapticToken: Int?
     @AppStorage("showEbookCoverInAudioView") private var showEbookCover = false
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.coverTint) private var environmentCoverTint
@@ -267,6 +268,15 @@ public struct ReadingSidebarView: View {
                                 )
                         }
                     }
+                    .scaleEffect(
+                        mode == .ebook
+                            ? 1.0
+                            : MiniPlayerPolicy.artworkPlaybackScale(isPlaying: model.isPlaying)
+                    )
+                    .animation(
+                        .spring(response: 0.42, dampingFraction: 0.76),
+                        value: model.isPlaying,
+                    )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .aspectRatio(1, contentMode: .fit)
@@ -276,6 +286,7 @@ public struct ReadingSidebarView: View {
                     coverView
                         .contentShape(Rectangle())
                         .onTapGesture {
+                            ReaderHaptics.selectionTick()
                             withAnimation(.easeInOut(duration: 0.2)) {
                                 showEbookCover.toggle()
                             }
@@ -330,6 +341,11 @@ public struct ReadingSidebarView: View {
                 let clampedValue = min(max(newValue, 0), 1)
                 isDraggingSlider = true
                 draggedSliderValue = clampedValue
+                let token = MiniPlayerPolicy.scrubHapticStepToken(fraction: clampedValue)
+                if token != lastScrubHapticToken {
+                    lastScrubHapticToken = token
+                    ReaderHaptics.selectionTick()
+                }
                 if seekWhileDragging {
                     onProgressSeek?(clampedValue)
                 }
@@ -360,8 +376,14 @@ public struct ReadingSidebarView: View {
                     isDraggingSlider = editing
                     if editing {
                         seekDebounceUntil = nil
-                        draggedSliderValue = min(max(chapterProgress, 0), 1)
+                        let startVal = min(max(chapterProgress, 0), 1)
+                        draggedSliderValue = startVal
+                        lastScrubHapticToken = MiniPlayerPolicy.scrubHapticStepToken(
+                            fraction: startVal
+                        )
+                        ReaderHaptics.prepareForScrub()
                     } else {
+                        lastScrubHapticToken = nil
                         seekDebounceUntil = Date().addingTimeInterval(0.5)
                         if !seekWhileDragging {
                             onProgressSeek?(draggedSliderValue)
@@ -422,32 +444,47 @@ public struct ReadingSidebarView: View {
                 systemImage: "backward.end.fill",
                 size: InkAmpPlayerMetrics.chapterButtonSize,
                 help: "Restart chapter / Previous chapter",
-                action: onPrevChapter,
+                action: {
+                    ReaderHaptics.chapterBoundaryCrossed()
+                    onPrevChapter()
+                },
             )
 
             InkAmpPlayerSkipButton(
                 systemImage: "arrow.counterclockwise",
                 help: "Skip backward",
-                action: onSkipBackward,
+                action: {
+                    ReaderHaptics.selectionTick()
+                    onSkipBackward()
+                },
             )
 
             InkAmpPlayerPlayPauseButton(
                 isPlaying: model.isPlaying,
-                action: onPlayPause,
+                action: {
+                    ReaderHaptics.bookmarkToggled(added: !model.isPlaying)
+                    onPlayPause()
+                },
             )
             .help("Play/pause")
 
             InkAmpPlayerSkipButton(
                 systemImage: "arrow.clockwise",
                 help: "Skip forward",
-                action: onSkipForward,
+                action: {
+                    ReaderHaptics.selectionTick()
+                    onSkipForward()
+                },
             )
 
             InkAmpPlayerSkipButton(
                 systemImage: "forward.end.fill",
                 size: InkAmpPlayerMetrics.chapterButtonSize,
                 help: "Next chapter",
-                action: onNextChapter,
+                action: {
+                    ReaderHaptics.chapterBoundaryCrossed()
+                    onNextChapter()
+                },
             )
         }
         .padding(.horizontal, InkAmpMetrics.screenInset)
@@ -456,7 +493,10 @@ public struct ReadingSidebarView: View {
     /// Readaloud overlay keeps the previous chrome so page-theme contrast stays intact.
     private var legacyTransportControls: some View {
         HStack(spacing: 8) {
-            Button(action: onPrevChapter) {
+            Button(action: {
+                ReaderHaptics.chapterBoundaryCrossed()
+                onPrevChapter()
+            }) {
                 Image(systemName: "backward.end.fill")
                     .font(.title3)
                     .frame(width: 44, height: 44)
@@ -469,7 +509,10 @@ public struct ReadingSidebarView: View {
             .buttonStyle(.plain)
             .help("Restart chapter / Previous chapter")
 
-            Button(action: onSkipBackward) {
+            Button(action: {
+                ReaderHaptics.selectionTick()
+                onSkipBackward()
+            }) {
                 Image(systemName: "arrow.counterclockwise.circle")
                     .font(.largeTitle)
                     .frame(width: 54, height: 54)
@@ -482,7 +525,10 @@ public struct ReadingSidebarView: View {
             .buttonStyle(.plain)
             .help("Previous sentence")
 
-            Button(action: onPlayPause) {
+            Button(action: {
+                ReaderHaptics.bookmarkToggled(added: !model.isPlaying)
+                onPlayPause()
+            }) {
                 Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
                     .font(.title)
                     .foregroundStyle(primaryColor)
@@ -493,7 +539,10 @@ public struct ReadingSidebarView: View {
             .buttonStyle(.plain)
             .help("Play/pause")
 
-            Button(action: onSkipForward) {
+            Button(action: {
+                ReaderHaptics.selectionTick()
+                onSkipForward()
+            }) {
                 Image(systemName: "arrow.clockwise.circle")
                     .font(.largeTitle)
                     .frame(width: 54, height: 54)
@@ -506,7 +555,10 @@ public struct ReadingSidebarView: View {
             .buttonStyle(.plain)
             .help("Next sentence")
 
-            Button(action: onNextChapter) {
+            Button(action: {
+                ReaderHaptics.chapterBoundaryCrossed()
+                onNextChapter()
+            }) {
                 Image(systemName: "forward.end.fill")
                     .font(.title3)
                     .frame(width: 44, height: 44)
@@ -528,7 +580,10 @@ public struct ReadingSidebarView: View {
             if mode != .ebook {
                 PlaybackRateButton(
                     currentRate: model.playbackRate,
-                    onRateChange: onPlaybackRateChange,
+                    onRateChange: { rate in
+                        ReaderHaptics.selectionTick()
+                        onPlaybackRateChange(rate)
+                    },
                     backgroundColor: usesSystemChrome ? systemAccent : secondaryColor,
                     foregroundColor: usesSystemChrome ? inkTheme.primaryText : primaryColor,
                     transparency: 1.0,
@@ -542,7 +597,10 @@ public struct ReadingSidebarView: View {
                     ?? progressData?.chapterLabel.flatMap { label in
                         chapters.first(where: { $0.label == label })?.id
                     },
-                onChapterSelected: onChapterSelected,
+                onChapterSelected: { chapter in
+                    ReaderHaptics.jumpNavigation()
+                    onChapterSelected(chapter)
+                },
                 backgroundColor: usesSystemChrome ? inkTheme.secondaryAccent : secondaryColor,
                 foregroundColor: usesSystemChrome ? inkTheme.primaryText : primaryColor,
                 transparency: 1.0,
@@ -718,8 +776,10 @@ public struct ReadingSidebarView: View {
         VStack(spacing: 6) {
             Button(action: {
                 if model.sleepTimerActive {
+                    ReaderHaptics.selectionTick()
                     onSleepTimerCancel()
                 } else {
+                    ReaderHaptics.selectionTick()
                     showSleepTimerPopover = true
                 }
             }) {
@@ -800,6 +860,7 @@ public struct ReadingSidebarView: View {
         -> some View
     {
         Button(action: {
+            ReaderHaptics.bookmarkToggled(added: true)
             onSleepTimerStart(duration, type)
             showSleepTimerPopover = false
         }) {
