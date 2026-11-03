@@ -94,6 +94,13 @@ public struct EbookPlayerView: View {
             }
 
             Task {
+                if let metadata = viewModel.bookData?.metadata {
+                    ContinueWidgetPublisher.publishEbookProgress(
+                        book: metadata,
+                        progress: viewModel.progressManager?.bookFraction,
+                        isReadaloud: viewModel.hasAudioNarration,
+                    )
+                }
                 await viewModel.handleAppBackgrounding()
 
                 if backgroundTask != .invalid {
@@ -150,6 +157,13 @@ public struct EbookPlayerView: View {
             debugLog(
                 "[EbookPlayerView] onDisappear scenePhase=\(scenePhase) bookId=\(viewModel.bookData?.metadata.uuid ?? "nil")"
             )
+            if let metadata = viewModel.bookData?.metadata {
+                ContinueWidgetPublisher.publishEbookProgress(
+                    book: metadata,
+                    progress: viewModel.progressManager?.bookFraction,
+                    isReadaloud: viewModel.hasAudioNarration,
+                )
+            }
             if scenePhase == .active {
                 let keepsSession = PlayerPresenter.shared.cardDismissalKeepsSession()
                 viewModel.handleOnDisappear(close: keepsSession ? .detachView : .endSession)

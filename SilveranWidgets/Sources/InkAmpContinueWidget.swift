@@ -7,6 +7,8 @@
 //  Playback transport intents are intentionally not surfaced here.
 //
 
+import AppIntents
+import ImageIO
 import OSLog
 import SilveranAppleWidgets
 import SwiftUI
@@ -25,6 +27,7 @@ struct SilveranReaderWidgets: WidgetBundle {
         InkAmpLightLargeWidget()
         InkAmpDarkMediumWidget()
         InkAmpDarkLargeWidget()
+        SilveranReadingWidget()
     }
 }
 
@@ -295,6 +298,7 @@ struct InkAmpDarkLargeWidget: Widget {
 // MARK: - Shared view
 
 struct InkAmpContinueWidgetView: View {
+    @Environment(\.displayScale) private var displayScale
     let entry: InkAmpContinueEntry
     let theme: InkAmpWidgetTheme
     let layout: InkAmpContinueWidgetLayout
@@ -303,6 +307,9 @@ struct InkAmpContinueWidgetView: View {
     private var colors: InkAmpWidgetColors { InkAmpWidgetColors(theme: theme) }
     private var upNext: [ContinueWidgetQueueItem] {
         InkAmpContinueWidgetActions.upNextItems(for: snapshot, layout: layout)
+    }
+    private var statusBadge: InkAmpContinueStatusBadge {
+        InkAmpContinueWidgetActions.statusBadge(for: snapshot)
     }
 
     var body: some View {
@@ -319,6 +326,23 @@ struct InkAmpContinueWidgetView: View {
             colors.background
         }
         .inkAmpLiveContent(isPlaceholder: entry.isPlaceholder)
+    }
+
+    private func statusBadgePill(compact: Bool) -> some View {
+        HStack(spacing: compact ? 3 : 4) {
+            Image(systemName: statusBadge.symbolName)
+                .font(.system(size: compact ? 7.5 : 8.5, weight: .bold))
+            Text(statusBadge.label)
+                .font(.system(size: compact ? 8 : 9, weight: .bold))
+                .tracking(compact ? 0.45 : 0.55)
+        }
+        .foregroundStyle(colors.accent)
+        .padding(.horizontal, compact ? 6 : 7)
+        .padding(.vertical, compact ? 3 : 4)
+        .background(
+            Capsule(style: .continuous)
+                .fill(colors.accent.opacity(theme == .light ? 0.14 : 0.18))
+        )
     }
 
     // MARK: Medium
@@ -354,16 +378,7 @@ struct InkAmpContinueWidgetView: View {
     private var mediumNowColumn: some View {
         Link(destination: InkAmpContinueWidgetActions.continueURL(for: snapshot)) {
             VStack(alignment: .leading, spacing: InkAmpContinueWidgetMetrics.mediumNowColumnSpacing) {
-                Text("NOW LISTENING")
-                    .font(.system(size: 8, weight: .bold))
-                    .tracking(0.5)
-                    .foregroundStyle(colors.accent)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(colors.accent.opacity(theme == .light ? 0.14 : 0.18))
-                    )
+                statusBadgePill(compact: true)
 
                 HStack(alignment: .top, spacing: InkAmpContinueWidgetMetrics.mediumCoverMetadataGap) {
                     cover(
@@ -448,12 +463,35 @@ struct InkAmpContinueWidgetView: View {
                     kind: item.kind,
                     size: InkAmpContinueWidgetMetrics.mediumQueueCoverSize,
                 )
-                Text(item.title)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(colors.primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(item.title)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(colors.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+
+                    HStack(spacing: 3) {
+                        Image(systemName: (item.kind ?? .ebook).symbolName)
+                            .font(.system(size: 7.5, weight: .semibold))
+                            .foregroundStyle(colors.accent)
+                        if let pct = item.percentComplete {
+                            Text("\(pct)%")
+                                .font(.system(size: 8.5, weight: .medium, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(colors.secondary)
+                        } else if let subtitle = item.subtitle, !subtitle.isEmpty {
+                            Text(subtitle)
+                                .font(.system(size: 8.5))
+                                .foregroundStyle(colors.secondary)
+                                .lineLimit(1)
+                        } else {
+                            Text((item.kind ?? .ebook).label)
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(colors.secondary)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .buttonStyle(.plain)
@@ -461,10 +499,16 @@ struct InkAmpContinueWidgetView: View {
     }
 
     private var mediumActionRow: some View {
-        HStack(spacing: 7) {
-            Link(destination: InkAmpContinueWidgetActions.continueURL(for: snapshot)) {
-                Text("Continue")
-                    .font(.system(size: 11, weight: .bold))
+        HStack(spacing: 6) {
+            #if os(iOS)
+            if InkAmpContinueWidgetActions.showsInlineTransport(for: snapshot) {
+                Button(intent: ContinuePlayPauseIntent()) {
+                    HStack(spacing: 4) {
+                        Image(systemName: snapshot.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 10, weight: .bold))
+                        Text(snapshot.isPlaying ? "Pause" : "Play")
+                            .font(.system(size: 11, weight: .bold))
+                    }
                     .foregroundStyle(colors.continueLabel)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, InkAmpContinueWidgetMetrics.mediumActionVerticalPadding)
@@ -472,22 +516,71 @@ struct InkAmpContinueWidgetView: View {
                         RoundedRectangle(cornerRadius: 9, style: .continuous)
                             .fill(colors.continueFill)
                     )
-            }
-            .buttonStyle(.plain)
+                }
+                .buttonStyle(.plain)
 
-            Link(destination: InkAmpContinueWidgetActions.browseQueueURL()) {
-                Text("Browse Queue")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(colors.browseLabel)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, InkAmpContinueWidgetMetrics.mediumActionVerticalPadding)
-                    .background(
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(colors.browseFill)
-                    )
+                Button(intent: ContinueSkipBackwardIntent()) {
+                    Image(systemName: "gobackward.15")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(colors.browseLabel)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, InkAmpContinueWidgetMetrics.mediumActionVerticalPadding)
+                        .background(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(colors.browseFill)
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Rewind 15 seconds")
+
+                Link(destination: InkAmpContinueWidgetActions.browseQueueURL()) {
+                    Text("Queue")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(colors.browseLabel)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, InkAmpContinueWidgetMetrics.mediumActionVerticalPadding)
+                        .background(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(colors.browseFill)
+                        )
+                }
+                .buttonStyle(.plain)
+            } else {
+                mediumDefaultActionLinks
             }
-            .buttonStyle(.plain)
+            #else
+            mediumDefaultActionLinks
+            #endif
         }
+    }
+
+    @ViewBuilder
+    private var mediumDefaultActionLinks: some View {
+        Link(destination: InkAmpContinueWidgetActions.continueURL(for: snapshot)) {
+            Text("Continue")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(colors.continueLabel)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, InkAmpContinueWidgetMetrics.mediumActionVerticalPadding)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(colors.continueFill)
+                )
+        }
+        .buttonStyle(.plain)
+
+        Link(destination: InkAmpContinueWidgetActions.browseQueueURL()) {
+            Text("Browse Queue")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(colors.browseLabel)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, InkAmpContinueWidgetMetrics.mediumActionVerticalPadding)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(colors.browseFill)
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: Large
@@ -518,16 +611,7 @@ struct InkAmpContinueWidgetView: View {
     private var largeNowColumn: some View {
         Link(destination: InkAmpContinueWidgetActions.continueURL(for: snapshot)) {
             VStack(alignment: .leading, spacing: 7) {
-                Text("NOW LISTENING")
-                    .font(.system(size: 9, weight: .bold))
-                    .tracking(0.55)
-                    .foregroundStyle(colors.accent)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(colors.accent.opacity(theme == .light ? 0.14 : 0.18))
-                    )
+                statusBadgePill(compact: false)
 
                 cover(
                     filename: snapshot.coverFilename,
@@ -573,7 +657,7 @@ struct InkAmpContinueWidgetView: View {
     }
 
     private var upNextColumn: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 7) {
             Text("UP NEXT")
                 .font(.system(size: 10, weight: .bold))
                 .tracking(0.6)
@@ -594,17 +678,42 @@ struct InkAmpContinueWidgetView: View {
     private func upNextRow(_ item: ContinueWidgetQueueItem) -> some View {
         Link(destination: InkAmpContinueWidgetActions.upNextURL(for: item)) {
             HStack(spacing: 8) {
-                cover(filename: item.coverFilename, kind: item.kind, size: 36)
-                VStack(alignment: .leading, spacing: 1) {
+                cover(filename: item.coverFilename, kind: item.kind, size: 38)
+                VStack(alignment: .leading, spacing: 2) {
                     Text(item.title)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(colors.primary)
                         .lineLimit(2)
-                    if let subtitle = item.subtitle, !subtitle.isEmpty {
-                        Text(subtitle)
-                            .font(.system(size: 10))
-                            .foregroundStyle(colors.secondary)
-                            .lineLimit(1)
+
+                    HStack(spacing: 4) {
+                        Image(systemName: (item.kind ?? .ebook).symbolName)
+                            .font(.system(size: 8.5, weight: .semibold))
+                            .foregroundStyle(colors.accent)
+                        if let subtitle = item.subtitle, !subtitle.isEmpty {
+                            Text(subtitle)
+                                .font(.system(size: 10))
+                                .foregroundStyle(colors.secondary)
+                                .lineLimit(1)
+                        } else {
+                            Text((item.kind ?? .ebook).label)
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(colors.secondary)
+                        }
+                        if let pct = item.percentComplete {
+                            Text("· \(pct)%")
+                                .font(.system(size: 9.5, weight: .medium, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(colors.secondary)
+                        }
+                    }
+
+                    if let progress = item.clampedProgress {
+                        InkAmpThemedProgressBar(
+                            progress: progress,
+                            fill: colors.progress,
+                            track: colors.progressTrack,
+                            height: 2.5,
+                        )
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -616,9 +725,15 @@ struct InkAmpContinueWidgetView: View {
 
     private func actionRow(continueProminent: Bool) -> some View {
         HStack(spacing: 8) {
-            Link(destination: InkAmpContinueWidgetActions.continueURL(for: snapshot)) {
-                Text("Continue")
-                    .font(.system(size: continueProminent ? 14 : 12, weight: .bold))
+            #if os(iOS)
+            if InkAmpContinueWidgetActions.showsInlineTransport(for: snapshot) {
+                Button(intent: ContinuePlayPauseIntent()) {
+                    HStack(spacing: 5) {
+                        Image(systemName: snapshot.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: continueProminent ? 13 : 11, weight: .bold))
+                        Text(snapshot.isPlaying ? "Pause" : "Play")
+                            .font(.system(size: continueProminent ? 14 : 12, weight: .bold))
+                    }
                     .foregroundStyle(colors.continueLabel)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, continueProminent ? 12 : 9)
@@ -626,22 +741,71 @@ struct InkAmpContinueWidgetView: View {
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .fill(colors.continueFill)
                     )
-            }
-            .buttonStyle(.plain)
+                }
+                .buttonStyle(.plain)
 
-            Link(destination: InkAmpContinueWidgetActions.browseQueueURL()) {
-                Text("Browse Queue")
-                    .font(.system(size: continueProminent ? 14 : 12, weight: .semibold))
-                    .foregroundStyle(colors.browseLabel)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, continueProminent ? 12 : 9)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(colors.browseFill)
-                    )
+                Button(intent: ContinueSkipBackwardIntent()) {
+                    Image(systemName: "gobackward.15")
+                        .font(.system(size: continueProminent ? 14 : 12, weight: .semibold))
+                        .foregroundStyle(colors.browseLabel)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, continueProminent ? 12 : 9)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(colors.browseFill)
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Rewind 15 seconds")
+
+                Link(destination: InkAmpContinueWidgetActions.browseQueueURL()) {
+                    Text("Browse Queue")
+                        .font(.system(size: continueProminent ? 14 : 12, weight: .semibold))
+                        .foregroundStyle(colors.browseLabel)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, continueProminent ? 12 : 9)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(colors.browseFill)
+                        )
+                }
+                .buttonStyle(.plain)
+            } else {
+                defaultLargeActionLinks(continueProminent: continueProminent)
             }
-            .buttonStyle(.plain)
+            #else
+            defaultLargeActionLinks(continueProminent: continueProminent)
+            #endif
         }
+    }
+
+    @ViewBuilder
+    private func defaultLargeActionLinks(continueProminent: Bool) -> some View {
+        Link(destination: InkAmpContinueWidgetActions.continueURL(for: snapshot)) {
+            Text("Continue")
+                .font(.system(size: continueProminent ? 14 : 12, weight: .bold))
+                .foregroundStyle(colors.continueLabel)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, continueProminent ? 12 : 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(colors.continueFill)
+                )
+        }
+        .buttonStyle(.plain)
+
+        Link(destination: InkAmpContinueWidgetActions.browseQueueURL()) {
+            Text("Browse Queue")
+                .font(.system(size: continueProminent ? 14 : 12, weight: .semibold))
+                .foregroundStyle(colors.browseLabel)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, continueProminent ? 12 : 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(colors.browseFill)
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private var emptyState: some View {
@@ -685,7 +849,7 @@ struct InkAmpContinueWidgetView: View {
         ZStack {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(colors.coverFallback)
-            if let image = coverImage(filename: filename) {
+            if let image = coverImage(filename: filename, maxPoints: size) {
                 image
                     .resizable()
                     .inkAmpFullColorRendering()
@@ -704,11 +868,23 @@ struct InkAmpContinueWidgetView: View {
         )
     }
 
-    private func coverImage(filename: String?) -> Image? {
+    private func coverImage(filename: String?, maxPoints: CGFloat) -> Image? {
         guard let filename,
             let url = ContinueWidgetSnapshotStore.coverURL(for: filename)
         else { return nil }
         #if canImport(UIKit)
+        let maxPixels = max(64, Int((maxPoints * max(displayScale, 2)).rounded(.up)))
+        if let source = CGImageSourceCreateWithURL(url as CFURL, nil) {
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+            ]
+            if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+                return Image(uiImage: UIImage(cgImage: cgImage, scale: max(displayScale, 1), orientation: .up))
+            }
+        }
         guard let ui = UIImage(contentsOfFile: url.path) else { return nil }
         return Image(uiImage: ui)
         #elseif canImport(AppKit)

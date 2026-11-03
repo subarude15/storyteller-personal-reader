@@ -118,13 +118,53 @@ public enum InkAmpContinueWidgetPalette {
     }
 }
 
-/// Deep-link actions for the Home Screen Continue + Next Up tiles.
-///
-/// These widgets intentionally do **not** surface playback transport
-/// (`ContinuePlayPauseIntent` / skip intents). Transport intents may still live
-/// in shared code for other surfaces.
+/// Context-aware header chip for the Continue widget Now column.
+public struct InkAmpContinueStatusBadge: Sendable, Equatable {
+    public let label: String
+    public let symbolName: String
+
+    public init(label: String, symbolName: String) {
+        self.label = label
+        self.symbolName = symbolName
+    }
+}
+
+/// Deep-link and inline transport actions for the Home Screen Continue + Next Up tiles.
 public enum InkAmpContinueWidgetActions {
     public static let usesPlaybackTransportIntents = false
+
+    /// Inline Play/Pause and -15s transport controls appear only when the app
+    /// owns an active audio session (`audiobook`, `readaloud`, or `podcast`).
+    public static func showsInlineTransport(for snapshot: ContinueWidgetSnapshot) -> Bool {
+        guard snapshot.supportsTransportControls else { return false }
+        return snapshot.kind != .ebook
+    }
+
+    /// Context-aware badge for the Now card so ebooks never say "NOW LISTENING".
+    public static func statusBadge(for snapshot: ContinueWidgetSnapshot) -> InkAmpContinueStatusBadge {
+        if snapshot.isPlaying {
+            switch snapshot.kind {
+                case .readaloud:
+                    return InkAmpContinueStatusBadge(label: "NOW READING", symbolName: "waveform")
+                case .podcast:
+                    return InkAmpContinueStatusBadge(label: "NOW PLAYING", symbolName: "waveform")
+                case .ebook:
+                    return InkAmpContinueStatusBadge(label: "NOW READING", symbolName: "book.fill")
+                case .audiobook, .none:
+                    return InkAmpContinueStatusBadge(label: "NOW LISTENING", symbolName: "waveform")
+            }
+        }
+        switch snapshot.kind {
+            case .ebook:
+                return InkAmpContinueStatusBadge(label: "CONTINUE READING", symbolName: "book.closed.fill")
+            case .readaloud:
+                return InkAmpContinueStatusBadge(label: "CONTINUE SYNC", symbolName: "text.book.closed.fill")
+            case .podcast:
+                return InkAmpContinueStatusBadge(label: "CONTINUE PODCAST", symbolName: "mic.fill")
+            case .audiobook, .none:
+                return InkAmpContinueStatusBadge(label: "CONTINUE LISTENING", symbolName: "headphones")
+        }
+    }
 
     public static func continueURL(for snapshot: ContinueWidgetSnapshot) -> URL {
         if let deepLink = snapshot.deepLink?.trimmingCharacters(in: .whitespacesAndNewlines),

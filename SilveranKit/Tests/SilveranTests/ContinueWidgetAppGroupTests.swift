@@ -930,4 +930,132 @@ struct ContinueWidgetCurrentSnapshotTests {
             )
         )
     }
+
+    @Test func remainingTextAdjustsForPlaybackRate() {
+        let normal = ContinueWidgetSnapshot(
+            title: "Piranesi",
+            progress: 0.5,
+            elapsedSeconds: 1800,
+            durationSeconds: 3600,
+            rate: 1.0,
+        )
+        #expect(normal.remainingText == "30m left")
+
+        let faster = ContinueWidgetSnapshot(
+            title: "Piranesi",
+            progress: 0.5,
+            elapsedSeconds: 1800,
+            durationSeconds: 3600,
+            rate: 1.5,
+        )
+        #expect(faster.remainingText == "20m left")
+        #expect(faster.progressCaption == "50% · 20m left")
+    }
+
+    @Test func statusBadgeReflectsKindAndPlaybackState() {
+        let playingAudio = ContinueWidgetSnapshot(title: "Piranesi", isPlaying: true, kind: .audiobook)
+        #expect(
+            InkAmpContinueWidgetActions.statusBadge(for: playingAudio)
+                == InkAmpContinueStatusBadge(label: "NOW LISTENING", symbolName: "waveform")
+        )
+
+        let playingPodcast = ContinueWidgetSnapshot(title: "Vergecast", isPlaying: true, kind: .podcast)
+        #expect(
+            InkAmpContinueWidgetActions.statusBadge(for: playingPodcast)
+                == InkAmpContinueStatusBadge(label: "NOW PLAYING", symbolName: "waveform")
+        )
+
+        let idleEbook = ContinueWidgetSnapshot(title: "Good Energy", isPlaying: false, kind: .ebook)
+        #expect(
+            InkAmpContinueWidgetActions.statusBadge(for: idleEbook)
+                == InkAmpContinueStatusBadge(label: "CONTINUE READING", symbolName: "book.closed.fill")
+        )
+
+        let idleReadaloud = ContinueWidgetSnapshot(title: "Dune", isPlaying: false, kind: .readaloud)
+        #expect(
+            InkAmpContinueWidgetActions.statusBadge(for: idleReadaloud)
+                == InkAmpContinueStatusBadge(label: "CONTINUE SYNC", symbolName: "text.book.closed.fill")
+        )
+    }
+
+    @Test func inlineTransportRequiresActiveNonEbookSession() {
+        let liveAudio = ContinueWidgetSnapshot(
+            title: "Piranesi",
+            isPlaying: true,
+            kind: .audiobook,
+            hasLiveSession: true,
+        )
+        #expect(InkAmpContinueWidgetActions.showsInlineTransport(for: liveAudio))
+
+        let pausedLivePodcast = ContinueWidgetSnapshot(
+            title: "Vergecast",
+            isPlaying: false,
+            kind: .podcast,
+            hasLiveSession: true,
+        )
+        #expect(InkAmpContinueWidgetActions.showsInlineTransport(for: pausedLivePodcast))
+
+        let ebookWithStaleLiveFlag = ContinueWidgetSnapshot(
+            title: "Good Energy",
+            isPlaying: false,
+            kind: .ebook,
+            hasLiveSession: true,
+        )
+        #expect(!InkAmpContinueWidgetActions.showsInlineTransport(for: ebookWithStaleLiveFlag))
+
+        let coldAudio = ContinueWidgetSnapshot(
+            title: "Piranesi",
+            isPlaying: false,
+            kind: .audiobook,
+            hasLiveSession: false,
+        )
+        #expect(!InkAmpContinueWidgetActions.showsInlineTransport(for: coldAudio))
+    }
+
+    @Test func liveSessionPriorityYieldsWhenPausedAndNewerEbookIsActive() {
+        #expect(
+            ContinueWidgetSnapshot.shouldPreferLiveSession(
+                sessionIsPlaying: true,
+                sessionItemID: "book:storyteller/troop",
+                homeItemID: "book:storyteller/ebook-1",
+            )
+        )
+        #expect(
+            !ContinueWidgetSnapshot.shouldPreferLiveSession(
+                sessionIsPlaying: false,
+                sessionItemID: "book:storyteller/troop",
+                homeItemID: "book:storyteller/ebook-1",
+            )
+        )
+        #expect(
+            ContinueWidgetSnapshot.shouldPreferLiveSession(
+                sessionIsPlaying: false,
+                sessionItemID: "book:storyteller/troop",
+                homeItemID: "book:storyteller/troop",
+            )
+        )
+        #expect(
+            ContinueWidgetSnapshot.shouldPreferLiveSession(
+                sessionIsPlaying: false,
+                sessionItemID: "book:storyteller/troop",
+                homeItemID: nil,
+            )
+        )
+    }
+
+    @Test func upNextItemProgressAndKindSymbols() {
+        let item = ContinueWidgetQueueItem(
+            id: "book:storyteller/1",
+            title: "Book 1",
+            kind: .readaloud,
+            deepLink: "punkrally://continue?item=book:storyteller/1",
+            progress: 0.42,
+        )
+        #expect(item.clampedProgress == 0.42)
+        #expect(item.percentComplete == 42)
+        #expect(item.kind?.symbolName == "text.book.closed.fill")
+        #expect(ContinueWidgetKindTag.ebook.symbolName == "book.closed.fill")
+        #expect(ContinueWidgetKindTag.audiobook.symbolName == "headphones")
+        #expect(ContinueWidgetKindTag.podcast.symbolName == "mic.fill")
+    }
 }

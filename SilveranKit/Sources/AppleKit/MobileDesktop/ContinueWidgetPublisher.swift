@@ -73,7 +73,13 @@ public enum ContinueWidgetPublisher {
             // Home can publish before the queue loads (nil title) and again
             // once the in-progress item exists. The nil write must not land last.
             guard serial == publishSerial else { return }
-            if session != nil {
+            if let session,
+                ContinueWidgetSnapshot.shouldPreferLiveSession(
+                    sessionIsPlaying: session.isPlaying,
+                    sessionItemID: ContinueWidgetItemID.from(sessionKind: session.kind),
+                    homeItemID: itemID,
+                )
+            {
                 await publishSession(session, upNext: upNext, serial: serial)
                 return
             }
@@ -88,6 +94,45 @@ public enum ContinueWidgetPublisher {
                 durationSeconds: durationSeconds,
                 hasLiveSession: false,
                 upNext: upNext,
+                itemID: itemID,
+            )
+        }
+    }
+
+    /// Publishes updated ebook/readaloud reading progress straight from the reader
+    /// so Home Screen widgets reflect page turns even when the user backgrounds the
+    /// app directly from `EbookPlayerView` without returning to the Library tab.
+    public static func publishEbookProgress(
+        book: BookMetadata,
+        progress: Double?,
+        isReadaloud: Bool = false,
+    ) {
+        publishSerial &+= 1
+        let serial = publishSerial
+        Task { @MainActor in
+            let session = await AudioSessionActor.shared.currentSnapshot()
+            guard serial == publishSerial else { return }
+            if let session, session.isPlaying {
+                await publishSession(session, upNext: nil, serial: serial)
+                return
+            }
+            var coverData = await BookServiceActor.shared.cachedCoverData(for: book.id, audio: false)
+            if coverData == nil {
+                coverData = await BookServiceActor.shared.cachedCoverData(for: book.id, audio: true)
+            }
+            guard serial == publishSerial else { return }
+            let author = book.authors?.first?.name ?? book.narrators?.first?.name
+            let itemID = "book:\(book.id.sourceID)/\(book.id.uuid)"
+            ContinueWidgetSnapshotStore.publish(
+                title: book.title,
+                subtitle: author,
+                isPlaying: false,
+                kind: isReadaloud ? .readaloud : .ebook,
+                coverData: coverData,
+                progress: progress ?? book.progress,
+                durationSeconds: book.durationValue,
+                hasLiveSession: false,
+                upNext: nil,
                 itemID: itemID,
             )
         }

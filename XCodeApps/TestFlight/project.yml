@@ -171,6 +171,7 @@ targets:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
         SILVERAN_WIDGET_APP_GROUP: "$(APP_GROUP_ID)"
     sources:
+      - path: SilveranWidgets/Sources/SilveranReadingWidget.swift
       - path: SilveranWidgets/Sources/InkAmpContinueWidget.swift
     dependencies:
       - package: Silveran

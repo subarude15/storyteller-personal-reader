@@ -327,10 +327,9 @@ targets:
         # Literal — must match Sideload + widgets entitlements for AltStore.
         SILVERAN_WIDGET_APP_GROUP: group.com.punkrally.reader
     sources:
-      # ink+amp Continue: cover + progress + transport controls.
-      # `SilveranAppleWidgets` gives the extension the shared snapshot store and
-      # the AppIntents the buttons use; both are also linked into the app so the
-      # system can perform the AudioPlaybackIntents in the app's process.
+      # ink+amp Continue: cover + progress + transport controls, plus the
+      # configurable Library + Lock Screen widget (`SilveranReadingWidget`).
+      - path: SilveranWidgets/Sources/SilveranReadingWidget.swift
       - path: SilveranWidgets/Sources/InkAmpContinueWidget.swift
     dependencies:
       - package: Silveran

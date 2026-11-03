@@ -20,6 +20,15 @@ public enum ContinueWidgetKindTag: String, Codable, Sendable {
             case .podcast: return "POD"
         }
     }
+
+    public var symbolName: String {
+        switch self {
+            case .ebook: return "book.closed.fill"
+            case .audiobook: return "headphones"
+            case .readaloud: return "text.book.closed.fill"
+            case .podcast: return "mic.fill"
+        }
+    }
 }
 
 /// One Up next row in the Continue widget. Same identity string as `HomeMixedItem.id`
@@ -32,6 +41,17 @@ public struct ContinueWidgetQueueItem: Codable, Sendable, Hashable, Identifiable
     public var kind: ContinueWidgetKindTag?
     public var deepLink: String
     public var progress: Double?
+
+    public var clampedProgress: Double? {
+        guard let progress, progress > 0 else { return nil }
+        return min(max(progress, 0), 1)
+    }
+
+    public var percentComplete: Int? {
+        guard let clampedProgress else { return nil }
+        let pct = Int((clampedProgress * 100).rounded())
+        return pct > 0 ? pct : nil
+    }
 
     public init(
         id: String,
@@ -173,13 +193,15 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         clampedProgress.map { Int(($0 * 100).rounded()) }
     }
 
-    /// "12m left" / "1h 5m left" when a duration is known.
+    /// "12m left" / "1h 5m left" when a duration is known, adjusted for playback rate.
     public var remainingText: String? {
         guard let durationSeconds, durationSeconds > 0 else { return nil }
         let elapsed = elapsedSeconds ?? ((clampedProgress ?? 0) * durationSeconds)
-        let remaining = max(0, durationSeconds - elapsed)
-        guard remaining > 0 else { return nil }
-        return Self.durationText(remaining) + " left"
+        let rawRemaining = max(0, durationSeconds - elapsed)
+        guard rawRemaining > 0 else { return nil }
+        let effectiveRate = (rate ?? 1.0) > 0.05 ? (rate ?? 1.0) : 1.0
+        let adjustedRemaining = rawRemaining / effectiveRate
+        return Self.durationText(adjustedRemaining) + " left"
     }
 
     public var elapsedText: String? {
@@ -249,6 +271,25 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
             title: nextTitle,
             deepLink: nextDeepLink,
         )
+    }
+
+    /// Determines whether an existing audio session should take priority over the
+    /// Home mixed-queue's top `continueItem`. Active playback always wins, and a
+    /// paused session wins when there is no newer Home item or when the Home item
+    /// is the same book/episode. A paused session does not block a more recently
+    /// read ebook from becoming the Continue widget's Now card.
+    public static func shouldPreferLiveSession(
+        sessionIsPlaying: Bool,
+        sessionItemID: String,
+        homeItemID: String?,
+    ) -> Bool {
+        if sessionIsPlaying { return true }
+        guard let homeItemID = homeItemID?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !homeItemID.isEmpty
+        else {
+            return true
+        }
+        return sessionItemID == homeItemID
     }
 
     /// Identity for "did anything the widget paints change?" comparisons —
