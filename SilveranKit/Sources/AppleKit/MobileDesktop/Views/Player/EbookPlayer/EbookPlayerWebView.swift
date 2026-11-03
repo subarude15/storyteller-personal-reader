@@ -334,14 +334,14 @@ private class WebViewCoordinator2: NSObject, WKNavigationDelegate, WKScriptMessa
 
     private static func jpegDataURL(from image: PlatformSnapshotImage) -> String? {
         #if os(iOS)
-        guard let data = image.jpegData(compressionQuality: 0.88) else { return nil }
+        guard let data = image.jpegData(compressionQuality: 0.92) else { return nil }
         #else
         guard
             let tiff = image.tiffRepresentation,
             let rep = NSBitmapImageRep(data: tiff),
             let data = rep.representation(
                 using: .jpeg,
-                properties: [.compressionFactor: NSNumber(value: 0.88)],
+                properties: [.compressionFactor: NSNumber(value: 0.92)],
             )
         else { return nil }
         #endif

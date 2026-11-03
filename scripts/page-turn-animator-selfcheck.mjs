@@ -822,4 +822,100 @@ assert(
 );
 assert(!document.getElementById("inkamp-page-curl-overlay"), "no overlay without snapshot");
 
+// --- Apple Books enhancements: cast shadow, bleed-through, slide, performTurn ---
+assert(
+  atHalf.castShadowPath.includes("C ") && atHalf.castShadowOpacity > 0,
+  "mid peel projects cast drop shadow onto revealed next page",
+);
+assert(
+  atHalf.creaseShadowPath.includes("C ") && atHalf.creaseShadowOpacity > 0,
+  "mid peel has concave valley crease shading",
+);
+assert(
+  typeof atHalf.bleedTransform === "string" && atHalf.bleedTransform.includes("scaleX(-1)"),
+  "mid peel computes diagonal crease reflection transform for backside bleed-through",
+);
+
+// Verify bleed-through layer & transparent underlay on intra-section curl
+const bleedRenderer = makeRenderer(false);
+bleedRenderer.page = 2;
+bleedRenderer.pages = 6;
+const bleedAnimator = new PageTurnAnimator();
+bleedAnimator.setStyle("curl");
+bleedAnimator.attach(bleedRenderer, host);
+assert(
+  bleedAnimator.begin({
+    width: W,
+    height: H,
+    fromRight: true,
+    sourceUrl: FAKE_SNAPSHOT,
+    progress: 0.45,
+  }) === true,
+  "intra-section curl mounts with bleed-through",
+);
+{
+  const ov = document.getElementById("inkamp-page-curl-overlay");
+  const ul = childByClass(ov, "inkamp-curl-underlay");
+  assert(
+    ul?.style?.backgroundColor === "transparent",
+    "intra-section underlay is transparent so stationary next page shows underneath",
+  );
+  const bleed = childByClass(ov, "inkamp-curl-back-bleed");
+  assert(bleed && bleed.style.clipPath.startsWith("path("), "backside bleed-through clipped to fold");
+  const svgShapes = childByClass(ov, "inkamp-curl-shapes");
+  const castEl = svgShapes?.children?.find?.(
+    (c) => c.getAttribute?.("class") === "inkamp-curl-cast-shadow",
+  );
+  assert(castEl && Number(castEl.style.opacity) > 0, "cast shadow path visible on next page");
+}
+bleedAnimator.cancel({ durationMs: 0 });
+
+// Verify idle snapshot pre-caching and performTurn for both curl and slide
+let navigatedCount = 0;
+let simPos = 1;
+bleedAnimator.notifyPageSettled();
+await sleep(80);
+assert(lastSnapshotRequest?.requestId > 0, "notifyPageSettled requests idle snapshot");
+bleedAnimator.receiveNativeSnapshot(lastSnapshotRequest.requestId, FAKE_SNAPSHOT);
+assert(bleedAnimator.cachedSnapshotUrl === FAKE_SNAPSHOT, "idle snapshot cached for 0ms turn");
+
+await bleedAnimator.performTurn({
+  direction: "right",
+  navigate: () => {
+    navigatedCount += 1;
+    simPos += 1;
+  },
+  position: () => simPos,
+});
+assert(navigatedCount === 1 && simPos === 2, "performTurn in curl mode navigates once and completes");
+assert(bleedAnimator.phase === "idle", "performTurn curl returns to idle");
+
+// Slide mode performTurn uses GPU translate3d sheet + parallax
+bleedAnimator.setStyle("slide");
+bleedAnimator.notifyPageSettled();
+await sleep(80);
+bleedAnimator.receiveNativeSnapshot(lastSnapshotRequest.requestId, FAKE_SNAPSHOT);
+await bleedAnimator.performTurn({
+  direction: "right",
+  navigate: () => {
+    navigatedCount += 1;
+    simPos += 1;
+  },
+  position: () => simPos,
+});
+assert(navigatedCount === 2 && simPos === 3, "performTurn in slide mode navigates once and completes");
+assert(bleedAnimator.phase === "idle", "performTurn slide returns to idle");
+
+// No-op turn at book boundary cancels overlay immediately without animating a fake turn
+bleedAnimator.notifyPageSettled();
+await sleep(80);
+bleedAnimator.receiveNativeSnapshot(lastSnapshotRequest.requestId, FAKE_SNAPSHOT);
+await bleedAnimator.performTurn({
+  direction: "left",
+  navigate: () => {}, // position unchanged
+  position: () => simPos,
+});
+assert(bleedAnimator.phase === "idle", "no-op performTurn cleans up immediately");
+bleedAnimator.detach();
+
 console.log("PageTurnAnimator.selfcheck: ok");

@@ -310,8 +310,8 @@ class FoliateManager {
           swipeShown = false;
           const t = event.touches?.[0];
           if (t) {
-            touchStartX = t.clientX;
-            touchStartY = t.clientY;
+            touchStartX = t.screenX ?? t.clientX;
+            touchStartY = t.screenY ?? t.clientY;
           }
           // Snapshot the spread before Foliate starts scrolling under the finger.
           if (this.#nativeSpreadCurl && event.touches?.length === 1) {
@@ -328,8 +328,8 @@ class FoliateManager {
           }
           const t = event.touches?.[0];
           if (t) {
-            const dx = t.clientX - touchStartX;
-            const dy = t.clientY - touchStartY;
+            const dx = (t.screenX ?? t.clientX) - touchStartX;
+            const dy = (t.screenY ?? t.clientY) - touchStartY;
             if (dx * dx + dy * dy > 25) touchMoved = true;
             if (touchMoved && !swipeShown && this.#swipeCurlId) {
               swipeShown = true;
@@ -359,25 +359,45 @@ class FoliateManager {
         });
 
         doc.addEventListener("click", (event) => {
-          if (clickTimer !== null) {
-            clearTimeout(clickTimer);
-            clickTimer = null;
-            return;
-          }
-
           if (isDragging || touchMoved) {
             isDragging = false;
             touchMoved = false;
             return;
           }
 
-          // Curl gesture owns the interaction — never reveal chrome mid-turn.
-          if (this.#pageTurnAnimator.phase !== "idle") {
+          // Active drag/curl gesture owns the interaction — never reveal chrome mid-turn.
+          if (
+            this.#pageTurnAnimator.phase === "pending"
+            || this.#pageTurnAnimator.phase === "curling"
+          ) {
             return;
           }
 
           const selection = doc.getSelection?.();
           if (selection && !selection.isCollapsed) {
+            return;
+          }
+
+          // Margin taps turn the page immediately (0ms latency) and never wait
+          // on the double-click audio-seek timer, so rapid taps flip every page.
+          const zone = this.#getClickZone(event);
+          if (zone === "left" || zone === "right") {
+            if (clickTimer !== null) {
+              clearTimeout(clickTimer);
+              clickTimer = null;
+            }
+            this.#handleMarginClickNavigation(zone);
+            return;
+          }
+
+          if (!this.#hasAudioNarration) {
+            this.#reportOverlayToggle();
+            return;
+          }
+
+          if (clickTimer !== null) {
+            clearTimeout(clickTimer);
+            clickTimer = null;
             return;
           }
 
@@ -388,7 +408,7 @@ class FoliateManager {
             if (selectionNow && !selectionNow.isCollapsed) {
               return;
             }
-            this.#handleSingleClick(event);
+            this.#reportOverlayToggle();
           }, 150);
         });
 
@@ -542,6 +562,7 @@ class FoliateManager {
     };
 
     window.webkit?.messageHandlers?.Relocated?.postMessage(payload);
+    this.#pageTurnAnimator.notifyPageSettled();
 
     if (this.#pendingHighlight) {
       const { sectionIndex: pendingSectionIndex, textId } = this.#pendingHighlight;
@@ -593,25 +614,44 @@ class FoliateManager {
     }
   }
 
-  #handleSingleClick(event) {
-    if (!this.#enableMarginClickNavigation) {
-      this.#reportOverlayToggle();
-      return;
+  /**
+   * Map a click inside a scrolled section iframe to its true horizontal screen
+   * zone ("left" | "right" | "center"). Using frameLeft + event.clientX keeps
+   * tap zones aligned to the visible viewport across every page and iPad spread.
+   */
+  #getClickZone(event) {
+    if (!this.#enableMarginClickNavigation) return "center";
+    const doc =
+      event?.currentTarget?.nodeType === 9
+        ? event.currentTarget
+        : event?.target?.ownerDocument;
+    const frameEl = doc?.defaultView?.frameElement;
+    const frameLeft = frameEl?.getBoundingClientRect?.().left ?? 0;
+    const viewportWidth =
+      window.innerWidth || document.documentElement?.clientWidth || 1;
+    let viewportX = frameLeft + (event?.clientX ?? 0);
+    if (!frameEl && !this.#usesSpread) {
+      const pageWidth = this.#singleColumnMode
+        ? viewportWidth
+        : Math.max(1, Math.floor(viewportWidth / 2));
+      viewportX = ((event?.clientX ?? 0) % pageWidth + pageWidth) % pageWidth;
+      const marginZone = pageWidth * 0.18;
+      if (viewportX < marginZone) return "left";
+      if (viewportX > pageWidth - marginZone) return "right";
+      return "center";
     }
+    const marginZonePercent = 0.18;
+    const leftZone = viewportWidth * marginZonePercent;
+    const rightZone = viewportWidth * (1 - marginZonePercent);
+    if (viewportX < leftZone) return "left";
+    if (viewportX > rightZone) return "right";
+    return "center";
+  }
 
-    const pageWidth = this.#singleColumnMode
-      ? window.innerWidth
-      : Math.floor(window.innerWidth / 2);
-
-    const marginZonePercent = 0.15;
-    const leftZone = pageWidth * marginZonePercent;
-    const rightZone = pageWidth * (1 - marginZonePercent);
-    const clickX = event.clientX % pageWidth;
-
-    if (clickX < leftZone) {
-      this.#handleMarginClickNavigation("left");
-    } else if (clickX > rightZone) {
-      this.#handleMarginClickNavigation("right");
+  #handleSingleClick(event) {
+    const zone = this.#getClickZone(event);
+    if (zone === "left" || zone === "right") {
+      this.#handleMarginClickNavigation(zone);
     } else {
       this.#reportOverlayToggle();
     }
@@ -674,8 +714,13 @@ class FoliateManager {
     }
     if (this.#nativeSpreadCurl) {
       void this.#spreadCurl.turn(false, () => this.#view.goLeft(), () => this.#spreadPosition());
+      return;
     }
-    this.#view.goLeft();
+    void this.#pageTurnAnimator.performTurn({
+      direction: "left",
+      navigate: () => this.#view.goLeft(),
+      position: () => this.#spreadPosition(),
+    });
   }
 
   goRight() {
@@ -686,8 +731,13 @@ class FoliateManager {
     }
     if (this.#nativeSpreadCurl) {
       void this.#spreadCurl.turn(true, () => this.#view.goRight(), () => this.#spreadPosition());
+      return;
     }
-    this.#view.goRight();
+    void this.#pageTurnAnimator.performTurn({
+      direction: "right",
+      navigate: () => this.#view.goRight(),
+      position: () => this.#spreadPosition(),
+    });
   }
 
   goTo(href) {
@@ -860,12 +910,14 @@ class FoliateManager {
     if (styles.spreadMode !== undefined && styles.spreadMode !== null && !!styles.spreadMode !== this.#spreadMode) {
       this.#spreadMode = !!styles.spreadMode;
       this.#spreadCurl.cancel();
-      this.#pageTurnAnimator.setNativeSpread(this.#spreadMode);
+      this.#pageTurnAnimator.setNativeSpread(this.#spreadMode && this.#spreadCurl.available);
     }
     this.#spreadCurl.fillColor = this.#backgroundColor;
+    this.#pageTurnAnimator.invalidateCachedSnapshot();
 
     this.#applyStylesToRenderer();
     this.#refreshReadaloudHighlight();
+    this.#pageTurnAnimator.notifyPageSettled();
   }
 
   #applyStylesToRenderer() {
@@ -938,7 +990,9 @@ class FoliateManager {
     if (!this.#resizeHandler) {
       this.#resizeHandler = () => {
         this.#spreadCurl.cancel();
+        this.#pageTurnAnimator.invalidateCachedSnapshot();
         this.#updateMaxInlineSize();
+        this.#pageTurnAnimator.notifyPageSettled();
       };
       window.addEventListener("resize", this.#resizeHandler);
     }
