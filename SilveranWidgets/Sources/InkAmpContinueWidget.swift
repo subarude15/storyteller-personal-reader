@@ -25,9 +25,6 @@ struct SilveranReaderWidgets: WidgetBundle {
         InkAmpLightLargeWidget()
         InkAmpDarkMediumWidget()
         InkAmpDarkLargeWidget()
-        #if os(iOS)
-        InkAmpPlaybackLiveActivity()
-        #endif
     }
 }
 

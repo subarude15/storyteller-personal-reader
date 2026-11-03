@@ -48,32 +48,17 @@ public final class LiveActivityController {
         guard !installed else { return }
         installed = true
 
+        // Playback Live Activity is retired in favor of native iOS system Now Playing.
+        // Purge any lingering/stale activities from previous app builds immediately.
         Task {
-            let current = await AudioSessionActor.shared.currentSnapshot()
-            if latestSnapshot == nil { record(current) }
-            await adoptExisting(hasSession: current != nil)
-            adopted = true
-            await AudioSessionActor.shared.addSnapshotObserver { snapshot in
-                Task { @MainActor in LiveActivityController.shared.receive(snapshot) }
-            }
-            scheduleSync()
-        }
-        observeCoverAndTint()
-        let center = NotificationCenter.default
-        for name in [
-            UserDefaults.didChangeNotification,
-            UIAccessibility.darkerSystemColorsStatusDidChangeNotification,
-        ] {
-            center.addObserver(forName: name, object: nil, queue: .main) { _ in
-                Task { @MainActor in LiveActivityController.shared.scheduleSync() }
-            }
+            await InkAmpPlaybackActivityCleanup.endAllImmediately()
         }
     }
 
     /// Call before closing `kind` on an explicit user action so its activity is removed
     /// immediately instead of lingering for 15 minutes.
     public func noteUserClosedSession(_ kind: AudioSessionKind) {
-        gate.userClosed(itemID: InkAmpPlaybackActivityState.activityItemID(for: kind))
+        // No-op: Playback Live Activity retired.
     }
 
     private func receive(_ snapshot: AudioSessionSnapshot?) {

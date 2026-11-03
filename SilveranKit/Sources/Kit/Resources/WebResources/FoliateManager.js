@@ -186,6 +186,7 @@ class FoliateManager {
 
     this.#view = document.createElement("foliate-view");
     this.#view.setAttribute("flow", "paginated");
+    this.#view.setAttribute("animated", "");
 
     const container = document.getElementById("reader-container");
     container.appendChild(this.#view);
@@ -209,6 +210,9 @@ class FoliateManager {
     const renderer = this.#view?.renderer;
     if (!renderer) return;
     const host = document.getElementById("reader-container");
+    if (this.#pageTurnStyle !== "instant" && !this.#pageTurnAnimator.reduceMotion) {
+      renderer.setAttribute("animated", "");
+    }
     this.#pageTurnAnimator.attach(renderer, host);
     this.#pageTurnAnimator.applyToRenderer(renderer);
   }

@@ -653,17 +653,14 @@ extension SettingsView {
 
 private struct PlayerAppearanceSettingsSection: View {
     @AppStorage(CoverTintSettings.enabledKey) private var coverTintEnabled = CoverTintSettings.defaultEnabled
-    @AppStorage(InkAmpLiveActivitySettings.enabledKey) private var liveActivityEnabled =
-        InkAmpLiveActivitySettings.defaultEnabled
 
     var body: some View {
         Section {
             Toggle("Tint player from cover", isOn: $coverTintEnabled)
-            Toggle("Show on Lock Screen & Dynamic Island", isOn: $liveActivityEnabled)
         } header: {
             Text("Player")
         } footer: {
-            Text("Uses the cover's color for player controls. Increase Contrast always uses the app accent. Lock Screen playback controls appear while listening.")
+            Text("Uses the cover's color for player controls. Increase Contrast always uses the app accent. System Now Playing controls appear on the Lock Screen and Dynamic Island while listening.")
         }
     }
 }
