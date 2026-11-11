@@ -28,7 +28,7 @@ struct HighlightExportPolicyTests {
             text: nil
         )
         return Highlight(
-            bookID: "book-1",
+            bookID: BookID(sourceID: "storyteller", uuid: "book-1"),
             locator: locator,
             text: text,
             color: color,

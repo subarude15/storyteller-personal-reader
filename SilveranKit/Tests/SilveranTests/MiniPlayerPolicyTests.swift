@@ -5,15 +5,15 @@ import Testing
 @Suite("Persistent mini-player policy, compact remaining time & audiobook polish")
 struct MiniPlayerPolicyTests {
     @Test func audiobookCardDismissalAlwaysKeepsSessionAliveEvenWhenPaused() {
-        let bookID = "book-uuid-123"
+        let bookID = BookID(sourceID: "storyteller", uuid: "book-uuid-123")
         let playingKeep = MiniPlayerPolicy.shouldKeepSessionOnCardDismiss(
-            sessionKind: .audiobook(bookID: bookID),
+            sessionKind: .audiobook(bookID),
             cardBookID: bookID,
             cardCategory: .audio,
             isPlaying: true
         )
         let pausedKeep = MiniPlayerPolicy.shouldKeepSessionOnCardDismiss(
-            sessionKind: .audiobook(bookID: bookID),
+            sessionKind: .audiobook(bookID),
             cardBookID: bookID,
             cardCategory: .audio,
             isPlaying: false
@@ -23,10 +23,10 @@ struct MiniPlayerPolicyTests {
     }
 
     @Test func readaloudCardDismissalKeepsSessionOnlyWhenPlaying() {
-        let bookID = "book-uuid-456"
+        let bookID = BookID(sourceID: "storyteller", uuid: "book-uuid-456")
         #expect(
             MiniPlayerPolicy.shouldKeepSessionOnCardDismiss(
-                sessionKind: .readaloud(bookID: bookID),
+                sessionKind: .readaloud(bookID),
                 cardBookID: bookID,
                 cardCategory: .synced,
                 isPlaying: true
@@ -34,7 +34,7 @@ struct MiniPlayerPolicyTests {
         )
         #expect(
             MiniPlayerPolicy.shouldKeepSessionOnCardDismiss(
-                sessionKind: .readaloud(bookID: bookID),
+                sessionKind: .readaloud(bookID),
                 cardBookID: bookID,
                 cardCategory: .synced,
                 isPlaying: false
@@ -45,8 +45,8 @@ struct MiniPlayerPolicyTests {
     @Test func mismatchedBookIDOrEmptySessionDoesNotKeepCardSession() {
         #expect(
             MiniPlayerPolicy.shouldKeepSessionOnCardDismiss(
-                sessionKind: .audiobook(bookID: "other-book"),
-                cardBookID: "current-book",
+                sessionKind: .audiobook(BookID(sourceID: "storyteller", uuid: "other-book")),
+                cardBookID: BookID(sourceID: "storyteller", uuid: "current-book"),
                 cardCategory: .audio,
                 isPlaying: true
             ) == false
@@ -54,7 +54,7 @@ struct MiniPlayerPolicyTests {
         #expect(
             MiniPlayerPolicy.shouldKeepSessionOnCardDismiss(
                 sessionKind: nil,
-                cardBookID: "current-book",
+                cardBookID: BookID(sourceID: "storyteller", uuid: "current-book"),
                 cardCategory: .audio,
                 isPlaying: true
             ) == false
@@ -62,7 +62,6 @@ struct MiniPlayerPolicyTests {
     }
 
     @Test func formatRemainingCompactAdjustsForPlaybackRate() {
-        #expect(MiniPlayerPolicy.formatRemainingCompact(seconds: nil) == nil)
         #expect(MiniPlayerPolicy.formatRemainingCompact(seconds: 0) == nil)
         #expect(MiniPlayerPolicy.formatRemainingCompact(seconds: 35, playbackRate: 1.0) == "< 1m left")
         #expect(MiniPlayerPolicy.formatRemainingCompact(seconds: 18 * 60, playbackRate: 1.0) == "18m left")

@@ -139,7 +139,7 @@ struct ReaderScrubberPolicyTests {
             text: nil
         )
         let bookmark = Highlight(
-            bookID: "book-1",
+            bookID: BookID(sourceID: "storyteller", uuid: "book-1"),
             locator: locator,
             text: "Sample bookmarked passage",
             color: nil
