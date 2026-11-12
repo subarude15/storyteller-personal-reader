@@ -715,7 +715,7 @@ public struct EbookPlayerView: View {
                 .transition(.opacity)
             }
 
-            if !(isPad && viewModel.showAudioSidebar) {
+            if !(isPad && viewModel.showAudioSidebar) && !viewModel.isPageCurlActive {
                 // Spread: the card sits bottom-trailing on the right page.
                 draggableAudioCard
                     .frame(width: isSpread ? readerSize.width / 2 : nil)
