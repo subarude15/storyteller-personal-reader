@@ -16,6 +16,7 @@ struct EbookPlayerSettings: View {
     @State private var showFineTuning = false
     @AppStorage(CoverTintSettings.enabledKey) private var coverTintEnabled = CoverTintSettings.defaultEnabled
     @AppStorage(ReaderSpreadPolicy.settingKey) private var twoPagesInLandscape = true
+    @AppStorage(ReaderControlsHint.storageKey) private var controlsHintAcknowledgedVersion = 0
 
     private var activeThemesForCurrentScheme: [ReaderTheme] {
         colorScheme == .dark ? settingsVM.darkThemes : settingsVM.lightThemes
@@ -54,6 +55,10 @@ struct EbookPlayerSettings: View {
             Divider()
 
             pageTurnAndFlowSection
+
+            Divider()
+
+            readerControlsSection
 
             Divider()
 
@@ -479,6 +484,45 @@ struct EbookPlayerSettings: View {
         }
     }
 
+    // MARK: - Reader Controls
+
+    private var readerControlsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Reader Controls")
+                .font(.headline)
+                .foregroundStyle(.primary)
+
+            Picker("Reader Controls", selection: $settingsVM.readerControlsMode) {
+                ForEach(ReaderControlsMode.allCases, id: \.self) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .onChange(of: settingsVM.readerControlsMode) { _, _ in
+                ReaderHaptics.selectionTick()
+                settingsVM.save()
+            }
+
+            Text(
+                settingsVM.readerControlsMode == .immersive
+                    ? "Touch and hold the page to show controls. Tap the middle of the page, or wait a few seconds, to hide them. To highlight, show controls and tap Select Text. Mini Player › Always Show keeps only the narration player visible."
+                    : "Tap the middle of the page to show or hide controls. Touch and hold text to select and highlight it."
+            )
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if settingsVM.readerControlsMode == .immersive {
+                Button("Show Controls Tips Again") {
+                    controlsHintAcknowledgedVersion = 0
+                }
+                .font(.caption)
+                .disabled(controlsHintAcknowledgedVersion == 0)
+            }
+        }
+    }
+
     private func applyPreset(_ preset: ReaderTypographyPolicy.LayoutPreset) {
         settingsVM.lineSpacing = preset.lineSpacing
         settingsVM.marginLeftRight = preset.marginLeftRight
@@ -537,6 +581,7 @@ struct EbookPlayerSettings: View {
         settingsVM.showOverlaySkipForward = kDefaultShowOverlaySkipForward
         settingsVM.showOverlayPlayPause = kDefaultShowOverlayPlayPause
         settingsVM.lockViewToAudio = kDefaultLockViewToAudio
+        settingsVM.readerControlsMode = ReaderControlsMode(storedValue: kDefaultReaderControlsMode)
         twoPagesInLandscape = true
         fontSizeInput = String(Int(kDefaultFontSize))
 

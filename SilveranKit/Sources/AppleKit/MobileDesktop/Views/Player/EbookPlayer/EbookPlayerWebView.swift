@@ -625,6 +625,7 @@ private func makeWebViewConfiguration2(
     contentController.add(coordinator, name: "Relocated")
     contentController.add(coordinator, name: "PageFlipped")
     contentController.add(coordinator, name: "OverlayToggled")
+    contentController.add(coordinator, name: "ReaderChromeReveal")
     contentController.add(coordinator, name: "PageCurlChrome")
     contentController.add(coordinator, name: "MarginClickNav")
     contentController.add(coordinator, name: "SentenceSkip")
@@ -777,12 +778,21 @@ private struct WebViewRepresentable2: PlatformViewRepresentable {
     }
 
     func updateNSView(_ nsView: WKWebView, context: Context) {}
+
+    static func dismantleNSView(_ nsView: WKWebView, coordinator: WebViewCoordinator2) {
+        nsView.configuration.userContentController.removeAllScriptMessageHandlers()
+    }
     #else
     func makeUIView(context: Context) -> WKWebView {
         makeWebView(context: context)
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
+
+    /// The content controller retains the coordinator; release it with the view.
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: WebViewCoordinator2) {
+        uiView.configuration.userContentController.removeAllScriptMessageHandlers()
+    }
     #endif
 
     private func makeWebView(context: Context) -> WKWebView {

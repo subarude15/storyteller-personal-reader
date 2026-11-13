@@ -918,4 +918,30 @@ await bleedAnimator.performTurn({
 assert(bleedAnimator.phase === "idle", "no-op performTurn cleans up immediately");
 bleedAnimator.detach();
 
+// Immersive long-press hooks: an armed, unmoved touch is not a turn and can be
+// released; once the 2px drag lock fires it is a turn and is left alone.
+{
+  const holdAnimator = new PageTurnAnimator();
+  holdAnimator.setStyle("curl");
+  holdAnimator.attach(makeRenderer(false), host);
+  const listeners = {};
+  holdAnimator.observeDocument({
+    addEventListener: (type, fn) => (listeners[type] = fn),
+  });
+  const t = (x) => ({ touches: [{ screenX: x, screenY: 100, clientX: x, clientY: 100 }] });
+  listeners.touchstart({ ...t(200), changedTouches: t(200).touches });
+  assert(holdAnimator.phase === "pending", "touchstart arms the gesture");
+  assert(!holdAnimator.isTurnInProgress, "armed, unmoved touch is not a turn");
+  holdAnimator.releaseForHold();
+  assert(holdAnimator.phase === "idle", "hold releases the armed gesture");
+
+  listeners.touchstart({ ...t(200), changedTouches: t(200).touches });
+  listeners.touchmove(t(197));
+  assert(holdAnimator.isTurnInProgress, "3px drag past the 2px lock is a turn");
+  holdAnimator.releaseForHold();
+  assert(holdAnimator.isTurnInProgress, "hold never cancels a turn in progress");
+  listeners.touchend({});
+  holdAnimator.detach();
+}
+
 console.log("PageTurnAnimator.selfcheck: ok");

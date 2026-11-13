@@ -36,6 +36,11 @@ public struct PageFlippedMessage: Codable {
 public struct OverlayToggledMessage: Codable {
 }
 
+/// Sent when an immersive-mode long-press is recognized (iOS only). The contact
+/// was consumed in JS: no page turn, selection, or seek accompanies it.
+public struct ReaderChromeRevealMessage: Codable {
+}
+
 /// Sent when the page-curl animator needs floating reader chrome hidden/restored.
 /// `active: true` while a curl gesture/overlay is in flight; false when idle again.
 public struct PageCurlChromeMessage: Codable {

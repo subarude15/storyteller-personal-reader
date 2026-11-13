@@ -17,6 +17,7 @@ Living board for Cursor, Hermes, and the Grok crew. **Update this file when tips
 
 ## Now (do first)
 
+- [ ] **Immersive reader controls (iOS ebook + readaloud)** — branch `fix/immersive-reader-controls`, uncommitted. Chrome starts hidden; long-press reveals; center tap / 4 s idle hides; Select Text mode for highlights; Classic restores old behavior. Node self-checks pass; Swift tests, macOS CI, and device smoke **not yet run**. See `docs/reader-immersive-controls.md`.
 - [ ] **TorBox post-transfer cleanup / retention policy** — optional auto-delete or retention window for TorBox cloud torrents after NAS transfer completes. Do **not** start until Phase 2 is merged and proven.
 
 ## Shipped

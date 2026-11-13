@@ -214,6 +214,7 @@ public struct SettingsView: View {
                         showPageNumber: newValue.readingBar.showPageNumber,
                         overlayTransparency: newValue.readingBar.overlayTransparency,
                         alwaysShowMiniPlayer: newValue.readingBar.alwaysShowMiniPlayer,
+                        readerControlsMode: newValue.readingBar.controlsMode,
                         progressSyncIntervalSeconds: newValue.sync.progressSyncIntervalSeconds,
                         metadataRefreshIntervalSeconds: newValue.sync.metadataRefreshIntervalSeconds,
                         autoSyncToNewerServerPosition: newValue.sync.autoSyncToNewerServerPosition,

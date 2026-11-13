@@ -63,6 +63,7 @@ public let kDefaultShowTimeRemainingInChapter = true
 public let kDefaultShowPageNumber = true
 public let kDefaultOverlayTransparency: Double = 0.8
 public let kDefaultAlwaysShowMiniPlayer = false
+public let kDefaultReaderControlsMode = "immersive"
 public let kDefaultShowOverlaySkipBackward = true
 public let kDefaultShowOverlaySkipForward = true
 public let kDefaultShowOverlayPlayPause = true
