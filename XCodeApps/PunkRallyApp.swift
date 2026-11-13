@@ -83,7 +83,6 @@ public struct PunkRallyTabView: View {
     private var primaryTabView: some View {
         TabView(selection: $selectedTab) {
             HomeTabView()
-                .punkRallyMiniPlayerInset()
                 .tabItem {
                     Label(InkAmpPrimaryTab.home.title, systemImage: InkAmpPrimaryTab.home.systemImage)
                 }
@@ -556,6 +555,9 @@ private struct HomeTabView: View {
                 .padding(.horizontal, PunkRallyTheme.Metric.screenInset)
                 .padding(.vertical, 12)
             }
+            // Home owns its mini-player inset at the scroll boundary so the last
+            // stats row clears the bar plus 24pt when the bar is visible.
+            .punkRallyMiniPlayerInset(topClearance: 24)
             .background(chrome.bg)
             .navigationTitle("ink+amp")
             .toolbar {

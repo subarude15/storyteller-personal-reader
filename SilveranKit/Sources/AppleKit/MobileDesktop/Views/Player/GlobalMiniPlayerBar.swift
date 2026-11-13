@@ -112,6 +112,13 @@ struct GlobalMiniPlayerBar: View {
     private var monitor = AudioSessionMonitor.shared
     private var presenter = PlayerPresenter.shared
     private var podcastPresenter = PodcastPlayerPresenter.shared
+    private let topClearance: CGFloat
+
+    /// `topClearance` is transparent space above the bar, laid out only while
+    /// the bar is visible so a hidden bar leaves no gap.
+    init(topClearance: CGFloat = 0) {
+        self.topClearance = topClearance
+    }
 
     var body: some View {
         content
@@ -123,10 +130,14 @@ struct GlobalMiniPlayerBar: View {
         // Hide while a full-screen card is up so the inset collapses; show only
         // for headless / mini-player playback above the tab bar.
         if let snapshot = monitor.snapshot,
-            presenter.card == nil,
-            podcastPresenter.episode == nil
+            MiniPlayerPolicy.isDockedBarVisible(
+                hasSession: true,
+                isCardPresented: presenter.card != nil,
+                isPodcastEpisodePresented: podcastPresenter.episode != nil
+            )
         {
             barContent(snapshot)
+                .padding(.top, topClearance)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }

@@ -313,10 +313,14 @@ extension EnvironmentValues {
 /// Mini-player bar that sits above the tab bar via per-tab `safeAreaInset`
 /// (never overlay the UITabBar — TabView-level inset covers the bar on iOS).
 public struct PunkRallyMiniPlayerBar: View {
-    public init() {}
+    private let topClearance: CGFloat
+
+    public init(topClearance: CGFloat = 0) {
+        self.topClearance = topClearance
+    }
 
     public var body: some View {
-        GlobalMiniPlayerBar()
+        GlobalMiniPlayerBar(topClearance: topClearance)
             .accessibilityLabel("Mini player")
     }
 }
@@ -325,10 +329,11 @@ extension View {
     /// Pads content and places GlobalMiniPlayerBar above the tab bar (or sheet
     /// bottom). Use on every tab root **and** every sheet that can sit over
     /// playback (Find, show, Import, Settings, …) so close/stop stay reachable.
-    /// Collapses to zero height when nothing is playing.
-    public func punkRallyMiniPlayerInset() -> some View {
+    /// Collapses to zero height when nothing is playing. `topClearance` adds
+    /// space between content and the bar only while the bar is visible.
+    public func punkRallyMiniPlayerInset(topClearance: CGFloat = 0) -> some View {
         safeAreaInset(edge: .bottom, spacing: 0) {
-            PunkRallyMiniPlayerBar()
+            PunkRallyMiniPlayerBar(topClearance: topClearance)
         }
     }
 }

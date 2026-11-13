@@ -61,6 +61,27 @@ struct MiniPlayerPolicyTests {
         )
     }
 
+    /// The docked bar (and any inset clearance rendered inside it) exists only for a
+    /// live session with no full-screen presenter, so a hidden bar reserves nothing.
+    @Test func dockedBarVisibleOnlyForLiveSessionWithoutFullScreenPresenter() {
+        #expect(
+            MiniPlayerPolicy.isDockedBarVisible(
+                hasSession: true, isCardPresented: false, isPodcastEpisodePresented: false) == true,
+            "Playing or paused session docks the bar")
+        #expect(
+            MiniPlayerPolicy.isDockedBarVisible(
+                hasSession: false, isCardPresented: false, isPodcastEpisodePresented: false) == false,
+            "Stopped session hides the bar")
+        #expect(
+            MiniPlayerPolicy.isDockedBarVisible(
+                hasSession: true, isCardPresented: true, isPodcastEpisodePresented: false) == false,
+            "Full-screen book card hides the bar")
+        #expect(
+            MiniPlayerPolicy.isDockedBarVisible(
+                hasSession: true, isCardPresented: false, isPodcastEpisodePresented: true) == false,
+            "Full-screen podcast player hides the bar")
+    }
+
     @Test func formatRemainingCompactAdjustsForPlaybackRate() {
         #expect(MiniPlayerPolicy.formatRemainingCompact(seconds: 0) == nil)
         #expect(MiniPlayerPolicy.formatRemainingCompact(seconds: 35, playbackRate: 1.0) == "< 1m left")

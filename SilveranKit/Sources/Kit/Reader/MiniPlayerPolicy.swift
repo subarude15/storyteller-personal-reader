@@ -5,6 +5,16 @@ import Foundation
 /// Audiobook Now Playing surfaces (Batch D).
 public enum MiniPlayerPolicy {
 
+    /// Whether `GlobalMiniPlayerBar` renders: a live session (playing or paused)
+    /// with no full-screen book card or podcast player covering it.
+    public static func isDockedBarVisible(
+        hasSession: Bool,
+        isCardPresented: Bool,
+        isPodcastEpisodePresented: Bool,
+    ) -> Bool {
+        hasSession && !isCardPresented && !isPodcastEpisodePresented
+    }
+
     /// Determines whether dismissing the full-screen player card (via `< Library`
     /// or swipe-down) should preserve the live audio session in `GlobalMiniPlayerBar`.
     ///
