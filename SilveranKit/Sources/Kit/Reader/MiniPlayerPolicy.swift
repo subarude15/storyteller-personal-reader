@@ -70,7 +70,7 @@ public enum MiniPlayerPolicy {
         let trimmedAuthor = author?.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let contextLabel: String? = {
-            if let c = trimmedChapter, !c.isEmpty {
+            if let c = trimmedChapter, !c.isEmpty, !isLoadingPlaceholder(c) {
                 return c
             }
             if let a = trimmedAuthor, !a.isEmpty {
@@ -105,6 +105,12 @@ public enum MiniPlayerPolicy {
             case (nil, nil):
                 return nil
         }
+    }
+
+    /// Chapter label shown while chapter metadata is still loading (exact match only).
+    private static func isLoadingPlaceholder(_ trimmedLabel: String) -> Bool {
+        let lowered = trimmedLabel.lowercased()
+        return lowered == "loading..." || lowered == "loading…"
     }
 
     /// Apple Music / Apple Books style cover scale for playing vs paused state.

@@ -99,6 +99,46 @@ struct MiniPlayerPolicyTests {
         #expect(loadingChapterFallsBackToAuthor == "Frank Herbert")
     }
 
+    @Test func loadingPlaceholderVariantsFallBackToAuthor() {
+        for placeholder in ["Loading...", "Loading…", "  loading...\n", "LOADING…", "\tLoading..."] {
+            let subtitle = MiniPlayerPolicy.subtitle(
+                author: "Frank Herbert",
+                chapterLabel: placeholder,
+                bookProgress: nil,
+                remainingSeconds: 18 * 60
+            )
+            #expect(subtitle == "Frank Herbert · 18m left", "placeholder \(placeholder.debugDescription)")
+        }
+    }
+
+    @Test func realChapterTitlesContainingLoadingAreKept() {
+        for title in ["Loading the Spice", "Chapter 3: Loading...", "Loading", "Loading....", "Reloading..."] {
+            let subtitle = MiniPlayerPolicy.subtitle(
+                author: "Frank Herbert",
+                chapterLabel: title,
+                bookProgress: nil,
+                remainingSeconds: nil
+            )
+            #expect(subtitle == title)
+        }
+    }
+
+    @Test func loadingPlaceholderWithoutAuthorShowsProgressOnly() {
+        #expect(
+            MiniPlayerPolicy.subtitle(
+                author: nil, chapterLabel: "Loading...", bookProgress: 0.42, remainingSeconds: nil
+            ) == "42%")
+        #expect(
+            MiniPlayerPolicy.subtitle(
+                author: "  ", chapterLabel: "Loading…", bookProgress: nil, remainingSeconds: 30 * 60,
+                playbackRate: 1.5
+            ) == "20m left")
+        #expect(
+            MiniPlayerPolicy.subtitle(
+                author: nil, chapterLabel: "Loading...", bookProgress: 0.0, remainingSeconds: nil
+            ) == nil)
+    }
+
     @Test func artworkScaleAndScrubHapticTokensBehaveDeterministically() {
         #expect(MiniPlayerPolicy.artworkPlaybackScale(isPlaying: true) == 1.0)
         #expect(MiniPlayerPolicy.artworkPlaybackScale(isPlaying: false) == 0.88)
