@@ -46,6 +46,11 @@ struct DraggableAudioCard<FullContent: View>: View {
     let onSleepTimerCancel: () -> Void
     let onDismiss: () -> Void
     let onComicScrubberVisibilityChange: (Bool) -> Void
+    /// Reports card states that must keep immersive chrome on screen.
+    var onChromeBlockersChange: (Set<ReaderChromeBlocker>) -> Void = { _ in }
+    /// Card-local controls that do not go through a parent callback (scope,
+    /// expand/collapse, drag end) restart the immersive idle window.
+    var onActivity: () -> Void = {}
     @ViewBuilder let fullContent: () -> FullContent
 
     enum CardState {
@@ -91,6 +96,18 @@ struct DraggableAudioCard<FullContent: View>: View {
             return .chapter
         }
         return scrubScope
+    }
+
+    private var chromeBlockers: Set<ReaderChromeBlocker> {
+        guard isPresented else { return [] }
+        var blockers: Set<ReaderChromeBlocker> = []
+        if cardState != .compact { blockers.insert(.cardExpanded) }
+        if isDraggingSlider {
+            blockers.insert(.scrubbing)
+        } else if isDragging {
+            blockers.insert(.cardDrag)
+        }
+        return blockers
     }
 
     private var activeSourceFraction: Double {
@@ -176,6 +193,7 @@ struct DraggableAudioCard<FullContent: View>: View {
                     .overlay(alignment: .topTrailing) {
                         if cardState != .compact {
                             Button(action: {
+                                onActivity()
                                 withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                                     cardState = .compact
                                 }
@@ -206,6 +224,7 @@ struct DraggableAudioCard<FullContent: View>: View {
                             }
                             .onEnded { value in
                                 guard !isDraggingSlider else { return }
+                                onActivity()
                                 handleDragEnd(
                                     translation: value.translation.height,
                                     velocity: value.predictedEndTranslation.height
@@ -256,8 +275,12 @@ struct DraggableAudioCard<FullContent: View>: View {
                 isPresented && supportsComicScrubber && cardState == .scrubber
             )
         }
+        .onChange(of: chromeBlockers, initial: true) { _, blockers in
+            onChromeBlockersChange(blockers)
+        }
         .onDisappear {
             onComicScrubberVisibilityChange(false)
+            onChromeBlockersChange([])
         }
     }
 
@@ -319,6 +342,7 @@ struct DraggableAudioCard<FullContent: View>: View {
             }
             .contentShape(Rectangle())
             .onTapGesture {
+                onActivity()
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                     cardState = (supportsComicScrubber || isPureEbook) ? .scrubber : .expanded
                 }
@@ -402,6 +426,7 @@ struct DraggableAudioCard<FullContent: View>: View {
 
                 if chapterTicks.count > 1 {
                     Button {
+                        onActivity()
                         ReaderHaptics.selectionTick()
                         withAnimation(.easeInOut(duration: 0.18)) {
                             scrubScope = (scrubScope == .book) ? .chapter : .book

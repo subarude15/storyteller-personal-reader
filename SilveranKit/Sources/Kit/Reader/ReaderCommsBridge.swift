@@ -24,6 +24,9 @@ public final class ReaderCommsBridge {
     /// Notifies when user taps to toggle overlay (iOS only)
     public var onOverlayToggled: (() -> Void)?
 
+    /// Notifies when an immersive long-press asks to reveal reader controls (iOS only)
+    public var onReaderChromeReveal: (() -> Void)?
+
     /// Notifies when page-curl wants floating chrome hidden (`true`) or restored (`false`)
     public var onPageCurlChrome: ((Bool) -> Void)?
 
@@ -111,6 +114,12 @@ public final class ReaderCommsBridge {
     public func sendSwiftOverlayToggled(_: OverlayToggledMessage) {
         debugLog("[ReaderCommsBridge] sendSwiftOverlayToggled")
         onOverlayToggled?()
+    }
+
+    /// JS recognized an immersive long-press and consumed the contact
+    public func sendSwiftReaderChromeReveal(_: ReaderChromeRevealMessage) {
+        debugLog("[ReaderCommsBridge] sendSwiftReaderChromeReveal")
+        onReaderChromeReveal?()
     }
 
     /// JS page-curl lifecycle wants floating reader chrome suppressed or restored
@@ -312,6 +321,46 @@ public final class ReaderCommsBridge {
 
         debugLog("[ReaderCommsBridge] sendJsClearHighlight()")
         _ = try await js.evaluate("window.foliateManager.clearHighlight()")
+    }
+
+    /// Global the JS `FoliateManager` consumes at construction (`ReaderGestures.js`).
+    public static let pendingReaderControlsGlobal = "inkampPendingReaderControls"
+
+    /// Synchronously registers the controls state for every later page load.
+    /// Call before the reader HTML loads so it is never missed.
+    public func setReaderControlsForPageLoads(immersive: Bool) {
+        js?.setDocumentStartScript(
+            "window.\(Self.pendingReaderControlsGlobal) = {immersive: \(immersive), selectionMode: false};",
+            key: Self.pendingReaderControlsGlobal
+        )
+    }
+
+    /// Swift tells JS whether immersive long-press arbitration and the selection
+    /// lock are active. JS stays on legacy behavior until this first arrives.
+    ///
+    /// The state is also registered as a document-start script (selection mode
+    /// never carries into a fresh page), so a page that loads after this call
+    /// has it before `FoliateManager` is constructed and before any section
+    /// attaches. Returns `"applied"` or `"pending"` (manager not built yet).
+    @discardableResult
+    public func sendJsSetReaderControls(immersive: Bool, selectionMode: Bool) async throws -> String? {
+        guard let js else {
+            throw ReaderCommsBridgeError.jsNotAvailable
+        }
+        debugLog("[ReaderCommsBridge] sendJsSetReaderControls(immersive: \(immersive), selectionMode: \(selectionMode))")
+        setReaderControlsForPageLoads(immersive: immersive)
+        let global = "window.\(Self.pendingReaderControlsGlobal)"
+        return try await js.evaluate(
+            """
+            (() => {
+              const state = {immersive: \(immersive), selectionMode: \(selectionMode)};
+              \(global) = state;
+              if (!window.foliateManager) return "pending";
+              window.foliateManager.setReaderControls(state);
+              return "applied";
+            })()
+            """
+        )
     }
 
     /// Swift commands JS to update reader styles (font, colors, margins, etc.)

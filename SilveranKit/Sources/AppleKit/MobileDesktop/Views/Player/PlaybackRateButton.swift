@@ -114,6 +114,7 @@ public struct PlaybackRateButton: View {
                     .offset(y: 9)
             }
         }
+        .reportsReaderChromeSheet(showSpeedPicker)
     }
 
     private var speedPickerContent: some View {

@@ -70,6 +70,11 @@ public final class ReaderMessageRouter {
                     let msg = try decoder.decode(OverlayToggledMessage.self, from: data)
                     bridge.sendSwiftOverlayToggled(msg)
 
+                case "ReaderChromeReveal":
+                    let data = try JSONSerialization.data(withJSONObject: body)
+                    let msg = try decoder.decode(ReaderChromeRevealMessage.self, from: data)
+                    bridge.sendSwiftReaderChromeReveal(msg)
+
                 case "PageCurlChrome":
                     let data = try JSONSerialization.data(withJSONObject: body)
                     let msg = try decoder.decode(PageCurlChromeMessage.self, from: data)

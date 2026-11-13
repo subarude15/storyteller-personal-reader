@@ -114,9 +114,13 @@ class EbookPlayerViewModel {
     }
     var isTitleBarHovered = false
     #else
+    /// Immersive never auto-opens the iPad sidebar on entry; the stored
+    /// preference belongs to Classic and is only read/written there.
     var showAudioSidebar: Bool = false {
         didSet {
-            if _sidebarInitialized && oldValue != showAudioSidebar {
+            if _sidebarInitialized && oldValue != showAudioSidebar
+                && chrome.state.mode == .classic
+            {
                 UserDefaults.standard.set(
                     showAudioSidebar,
                     forKey: "EbookPlayerShowAudioSidebarIOS",
@@ -125,12 +129,19 @@ class EbookPlayerViewModel {
         }
     }
     var showAudioSheet = false
-    var isReadingBarVisible = true
-    var isTopBarVisible = true
-    /// True while a page-curl gesture/overlay is active. Hides floating chrome
-    /// for the curl lifetime without permanently toggling overlay preferences.
-    var isPageCurlActive = false
+    /// Single owner of iOS ebook/readaloud chrome visibility (`ReaderChromePolicy`).
+    let chrome: ReaderChromeController
+    var isReadingBarVisible: Bool { chrome.state.isBottomVisible }
+    var isTopBarVisible: Bool { chrome.state.isTopVisible }
+    /// True while a page-curl gesture/overlay is active. Masks floating chrome
+    /// for the curl lifetime without changing chrome state.
+    var isPageCurlActive: Bool { chrome.state.isCurlActive }
+    var isSelectTextMode: Bool { chrome.state.isSelectionMode }
     var collapseCardTrigger = 0
+    /// Section content is laid out (the first-run hint waits for this).
+    var isReaderContentReady = false
+    private var presentedChromeSheets: Set<UUID> = []
+    @ObservationIgnored private var lastAppliedControlsMode: ReaderControlsMode?
     /// iPad landscape two-page spread, measured by the view (`ReaderSpreadPolicy`).
     var isSpreadLayout = false {
         didSet { styleManager?.setSpreadMode(isSpreadLayout) }
@@ -277,8 +288,7 @@ class EbookPlayerViewModel {
             "[EbookPlayerViewModel] Init - audio sidebar: \(self.showAudioSidebar), chapter sidebar: \(self.showChapterSidebar)"
         )
         #else
-        self.showAudioSidebar =
-            UserDefaults.standard.object(forKey: "EbookPlayerShowAudioSidebarIOS") as? Bool ?? false
+        self.chrome = ReaderChromeController()
         #endif
         self._sidebarInitialized = true
     }
@@ -430,19 +440,106 @@ class EbookPlayerViewModel {
 
     func handleToggleOverlay() {
         #if os(iOS)
-        if settingsVM.alwaysShowMiniPlayer {
-            isTopBarVisible.toggle()
-            if !isTopBarVisible {
-                collapseCardTrigger += 1
-            }
-            debugLog("[EbookPlayerViewModel] Toggled top bar visibility: \(isTopBarVisible)")
-        } else {
-            isReadingBarVisible.toggle()
-            isTopBarVisible = isReadingBarVisible
-            debugLog("[EbookPlayerViewModel] Toggled overlay visibility: \(isReadingBarVisible)")
-        }
+        sendChrome(.centerTap(alwaysShowMiniPlayer: settingsVM.alwaysShowMiniPlayer))
+        debugLog(
+            "[EbookPlayerViewModel] Center tap - top: \(isTopBarVisible), bottom: \(isReadingBarVisible)"
+        )
         #endif
     }
+
+    #if os(iOS)
+    /// Comics keep the legacy tap-toggle chrome.
+    var effectiveControlsMode: ReaderControlsMode {
+        isComicBook ? .classic : settingsVM.readerControlsMode
+    }
+
+    var isChromeModalPresented: Bool {
+        showCustomizePopover || showSearchPanel || showBookmarksPanel || showTranslation
+            || showServerPositionDialog || pendingSelection != nil || pendingEditHighlight != nil
+            || !presentedChromeSheets.isEmpty
+    }
+
+    func sendChrome(_ event: ReaderChromeEvent) {
+        let before = chrome.state
+        chrome.send(event)
+        let after = chrome.state
+        // Legacy Always Show: hiding the toolbar also collapses the pinned card.
+        if before.isTopVisible && !after.isTopVisible
+            && after.cardAlwaysShows(
+                alwaysShowMiniPlayer: settingsVM.alwaysShowMiniPlayer,
+                hasAudioNarration: hasAudioNarration
+            )
+        {
+            collapseCardTrigger += 1
+        }
+        if before.mode != after.mode || before.isSelectionMode != after.isSelectionMode {
+            pushReaderControlsToJS()
+        }
+    }
+
+    func noteChromeActivity() {
+        sendChrome(.userActivity)
+    }
+
+    /// Applies the persisted mode once settings load, and again when it changes.
+    func applyControlsMode() {
+        guard settingsVM.isLoaded else { return }
+        let mode = effectiveControlsMode
+        sendChrome(.setMode(mode))
+        // Also covers the first load: an unchanged default mode sends no event.
+        pushReaderControlsToJS()
+        let previous = lastAppliedControlsMode
+        lastAppliedControlsMode = mode
+        if let open = ReaderSidebarPolicy.sidebarOnModeChange(
+            from: previous,
+            to: mode,
+            storedPreference: UserDefaults.standard.object(
+                forKey: "EbookPlayerShowAudioSidebarIOS"
+            ) as? Bool
+        ) {
+            showAudioSidebar = open
+        }
+    }
+
+    func toggleSelectTextMode() {
+        sendChrome(.setBlocker(.selectionMode, !isSelectTextMode))
+    }
+
+    func reportChromeSheet(_ id: UUID, presented: Bool) {
+        if presented {
+            presentedChromeSheets.insert(id)
+        } else {
+            presentedChromeSheets.remove(id)
+        }
+    }
+
+    func setCardChromeBlockers(_ blockers: Set<ReaderChromeBlocker>) {
+        for blocker in [ReaderChromeBlocker.cardExpanded, .cardDrag, .scrubbing] {
+            sendChrome(.setBlocker(blocker, blockers.contains(blocker)))
+        }
+    }
+
+    /// Before settings load nothing is sent, so JS stays on legacy behavior
+    /// (Classic readers never get a stray selection lock); `applyControlsMode`
+    /// pushes as soon as they load.
+    private func pushReaderControlsToJS(to target: ReaderCommsBridge? = nil) {
+        guard settingsVM.isLoaded, !isComicBook, let bridge = target ?? commsBridge else { return }
+        let state = chrome.state
+        let immersive = state.mode == .immersive
+        bridge.setReaderControlsForPageLoads(immersive: immersive)
+        Task { @MainActor in
+            do {
+                let result = try await bridge.sendJsSetReaderControls(
+                    immersive: immersive,
+                    selectionMode: state.isSelectionMode
+                )
+                debugLog("[EbookPlayerViewModel] Reader controls pushed: \(result ?? "nil")")
+            } catch {
+                debugLog("[EbookPlayerViewModel] Reader controls push failed: \(error)")
+            }
+        }
+    }
+    #endif
 
     func handleNextSentence() {
         mediaOverlayManager?.nextSentence()
@@ -590,6 +687,8 @@ class EbookPlayerViewModel {
     func handleOnAppear() {
         #if os(iOS)
         recoveryManager = WebViewRecoveryManager(viewModel: self)
+        // Re-arm the idle window cancelled by a previous disappear.
+        noteChromeActivity()
         #endif
 
         if let data = bookData {
@@ -647,6 +746,10 @@ class EbookPlayerViewModel {
                 isDarkMode: self.bridgeInitialColorScheme == .dark
             )
             await self.loadHighlights()
+            #if os(iOS)
+            self.pushReaderControlsToJS()
+            self.isReaderContentReady = true
+            #endif
         }
         session.onIncomingServerPosition = { [weak self] position in
             Task { @MainActor [weak self] in
@@ -746,6 +849,9 @@ class EbookPlayerViewModel {
 
     func handleOnDisappear(close policy: ReadingSessionClosePolicy? = .endSession) {
         debugLog("[EbookPlayerViewModel] View disappearing (policy: \(String(describing: policy)))")
+        #if os(iOS)
+        chrome.invalidate()
+        #endif
 
         session?.removeIncomingPositionObserver()
 
@@ -765,11 +871,17 @@ class EbookPlayerViewModel {
     func handleScenePhaseChange(_ phase: ScenePhase) {
         switch phase {
             case .active:
+                #if os(iOS)
+                sendChrome(.setForeground(true))
+                #endif
                 Task { @MainActor in
                     await progressManager?.handleResume()
                     await session?.handleSceneBecameActive()
                 }
             case .background:
+                #if os(iOS)
+                sendChrome(.setForeground(false))
+                #endif
                 debugLog("[EbookPlayerViewModel] Entering background - audio continues natively")
                 Task { @MainActor in
                     await session?.handleSceneEnteredBackground()
@@ -830,7 +942,7 @@ class EbookPlayerViewModel {
             Task { @MainActor in
                 #if os(iOS)
                 if self.isPageCurlActive != active {
-                    self.isPageCurlActive = active
+                    self.sendChrome(.setCurlActive(active))
                     debugLog(
                         "[EbookPlayerViewModel] Page curl chrome suppress active=\(active)"
                     )
@@ -838,6 +950,34 @@ class EbookPlayerViewModel {
                 #endif
             }
         }
+
+        #if os(iOS)
+        // A recovered WebView never sends the curl-ended message for the old page.
+        if isPageCurlActive {
+            sendChrome(.setCurlActive(false))
+        }
+
+        // Before the reader HTML loads (first open and recovery alike), so the
+        // first section attaches with the current controls state.
+        pushReaderControlsToJS(to: bridge)
+
+        bridge.onReaderChromeReveal = { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in
+                self.sendChrome(.reveal)
+            }
+        }
+
+        // Session owns margin navigation; immersive chrome also dismisses on it.
+        let sessionMarginClickNav = bridge.onMarginClickNav
+        bridge.onMarginClickNav = { [weak self] message in
+            sessionMarginClickNav?(message)
+            guard let self else { return }
+            Task { @MainActor in
+                self.sendChrome(.marginTap)
+            }
+        }
+        #endif
 
         bridge.onTextSelected = { [weak self] message in
             guard let self else { return }

@@ -41,6 +41,12 @@ struct EbookPlayerTopToolbar: View {
     var onSwitchFormat: ((LocalMediaCategory) -> Void)?
     var isCurrentPageBookmarked: Bool = false
     var onTogglePageBookmark: (() -> Void)? = nil
+    /// Immersive mode only: whether Select Text is active (`nil` hides the control).
+    var isSelectTextMode: Bool? = nil
+    var onToggleSelectText: (() -> Void)? = nil
+    var onHideControls: (() -> Void)? = nil
+    /// Taps on chrome that do not open a sheet restart the immersive idle window.
+    var onActivity: () -> Void = {}
 
     @State private var showSleepTimerSheet = false
     @State private var showOptionsSheet = false
@@ -204,6 +210,7 @@ struct EbookPlayerTopToolbar: View {
 
                     if isPad {
                         Button {
+                            onActivity()
                             withAnimation(.easeInOut) { showAudioSidebar.toggle() }
                         } label: {
                             Image(systemName: "sidebar.trailing")
@@ -228,6 +235,7 @@ struct EbookPlayerTopToolbar: View {
                     .sheet(isPresented: $showOptionsSheet) {
                         optionsSheet
                     }
+                    .reportsReaderChromeSheet(showOptionsSheet)
 
                     Button {
                         if let onTogglePageBookmark {
@@ -276,16 +284,60 @@ struct EbookPlayerTopToolbar: View {
             .frame(height: 44)
             .background(toolbarBackgroundColor.ignoresSafeArea(edges: .top))
 
+            if let isSelectTextMode {
+                selectTextControl(active: isSelectTextMode)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.top, 8)
+                    .padding(.trailing, 12)
+            }
+
             Spacer()
         }
         .sheet(isPresented: $showSleepTimerSheet) {
             sleepTimerSheet
         }
+        .reportsReaderChromeSheet(showSleepTimerSheet)
+        .accessibilityElement(children: .contain)
+        .accessibilityAction(named: "Hide reader controls") {
+            onHideControls?()
+        }
+    }
+
+    private func selectTextControl(active: Bool) -> some View {
+        Button {
+            onToggleSelectText?()
+        } label: {
+            if active {
+                Label("Done Selecting", systemImage: "checkmark")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 44)
+                    .background(Capsule().fill(Color.accentColor))
+            } else {
+                Label("Select Text", systemImage: "character.cursor.ibeam")
+                    .font(.subheadline)
+                    .foregroundStyle(iconColor)
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 44)
+                    .background(Capsule().fill(toolbarBackgroundColor.opacity(0.92)))
+                    .overlay(Capsule().stroke(iconColor.opacity(0.18), lineWidth: 1))
+            }
+        }
+        .buttonStyle(.plain)
+        .contentShape(Capsule())
+        .accessibilityLabel(active ? "Done selecting text" : "Select Text")
+        .accessibilityHint(
+            active
+                ? "Returns to immersive reading."
+                : "Lets you touch and hold text to select and highlight it."
+        )
     }
 
     private var sleepTimerButton: some View {
         Button(action: {
             if sleepTimerActive {
+                onActivity()
                 onSleepTimerCancel()
             } else {
                 showSleepTimerSheet = true
@@ -354,7 +406,7 @@ struct EbookPlayerTopToolbar: View {
                         }
                     }
 
-                    Section("Mini Player") {
+                    Section {
                         Toggle(
                             isOn: Binding(
                                 get: { settingsVM.alwaysShowMiniPlayer },
@@ -378,6 +430,14 @@ struct EbookPlayerTopToolbar: View {
                         ) {
                             Label("Show Stats Below", systemImage: "clock")
                         }
+                    } header: {
+                        Text("Mini Player")
+                    } footer: {
+                        Text(
+                            settingsVM.readerControlsMode == .immersive
+                                ? "With Immersive controls, Always Show keeps only the compact narration player on screen; the toolbar and scrubber still hide."
+                                : "Keeps the mini player on screen when you tap to hide controls."
+                        )
                     }
                 }
 

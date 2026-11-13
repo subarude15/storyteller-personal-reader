@@ -5,6 +5,13 @@ import { debugLog } from "./DebugConfig.js";
 import BookmarkManager from "./BookmarkManager.js";
 import PageTurnAnimator from "./PageTurnAnimator.js";
 import {
+  ReaderHoldArbiter,
+  ReaderTapRouter,
+  anchorFromCFI,
+  resolveSeekRange,
+  pendingReaderControls,
+} from "./ReaderGestures.js";
+import {
   COVER_RECTO_ATTRIBUTE,
   COVER_RECTO_CSS,
   NativeSpreadCurl,
@@ -184,10 +191,25 @@ class FoliateManager {
   #highlightedSectionIndex = null;
   #resizeHandler = null;
   #pendingHighlight = null;
+  #tapRouter = null;
+  #holdArbiter = new ReaderHoldArbiter({
+    onHold: () => this.#handleReaderHold(),
+    onHoldRelease: () => this.#handleReaderHoldRelease(),
+    isTurnInProgress: () => this.#pageTurnAnimator.isTurnInProgress,
+    isScrolled: () => this.#view?.renderer?.scrolled === true,
+  });
   #bookmarkManager = (() => {
     console.log("[FoliateManager] Creating BookmarkManager instance");
     return new BookmarkManager();
   })();
+
+  constructor() {
+    // Swift may push controls before this object exists; apply them now so
+    // the first section never attaches without the selection lock.
+    const pending = pendingReaderControls(globalThis.window);
+    if (pending) this.setReaderControls(pending);
+    globalThis.window?.addEventListener?.("pagehide", () => this.#holdArbiter.dispose());
+  }
 
   async open(file) {
     debugLog("FoliateManager", "open() called with file:", file.name);
@@ -292,15 +314,32 @@ class FoliateManager {
     });
 
     this.#view.addEventListener("page-flip", ({ detail }) => {
+      this.#holdArbiter.cancelPending();
       if (this.#swipeCurlId) this.#swipeCommitPending = true;
       this.#reportPageFlip(detail);
     });
 
-    let clickTimer = null;
+    const animatorPhase = () => this.#pageTurnAnimator.phase;
+    const tapRouter = new ReaderTapRouter({
+      hasAudioNarration: () => this.#hasAudioNarration,
+      isTurnActive: () => animatorPhase() === "pending" || animatorPhase() === "curling",
+      isTurnIdle: () => animatorPhase() === "idle",
+      hasSelection: (doc) => {
+        const selection = doc.getSelection?.();
+        return !!selection && !selection.isCollapsed;
+      },
+      getZone: (event) => this.#getClickZone(event),
+      onMargin: (zone) => this.#handleMarginClickNavigation(zone),
+      onCenter: () => this.#reportOverlayToggle(),
+      onSeek: (event, doc, index) => this.#handleDoubleClick(event, index, doc),
+    });
+    this.#tapRouter = tapRouter;
 
     this.#view.addEventListener("load", ({ detail }) => {
       const { doc, index } = detail;
       if (doc) {
+        // First, so its capture listeners run before every other handler.
+        this.#holdArbiter.attach(doc);
         this.#sectionDoc = doc;
         this.#sectionIndex = index;
         this.#applyCoverRecto();
@@ -372,61 +411,11 @@ class FoliateManager {
             touchMoved = false;
             return;
           }
-
-          // Active drag/curl gesture owns the interaction — never reveal chrome mid-turn.
-          if (
-            this.#pageTurnAnimator.phase === "pending"
-            || this.#pageTurnAnimator.phase === "curling"
-          ) {
-            return;
-          }
-
-          const selection = doc.getSelection?.();
-          if (selection && !selection.isCollapsed) {
-            return;
-          }
-
-          // Margin taps turn the page immediately (0ms latency) and never wait
-          // on the double-click audio-seek timer, so rapid taps flip every page.
-          const zone = this.#getClickZone(event);
-          if (zone === "left" || zone === "right") {
-            if (clickTimer !== null) {
-              clearTimeout(clickTimer);
-              clickTimer = null;
-            }
-            this.#handleMarginClickNavigation(zone);
-            return;
-          }
-
-          if (!this.#hasAudioNarration) {
-            this.#reportOverlayToggle();
-            return;
-          }
-
-          if (clickTimer !== null) {
-            clearTimeout(clickTimer);
-            clickTimer = null;
-            return;
-          }
-
-          clickTimer = setTimeout(() => {
-            clickTimer = null;
-            if (this.#pageTurnAnimator.phase !== "idle") return;
-            const selectionNow = doc.getSelection?.();
-            if (selectionNow && !selectionNow.isCollapsed) {
-              return;
-            }
-            this.#reportOverlayToggle();
-          }, 150);
+          tapRouter.click(event, doc);
         });
 
         doc.addEventListener("dblclick", (event) => {
-          if (clickTimer) {
-            clearTimeout(clickTimer);
-            clickTimer = null;
-          }
-
-          this.#handleDoubleClick(event, index, doc);
+          tapRouter.dblclick(event, doc, index);
         });
 
         this.#markAlignableText(doc);
@@ -611,6 +600,31 @@ class FoliateManager {
     // Page-turn gestures must not reveal reader chrome.
     if (this.#pageTurnAnimator.phase !== "idle") return;
     window.webkit?.messageHandlers?.OverlayToggled?.postMessage({});
+  }
+
+  /**
+   * Swift → JS immersive controls state. Until this arrives the hold arbiter is
+   * inert, so a late bridge keeps the legacy long-press selection.
+   * @param {{immersive: boolean, selectionMode: boolean}} state
+   */
+  setReaderControls(state) {
+    const immersive = !!state?.immersive && navigator.maxTouchPoints > 0;
+    const selectionMode = !!state?.selectionMode;
+    this.#holdArbiter.setState({ immersive, selectionMode });
+    if (immersive && !selectionMode) this.#bookmarkManager?.hideSelectionToolbar?.();
+  }
+
+  #handleReaderHold() {
+    this.#pageTurnAnimator.releaseForHold();
+    if (this.#swipeCurlId) this.#endSwipeCurl(false);
+    this.#tapRouter?.cancel();
+    window.webkit?.messageHandlers?.ReaderChromeReveal?.postMessage({});
+  }
+
+  /** The held contact's touchend never reaches Foliate; settle back in place. */
+  #handleReaderHoldRelease() {
+    const renderer = this.#view?.renderer;
+    if (renderer && !renderer.scrolled) renderer.snap?.(0, 0);
   }
 
   /** Keep wrap/html host opaque with the reader paper color. */
@@ -1036,33 +1050,17 @@ class FoliateManager {
   }
 
   #extractAnchorFromCFI(cfi) {
-    if (!cfi) return null;
-
-    const matches = [...cfi.matchAll(/\[([^\]]+)\]/g)];
-
-    for (let i = matches.length - 1; i >= 0; i--) {
-      const id = matches[i][1];
-      if (!id.match(/^\d+$/) && !id.includes(";") && !id.includes(",")) {
-        debugLog("FoliateManager", `Extracted anchor from CFI: ${id}`);
-        return id;
-      }
-    }
-
-    return null;
+    const id = anchorFromCFI(cfi);
+    if (id) debugLog("FoliateManager", `Extracted anchor from CFI: ${id}`);
+    return id;
   }
 
   #handleDoubleClick(event, sectionIndex, doc) {
     debugLog("FoliateManager", `Double-click detected in section ${sectionIndex}`);
 
-    const selection = doc.getSelection?.();
-    if (!selection) {
-      console.warn("[FM2] No selection available from double-click");
-      return;
-    }
-
-    const range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+    const { range, selection } = resolveSeekRange(doc, event) ?? {};
     if (!range) {
-      console.warn("[FM2] No range from selection");
+      console.warn("[FM2] No range from double-click");
       return;
     }
 
@@ -1091,7 +1089,7 @@ class FoliateManager {
     debugLog("FoliateManager", `Sending seek event: section=${sectionIndex}, anchor=${anchor}`);
     this.#reportSeekEvent(sectionIndex, anchor);
 
-    selection.removeAllRanges();
+    selection?.removeAllRanges();
   }
 
   #reportSeekEvent(sectionIndex, anchor) {

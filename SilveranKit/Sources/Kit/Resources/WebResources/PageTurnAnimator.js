@@ -556,6 +556,23 @@ export default class PageTurnAnimator {
     return this.#progress;
   }
 
+  /** A manual turn has visibly started (direction locked, sheet mounted, or settling). */
+  get isTurnInProgress() {
+    if (this.#phase === "pending") return !!this.#gesture?.moved;
+    return this.#phase !== "idle";
+  }
+
+  /**
+   * A recognized long-press owns this contact: drop the armed, unmoved gesture
+   * and its snapshot request, keeping the idle pre-capture like a tap does.
+   */
+  releaseForHold() {
+    if (this.#phase !== "pending" || this.#gesture?.moved) return;
+    const savedCache = this.#cachedSnapshotUrl;
+    this.#resetGesture();
+    this.#cachedSnapshotUrl = savedCache;
+  }
+
   /** Request id awaiting a native snapshot reply (0 when none). */
   get pendingSnapshotRequestId() {
     return this.#pendingSnapshotRequestId;
