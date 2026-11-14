@@ -61,3 +61,30 @@ and retains logs/results for 14 days. A build/probe/setup failure is a harness
 failure, **not** a reproduced layout regression. Read assertions and attachments
 before choosing the smallest production correction. No PR, tag, release or
 production rollout is part of this baseline submission.
+
+## Initial measured baseline (f6dab706)
+
+[Run 43651706073](https://github.com/subarude15/storyteller-personal-reader/actions/runs/43651706073)
+compiled and executed native XCTest on iPhone 17 Pro / iOS 26.2. Three test
+methods ran: Home matrix and stop/collapse passed; More -> Stats failed.
+
+- All 12 synthetic-content Home cases passed released-bottom geometry and
+  coordinate-tap checks. This does NOT reproduce or disprove Josh's original
+  Home library/device failure.
+- Six More -> Stats cases demonstrated resting-footer obstruction. In portrait
+  normal type, adjusted bottom inset stayed at 83 with or without the player;
+  footer bottom was 779 and player top 727 (52 points of vertical overlap).
+  The equivalent Home fixture had inset 171 with player, 83 hidden, and Stats
+  button bottom 691 above player top 727.
+- Three more failures were test navigation setup, not geometry: landscape with
+  accessibility type did not reach the offscreen Stats row in More's lazy List.
+  The test now scrolls that hub before navigation, without auto-scrolling or
+  weakening any measured-destination assertion. Those cases require a new run.
+- Native screenshots, metrics and hierarchy are retained in artifact
+  `home-scroll-native-f6dab70615223fb040a0da7903e5b1a4c76f93af` (ID 14137391162).
+  The normal iOS workflow [43651706021](https://github.com/subarude15/storyteller-personal-reader/actions/runs/43651706021)
+  passed all four jobs on that same commit.
+
+This is a RED baseline, not a production layout correction. Preserve the
+observed failures until the actual boundary correction is separately made and
+native-tested; never make the CI green by loosening its visibility assertions.

@@ -55,6 +55,21 @@ final class HomeScrollGeometryTests: XCTestCase {
                         defer { app.terminate() }
                         app.tabBars.buttons["More"].tap()
                         let statsLink = app.buttons["Stats"].firstMatch
+                        let hub = element("geometry.more.list", in: app)
+                        // More is a lazy List: in landscape/accessibility sizes,
+                        // the Stats row does not exist until scrolled into view.
+                        // This navigates the HUB only; destination measurements
+                        // and released-bottom assertions remain unchanged.
+                        for _ in 0..<6 {
+                            if statsLink.exists && statsLink.isHittable { break }
+                            let start = hub.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
+                            let end = hub.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
+                            start.press(forDuration: 0.05, thenDragTo: end)
+                        }
+                        if !statsLink.exists || !statsLink.isHittable {
+                            attach(app, activity: activity, name: "\(name)-hub-navigation",
+                                metrics: ["stage": "More hub; geometry not measured yet"])
+                        }
                         XCTAssertTrue(statsLink.waitForExistence(timeout: 5))
                         guard statsLink.exists else { return }
                         statsLink.tap()

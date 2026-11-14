@@ -37,6 +37,9 @@ struct MoreTabView: View {
                     }
                 }
             }
+#if INKAMP_GEOMETRY_HARNESS
+            .accessibilityIdentifier("geometry.more.list")
+#endif
             .navigationTitle(InkAmpPrimaryTab.more.title)
             .navigationDestination(for: InkAmpMoreNavRoute.self) { route in
                 moreDestinationView(route)
