@@ -127,6 +127,19 @@ struct GlobalMiniPlayerBar: View {
 
     @ViewBuilder
     private var content: some View {
+#if DEBUG
+        if ProcessInfo.processInfo.environment["INKAMP_GEOMETRY_FIXTURE"] == "1" {
+            MiniPlayerGeometryFixture(topClearance: topClearance)
+        } else {
+            liveContent
+        }
+#else
+        liveContent
+#endif
+    }
+
+    @ViewBuilder
+    private var liveContent: some View {
         // Hide while a full-screen card is up so the inset collapses; show only
         // for headless / mini-player playback above the tab bar.
         if let snapshot = monitor.snapshot,
@@ -339,6 +352,45 @@ struct InkAmpMiniPlayerChrome<Cover: View>: View {
 }
 
 #if DEBUG
+/// Geometry-host-only data seam: renders the REAL chrome and reserves space via
+/// the unchanged public inset path. No transport, network, audio or fake frames.
+private struct MiniPlayerGeometryFixture: View {
+    let topClearance: CGFloat
+    @State private var stopped = false
+    @State private var toggled = false
+
+    private var state: String {
+        ProcessInfo.processInfo.environment["INKAMP_GEOMETRY_PLAYER"] ?? "paused"
+    }
+
+    var body: some View {
+        if MiniPlayerPolicy.isDockedBarVisible(
+            hasSession: !stopped && state != "hidden",
+            isCardPresented: false,
+            isPodcastEpisodePresented: false
+        ) {
+            InkAmpMiniPlayerChrome(
+                title: "Local geometry fixture",
+                subtitle: "One hour left",
+                isPlaying: (state == "playing") != toggled,
+                progress: 0.5,
+                cover: {
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(.quaternary)
+                        .frame(width: 42, height: 42)
+                },
+                onExpand: {},
+                onSkipBackward: {},
+                onTogglePlayPause: { toggled.toggle() },
+                onStop: { stopped = true }
+            )
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("geometry.player")
+            .padding(.top, topClearance)
+        }
+    }
+}
+
 #Preview("Mini player · light") {
     InkAmpMiniPlayerChrome(
         title: "Piranesi — Susanna Clarke",

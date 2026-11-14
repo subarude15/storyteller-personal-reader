@@ -51,6 +51,12 @@ struct StatsView: View {
             .padding(.horizontal, PunkRallyTheme.Metric.screenInset)
             .padding(.vertical, 12)
         }
+#if INKAMP_GEOMETRY_HARNESS
+        .accessibilityIdentifier("geometry.scroll.stats")
+        .background(alignment: .topLeading) {
+            ScrollGeometryProbe(name: "stats").frame(width: 1, height: 1)
+        }
+#endif
         .background(chrome.bg)
         .navigationTitle("Stats")
         .task {
@@ -85,6 +91,10 @@ struct StatsView: View {
             weekChart
             monthlySummaryCard
             syncFooter
+#if INKAMP_GEOMETRY_HARNESS
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("geometry.stats.last")
+#endif
         }
     }
 

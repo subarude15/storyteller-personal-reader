@@ -546,15 +546,27 @@ private struct HomeTabView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+#if INKAMP_GEOMETRY_HARNESS
+                    // Isolated simulator target only; keep the production scroll
+                    // boundary and stats action, but require no server/library.
+                    InkAmpGeometryFixture.content
+#else
                     greetingHeader
                     finishTonightCard
                     continueHero
                     upNextRow
+#endif
                     statsStrip
                 }
                 .padding(.horizontal, PunkRallyTheme.Metric.screenInset)
                 .padding(.vertical, 12)
             }
+#if INKAMP_GEOMETRY_HARNESS
+            .accessibilityIdentifier("geometry.scroll.home")
+            .background(alignment: .topLeading) {
+                ScrollGeometryProbe(name: "home").frame(width: 1, height: 1)
+            }
+#endif
             // Home owns its mini-player inset at the scroll boundary so the last
             // stats row clears the bar plus 24pt when the bar is visible.
             .punkRallyMiniPlayerInset(topClearance: 24)
