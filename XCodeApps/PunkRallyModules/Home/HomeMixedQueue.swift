@@ -54,13 +54,25 @@ public enum HomeMixedItem: Identifiable, Equatable, Sendable {
         }
     }
 
-    /// Duration for finishability copy (audiobook/readaloud/ebook duration or podcast length).
+    /// Known audio/podcast duration; ebooks never expose an invented time estimate.
     public var durationSeconds: TimeInterval? {
         switch self {
-            case .book(let book, _, _, _):
-                return book.durationValue
+            case .book(let book, _, _, let badge):
+                switch badge {
+                    case .ebook, .podcast: return nil
+                    case .audiobook, .readaloud:
+                        guard let duration = book.durationValue,
+                            duration.isFinite,
+                            duration > 0
+                        else { return nil }
+                        return duration
+                }
             case .podcast(let entry):
-                return entry.durationSeconds
+                guard let duration = entry.durationSeconds,
+                    duration.isFinite,
+                    duration > 0
+                else { return nil }
+                return duration
         }
     }
 

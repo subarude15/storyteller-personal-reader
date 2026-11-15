@@ -19,13 +19,12 @@ import SilveranAppleKit
 struct StatsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
-    @AppStorage("punkRally.stats.dailyGoalMinutes") private var dailyGoalMinutes: Int = 30
     @State private var tracker = SessionTracker.shared
     @State private var sync = StatsSyncCoordinator.shared
+    @State private var motivation = ReadingMotivationStore.shared
+    @State private var weekOffset = 0
     @State private var tick = 0
     @State private var segment: Segment = .stats
-
-    private static let goalOptionsMinutes = [15, 30, 45, 60, 90]
 
     private enum Segment: String, CaseIterable, Identifiable {
         case stats = "Stats"
@@ -68,10 +67,12 @@ struct StatsView: View {
         .task {
             tracker.pruneOldSessions()
             await sync.syncNow(reason: "statsAppear")
+            await motivation.refreshNotifications()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 Task { await sync.syncNow(reason: "foreground") }
+                Task { await motivation.refreshNotifications() }
             }
         }
         .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in
@@ -91,11 +92,16 @@ struct StatsView: View {
 
     private var statsBody: some View {
         VStack(alignment: .leading, spacing: 20) {
-            dailyGoalCard
+            dailyGoalsCard
+            pinnedStatsCard
             heroCard
             streakAndFinishedRow
+            Text("Streaks use local calendar days with recorded activity; the current streak can carry through yesterday until today's activity is recorded.")
+                .font(.caption)
+                .foregroundStyle(chrome.textFaint)
             weekChart
             monthlySummaryCard
+            weeklyReceiptCard
             syncFooter
 #if INKAMP_GEOMETRY_HARNESS
                 .accessibilityElement(children: .combine)
@@ -104,90 +110,87 @@ struct StatsView: View {
         }
     }
 
-    // MARK: - Daily Goal Card
+    // MARK: - Daily Goals / Pins
 
-    private var dailyGoalCard: some View {
-        let snapshot = tracker.snapshot
-        let goalSeconds = Double(Swift.max(dailyGoalMinutes, 5) * 60)
-        let progress = Swift.min(Swift.max(snapshot.todaySeconds / goalSeconds, 0), 1)
-        let remainingSeconds = Swift.max(goalSeconds - snapshot.todaySeconds, 0)
-        let isGoalMet = snapshot.todaySeconds >= goalSeconds
+    private var dailyGoalsCard: some View {
+        let _ = tracker.revision
+        let day = motivation.today
+        return VStack(alignment: .leading, spacing: 14) {
+            Text("Today's goals")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(chrome.text)
+            goalRow(
+                "Reading",
+                seconds: day.readingSeconds,
+                goalMinutes: motivation.settings.dailyReadingGoalMinutes,
+                tint: PunkRallyTheme.Accent.gold
+            )
+            goalRow(
+                "Listening",
+                seconds: day.listeningSeconds,
+                goalMinutes: motivation.settings.dailyListeningGoalMinutes,
+                tint: PunkRallyTheme.Accent.primary
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(PunkRallyTheme.Metric.cardPadding)
+        .background(chrome.surface)
+        .clipShape(RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius)
+                .stroke(chrome.border, lineWidth: 1)
+        )
+    }
 
-        return HStack(spacing: 16) {
-            ZStack {
-                Circle()
-                    .stroke(chrome.border, lineWidth: 7)
-                    .frame(width: 64, height: 64)
-
-                Circle()
-                    .trim(from: 0, to: progress)
-                    .stroke(
-                        isGoalMet ? PunkRallyTheme.Accent.success : PunkRallyTheme.Accent.primary,
-                        style: StrokeStyle(lineWidth: 7, lineCap: .round)
-                    )
-                    .rotationEffect(.degrees(-90))
-                    .frame(width: 64, height: 64)
-                    .animation(.easeOut(duration: 0.35), value: progress)
-
-                if isGoalMet {
-                    Image(systemName: "checkmark")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(PunkRallyTheme.Accent.success)
-                } else {
-                    Text("\(Int((progress * 100).rounded()))%")
-                        .font(.caption.weight(.bold).monospacedDigit())
-                        .foregroundStyle(chrome.text)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Today's Goal")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(chrome.text)
-                    Spacer()
-                    Menu {
-                        ForEach(Self.goalOptionsMinutes, id: \.self) { mins in
-                            Button {
-                                dailyGoalMinutes = mins
-                            } label: {
-                                if dailyGoalMinutes == mins {
-                                    Label("\(mins) min / day", systemImage: "checkmark")
-                                } else {
-                                    Text("\(mins) min / day")
-                                }
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("\(dailyGoalMinutes)m goal")
-                            Image(systemName: "chevron.up.chevron.down")
-                                .font(.system(size: 9, weight: .semibold))
-                        }
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(PunkRallyTheme.Accent.primary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            Capsule()
-                                .fill(PunkRallyTheme.Accent.primary.opacity(0.14))
-                        )
-                    }
-                }
-
-                Text(snapshot.todaySeconds.hoursMinutes)
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
+    private func goalRow(
+        _ title: String,
+        seconds: TimeInterval,
+        goalMinutes: Int,
+        tint: Color
+    ) -> some View {
+        let target = Double(goalMinutes) * 60
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title)
                     .foregroundStyle(chrome.text)
+                Spacer()
+                Text(seconds.minutesShort + " / " + String(goalMinutes) + " min")
+                    .foregroundStyle(chrome.textMuted)
+                    .monospacedDigit()
+            }
+            ProgressView(value: min(max(seconds / target, 0), 1))
+                .tint(tint)
+        }
+        .font(.subheadline)
+    }
 
-                Text(
-                    isGoalMet
-                        ? "Daily goal reached — keep the streak going!"
-                        : "\(remainingSeconds.hoursMinutes) left to reach your \(dailyGoalMinutes)m goal"
-                )
-                .font(.caption)
-                .foregroundStyle(isGoalMet ? PunkRallyTheme.Accent.success : chrome.textMuted)
+    private var pinnedStatsCard: some View {
+        let _ = motivation.revision
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Pinned stats")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(chrome.text)
+            if motivation.settings.pinnedStats.isEmpty {
+                Text("No stats pinned. Choose up to three in Home → Reading motivation.")
+                    .font(.caption)
+                    .foregroundStyle(chrome.textMuted)
+            } else {
+                ForEach(motivation.settings.pinnedStats, id: \.self) { stat in
+                    HStack {
+                        Text(stat.label)
+                            .foregroundStyle(chrome.textMuted)
+                        Spacer()
+                        Text(motivation.value(for: stat))
+                            .fontWeight(.semibold)
+                            .foregroundStyle(chrome.text)
+                            .monospacedDigit()
+                    }
+                    .font(.subheadline)
+                }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
         .padding(PunkRallyTheme.Metric.cardPadding)
         .background(chrome.surface)
         .clipShape(RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius))
@@ -201,6 +204,7 @@ struct StatsView: View {
 
     private var heroCard: some View {
         let snapshot = tracker.snapshot
+        let receipt = motivation.weeklyReceipt()
         return VStack(alignment: .leading, spacing: 12) {
             Text("This week")
                 .font(.subheadline.weight(.medium))
@@ -211,15 +215,13 @@ struct StatsView: View {
                 .foregroundStyle(chrome.text)
 
             HStack(spacing: 16) {
-                let listen = snapshot.recentDays.reduce(0.0) { $0 + $1.listenSeconds }
-                let read = snapshot.recentDays.reduce(0.0) { $0 + $1.readSeconds }
                 legendDot(
                     color: PunkRallyTheme.Accent.primary,
-                    label: "Listen \(listen.hoursMinutes)"
+                    label: "Listen \(receipt.listeningSeconds.minutesShort)"
                 )
                 legendDot(
                     color: PunkRallyTheme.Accent.gold,
-                    label: "Read \(read.hoursMinutes)"
+                    label: "Read \(receipt.readingSeconds.minutesShort)"
                 )
                 Spacer()
             }
@@ -435,6 +437,74 @@ struct StatsView: View {
                 .foregroundStyle(chrome.text)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var weeklyReceiptCard: some View {
+        let receipt = motivation.weeklyReceipt(offset: weekOffset)
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        let minuteLabel = receipt.minutes.map {
+            $0 == 0 ? "Under 1 min" : String($0) + " min"
+        } ?? "Time unavailable"
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(weekOffset == 0 ? "This week's receipt" : "Previous week's receipt")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(chrome.text)
+                Spacer()
+                Button {
+                    weekOffset = -1
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .disabled(weekOffset < 0)
+                Button {
+                    weekOffset = 0
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .disabled(weekOffset == 0)
+            }
+            Text("Week of " + formatter.string(from: receipt.weekStart))
+                .font(.caption)
+                .foregroundStyle(chrome.textMuted)
+            if receipt.seconds == 0 && receipt.completedTitles == 0 {
+                Text("No reading or listening recorded this week.")
+                    .font(.subheadline)
+                    .foregroundStyle(chrome.textMuted)
+            } else {
+                receiptRow("Reading and listening", value: minuteLabel)
+                receiptRow("Activity days", value: String(receipt.activityDays) + " / 7")
+                receiptRow("Titles finished", value: String(receipt.completedTitles))
+                receiptRow(
+                    "Streak at week end",
+                    value: receipt.streakDays == 0 ? "No active streak" : String(receipt.streakDays) + " days"
+                )
+            }
+        }
+        .padding(PunkRallyTheme.Metric.cardPadding)
+        .background(chrome.surface)
+        .clipShape(RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: PunkRallyTheme.Metric.buttonCornerRadius)
+                .stroke(chrome.border, lineWidth: 1)
+        )
+    }
+
+    private func receiptRow(_ title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+                .foregroundStyle(chrome.textMuted)
+            Spacer()
+            Text(value)
+                .foregroundStyle(chrome.text)
+                .fontWeight(.medium)
+                .monospacedDigit()
+        }
+        .font(.subheadline)
     }
 
     // MARK: - Footer

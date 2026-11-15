@@ -56,6 +56,9 @@ public enum ContinueWidgetPublisher {
     /// when cover bytes are nil. `upNext` is the following Home mixed-queue rows
     /// (at most 3). Pass `[]` to clear them. Session-only republishes keep the
     /// last Up next by calling the snapshot store with `upNext: nil`.
+    /// `streakProvider` is invoked after session/artwork awaits, immediately
+    /// before the locked write, so Home supplies authoritative streak without
+    /// suspending under the store lock.
     public static func publishHomeContinue(
         title: String?,
         subtitle: String?,
@@ -65,6 +68,7 @@ public enum ContinueWidgetPublisher {
         durationSeconds: Double? = nil,
         upNext: [ContinueWidgetUpNextDraft] = [],
         itemID: String? = nil,
+        streakProvider: (@MainActor () -> (days: Int, dayKey: String))? = nil,
     ) {
         publishSerial &+= 1
         let serial = publishSerial
@@ -80,10 +84,16 @@ public enum ContinueWidgetPublisher {
                     homeItemID: itemID,
                 )
             {
-                await publishSession(session, upNext: upNext, serial: serial)
+                await publishSession(
+                    session,
+                    upNext: upNext,
+                    serial: serial,
+                    authoritativeStreakProvider: streakProvider,
+                )
                 return
             }
             guard serial == publishSerial else { return }
+            let streak = streakProvider?()
             ContinueWidgetSnapshotStore.publish(
                 title: title,
                 subtitle: subtitle,
@@ -95,6 +105,8 @@ public enum ContinueWidgetPublisher {
                 hasLiveSession: false,
                 upNext: upNext,
                 itemID: itemID,
+                streakDays: streak?.days,
+                streakActivityDayKey: streak?.dayKey,
             )
         }
     }
@@ -162,13 +174,16 @@ public enum ContinueWidgetPublisher {
         _ snapshot: AudioSessionSnapshot?,
         upNext: [ContinueWidgetUpNextDraft]? = nil,
         serial: UInt64? = nil,
+        authoritativeStreakProvider: (@MainActor () -> (days: Int, dayKey: String))? = nil,
     ) async {
         guard serial == nil || serial == publishSerial else { return }
         guard let snapshot else {
             // Session ended — keep title/cover, clear playing so the tile isn't stuck.
+            // Do not pre-read and re-assert streak: a Home publish can land between
+            // load and the store lock; nil preserves the freshest locked value.
             let last = ContinueWidgetSnapshotStore.loadSnapshot()
             guard last.isPlaying || (last.hasLiveSession ?? false) || upNext != nil else { return }
-            ContinueWidgetSnapshotStore.publish(
+            ContinueWidgetSnapshotStore.publishLiveMirror(
                 title: last.title,
                 subtitle: last.subtitle,
                 isPlaying: false,
@@ -212,7 +227,10 @@ public enum ContinueWidgetPublisher {
             draft.title.trimmingCharacters(in: .whitespacesAndNewlines) != snapshot.title
         }
         guard serial == nil || serial == publishSerial else { return }
-        ContinueWidgetSnapshotStore.publish(
+        // Refresh streak only AFTER every artwork/session await. The provider and
+        // synchronous locked store write cannot suspend this main-actor turn.
+        let streak = authoritativeStreakProvider?()
+        ContinueWidgetSnapshotStore.publishLiveMirror(
             title: snapshot.title,
             subtitle: snapshot.author ?? snapshot.chapterLabel,
             isPlaying: snapshot.isPlaying,
@@ -225,6 +243,8 @@ public enum ContinueWidgetPublisher {
             rate: snapshot.playbackRate,
             upNext: queue,
             itemID: ContinueWidgetItemID.from(sessionKind: snapshot.kind),
+            authoritativeStreakDays: streak?.days,
+            authoritativeStreakActivityDayKey: streak?.dayKey,
         )
     }
 

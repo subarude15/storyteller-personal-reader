@@ -1,0 +1,74 @@
+name: Reading motivation Swift tests
+
+on:
+  push:
+    branches: ["cursor/**"]
+    paths:
+      - "SilveranKit/Sources/Kit/Stats/**"
+      - "SilveranKit/Sources/AppleKit/WidgetSupport/ContinueWidgetSnapshotStore.swift"
+      - "SilveranKit/Sources/AppleKit/MobileDesktop/ContinueWidgetPublisher.swift"
+      - "SilveranKit/Tests/SilveranTests/**"
+      - "SilveranWidgets/Sources/InkAmpContinueWidget.swift"
+      - "XCodeApps/PunkRallyApp.swift"
+      - "XCodeApps/PunkRallyModules/Home/HomeMixedQueue.swift"
+      - "XCodeApps/PunkRallyModules/Stats/SessionTracker.swift"
+      - "XCodeApps/PunkRallyModules/Stats/StatsView.swift"
+      - "XCodeApps/PunkRallyModules/Motivation/**"
+      - "Package.swift"
+      - "Package.resolved"
+      - "scripts/test"
+      - ".github/workflows/reading-motivation-tests.yml"
+  pull_request:
+    branches: [main, punk-rally-ios]
+    paths:
+      - "SilveranKit/Sources/Kit/Stats/**"
+      - "SilveranKit/Sources/AppleKit/WidgetSupport/ContinueWidgetSnapshotStore.swift"
+      - "SilveranKit/Sources/AppleKit/MobileDesktop/ContinueWidgetPublisher.swift"
+      - "SilveranKit/Tests/SilveranTests/**"
+      - "SilveranWidgets/Sources/InkAmpContinueWidget.swift"
+      - "XCodeApps/PunkRallyApp.swift"
+      - "XCodeApps/PunkRallyModules/Home/HomeMixedQueue.swift"
+      - "XCodeApps/PunkRallyModules/Stats/SessionTracker.swift"
+      - "XCodeApps/PunkRallyModules/Stats/StatsView.swift"
+      - "XCodeApps/PunkRallyModules/Motivation/**"
+      - "Package.swift"
+      - "Package.resolved"
+      - "scripts/test"
+      - ".github/workflows/reading-motivation-tests.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: reading-motivation-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  swift-tests:
+    name: SilveranKit regression tests
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app || sudo xcode-select -s /Applications/Xcode_26.app || sudo xcode-select -s /Applications/Xcode.app || true
+
+      - name: Run Swift package tests
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/test 2>&1 | tee reading-motivation-tests.log
+
+      - name: Retain Swift test log and results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reading-motivation-swift-test-results
+          path: reading-motivation-tests.log
+          if-no-files-found: warn
+          retention-days: 14

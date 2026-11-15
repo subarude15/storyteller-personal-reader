@@ -1,6 +1,6 @@
 import CoreGraphics
 import Foundation
-import SilveranAppleWidgets
+@testable import SilveranAppleWidgets
 import SilveranKit
 import Testing
 
@@ -177,10 +177,11 @@ struct ContinueWidgetSnapshotTests {
             title: "Piranesi",
             progress: 0.5,
             durationSeconds: 3600,
+            rate: 1,
         )
         #expect(snapshot.percentComplete == 50)
         #expect(snapshot.remainingText == "30m left")
-        #expect(snapshot.progressCaption == "50% · 30m left")
+        #expect(snapshot.progressCaption == "50% · 30m / 1h · 30m left")
     }
 
     @Test func clampingAndDurationFormatting() {
@@ -241,6 +242,7 @@ struct ContinueWidgetSnapshotTests {
             progress: 0.56,
             elapsedSeconds: 17_640,
             durationSeconds: 31_680,
+            rate: 1,
             upNext: [
                 ContinueWidgetQueueItem(
                     id: "book:preview/good-energy",
@@ -276,7 +278,7 @@ struct ContinueWidgetSnapshotTests {
         let decoded = try decoder.decode(ContinueWidgetSnapshot.self, from: data)
         #expect(decoded.title == "The Quiet Path")
         #expect(decoded.subtitle == "Ella Monroe")
-        #expect(decoded.progressCaption == "56% · 3h 54m left")
+        #expect(decoded.progressCaption == "56% · 4h 54m / 8h 48m · 3h 54m left")
         #expect(decoded.upNextItems.count == 3)
         #expect(decoded.upNextItems.map(\.title) == [
             "Good Energy",
@@ -621,7 +623,7 @@ struct ContinueWidgetSnapshotTests {
     }
 }
 
-@Suite("Continue widget current snapshot selection")
+@Suite("Continue widget current snapshot selection", .serialized)
 struct ContinueWidgetCurrentSnapshotTests {
     private var troop: ContinueWidgetSnapshot {
         ContinueWidgetSnapshot(
@@ -949,7 +951,7 @@ struct ContinueWidgetCurrentSnapshotTests {
             rate: 1.5,
         )
         #expect(faster.remainingText == "20m left")
-        #expect(faster.progressCaption == "50% · 20m left")
+        #expect(faster.progressCaption == "50% · 30m / 1h · 20m left")
     }
 
     @Test func statusBadgeReflectsKindAndPlaybackState() {
@@ -1057,5 +1059,480 @@ struct ContinueWidgetCurrentSnapshotTests {
         #expect(ContinueWidgetKindTag.ebook.symbolName == "book.closed.fill")
         #expect(ContinueWidgetKindTag.audiobook.symbolName == "headphones")
         #expect(ContinueWidgetKindTag.podcast.symbolName == "mic.fill")
+    }
+
+    @Test func concurrentPublishPreservesFresherStreakAcrossAudioHomeRace() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("continue-publish-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let store = PausableContinueWidgetFileStore(root: root)
+        defer {
+            store.resetAndRelease()
+            try? FileManager.default.removeItem(at: root)
+            ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        }
+
+        ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        ContinueWidgetSnapshotStore.publish(
+            title: "Piranesi",
+            subtitle: "Clarke",
+            isPlaying: false,
+            kind: .ebook,
+            coverData: nil,
+            streakDays: 3,
+            streakActivityDayKey: "2026-11-14",
+            fileStore: store
+        )
+        #expect(store.readSnapshot(in: root)?.streakDays == 3)
+
+        store.pauseNextRead()
+        let audioDone = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            // Audio tick: nil streak should preserve whatever it read.
+            ContinueWidgetSnapshotStore.publish(
+                title: "Piranesi",
+                subtitle: "Clarke",
+                isPlaying: true,
+                kind: .audiobook,
+                coverData: nil,
+                hasLiveSession: true,
+                streakDays: nil,
+                streakActivityDayKey: nil,
+                fileStore: store
+            )
+            audioDone.signal()
+        }
+        try store.waitForPausedRead()
+        // Home publishes a fresher streak while audio still holds the publish lock.
+        store.expectContenderPublish()
+        let homeDone = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            ContinueWidgetSnapshotStore.publish(
+                title: "Piranesi",
+                subtitle: "Clarke",
+                isPlaying: false,
+                kind: .ebook,
+                coverData: nil,
+                streakDays: 5,
+                streakActivityDayKey: "2026-11-15",
+                fileStore: store
+            )
+            homeDone.signal()
+        }
+        try store.waitForContenderPublish()
+        // Without an atomic publish lock, home would finish first and audio would
+        // overwrite streak 5 with the stale preserved 3 after resume.
+        Thread.sleep(forTimeInterval: 0.05)
+        store.resumePausedRead()
+        #expect(audioDone.wait(timeout: .now() + 10) == .success)
+        #expect(homeDone.wait(timeout: .now() + 10) == .success)
+
+        let final = store.readSnapshot(in: root)
+        #expect(final?.streakDays == 5)
+        #expect(final?.streakActivityDayKey == "2026-11-15")
+    }
+
+    @Test func paintSignatureTracksProgressTimingStreakAndExcludesGeneratedAt() {
+        let base = ContinueWidgetSnapshot(
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            title: "Piranesi",
+            subtitle: "Clarke",
+            isPlaying: false,
+            kind: .audiobook,
+            progress: 0.25,
+            elapsedSeconds: 900,
+            durationSeconds: 3600,
+            hasLiveSession: true,
+            rate: 1,
+            streakDays: 2,
+            streakActivityDayKey: "2026-11-14"
+        )
+        var laterStamp = base
+        laterStamp.generatedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        #expect(base.paintSignature == laterStamp.paintSignature)
+
+        var progressChanged = base
+        progressChanged.progress = 0.5
+        #expect(progressChanged.paintSignature != base.paintSignature)
+
+        var timingChanged = base
+        timingChanged.elapsedSeconds = 1800
+        #expect(timingChanged.paintSignature != base.paintSignature)
+
+        var streakChanged = base
+        streakChanged.streakDays = 5
+        #expect(streakChanged.paintSignature != base.paintSignature)
+    }
+
+    @Test func publishLiveMirrorSeamPreservesFresherHomeStreakDuringAudioRace() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("continue-live-mirror-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let store = PausableContinueWidgetFileStore(root: root)
+        defer {
+            store.resetAndRelease()
+            try? FileManager.default.removeItem(at: root)
+            ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        }
+
+        ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        ContinueWidgetSnapshotStore.publish(
+            title: "Piranesi",
+            subtitle: "Clarke",
+            isPlaying: false,
+            kind: .ebook,
+            coverData: nil,
+            streakDays: 3,
+            streakActivityDayKey: "2026-11-14",
+            fileStore: store
+        )
+
+        store.pauseNextRead()
+        let audioDone = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            // Real publisher/audio seam: no pre-read streak re-assert.
+            ContinueWidgetSnapshotStore.publishLiveMirror(
+                title: "Piranesi",
+                subtitle: "Clarke",
+                isPlaying: true,
+                kind: .audiobook,
+                coverData: nil,
+                hasLiveSession: true,
+                fileStore: store
+            )
+            audioDone.signal()
+        }
+        try store.waitForPausedRead()
+        store.expectContenderPublish()
+        let homeDone = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            ContinueWidgetSnapshotStore.publish(
+                title: "Piranesi",
+                subtitle: "Clarke",
+                isPlaying: false,
+                kind: .ebook,
+                coverData: nil,
+                streakDays: 7,
+                streakActivityDayKey: "2026-11-15",
+                fileStore: store
+            )
+            homeDone.signal()
+        }
+        try store.waitForContenderPublish()
+        Thread.sleep(forTimeInterval: 0.05)
+        store.resumePausedRead()
+        #expect(audioDone.wait(timeout: .now() + 10) == .success)
+        #expect(homeDone.wait(timeout: .now() + 10) == .success)
+
+        let final = store.readSnapshot(in: root)
+        #expect(final?.streakDays == 7)
+        #expect(final?.streakActivityDayKey == "2026-11-15")
+    }
+
+    @Test func authoritativeStreakRetriesAfterSnapshotBecomesAvailable() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("continue-retry-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        }
+        let store = PausableContinueWidgetFileStore(root: root)
+        #expect(!ContinueWidgetSnapshotStore.updateAuthoritativeStreak(
+            streakDays: 1, streakActivityDayKey: "2026-11-15", fileStore: store
+        ))
+        ContinueWidgetSnapshotStore.publish(
+            title: "Book", subtitle: nil, isPlaying: false, kind: .ebook,
+            coverData: nil, fileStore: store
+        )
+        #expect(ContinueWidgetSnapshotStore.updateAuthoritativeStreak(
+            streakDays: 1, streakActivityDayKey: "2026-11-15", fileStore: store
+        ))
+        #expect(store.readSnapshot(in: root)?.streakDays == 1)
+    }
+
+    @Test func unchangedPaintPersistsRawRateAndTiming() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("continue-raw-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        }
+        let store = PausableContinueWidgetFileStore(root: root)
+        ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        ContinueWidgetSnapshotStore.publish(
+            title: "Piranesi", subtitle: nil, isPlaying: false, kind: .audiobook,
+            coverData: nil, progress: 0.1, elapsedSeconds: 60,
+            durationSeconds: 600, rate: 1, fileStore: store
+        )
+        let before = try #require(store.readSnapshot(in: root))
+        ContinueWidgetSnapshotStore.publish(
+            title: "Piranesi", subtitle: nil, isPlaying: false, kind: .audiobook,
+            coverData: nil, progress: 0.101, elapsedSeconds: 61,
+            durationSeconds: 600, rate: 0.999, fileStore: store
+        )
+        let after = try #require(store.readSnapshot(in: root))
+        #expect(before.paintSignature == after.paintSignature)
+        #expect(after.rate == 0.999)
+        #expect(after.elapsedSeconds == 61)
+        #expect(after.progress == 0.101)
+    }
+
+    @Test func unchangedPaintPersistsNewStreakAnchor() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("continue-anchor-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        }
+        let store = PausableContinueWidgetFileStore(root: root)
+        ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        for anchor in ["2026-11-10", "2026-11-15"] {
+            ContinueWidgetSnapshotStore.publish(
+                title: "Piranesi", subtitle: "Clarke", isPlaying: false,
+                kind: .ebook, coverData: nil, streakDays: 1,
+                streakActivityDayKey: anchor, fileStore: store
+            )
+        }
+        let saved = try #require(store.readSnapshot(in: root))
+        #expect(saved.streakDays == 1)
+        #expect(saved.streakActivityDayKey == "2026-11-15")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let today = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 15)))
+        #expect(saved.resolvingStreak(at: today, calendar: calendar).streakDays == 1)
+    }
+
+    @Test func continueWidgetPublisherSourceDoesNotPreassertStoredStreak() throws {
+        let publisherURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/AppleKit/MobileDesktop/ContinueWidgetPublisher.swift")
+        let source = try String(contentsOf: publisherURL, encoding: .utf8)
+        #expect(source.contains("publishLiveMirror("))
+        #expect(!source.contains("streakDays: last.streakDays"))
+        #expect(!source.contains("streakActivityDayKey: last.streakActivityDayKey"))
+        #expect(!source.contains("streakDays: streakDays ?? last.streakDays"))
+        // iOS-only publisher is not a SwiftPM macOS runtime target. This source
+        // integration check complements store behavior tests; it is not device QA.
+        let sessionBody = try #require(source.components(
+            separatedBy: "private static func publishSession("
+        ).last?.components(separatedBy: "private static func handleToggleFromWidget(").first)
+        let refresh = try #require(sessionBody.range(of: "let streak = authoritativeStreakProvider?()"))
+        let write = try #require(sessionBody.range(
+            of: "ContinueWidgetSnapshotStore.publishLiveMirror(", options: .backwards
+        ))
+        #expect(refresh.lowerBound < write.lowerBound)
+        #expect(!sessionBody[refresh.lowerBound..<write.lowerBound].contains("await "))
+    }
+
+    @Test func updateAuthoritativeStreakPreservesItemTimingAndNoopsUnchanged() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("continue-streak-only-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        }
+        let store = PausableContinueWidgetFileStore(root: root)
+        ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        ContinueWidgetSnapshotStore.publish(
+            title: "Piranesi",
+            subtitle: "Clarke",
+            isPlaying: true,
+            kind: .audiobook,
+            coverData: Data([0x01, 0x02]),
+            progress: 0.42,
+            elapsedSeconds: 900,
+            durationSeconds: 3600,
+            hasLiveSession: true,
+            rate: 1.25,
+            streakDays: 0,
+            streakActivityDayKey: "2026-11-10",
+            fileStore: store
+        )
+        let before = try #require(store.readSnapshot(in: root))
+
+        ContinueWidgetSnapshotStore.updateAuthoritativeStreak(
+            streakDays: 3,
+            streakActivityDayKey: "2026-11-15",
+            fileStore: store
+        )
+        let updated = try #require(store.readSnapshot(in: root))
+        #expect(updated.streakDays == 3)
+        #expect(updated.streakActivityDayKey == "2026-11-15")
+        #expect(updated.title == before.title)
+        #expect(updated.subtitle == before.subtitle)
+        #expect(updated.isPlaying == before.isPlaying)
+        #expect(updated.kind == before.kind)
+        #expect(updated.progress == before.progress)
+        #expect(updated.elapsedSeconds == before.elapsedSeconds)
+        #expect(updated.durationSeconds == before.durationSeconds)
+        #expect(updated.rate == before.rate)
+        #expect(updated.hasLiveSession == before.hasLiveSession)
+        #expect(updated.coverFilename == before.coverFilename)
+
+        let generatedAt = updated.generatedAt
+        ContinueWidgetSnapshotStore.updateAuthoritativeStreak(
+            streakDays: 3,
+            streakActivityDayKey: "2026-11-15",
+            fileStore: store
+        )
+        let unchanged = try #require(store.readSnapshot(in: root))
+        #expect(unchanged.generatedAt == generatedAt)
+        #expect(unchanged.streakDays == 3)
+
+        // Same count, new activity anchor still publishes.
+        ContinueWidgetSnapshotStore.updateAuthoritativeStreak(
+            streakDays: 3,
+            streakActivityDayKey: "2026-11-16",
+            fileStore: store
+        )
+        let reanchored = try #require(store.readSnapshot(in: root))
+        #expect(reanchored.streakDays == 3)
+        #expect(reanchored.streakActivityDayKey == "2026-11-16")
+        #expect(reanchored.progress == 0.42)
+        #expect(reanchored.rate == 1.25)
+        #expect(ContinueWidgetSnapshotStore.updateAuthoritativeStreak(
+            streakDays: 0, streakActivityDayKey: "2026-11-16", fileStore: store
+        ))
+        let corrected = try #require(store.readSnapshot(in: root))
+        #expect(corrected.streakDays == 0)
+        #expect(corrected.progress == 0.42)
+        #expect(corrected.rate == 1.25)
+    }
+
+    @Test func sessionTrackerSourcePublishesStreakIndependentOfNotificationOptIn() throws {
+        let trackerURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("XCodeApps/PunkRallyModules/Stats/SessionTracker.swift")
+        let source = try String(contentsOf: trackerURL, encoding: .utf8)
+        let syncBody = try #require(source.components(
+            separatedBy: "func applyMergedSyncDocument("
+        ).last?.components(separatedBy: "/// Prune sessions").first)
+        #expect(syncBody.contains("publishAuthoritativeStreakIfNeeded(force: true)"))
+        #expect(source.contains("updateAuthoritativeStreak("))
+        #expect(source.contains("publishAuthoritativeStreakIfNeeded"))
+        #expect(source.contains("shouldRunCadence("))
+        #expect(source.contains("shouldReconcileNotificationsOnTick("))
+        #expect(source.contains("shouldPublishAuthoritativeStreak("))
+        #expect(source.contains("hasActiveSession: self.activeSession != nil"))
+        #expect(source.contains("notificationsEnabled: ReadingMotivationStore.shared.settings.notificationsEnabled"))
+    }
+}
+
+/// Directory-backed Continue publish seam with a suspension point on snapshot read.
+private final class PausableContinueWidgetFileStore: ContinueWidgetSnapshotFileStoring, @unchecked Sendable {
+    let root: URL
+    private let lock = NSLock()
+    private var pauseRead = false
+    private var awaitingContender = false
+    private let readStarted = DispatchSemaphore(value: 0)
+    private let readGate = DispatchSemaphore(value: 0)
+    private let contenderEntered = DispatchSemaphore(value: 0)
+
+    init(root: URL) { self.root = root }
+
+    func resolveContainer() -> URL? {
+        lock.lock()
+        let shouldSignalContender = awaitingContender
+        if shouldSignalContender { awaitingContender = false }
+        lock.unlock()
+        if shouldSignalContender {
+            contenderEntered.signal()
+        }
+        return root
+    }
+
+    func ensureDirectories(in container: URL) throws {
+        try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: ContinueWidgetSnapshotStore.coversDirectory(in: container),
+            withIntermediateDirectories: true
+        )
+    }
+
+    func readSnapshot(in container: URL) -> ContinueWidgetSnapshot? {
+        lock.lock()
+        let shouldPause = pauseRead
+        if shouldPause { pauseRead = false }
+        lock.unlock()
+        if shouldPause {
+            readStarted.signal()
+            let released = readGate.wait(timeout: .now() + 10)
+            #expect(released == .success, "Paused snapshot read was not released within 10 seconds")
+        }
+        return ContinueWidgetSnapshotStore.readSnapshotFile(in: container)
+    }
+
+    func writeSnapshotData(_ data: Data, to container: URL) throws {
+        try data.write(
+            to: ContinueWidgetSnapshotStore.snapshotURL(in: container),
+            options: [.atomic]
+        )
+    }
+
+    func existingCoverFilename(in container: URL) -> String? {
+        ContinueWidgetSnapshotStore.readSnapshotFile(in: container)?.coverFilename
+    }
+
+    func writeCoverData(_ data: Data, to container: URL) throws -> String {
+        let name = "continue_cover.dat"
+        let url = ContinueWidgetSnapshotStore.coversDirectory(in: container)
+            .appendingPathComponent(name, isDirectory: false)
+        try data.write(to: url, options: [.atomic])
+        return name
+    }
+
+    func pauseNextRead() {
+        lock.lock()
+        pauseRead = true
+        lock.unlock()
+    }
+
+    func waitForPausedRead() throws {
+        try #require(
+            readStarted.wait(timeout: .now() + 10) == .success,
+            "Publish never reached its snapshot-read suspension point within 10 seconds"
+        )
+    }
+
+    func expectContenderPublish() {
+        lock.lock()
+        awaitingContender = true
+        lock.unlock()
+    }
+
+    func waitForContenderPublish() throws {
+        try #require(
+            contenderEntered.wait(timeout: .now() + 10) == .success,
+            "Contending publish never entered resolveContainer within 10 seconds"
+        )
+    }
+
+    func resumePausedRead() {
+        readGate.signal()
+    }
+
+    func resetAndRelease() {
+        lock.lock()
+        let wasPaused = pauseRead
+        let wasAwaitingContender = awaitingContender
+        pauseRead = false
+        awaitingContender = false
+        lock.unlock()
+        if wasPaused {
+            readStarted.signal()
+        }
+        if wasAwaitingContender {
+            contenderEntered.signal()
+        }
+        readGate.signal()
     }
 }

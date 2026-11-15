@@ -170,15 +170,35 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
             entryDate: update.entryDate,
             refreshAfter: update.refreshAfter,
         )
+        let calendar = ContinueWidgetSnapshot.normalizedLocalCalendar()
+        let raw = Self.loadSnapshot()
+        let entry = InkAmpContinueEntry(date: update.entryDate, resolved: update.resolved)
+        var entries = [entry]
+        // Day-boundary entry expires/recomputes streak text even if Home never
+        // republishes and audio-session updates keep refreshing the snapshot.
+        if let dayEnd = calendar.dateInterval(of: .day, for: update.entryDate)?.end,
+            dayEnd > update.entryDate
+        {
+            entries.append(
+                InkAmpContinueEntry(
+                    date: dayEnd,
+                    resolved: InkAmpContinueTimelineResolver.resolveLive(
+                        loaded: raw.resolvingStreak(at: dayEnd, calendar: calendar),
+                        phase: .timeline
+                    )
+                )
+            )
+        }
         let policy: TimelineReloadPolicy
         if let refreshAfter = update.refreshAfter {
-            policy = .after(refreshAfter)
+            let bound = entries.dropFirst().map(\.date)
+            let next = ([refreshAfter] + bound).filter { $0 > update.entryDate }.min() ?? refreshAfter
+            policy = .after(next)
         } else {
             policy = .atEnd
         }
-        let entry = InkAmpContinueEntry(date: update.entryDate, resolved: update.resolved)
         Self.logger.notice("provider bundle=\(Self.bundleRole, privacy: .public) phase=timeline event=success hasItem=\(update.snapshot.hasItem, privacy: .public)")
-        completion(Timeline(entries: [entry], policy: policy))
+        completion(Timeline(entries: entries, policy: policy))
     }
 
     static func loadSnapshot() -> ContinueWidgetSnapshot {
@@ -186,11 +206,13 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
     }
 
     private func liveUpdate(phase: InkAmpContinueLivePhase) -> ContinueWidgetLiveUpdate {
-        ContinueWidgetLiveUpdateBuilder.make(
-            loaded: Self.loadSnapshot(),
+        let now = Date()
+        let calendar = ContinueWidgetSnapshot.normalizedLocalCalendar()
+        return ContinueWidgetLiveUpdateBuilder.make(
+            loaded: Self.loadSnapshot().resolvingStreak(at: now, calendar: calendar),
             phase: phase,
             theme: theme,
-            now: Date(),
+            now: now,
         )
     }
 
@@ -345,6 +367,14 @@ struct InkAmpContinueWidgetView: View {
         )
     }
 
+    private var subtitleLine: String? {
+        let values = [snapshot.subtitle, snapshot.streakText]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !values.isEmpty else { return nil }
+        return values.joined(separator: " · ")
+    }
+
     // MARK: Medium
 
     private var mediumBody: some View {
@@ -395,7 +425,7 @@ struct InkAmpContinueWidgetView: View {
                             .minimumScaleFactor(0.85)
                             .multilineTextAlignment(.leading)
 
-                        if let subtitle = snapshot.subtitle, !subtitle.isEmpty {
+                        if let subtitle = subtitleLine {
                             Text(subtitle)
                                 .font(.system(size: 10))
                                 .foregroundStyle(colors.secondary)
@@ -626,7 +656,7 @@ struct InkAmpContinueWidgetView: View {
                     .minimumScaleFactor(0.82)
                     .multilineTextAlignment(.leading)
 
-                if let subtitle = snapshot.subtitle, !subtitle.isEmpty {
+                if let subtitle = subtitleLine {
                     Text(subtitle)
                         .font(.system(size: 10))
                         .foregroundStyle(colors.secondary)
