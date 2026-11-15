@@ -48,6 +48,8 @@ The iOS Swift compile, WidgetKit rendering/reload behavior, App Group sharing on
 
 ## Final consistency follow-up
 
+Archive deduplication now uses the same eligible Gregorian identities as streak union, so an ignored ambiguous older non-Gregorian entry cannot suppress a valid replacement archive. Finite aggregate additions saturate instead of overflowing; unrepresentable minute counts return nil and render unavailable rather than trapping or fabricating a zero. Regression covers archive-key collision and extreme finite/nonfinite minute magnitudes. Native verification remains required.
+
 Sync document application now forces an authoritative shared-widget streak refresh even without an active session or visible Home, including correction down to zero; unchanged shared data still no-ops. The shared-store downward-correction regression and explicit sync-call source assertion cover the seam (not native UI lifecycle execution).
 
 Home records each live audio snapshot's observation instant in the same non-suspending main-actor update. A playing item's projection is anchored to that observation rather than a later render clock; a paused item's hypothetical resume-now estimate uses current time. The shared projection regression checks unchanged playing forecasts between refreshes and the paused distinction. These follow-up tests still require exact-tip native CI.

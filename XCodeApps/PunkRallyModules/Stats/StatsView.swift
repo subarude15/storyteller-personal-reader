@@ -326,8 +326,9 @@ struct StatsView: View {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
-        let minuteLabel = receipt.minutes == 0
-            ? "Under 1 min" : String(receipt.minutes) + " min"
+        let minuteLabel = receipt.minutes.map {
+            $0 == 0 ? "Under 1 min" : String($0) + " min"
+        } ?? "Time unavailable"
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(weekOffset == 0 ? "This week's receipt" : "Previous week's receipt")

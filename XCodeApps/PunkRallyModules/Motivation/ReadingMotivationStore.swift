@@ -304,8 +304,7 @@ final class ReadingMotivationStore {
     }
 
     private static func durationText(_ seconds: TimeInterval) -> String {
-        guard seconds.isFinite, seconds >= 0 else { return "–" }
-        let minutes = max(0, Int(seconds / 60))
+        guard let minutes = ReadingMotivationCalculations.wholeMinutes(seconds) else { return "–" }
         let hours = minutes / 60
         let remainder = minutes % 60
         if seconds > 0, minutes == 0 { return "<1m" }

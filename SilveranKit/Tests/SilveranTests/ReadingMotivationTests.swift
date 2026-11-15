@@ -1,6 +1,6 @@
 import Foundation
 import SilveranAppleWidgets
-import SilveranKit
+@testable import SilveranKit
 import Testing
 
 private final class TestMotivationClock: ReadingMotivationClock, @unchecked Sendable {
@@ -1257,6 +1257,43 @@ struct ReadingMotivationTests {
         #expect(await scheduler.pendingCount() == 0)
         let persisted = await storage.load()
         #expect(persisted.hasConsumedDayKey("2026-11-15"))
+    }
+
+    @Test func unsupportedCalendarArchiveCannotBlockGregorianArchive() throws {
+        let legacy = try JSONDecoder().decode(ReadingMotivationActivityDay.self, from: Data(
+            #"{"year":2026,"month":11,"day":14,"calendarIdentifier":"japanese","timeZoneIdentifier":"America/New_York"}"#.utf8
+        ))
+        let archived = ReadingMotivationCalculations.archiveExpiredActivityDays(
+            sessions: [session(start: date(2026, 11, 14, 12), end: date(2026, 11, 14, 13))],
+            before: date(2026, 11, 15, 0), existing: [legacy],
+            calendar: calendar, now: date(2026, 11, 15, 12)
+        )
+        #expect(archived.contains(legacy))
+        #expect(archived.contains(where: {
+            $0.calendarIdentifier == "gregorian" && $0.dayKey == "2026-11-14"
+        }))
+    }
+
+    @Test func unsupportedMinuteMagnitudesAreUnknownAndAggregateOverflowDoesNotTrap() {
+        #expect(ReadingMotivationCalculations.wholeMinutes(3599) == 59)
+        #expect(ReadingMotivationCalculations.wholeMinutes(0) == 0)
+        #expect(ReadingMotivationCalculations.wholeMinutes(-1) == nil)
+        #expect(ReadingMotivationCalculations.wholeMinutes(.nan) == nil)
+        #expect(ReadingMotivationCalculations.wholeMinutes(.infinity) == nil)
+        #expect(ReadingMotivationCalculations.wholeMinutes(.greatestFiniteMagnitude) == nil)
+        #expect(ReadingMotivationCalculations.wholeMinutes(0x1p63 * 60) == nil)
+        let huge = ReadingMotivationWeeklyReceipt(
+            weekStart: date(2026, 11, 15, 0),
+            readingSeconds: .greatestFiniteMagnitude, listeningSeconds: .greatestFiniteMagnitude,
+            activityDays: 1, completedTitles: 0, streakDays: 1
+        )
+        #expect(huge.seconds.isFinite)
+        #expect(huge.minutes == nil)
+        let day = ReadingMotivationDay(
+            day: date(2026, 11, 15, 0), readingSeconds: .greatestFiniteMagnitude,
+            listeningSeconds: .greatestFiniteMagnitude
+        )
+        #expect(day.seconds.isFinite)
     }
 
     @Test func oldWidgetSnapshotDecodesWithoutNewMotivationFields() throws {

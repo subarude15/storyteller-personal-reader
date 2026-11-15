@@ -109,7 +109,7 @@ public struct ReadingMotivationDay: Equatable, Sendable, Identifiable {
         self.listeningSeconds = listeningSeconds.isFinite && listeningSeconds > 0 ? listeningSeconds : 0
     }
 
-    public var seconds: TimeInterval { readingSeconds + listeningSeconds }
+    public var seconds: TimeInterval { ReadingMotivationCalculations.addingSeconds(readingSeconds, listeningSeconds) }
 }
 
 /// Frozen Gregorian local-day identity for activity already removed from SessionTracker.
@@ -154,8 +154,9 @@ public struct ReadingMotivationWeeklyReceipt: Equatable, Sendable {
     public let completedTitles: Int
     public let streakDays: Int
 
-    public var seconds: TimeInterval { readingSeconds + listeningSeconds }
-    public var minutes: Int { Int((seconds / 60).rounded(.down)) }
+    public var seconds: TimeInterval { ReadingMotivationCalculations.addingSeconds(readingSeconds, listeningSeconds) }
+    /// Nil means unsupported/nonfinite magnitude, never a trapping Int conversion.
+    public var minutes: Int? { ReadingMotivationCalculations.wholeMinutes(seconds) }
 }
 
 public enum ReadingMotivationFinishProjection: Equatable, Sendable {
@@ -172,6 +173,18 @@ public enum ReadingMotivationCalculations {
         normalized.firstWeekday = calendar.firstWeekday
         normalized.minimumDaysInFirstWeek = calendar.minimumDaysInFirstWeek
         return normalized
+    }
+
+    public static func wholeMinutes(_ seconds: TimeInterval) -> Int? {
+        guard seconds.isFinite, seconds >= 0 else { return nil }
+        let minutes = (seconds / 60).rounded(.down)
+        guard minutes < 0x1p63 else { return nil }
+        return Int(minutes)
+    }
+
+    fileprivate static func addingSeconds(_ lhs: Double, _ rhs: Double) -> Double {
+        let sum = lhs + rhs
+        return sum.isFinite ? sum : Double.greatestFiniteMagnitude
     }
 
     /// Keep live contributions consistent with the existing persisted-session
@@ -198,11 +211,11 @@ public enum ReadingMotivationCalculations {
                 interval.end > cursor
             {
                 let segmentEnd = min(session.endedAt, interval.end)
-                let seconds = duration * segmentEnd.timeIntervalSince(cursor) / span
+                let seconds = duration * (segmentEnd.timeIntervalSince(cursor) / span)
                 var total = totals[interval.start, default: (0, 0)]
                 switch session.kind {
-                    case .reading: total.reading += seconds
-                    case .listening: total.listening += seconds
+                    case .reading: total.reading = addingSeconds(total.reading, seconds)
+                    case .listening: total.listening = addingSeconds(total.listening, seconds)
                 }
                 totals[interval.start] = total
                 cursor = segmentEnd
@@ -278,7 +291,9 @@ public enum ReadingMotivationCalculations {
         let calendar = normalizedLocalCalendar(from: calendar)
         let expired = normalizedSessions(sessions, now: now).filter { $0.endedAt < cutoff }
         let days = dailyTotals(sessions: expired, calendar: calendar, now: now)
-        let existingKeys = Set(existing.map(\.dayKey))
+        let existingKeys = Set(existing.filter {
+            $0.calendarIdentifier == String(describing: calendar.identifier)
+        }.map(\.dayKey))
         let additions = days
             .map { ReadingMotivationActivityDay(date: $0.day, calendar: calendar) }
             .filter { !existingKeys.contains($0.dayKey) }
@@ -349,8 +364,8 @@ public enum ReadingMotivationCalculations {
         let streakReference = min(now, range.end.addingTimeInterval(-1))
         return ReadingMotivationWeeklyReceipt(
             weekStart: range.start,
-            readingSeconds: days.reduce(0) { $0 + $1.readingSeconds },
-            listeningSeconds: days.reduce(0) { $0 + $1.listeningSeconds },
+            readingSeconds: days.reduce(0) { addingSeconds($0, $1.readingSeconds) },
+            listeningSeconds: days.reduce(0) { addingSeconds($0, $1.listeningSeconds) },
             activityDays: days.filter { $0.seconds > 0 }.count,
             completedTitles: titleIDs.count,
             streakDays: streaks(
