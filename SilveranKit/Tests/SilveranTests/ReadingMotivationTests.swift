@@ -181,6 +181,7 @@ private actor TestMotivationStateStore: ReadingMotivationNotificationStateStorin
     var loadStartWaiter: CheckedContinuation<Void, Never>?
     var loadRelease: CheckedContinuation<Void, Never>?
     var pauseNextSave = false
+    var pauseNextPreparedPendingIntentSave = false
     var pausedSaveEntered = false
     var saveStartWaiter: CheckedContinuation<Void, Never>?
     var saveRelease: CheckedContinuation<Void, Never>?
@@ -199,8 +200,19 @@ private actor TestMotivationStateStore: ReadingMotivationNotificationStateStorin
         return state
     }
     func save(_ state: ReadingMotivationNotificationState) async {
-        if pauseNextSave {
+        let preparingPendingIntent =
+            state.pendingDeliveryDate != nil
+            && (
+                state.pendingDeliveryDate != self.state.pendingDeliveryDate
+                    || state.pendingKind != self.state.pendingKind
+                    || state.pendingDayKey != self.state.pendingDayKey
+            )
+        let shouldPause =
+            pauseNextSave
+            || (pauseNextPreparedPendingIntentSave && preparingPendingIntent)
+        if shouldPause {
             pauseNextSave = false
+            if preparingPendingIntent { pauseNextPreparedPendingIntentSave = false }
             pausedSaveEntered = true
             saveStartWaiter?.resume()
             saveStartWaiter = nil
@@ -219,6 +231,7 @@ private actor TestMotivationStateStore: ReadingMotivationNotificationStateStorin
         loadRelease = nil
     }
     func pauseNextSaveCall() { pauseNextSave = true }
+    func pauseNextPreparedPendingIntentSaveCall() { pauseNextPreparedPendingIntentSave = true }
     func waitForPausedSave() async {
         if pausedSaveEntered { return }
         await withCheckedContinuation { saveStartWaiter = $0 }
@@ -248,6 +261,36 @@ private actor TestMotivationSignal {
     func wait() async {
         guard !signaled else { return }
         await withCheckedContinuation { waiters.append($0) }
+    }
+}
+
+/// Awaits the coordinator's actual post-registration observer, not Task.yield.
+private actor TestMotivationIntentRegistration {
+    private var latestPreferenceRevision: UInt64 = 0
+    private var latestRequestRevision: UInt64 = 0
+    private var waiters: [(UInt64, UInt64, CheckedContinuation<Void, Never>)] = []
+
+    func note(preferenceRevision: UInt64, requestRevision: UInt64) {
+        latestPreferenceRevision = preferenceRevision
+        latestRequestRevision = requestRevision
+        waiters = waiters.filter { preference, request, continuation in
+            if preferenceRevision == preference, requestRevision == request {
+                continuation.resume()
+                return false
+            }
+            return true
+        }
+    }
+
+    func waitFor(preferenceRevision: UInt64, requestRevision: UInt64) async {
+        if latestPreferenceRevision == preferenceRevision,
+            latestRequestRevision == requestRevision
+        {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append((preferenceRevision, requestRevision, continuation))
+        }
     }
 }
 
@@ -292,11 +335,17 @@ struct ReadingMotivationTests {
         scheduler: TestMotivationScheduler,
         stateStore: TestMotivationStateStore = TestMotivationStateStore(),
         now: Date,
-        clock: TestMotivationClock? = nil
+        clock: TestMotivationClock? = nil,
+        intentRegistrationObserver: (@Sendable (UInt64, UInt64, Bool) -> Void)? = nil,
+        transactionWaitObserver: (@Sendable () -> Void)? = nil
     ) -> (ReadingMotivationNotificationCoordinator, TestMotivationClock) {
         let clock = clock ?? TestMotivationClock(now)
         let coordinator = ReadingMotivationNotificationCoordinator(
-            scheduler: scheduler, stateStore: stateStore, clock: clock
+            scheduler: scheduler,
+            stateStore: stateStore,
+            clock: clock,
+            intentRegistrationObserver: intentRegistrationObserver,
+            transactionWaitObserver: transactionWaitObserver
         )
         return (coordinator, clock)
     }
@@ -1570,7 +1619,13 @@ struct ReadingMotivationTests {
         )
         await storage.pauseNextLoadCall()
         let scheduler = TestMotivationScheduler()
-        let (coordinator, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: now)
+        let registrations = TestMotivationIntentRegistration()
+        let (coordinator, _) = makeCoordinator(
+            scheduler: scheduler, stateStore: storage, now: now,
+            intentRegistrationObserver: { preference, request, _ in
+                Task { await registrations.note(preferenceRevision: preference, requestRevision: request) }
+            }
+        )
 
         let first = Task {
             try await coordinator.reconcile(
@@ -1579,16 +1634,13 @@ struct ReadingMotivationTests {
             )
         }
         await storage.waitForPausedLoad()
-        let secondStarted = TestMotivationSignal()
         let second = Task {
-            await secondStarted.signal()
-            return try await coordinator.reconcile(
+            try await coordinator.reconcile(
                 candidates: [candidate], enabled: true, now: now, calendar: cal,
                 preferenceRevision: 1, requestRevision: 2
             )
         }
-        await secondStarted.wait()
-        await Task.yield()
+        await registrations.waitFor(preferenceRevision: 1, requestRevision: 2)
         await storage.resumePausedLoad()
 
         // Newer requestRevision registers before the gate; the first transaction is
@@ -1610,7 +1662,13 @@ struct ReadingMotivationTests {
         let scheduler = TestMotivationScheduler()
         await scheduler.pauseNextScheduleCall()
         let storage = TestMotivationStateStore()
-        let (coordinator, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: now)
+        let registrations = TestMotivationIntentRegistration()
+        let (coordinator, _) = makeCoordinator(
+            scheduler: scheduler, stateStore: storage, now: now,
+            intentRegistrationObserver: { preference, request, _ in
+                Task { await registrations.note(preferenceRevision: preference, requestRevision: request) }
+            }
+        )
 
         let enabled = Task {
             try await coordinator.reconcile(
@@ -1619,16 +1677,13 @@ struct ReadingMotivationTests {
             )
         }
         await scheduler.waitForPausedSchedule()
-        let disabledStarted = TestMotivationSignal()
         let disabled = Task {
-            await disabledStarted.signal()
-            return try await coordinator.reconcile(
+            try await coordinator.reconcile(
                 candidates: [], enabled: false, now: now, calendar: cal,
                 preferenceRevision: 2, requestRevision: 2
             )
         }
-        await disabledStarted.wait()
-        await Task.yield()
+        await registrations.waitFor(preferenceRevision: 2, requestRevision: 2)
         await scheduler.resumePausedSchedule()
 
         // Schedule already entered: best-effort cancel after completion, not a
@@ -1655,7 +1710,13 @@ struct ReadingMotivationTests {
         let scheduler = TestMotivationScheduler()
         await scheduler.pauseNextAuthorizationCall()
         let storage = TestMotivationStateStore()
-        let (coordinator, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: now)
+        let registrations = TestMotivationIntentRegistration()
+        let (coordinator, _) = makeCoordinator(
+            scheduler: scheduler, stateStore: storage, now: now,
+            intentRegistrationObserver: { preference, request, _ in
+                Task { await registrations.note(preferenceRevision: preference, requestRevision: request) }
+            }
+        )
 
         let enabled = Task {
             try await coordinator.reconcile(
@@ -1664,16 +1725,13 @@ struct ReadingMotivationTests {
             )
         }
         await scheduler.waitForPausedAuthorization()
-        let disabledStarted = TestMotivationSignal()
         let disabled = Task {
-            await disabledStarted.signal()
-            return try await coordinator.reconcile(
+            try await coordinator.reconcile(
                 candidates: [], enabled: false, now: now, calendar: cal,
                 preferenceRevision: 2, requestRevision: 2
             )
         }
-        await disabledStarted.wait()
-        await Task.yield()
+        await registrations.waitFor(preferenceRevision: 2, requestRevision: 2)
         await scheduler.resumePausedAuthorization()
 
         #expect(try await enabled.value == .none)
@@ -1693,7 +1751,13 @@ struct ReadingMotivationTests {
         let scheduler = TestMotivationScheduler()
         let storage = TestMotivationStateStore()
         await storage.pauseNextSaveCall()
-        let (coordinator, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: now)
+        let registrations = TestMotivationIntentRegistration()
+        let (coordinator, _) = makeCoordinator(
+            scheduler: scheduler, stateStore: storage, now: now,
+            intentRegistrationObserver: { preference, request, _ in
+                Task { await registrations.note(preferenceRevision: preference, requestRevision: request) }
+            }
+        )
 
         let enabled = Task {
             try await coordinator.reconcile(
@@ -1702,16 +1766,13 @@ struct ReadingMotivationTests {
             )
         }
         await storage.waitForPausedSave()
-        let disabledStarted = TestMotivationSignal()
         let disabled = Task {
-            await disabledStarted.signal()
-            return try await coordinator.reconcile(
+            try await coordinator.reconcile(
                 candidates: [], enabled: false, now: now, calendar: cal,
                 preferenceRevision: 2, requestRevision: 2
             )
         }
-        await disabledStarted.wait()
-        await Task.yield()
+        await registrations.waitFor(preferenceRevision: 2, requestRevision: 2)
         await storage.resumePausedSave()
 
         #expect(try await enabled.value == .none)
@@ -1730,8 +1791,12 @@ struct ReadingMotivationTests {
         let scheduler = TestMotivationScheduler()
         await scheduler.pauseNextScheduleCall()
         let storage = TestMotivationStateStore()
+        let registrations = TestMotivationIntentRegistration()
         let (coordinator, _) = makeCoordinator(
-            scheduler: scheduler, stateStore: storage, now: start, clock: clock
+            scheduler: scheduler, stateStore: storage, now: start, clock: clock,
+            intentRegistrationObserver: { preference, request, _ in
+                Task { await registrations.note(preferenceRevision: preference, requestRevision: request) }
+            }
         )
 
         let enabled = Task {
@@ -1741,16 +1806,13 @@ struct ReadingMotivationTests {
             )
         }
         await scheduler.waitForPausedSchedule()
-        let disabledStarted = TestMotivationSignal()
         let disabled = Task {
-            await disabledStarted.signal()
-            return try await coordinator.reconcile(
+            try await coordinator.reconcile(
                 candidates: [], enabled: false, now: start, calendar: cal,
                 preferenceRevision: 2, requestRevision: 2
             )
         }
-        await disabledStarted.wait()
-        await Task.yield()
+        await registrations.waitFor(preferenceRevision: 2, requestRevision: 2)
         // Fire boundary elapses while the already-entered OS add is still paused.
         clock.advance(to: delivery.addingTimeInterval(30))
         await scheduler.resumePausedSchedule()
@@ -1786,7 +1848,13 @@ struct ReadingMotivationTests {
         let rescue = ReadingMotivationNotificationCandidate(kind: .rescue, deliveryDate: delivery)
         let scheduler = TestMotivationScheduler()
         await scheduler.pauseNextScheduleCall()
-        let (coordinator, _) = makeCoordinator(scheduler: scheduler, now: now)
+        let registrations = TestMotivationIntentRegistration()
+        let (coordinator, _) = makeCoordinator(
+            scheduler: scheduler, now: now,
+            intentRegistrationObserver: { preference, request, _ in
+                Task { await registrations.note(preferenceRevision: preference, requestRevision: request) }
+            }
+        )
         let lower = Task {
             try await coordinator.reconcile(
                 candidates: [receipt], enabled: true, now: now, calendar: cal,
@@ -1794,16 +1862,13 @@ struct ReadingMotivationTests {
             )
         }
         await scheduler.waitForPausedSchedule()
-        let higherStarted = TestMotivationSignal()
         let higher = Task {
-            await higherStarted.signal()
-            return try await coordinator.reconcile(
+            try await coordinator.reconcile(
                 candidates: [receipt, rescue], enabled: true, now: now, calendar: cal,
                 preferenceRevision: 1, requestRevision: 2
             )
         }
-        await higherStarted.wait()
-        await Task.yield()
+        await registrations.waitFor(preferenceRevision: 1, requestRevision: 2)
         await scheduler.resumePausedSchedule()
 
         let lowerDecision = try await lower.value
@@ -1833,7 +1898,13 @@ struct ReadingMotivationTests {
         let scheduler = TestMotivationScheduler()
         await scheduler.pauseNextScheduleCall()
         let storage = TestMotivationStateStore()
-        let (coordinator, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: now)
+        let deliveryQueued = TestMotivationSignal()
+        let (coordinator, _) = makeCoordinator(
+            scheduler: scheduler, stateStore: storage, now: now,
+            transactionWaitObserver: {
+                Task { await deliveryQueued.signal() }
+            }
+        )
         let scheduling = Task {
             try await coordinator.reconcile(
                 candidates: [candidate], enabled: true, now: now, calendar: cal,
@@ -1841,15 +1912,12 @@ struct ReadingMotivationTests {
             )
         }
         await scheduler.waitForPausedSchedule()
-        let deliveryStarted = TestMotivationSignal()
         let delivered = Task {
-            await deliveryStarted.signal()
             await coordinator.markDelivered(
                 dayKey: dayKey, deliveredAt: deliveredAt, calendar: cal
             )
         }
-        await deliveryStarted.wait()
-        await Task.yield()
+        await deliveryQueued.wait()
         await scheduler.resumePausedSchedule()
 
         _ = try await scheduling.value
@@ -2042,6 +2110,129 @@ struct ReadingMotivationTests {
             preferenceRevision: 1, requestRevision: 3
         ) == .none)
         #expect(await scheduler.pendingCount() == 0)
+    }
+
+    @Test(
+        arguments: [false, true]
+    )
+    func pendingIntentSaveSpanningOldFireBoundaryDeclinesReplacement(
+        dismissEvidence: Bool
+    ) async throws {
+        let start = date(2026, 11, 15, 18)
+        let oldFire = date(2026, 11, 15, 20)
+        let newFire = date(2026, 11, 15, 21)
+        let dayKey = "2026-11-15"
+        let identifier = ReadingMotivationNotificationCoordinator.identifier(for: dayKey)
+        let clock = TestMotivationClock(start)
+        let scheduler = TestMotivationScheduler()
+        let storage = TestMotivationStateStore()
+        let (coordinator, _) = makeCoordinator(
+            scheduler: scheduler, stateStore: storage, now: start, clock: clock
+        )
+        #expect(try await coordinator.reconcile(
+            candidates: [.init(kind: .pace, deliveryDate: oldFire)],
+            enabled: true, now: start, calendar: calendar,
+            preferenceRevision: 1, requestRevision: 1
+        ) == .schedule(kind: .pace, dayKey: dayKey))
+        #expect(await scheduler.scheduleCalls() == 1)
+
+        await storage.pauseNextPreparedPendingIntentSaveCall()
+        let replacing = Task {
+            try await coordinator.reconcile(
+                candidates: [
+                    .init(kind: .pace, deliveryDate: newFire),
+                    .init(kind: .rescue, deliveryDate: newFire),
+                ],
+                enabled: true, now: start, calendar: calendar,
+                preferenceRevision: 1, requestRevision: 2
+            )
+        }
+        await storage.waitForPausedSave()
+        clock.advance(to: oldFire.addingTimeInterval(30))
+        await scheduler.setDelivered(identifier: identifier, at: oldFire)
+        if dismissEvidence {
+            await scheduler.clearDelivered()
+        }
+        await storage.resumePausedSave()
+
+        let decision = try await replacing.value
+        #expect(decision == .cancelPending || decision == .none)
+        #expect(await scheduler.scheduleCalls() == 1)
+        #expect(await scheduler.pendingCount() == 0)
+        #expect(await storage.load().hasConsumedDayKey(dayKey))
+        #expect(await storage.load().pendingKind == nil)
+        #expect(try await coordinator.reconcile(
+            candidates: [.init(kind: .rescue, deliveryDate: newFire)],
+            enabled: true, now: clock.now(), calendar: calendar,
+            preferenceRevision: 1, requestRevision: 3
+        ) == .none)
+        #expect(await scheduler.scheduleCalls() == 1)
+    }
+
+    @Test func initialPendingIntentSaveSpanningOwnFireBoundaryDeclinesInstall() async throws {
+        let start = date(2026, 11, 15, 18)
+        let delivery = date(2026, 11, 15, 20)
+        let dayKey = "2026-11-15"
+        let clock = TestMotivationClock(start)
+        let scheduler = TestMotivationScheduler()
+        let storage = TestMotivationStateStore()
+        await storage.pauseNextPreparedPendingIntentSaveCall()
+        let (coordinator, _) = makeCoordinator(
+            scheduler: scheduler, stateStore: storage, now: start, clock: clock
+        )
+        let installing = Task {
+            try await coordinator.reconcile(
+                candidates: [.init(kind: .rescue, deliveryDate: delivery)],
+                enabled: true, now: start, calendar: calendar,
+                preferenceRevision: 1, requestRevision: 1
+            )
+        }
+        await storage.waitForPausedSave()
+        clock.advance(to: delivery.addingTimeInterval(30))
+        await storage.resumePausedSave()
+
+        let decision = try await installing.value
+        #expect(decision == .cancelPending || decision == .none)
+        #expect(await scheduler.scheduleCalls() == 0)
+        #expect(await scheduler.pendingCount() == 0)
+        #expect(await storage.load().hasConsumedDayKey(dayKey))
+        #expect(await storage.load().pendingKind == nil)
+    }
+
+    @Test func recoveryInspectionSpanningFireBoundaryDeclinesReinstall() async throws {
+        let start = date(2026, 11, 15, 18)
+        let delivery = date(2026, 11, 15, 20)
+        let dayKey = "2026-11-15"
+        let clock = TestMotivationClock(start)
+        let scheduler = TestMotivationScheduler()
+        let storage = TestMotivationStateStore(
+            ReadingMotivationNotificationState(
+                pendingKind: .rescue,
+                pendingDayKey: dayKey,
+                pendingDeliveryDate: delivery
+            )
+        )
+        let (coordinator, _) = makeCoordinator(
+            scheduler: scheduler, stateStore: storage, now: start, clock: clock
+        )
+        await scheduler.pauseNextPendingIdentifiersCall()
+        let recovering = Task {
+            try await coordinator.reconcile(
+                candidates: [.init(kind: .rescue, deliveryDate: delivery)],
+                enabled: true, now: start, calendar: calendar,
+                preferenceRevision: 1, requestRevision: 1
+            )
+        }
+        await scheduler.waitForPausedPendingIdentifiers()
+        // Fire boundary elapses during missing-OS inspection with no delivery evidence.
+        clock.advance(to: delivery.addingTimeInterval(30))
+        await scheduler.resumePausedPendingIdentifiers()
+
+        let decision = try await recovering.value
+        #expect(decision == .none || decision == .cancelPending)
+        #expect(await scheduler.scheduleCalls() == 0)
+        #expect(await storage.load().hasConsumedDayKey(dayKey))
+        #expect(await storage.load().pendingKind == nil)
     }
 
     @Test func deliveryDismissedDuringCancellationStillConsumesDayAfterRestart() async throws {

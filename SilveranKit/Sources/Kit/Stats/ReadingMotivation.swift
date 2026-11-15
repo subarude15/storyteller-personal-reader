@@ -1007,6 +1007,10 @@ public actor ReadingMotivationNotificationCoordinator {
     private let scheduler: any ReadingMotivationNotificationScheduling
     private let stateStore: any ReadingMotivationNotificationStateStoring
     private let clock: any ReadingMotivationClock
+    /// Optional test seam: fires synchronously after a successful pre-gate intent registration.
+    private let intentRegistrationObserver: (@Sendable (UInt64, UInt64, Bool) -> Void)?
+    /// Optional test seam: fires when a caller suspends on the shared-state transaction gate.
+    private let transactionWaitObserver: (@Sendable () -> Void)?
     private var state: ReadingMotivationNotificationState = .empty
     private var hasLoadedState = false
     private var transactionActive = false
@@ -1018,11 +1022,15 @@ public actor ReadingMotivationNotificationCoordinator {
     public init(
         scheduler: any ReadingMotivationNotificationScheduling,
         stateStore: any ReadingMotivationNotificationStateStoring,
-        clock: any ReadingMotivationClock = SystemReadingMotivationClock()
+        clock: any ReadingMotivationClock = SystemReadingMotivationClock(),
+        intentRegistrationObserver: (@Sendable (UInt64, UInt64, Bool) -> Void)? = nil,
+        transactionWaitObserver: (@Sendable () -> Void)? = nil
     ) {
         self.scheduler = scheduler
         self.stateStore = stateStore
         self.clock = clock
+        self.intentRegistrationObserver = intentRegistrationObserver
+        self.transactionWaitObserver = transactionWaitObserver
     }
 
     /// Called only from the explicit opt-in control, never during app startup.
@@ -1179,6 +1187,10 @@ public actor ReadingMotivationNotificationCoordinator {
                     preferenceRevision: preferenceRevision,
                     requestRevision: requestRevision
                 ) else { return .none }
+                // Retain the replaced request's fire boundary before overwrite so a
+                // suspended pending-intent save cannot hide a late old delivery.
+                let priorPendingDayKey = state.pendingDayKey
+                let priorPendingDeliveryDate = state.pendingDeliveryDate
                 let request = ReadingMotivationNotificationRequest(
                     identifier: Self.identifier(for: installDay),
                     kind: installKind,
@@ -1188,22 +1200,21 @@ public actor ReadingMotivationNotificationCoordinator {
                 state.pendingDayKey = installDay
                 state.pendingDeliveryDate = deliveryDate
                 await stateStore.save(state)
-                guard isLatestIntent(
+                let installed = try await installPreparedPendingIfStillEligible(
+                    request: request,
+                    installKind: installKind,
+                    installDay: installDay,
+                    priorPendingDayKey: priorPendingDayKey,
+                    priorPendingDeliveryDate: priorPendingDeliveryDate,
                     enabled: enabled,
                     preferenceRevision: preferenceRevision,
-                    requestRevision: requestRevision
-                ) else {
-                    // Opt-out/supersession observed after ledger write, before OS add.
-                    clearPendingState()
-                    await stateStore.save(state)
-                    return .none
-                }
-                do {
-                    try await scheduler.schedule(request)
-                } catch {
-                    clearPendingState()
-                    await stateStore.save(state)
-                    throw error
+                    requestRevision: requestRevision,
+                    now: now,
+                    calendar: calendar
+                )
+                guard installed else {
+                    if state.hasConsumedDayKey(installDay) { return .cancelPending }
+                    return latestEnabledPreference ? .none : .cancelPending
                 }
                 // OS add already entered: cancellation is best-effort only.
                 if !isLatestIntent(
@@ -1285,6 +1296,7 @@ public actor ReadingMotivationNotificationCoordinator {
         latestPreferenceRevision = preferenceRevision
         latestRequestRevision = requestRevision
         latestEnabledPreference = enabled
+        intentRegistrationObserver?(preferenceRevision, requestRevision, enabled)
     }
 
     private func isLatestIntent(
@@ -1302,7 +1314,10 @@ public actor ReadingMotivationNotificationCoordinator {
             transactionActive = true
             return
         }
-        await withCheckedContinuation { transactionWaiters.append($0) }
+        await withCheckedContinuation { continuation in
+            transactionWaiters.append(continuation)
+            transactionWaitObserver?()
+        }
     }
 
     private func endTransaction() {
@@ -1424,12 +1439,22 @@ public actor ReadingMotivationNotificationCoordinator {
             kind: pendingKind,
             deliveryDate: stillDelivery
         )
-        do {
-            try await scheduler.schedule(request)
-        } catch {
-            clearPendingState()
-            await stateStore.save(state)
-            throw error
+        // Recovery has no replaced boundary distinct from the ledger pending itself.
+        let installed = try await installPreparedPendingIfStillEligible(
+            request: request,
+            installKind: pendingKind,
+            installDay: pendingDay,
+            priorPendingDayKey: nil,
+            priorPendingDeliveryDate: nil,
+            enabled: enabled,
+            preferenceRevision: preferenceRevision,
+            requestRevision: requestRevision,
+            now: now,
+            calendar: calendar
+        )
+        guard installed else {
+            if state.hasConsumedDayKey(pendingDay) { return .cancelPending }
+            return latestEnabledPreference ? .none : .cancelPending
         }
         if !isLatestIntent(
             enabled: enabled,
@@ -1448,6 +1473,135 @@ public actor ReadingMotivationNotificationCoordinator {
             return .cancelPending
         }
         return .schedule(kind: pendingKind, dayKey: pendingDay)
+    }
+
+    /// After the last awaited pending-intent persistence, re-ingest deliveries,
+    /// refresh the clock, consume any retained replaced fire boundary, and only
+    /// then enter `scheduler.schedule` with no further await gap.
+    private func installPreparedPendingIfStillEligible(
+        request: ReadingMotivationNotificationRequest,
+        installKind: ReadingMotivationNotificationKind,
+        installDay: String,
+        priorPendingDayKey: String?,
+        priorPendingDeliveryDate: Date?,
+        enabled: Bool,
+        preferenceRevision: UInt64,
+        requestRevision: UInt64,
+        now: Date,
+        calendar: Calendar
+    ) async throws -> Bool {
+        guard isLatestIntent(
+            enabled: enabled,
+            preferenceRevision: preferenceRevision,
+            requestRevision: requestRevision
+        ) else {
+            clearPendingState()
+            await stateStore.save(state)
+            return false
+        }
+
+        await ingestDelivered(calendar: calendar)
+        var installNow = max(now, clock.now())
+        await consumeRetainedExpiredBoundary(
+            priorDayKey: priorPendingDayKey,
+            priorDeliveryDate: priorPendingDeliveryDate,
+            now: installNow,
+            calendar: calendar
+        )
+        installNow = max(now, clock.now())
+        await consumeExpiredPending(now: installNow, calendar: calendar)
+        installNow = max(now, clock.now())
+
+        guard isLatestIntent(
+            enabled: enabled,
+            preferenceRevision: preferenceRevision,
+            requestRevision: requestRevision
+        ) else {
+            clearPendingState()
+            await stateStore.save(state)
+            return false
+        }
+        if state.hasConsumedDayKey(installDay)
+            || state.pendingDayKey != installDay
+            || state.pendingKind != installKind
+            || state.pendingDeliveryDate != request.deliveryDate
+            || request.deliveryDate <= installNow
+        {
+            if state.pendingDayKey != nil {
+                await consumeExpiredPending(now: installNow, calendar: calendar)
+                if state.pendingDayKey != nil {
+                    clearPendingState()
+                    await stateStore.save(state)
+                }
+            }
+            return false
+        }
+
+        // Final non-suspending clock/intent/day check immediately before OS add.
+        installNow = max(now, clock.now())
+        guard isLatestIntent(
+                enabled: enabled,
+                preferenceRevision: preferenceRevision,
+                requestRevision: requestRevision
+            ),
+            !state.hasConsumedDayKey(installDay),
+            state.pendingDayKey == installDay,
+            state.pendingKind == installKind,
+            state.pendingDeliveryDate == request.deliveryDate,
+            request.deliveryDate > installNow
+        else {
+            await consumeExpiredPending(now: max(now, clock.now()), calendar: calendar)
+            if state.pendingDayKey != nil {
+                clearPendingState()
+                await stateStore.save(state)
+            }
+            return false
+        }
+
+        do {
+            try await scheduler.schedule(request)
+            return true
+        } catch {
+            clearPendingState()
+            await stateStore.save(state)
+            throw error
+        }
+    }
+
+    /// Consume a replaced request's fire boundary retained outside overwritten
+    /// pending fields so save suspension across the old boundary cannot miss a
+    /// late delivery (including dismissed OS evidence).
+    private func consumeRetainedExpiredBoundary(
+        priorDayKey: String?,
+        priorDeliveryDate: Date?,
+        now: Date,
+        calendar: Calendar
+    ) async {
+        guard let priorDayKey else { return }
+        if let priorDeliveryDate {
+            guard priorDeliveryDate <= now else { return }
+            state.consume(dayKey: priorDayKey)
+            state.consume(
+                dayKey: ReadingMotivationNotificationPolicy.localDayKey(
+                    priorDeliveryDate, calendar: calendar
+                )
+            )
+            state.consume(
+                dayKey: ReadingMotivationNotificationPolicy.localDayKey(now, calendar: calendar)
+            )
+        } else {
+            // Undated legacy: absence from OS is not non-delivery proof.
+            state.consume(dayKey: priorDayKey)
+            state.consume(
+                dayKey: ReadingMotivationNotificationPolicy.localDayKey(now, calendar: calendar)
+            )
+        }
+        await stateStore.save(state)
+        await scheduler.cancelPending(identifier: Self.identifier(for: priorDayKey))
+        if let pendingDay = state.pendingDayKey, state.hasConsumedDayKey(pendingDay) {
+            clearPendingState()
+            await stateStore.save(state)
+        }
     }
 
     private func abandonPending(referenceNow: Date, calendar: Calendar) async {
