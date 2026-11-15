@@ -436,8 +436,8 @@ struct ContinueWidgetSnapshotTests {
         #expect(source.contains("shouldRunCadence("))
         #expect(source.contains("shouldReconcileNotificationsOnTick("))
         #expect(source.contains("shouldPublishAuthoritativeStreak("))
-        // Cadence starts from shouldRunCadence; notifications stay separately gated.
-        #expect(source.contains("shouldRunCadence(\n                    hasActiveSession: self.activeSession != nil"))
+        #expect(source.contains("hasActiveSession: self.activeSession != nil"))
+        #expect(source.contains("notificationsEnabled: ReadingMotivationStore.shared.settings.notificationsEnabled"))
     }
 }
 
