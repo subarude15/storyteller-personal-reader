@@ -487,6 +487,38 @@ struct ReadingMotivationTests {
         #expect(state.hasConsumedDayKey("2026-11-14"))
         #expect(state.pendingKind == .pace)
         #expect(state.pendingDeliveryDate == nil)
+        #expect(state.unresolvedFireBoundaries.isEmpty)
+    }
+
+    @Test func earliestUnresolvedFireBoundarySurvivesChainEncodeAndPendingClear() throws {
+        let dayKey = "2026-11-15"
+        let earliest = date(2026, 11, 15, 20)
+        var state = ReadingMotivationNotificationState(
+            pendingKind: .pace,
+            pendingDayKey: dayKey,
+            pendingDeliveryDate: date(2026, 11, 15, 21)
+        )
+        state.retainUnresolvedFireBoundary(dayKey: dayKey, fireDate: earliest)
+        state.retainUnresolvedFireBoundary(dayKey: dayKey, fireDate: date(2026, 11, 15, 21))
+        state.retainUnresolvedFireBoundary(dayKey: dayKey, fireDate: date(2026, 11, 15, 22))
+        #expect(state.unresolvedFireBoundaries[dayKey] == earliest)
+
+        // clearPendingState must not discard unresolved safety evidence.
+        state.pendingKind = nil
+        state.pendingDayKey = nil
+        state.pendingDeliveryDate = nil
+        #expect(state.unresolvedFireBoundaries[dayKey] == earliest)
+
+        let encoded = try JSONEncoder().encode(state)
+        let decoded = try JSONDecoder().decode(ReadingMotivationNotificationState.self, from: encoded)
+        #expect(decoded.unresolvedFireBoundaries[dayKey] == earliest)
+        #expect(decoded.pendingDayKey == nil)
+
+        let legacy = Data(#"{"pendingKind":"rescue","pendingDayKey":"2026-11-15"}"#.utf8)
+        let legacyState = try JSONDecoder().decode(ReadingMotivationNotificationState.self, from: legacy)
+        #expect(legacyState.unresolvedFireBoundaries.isEmpty)
+        #expect(legacyState.pendingKind == .rescue)
+        #expect(legacyState.pendingDeliveryDate == nil)
     }
 
     @Test func consumedDayLedgerIsBoundedAndKeepsRecentDays() {
@@ -2167,6 +2199,110 @@ struct ReadingMotivationTests {
             preferenceRevision: 1, requestRevision: 3
         ) == .none)
         #expect(await scheduler.scheduleCalls() == 1)
+    }
+
+    @Test(
+        arguments: [false, true]
+    )
+    func supersessionDuringPausedPreparedReplacementSaveConsumesDurableOldBoundary(
+        dismissEvidence: Bool
+    ) async throws {
+        let start = date(2026, 11, 15, 18)
+        let oldFire = date(2026, 11, 15, 20)
+        let newFire = date(2026, 11, 15, 21)
+        let dayKey = "2026-11-15"
+        let identifier = ReadingMotivationNotificationCoordinator.identifier(for: dayKey)
+        let clock = TestMotivationClock(start)
+        let scheduler = TestMotivationScheduler()
+        let storage = TestMotivationStateStore()
+        let registrations = TestMotivationIntentRegistration()
+        let (coordinator, _) = makeCoordinator(
+            scheduler: scheduler, stateStore: storage, now: start, clock: clock,
+            intentRegistrationObserver: { preference, request, _ in
+                Task { await registrations.note(preferenceRevision: preference, requestRevision: request) }
+            }
+        )
+        #expect(try await coordinator.reconcile(
+            candidates: [.init(kind: .pace, deliveryDate: oldFire)],
+            enabled: true, now: start, calendar: calendar,
+            preferenceRevision: 1, requestRevision: 1
+        ) == .schedule(kind: .pace, dayKey: dayKey))
+        #expect(await scheduler.scheduleCalls() == 1)
+
+        await storage.pauseNextPreparedPendingIntentSaveCall()
+        let replacing = Task {
+            try await coordinator.reconcile(
+                candidates: [
+                    .init(kind: .pace, deliveryDate: newFire),
+                    .init(kind: .rescue, deliveryDate: newFire),
+                ],
+                enabled: true, now: start, calendar: calendar,
+                preferenceRevision: 1, requestRevision: 2
+            )
+        }
+        await storage.waitForPausedSave()
+        // Old fire elapses and evidence may be dismissed while the prepared
+        // replacement save is still suspended; a newer revision registers next.
+        clock.advance(to: oldFire.addingTimeInterval(30))
+        await scheduler.setDelivered(identifier: identifier, at: oldFire)
+        if dismissEvidence {
+            await scheduler.clearDelivered()
+        }
+
+        let newer = Task {
+            try await coordinator.reconcile(
+                candidates: [.init(kind: .rescue, deliveryDate: newFire)],
+                enabled: true, now: start, calendar: calendar,
+                preferenceRevision: 1, requestRevision: 3
+            )
+        }
+        await registrations.waitFor(preferenceRevision: 1, requestRevision: 3)
+        await storage.resumePausedSave()
+
+        let staleDecision = try await replacing.value
+        let newerDecision = try await newer.value
+        #expect(staleDecision == .cancelPending || staleDecision == .none)
+        #expect(newerDecision == .cancelPending || newerDecision == .none)
+        #expect(await scheduler.scheduleCalls() == 1)
+        #expect(await scheduler.pendingCount() == 0)
+        let finalState = await storage.load()
+        #expect(finalState.hasConsumedDayKey(dayKey))
+        #expect(finalState.pendingKind == nil)
+        #expect(finalState.unresolvedFireBoundaries[dayKey] == nil)
+    }
+
+    @Test func restartFromEncodedPreparedReplacementCheckpointBlocksSecondSchedule() async throws {
+        let start = date(2026, 11, 15, 18)
+        let oldFire = date(2026, 11, 15, 20)
+        let newFire = date(2026, 11, 15, 21)
+        let dayKey = "2026-11-15"
+        var checkpoint = ReadingMotivationNotificationState(
+            pendingKind: .rescue,
+            pendingDayKey: dayKey,
+            pendingDeliveryDate: newFire
+        )
+        checkpoint.retainUnresolvedFireBoundary(dayKey: dayKey, fireDate: oldFire)
+        let encoded = try JSONEncoder().encode(checkpoint)
+        let decoded = try JSONDecoder().decode(ReadingMotivationNotificationState.self, from: encoded)
+        #expect(decoded.unresolvedFireBoundaries[dayKey] == oldFire)
+        #expect(decoded.pendingDeliveryDate == newFire)
+
+        let clock = TestMotivationClock(oldFire.addingTimeInterval(30))
+        let scheduler = TestMotivationScheduler()
+        let storage = TestMotivationStateStore(decoded)
+        let (restarted, _) = makeCoordinator(
+            scheduler: scheduler, stateStore: storage, now: clock.now(), clock: clock
+        )
+        #expect(try await restarted.reconcile(
+            candidates: [.init(kind: .rescue, deliveryDate: newFire)],
+            enabled: true, now: clock.now(), calendar: calendar,
+            preferenceRevision: 1, requestRevision: 1
+        ) == .none)
+        #expect(await scheduler.scheduleCalls() == 0)
+        #expect(await scheduler.pendingCount() == 0)
+        #expect(await storage.load().hasConsumedDayKey(dayKey))
+        #expect(await storage.load().pendingKind == nil)
+        #expect(await storage.load().unresolvedFireBoundaries[dayKey] == nil)
     }
 
     @Test func initialPendingIntentSaveSpanningOwnFireBoundaryDeclinesInstall() async throws {

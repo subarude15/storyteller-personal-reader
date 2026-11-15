@@ -688,13 +688,17 @@ public struct ReadingMotivationNotificationState: Codable, Equatable, Sendable {
     public var pendingKind: ReadingMotivationNotificationKind?
     public var pendingDayKey: String?
     public var pendingDeliveryDate: Date?
+    /// Earliest unresolved replaced fire boundary per requested day.
+    /// Survives `clearPendingState` / stale cleanup / failure until resolved.
+    public var unresolvedFireBoundaries: [String: Date]
 
     public init(
         consumedDayKey: String? = nil,
         consumedDayKeys: Set<String> = [],
         pendingKind: ReadingMotivationNotificationKind? = nil,
         pendingDayKey: String? = nil,
-        pendingDeliveryDate: Date? = nil
+        pendingDeliveryDate: Date? = nil,
+        unresolvedFireBoundaries: [String: Date] = [:]
     ) {
         self.consumedDayKey = consumedDayKey
         var keys = consumedDayKeys
@@ -703,6 +707,7 @@ public struct ReadingMotivationNotificationState: Codable, Equatable, Sendable {
         self.pendingKind = pendingKind
         self.pendingDayKey = pendingDayKey
         self.pendingDeliveryDate = pendingDeliveryDate
+        self.unresolvedFireBoundaries = unresolvedFireBoundaries
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -711,6 +716,7 @@ public struct ReadingMotivationNotificationState: Codable, Equatable, Sendable {
         case pendingKind
         case pendingDayKey
         case pendingDeliveryDate
+        case unresolvedFireBoundaries
     }
 
     public init(from decoder: Decoder) throws {
@@ -720,7 +726,10 @@ public struct ReadingMotivationNotificationState: Codable, Equatable, Sendable {
             consumedDayKeys: try values.decodeIfPresent(Set<String>.self, forKey: .consumedDayKeys) ?? [],
             pendingKind: try values.decodeIfPresent(ReadingMotivationNotificationKind.self, forKey: .pendingKind),
             pendingDayKey: try values.decodeIfPresent(String.self, forKey: .pendingDayKey),
-            pendingDeliveryDate: try values.decodeIfPresent(Date.self, forKey: .pendingDeliveryDate)
+            pendingDeliveryDate: try values.decodeIfPresent(Date.self, forKey: .pendingDeliveryDate),
+            unresolvedFireBoundaries: try values.decodeIfPresent(
+                [String: Date].self, forKey: .unresolvedFireBoundaries
+            ) ?? [:]
         )
     }
 
@@ -731,6 +740,9 @@ public struct ReadingMotivationNotificationState: Codable, Equatable, Sendable {
         try values.encodeIfPresent(pendingKind, forKey: .pendingKind)
         try values.encodeIfPresent(pendingDayKey, forKey: .pendingDayKey)
         try values.encodeIfPresent(pendingDeliveryDate, forKey: .pendingDeliveryDate)
+        if !unresolvedFireBoundaries.isEmpty {
+            try values.encode(unresolvedFireBoundaries, forKey: .unresolvedFireBoundaries)
+        }
     }
 
     public static let empty = ReadingMotivationNotificationState()
@@ -743,6 +755,21 @@ public struct ReadingMotivationNotificationState: Codable, Equatable, Sendable {
         consumedDayKey = dayKey
         consumedDayKeys.insert(dayKey)
         consumedDayKeys = Self.bounded(consumedDayKeys)
+    }
+
+    /// Keep the earliest unresolved fire date for a requested day across chained
+    /// replacements. Unresolved entries are not capped away for size.
+    public mutating func retainUnresolvedFireBoundary(dayKey: String, fireDate: Date) {
+        if let existing = unresolvedFireBoundaries[dayKey] {
+            unresolvedFireBoundaries[dayKey] = min(existing, fireDate)
+        } else {
+            unresolvedFireBoundaries[dayKey] = fireDate
+        }
+    }
+
+    public mutating func dropFutureUnresolvedFireBoundary(dayKey: String, now: Date) {
+        guard let fire = unresolvedFireBoundaries[dayKey], fire > now else { return }
+        unresolvedFireBoundaries.removeValue(forKey: dayKey)
     }
 
     private static func bounded(_ keys: Set<String>) -> Set<String> {
@@ -1077,6 +1104,8 @@ public actor ReadingMotivationNotificationCoordinator {
         // authoritative so a late OS delivery cannot be followed by a replacement.
         var referenceNow = max(now, clock.now())
         await ingestDelivered(calendar: calendar)
+        await consumeExpiredUnresolvedBoundaries(now: referenceNow, calendar: calendar)
+        referenceNow = max(now, clock.now())
         await consumeExpiredPending(now: referenceNow, calendar: calendar)
         await stateStore.save(state)
         guard isLatestIntent(
@@ -1122,6 +1151,8 @@ public actor ReadingMotivationNotificationCoordinator {
                 }()
                 await ingestDelivered(calendar: calendar)
                 referenceNow = max(now, clock.now())
+                await consumeExpiredUnresolvedBoundaries(now: referenceNow, calendar: calendar)
+                referenceNow = max(now, clock.now())
                 await consumeExpiredPending(now: referenceNow, calendar: calendar)
                 guard isLatestIntent(
                     enabled: enabled,
@@ -1160,6 +1191,8 @@ public actor ReadingMotivationNotificationCoordinator {
                 // Cancel awaits do not control OS delivery of the old request.
                 await ingestDelivered(calendar: calendar)
                 referenceNow = max(now, clock.now())
+                await consumeExpiredUnresolvedBoundaries(now: referenceNow, calendar: calendar)
+                referenceNow = max(now, clock.now())
                 await consumeExpiredPending(now: referenceNow, calendar: calendar)
                 guard isLatestIntent(
                     enabled: enabled,
@@ -1187,10 +1220,16 @@ public actor ReadingMotivationNotificationCoordinator {
                     preferenceRevision: preferenceRevision,
                     requestRevision: requestRevision
                 ) else { return .none }
-                // Retain the replaced request's fire boundary before overwrite so a
-                // suspended pending-intent save cannot hide a late old delivery.
+                // Persist the replaced request's fire boundary with the prepared
+                // intent so crash/stale cleanup cannot lose late old-delivery evidence.
                 let priorPendingDayKey = state.pendingDayKey
                 let priorPendingDeliveryDate = state.pendingDeliveryDate
+                retainPriorPendingAsUnresolvedBoundary(now: referenceNow, calendar: calendar)
+                if state.hasConsumedDayKey(installDay) {
+                    clearPendingState()
+                    await stateStore.save(state)
+                    return .cancelPending
+                }
                 let request = ReadingMotivationNotificationRequest(
                     identifier: Self.identifier(for: installDay),
                     kind: installKind,
@@ -1226,6 +1265,8 @@ public actor ReadingMotivationNotificationCoordinator {
                     return latestEnabledPreference ? .none : .cancelPending
                 }
                 await ingestDelivered(calendar: calendar)
+                referenceNow = max(now, clock.now())
+                await consumeExpiredUnresolvedBoundaries(now: referenceNow, calendar: calendar)
                 referenceNow = max(now, clock.now())
                 await consumeExpiredPending(now: referenceNow, calendar: calendar)
                 if !isLatestIntent(
@@ -1328,10 +1369,34 @@ public actor ReadingMotivationNotificationCoordinator {
         transactionWaiters.removeFirst().resume()
     }
 
+    /// Clears only the current prepared pending request. Unresolved replaced fire
+    /// boundaries stay until conservatively resolved into the consumed ledger.
     private func clearPendingState() {
         state.pendingKind = nil
         state.pendingDayKey = nil
         state.pendingDeliveryDate = nil
+    }
+
+    /// Fold the about-to-be-overwritten pending fire boundary into durable evidence.
+    /// Undated legacy pending is consumed immediately (absence is not non-delivery).
+    private func retainPriorPendingAsUnresolvedBoundary(now: Date, calendar: Calendar) {
+        guard let priorDay = state.pendingDayKey else { return }
+        if let priorFire = state.pendingDeliveryDate {
+            state.retainUnresolvedFireBoundary(dayKey: priorDay, fireDate: priorFire)
+        } else {
+            state.consume(dayKey: priorDay)
+            state.consume(
+                dayKey: ReadingMotivationNotificationPolicy.localDayKey(now, calendar: calendar)
+            )
+        }
+    }
+
+    /// After a confirmed OS install of the current pending request, still-future
+    /// superseded boundaries for that day are safe to drop without consuming.
+    private func dropFutureUnresolvedIfSafe(dayKey: String, now: Date) async {
+        guard state.unresolvedFireBoundaries[dayKey] != nil else { return }
+        state.dropFutureUnresolvedFireBoundary(dayKey: dayKey, now: now)
+        await stateStore.save(state)
     }
 
     /// Crash recovery: ledger may retain a future unconsumed pending intent that
@@ -1365,6 +1430,8 @@ public actor ReadingMotivationNotificationCoordinator {
         var liveNow = max(now, clock.now())
         await ingestDelivered(calendar: calendar)
         liveNow = max(now, clock.now())
+        await consumeExpiredUnresolvedBoundaries(now: liveNow, calendar: calendar)
+        liveNow = max(now, clock.now())
         await consumeExpiredPending(now: liveNow, calendar: calendar)
         await stateStore.save(state)
 
@@ -1381,6 +1448,8 @@ public actor ReadingMotivationNotificationCoordinator {
         else { return .none }
 
         if osPending.contains(identifier) {
+            // Prior OS install succeeded; drop still-future superseded evidence.
+            await dropFutureUnresolvedIfSafe(dayKey: pendingDay, now: liveNow)
             return .none
         }
 
@@ -1388,6 +1457,8 @@ public actor ReadingMotivationNotificationCoordinator {
         let osPendingAgain = await scheduler.pendingIdentifiers()
         liveNow = max(now, clock.now())
         await ingestDelivered(calendar: calendar)
+        liveNow = max(now, clock.now())
+        await consumeExpiredUnresolvedBoundaries(now: liveNow, calendar: calendar)
         liveNow = max(now, clock.now())
         await consumeExpiredPending(now: liveNow, calendar: calendar)
         await stateStore.save(state)
@@ -1406,6 +1477,7 @@ public actor ReadingMotivationNotificationCoordinator {
         else { return .none }
 
         if osPendingAgain.contains(identifier) {
+            await dropFutureUnresolvedIfSafe(dayKey: pendingDay, now: liveNow)
             return .none
         }
 
@@ -1439,7 +1511,7 @@ public actor ReadingMotivationNotificationCoordinator {
             kind: pendingKind,
             deliveryDate: stillDelivery
         )
-        // Recovery has no replaced boundary distinct from the ledger pending itself.
+        // Durable unresolved boundaries travel with the ledger; local prior is nil.
         let installed = try await installPreparedPendingIfStillEligible(
             request: request,
             installKind: pendingKind,
@@ -1466,6 +1538,8 @@ public actor ReadingMotivationNotificationCoordinator {
         }
         await ingestDelivered(calendar: calendar)
         liveNow = max(now, clock.now())
+        await consumeExpiredUnresolvedBoundaries(now: liveNow, calendar: calendar)
+        liveNow = max(now, clock.now())
         await consumeExpiredPending(now: liveNow, calendar: calendar)
         await stateStore.save(state)
         if state.hasConsumedDayKey(pendingDay) {
@@ -1475,9 +1549,10 @@ public actor ReadingMotivationNotificationCoordinator {
         return .schedule(kind: pendingKind, dayKey: pendingDay)
     }
 
-    /// After the last awaited pending-intent persistence, re-ingest deliveries,
-    /// refresh the clock, consume any retained replaced fire boundary, and only
-    /// then enter `scheduler.schedule` with no further await gap.
+    /// After the last awaited pending-intent persistence, resolve durable/local
+    /// replaced fire boundaries first, refresh the clock, then stale-intent /
+    /// expiry guards, and only then enter `scheduler.schedule` with no further
+    /// await gap after the final non-suspending check.
     private func installPreparedPendingIfStillEligible(
         request: ReadingMotivationNotificationRequest,
         installKind: ReadingMotivationNotificationKind,
@@ -1490,18 +1565,10 @@ public actor ReadingMotivationNotificationCoordinator {
         now: Date,
         calendar: Calendar
     ) async throws -> Bool {
-        guard isLatestIntent(
-            enabled: enabled,
-            preferenceRevision: preferenceRevision,
-            requestRevision: requestRevision
-        ) else {
-            clearPendingState()
-            await stateStore.save(state)
-            return false
-        }
-
         await ingestDelivered(calendar: calendar)
         var installNow = max(now, clock.now())
+        // Merge any call-local prior into durable evidence, then resolve expired
+        // boundaries BEFORE any stale-intent clear can erase them.
         await consumeRetainedExpiredBoundary(
             priorDayKey: priorPendingDayKey,
             priorDeliveryDate: priorPendingDeliveryDate,
@@ -1528,6 +1595,8 @@ public actor ReadingMotivationNotificationCoordinator {
             || request.deliveryDate <= installNow
         {
             if state.pendingDayKey != nil {
+                await consumeExpiredUnresolvedBoundaries(now: installNow, calendar: calendar)
+                installNow = max(now, clock.now())
                 await consumeExpiredPending(now: installNow, calendar: calendar)
                 if state.pendingDayKey != nil {
                     clearPendingState()
@@ -1550,6 +1619,8 @@ public actor ReadingMotivationNotificationCoordinator {
             state.pendingDeliveryDate == request.deliveryDate,
             request.deliveryDate > installNow
         else {
+            let failedNow = max(now, clock.now())
+            await consumeExpiredUnresolvedBoundaries(now: failedNow, calendar: calendar)
             await consumeExpiredPending(now: max(now, clock.now()), calendar: calendar)
             if state.pendingDayKey != nil {
                 clearPendingState()
@@ -1560,6 +1631,15 @@ public actor ReadingMotivationNotificationCoordinator {
 
         do {
             try await scheduler.schedule(request)
+            // OS add already entered. Resolve any boundary that elapsed during the
+            // await; only then drop still-future superseded evidence for this day.
+            var afterSchedule = max(now, clock.now())
+            await consumeExpiredUnresolvedBoundaries(now: afterSchedule, calendar: calendar)
+            afterSchedule = max(now, clock.now())
+            if state.unresolvedFireBoundaries[installDay] != nil {
+                state.dropFutureUnresolvedFireBoundary(dayKey: installDay, now: afterSchedule)
+                await stateStore.save(state)
+            }
             return true
         } catch {
             clearPendingState()
@@ -1568,36 +1648,50 @@ public actor ReadingMotivationNotificationCoordinator {
         }
     }
 
-    /// Consume a replaced request's fire boundary retained outside overwritten
-    /// pending fields so save suspension across the old boundary cannot miss a
-    /// late delivery (including dismissed OS evidence).
+    /// Merge a call-local replaced boundary into durable evidence, then consume
+    /// any expired durable boundaries (including dismissed OS evidence).
     private func consumeRetainedExpiredBoundary(
         priorDayKey: String?,
         priorDeliveryDate: Date?,
         now: Date,
         calendar: Calendar
     ) async {
-        guard let priorDayKey else { return }
-        if let priorDeliveryDate {
-            guard priorDeliveryDate <= now else { return }
-            state.consume(dayKey: priorDayKey)
+        if let priorDayKey {
+            if let priorDeliveryDate {
+                state.retainUnresolvedFireBoundary(dayKey: priorDayKey, fireDate: priorDeliveryDate)
+            } else {
+                // Undated legacy: absence from OS is not non-delivery proof.
+                state.consume(dayKey: priorDayKey)
+                state.consume(
+                    dayKey: ReadingMotivationNotificationPolicy.localDayKey(now, calendar: calendar)
+                )
+                await stateStore.save(state)
+            }
+        }
+        await consumeExpiredUnresolvedBoundaries(now: now, calendar: calendar)
+    }
+
+    /// Conservatively fold expired unresolved replaced fire boundaries into the
+    /// consumed ledger before any clear/cancel/reinstall can erase evidence.
+    private func consumeExpiredUnresolvedBoundaries(now: Date, calendar: Calendar) async {
+        let expired = state.unresolvedFireBoundaries.filter { _, fireDate in fireDate <= now }
+        guard !expired.isEmpty else { return }
+        for (dayKey, fireDate) in expired {
+            state.consume(dayKey: dayKey)
             state.consume(
                 dayKey: ReadingMotivationNotificationPolicy.localDayKey(
-                    priorDeliveryDate, calendar: calendar
+                    fireDate, calendar: calendar
                 )
             )
             state.consume(
                 dayKey: ReadingMotivationNotificationPolicy.localDayKey(now, calendar: calendar)
             )
-        } else {
-            // Undated legacy: absence from OS is not non-delivery proof.
-            state.consume(dayKey: priorDayKey)
-            state.consume(
-                dayKey: ReadingMotivationNotificationPolicy.localDayKey(now, calendar: calendar)
-            )
+            state.unresolvedFireBoundaries.removeValue(forKey: dayKey)
         }
         await stateStore.save(state)
-        await scheduler.cancelPending(identifier: Self.identifier(for: priorDayKey))
+        for dayKey in expired.keys {
+            await scheduler.cancelPending(identifier: Self.identifier(for: dayKey))
+        }
         if let pendingDay = state.pendingDayKey, state.hasConsumedDayKey(pendingDay) {
             clearPendingState()
             await stateStore.save(state)
@@ -1612,6 +1706,8 @@ public actor ReadingMotivationNotificationCoordinator {
         // be dismissed. Account for evidence and elapsed fire time before erasing
         // the pending record so a later same-day request cannot duplicate it.
         await ingestDelivered(calendar: calendar)
+        let liveNow = max(referenceNow, clock.now())
+        await consumeExpiredUnresolvedBoundaries(now: liveNow, calendar: calendar)
         await consumeExpiredPending(now: max(referenceNow, clock.now()), calendar: calendar)
         clearPendingState()
         await stateStore.save(state)
