@@ -1474,7 +1474,7 @@ public actor AudioSessionActor {
     private var geometryLifecycleSnapshot: AudioSessionSnapshot?
     private var usesGeometryLifecycleSnapshot: Bool {
         Bundle.main.bundleIdentifier == "com.punkrally.reader.geometry"
-            && ["cover", "async"].contains(
+            && ["cover", "async", "launch"].contains(
                 ProcessInfo.processInfo.environment["INKAMP_GEOMETRY_LIFECYCLE"] ?? "")
     }
     public func publishGeometryLifecycleSnapshot(_ snapshot: AudioSessionSnapshot?) {
