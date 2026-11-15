@@ -103,7 +103,37 @@ public struct ReadingMotivationDay: Equatable, Sendable, Identifiable {
     public let readingSeconds: TimeInterval
     public let listeningSeconds: TimeInterval
 
+    public init(day: Date, readingSeconds: TimeInterval, listeningSeconds: TimeInterval) {
+        self.day = day
+        self.readingSeconds = readingSeconds.isFinite && readingSeconds > 0 ? readingSeconds : 0
+        self.listeningSeconds = listeningSeconds.isFinite && listeningSeconds > 0 ? listeningSeconds : 0
+    }
+
     public var seconds: TimeInterval { readingSeconds + listeningSeconds }
+}
+
+/// Frozen local-calendar date identity for activity already removed from SessionTracker.
+public struct ReadingMotivationActivityDay: Codable, Equatable, Hashable, Sendable, Identifiable {
+    public let year: Int
+    public let month: Int
+    public let day: Int
+    public let calendarIdentifier: String
+    public let timeZoneIdentifier: String
+
+    public var dayKey: String {
+        String(format: "%04d-%02d-%02d", year, month, day)
+    }
+
+    public var id: String { dayKey + "|" + calendarIdentifier + "|" + timeZoneIdentifier }
+
+    public init(date: Date, calendar: Calendar, timeZoneIdentifier: String? = nil) {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        year = components.year ?? 0
+        month = components.month ?? 0
+        day = components.day ?? 0
+        calendarIdentifier = String(describing: calendar.identifier)
+        self.timeZoneIdentifier = timeZoneIdentifier ?? calendar.timeZone.identifier
+    }
 }
 
 public struct ReadingMotivationStreaks: Equatable, Sendable {
@@ -170,33 +200,36 @@ public enum ReadingMotivationCalculations {
         sessions: [InkampStatsSessionRecord],
         calendar: Calendar,
         now: Date,
-        archivedActivityDays: [Date] = []
+        archivedActivityDays: [ReadingMotivationActivityDay] = []
     ) -> ReadingMotivationStreaks {
-        let today = calendar.startOfDay(for: now)
-        let activeDays = Set(
-            dailyTotals(sessions: sessions, calendar: calendar, now: now).map(\.day)
-                + archivedActivityDays.map { calendar.startOfDay(for: $0) }.filter { $0 <= today }
-        )
+        let today = localDayKey(now, calendar: calendar)
+        var activeDays = Set(dailyTotals(sessions: sessions, calendar: calendar, now: now).map {
+            localDayKey($0.day, calendar: calendar)
+        })
+        let calendarIdentifier = String(describing: calendar.identifier)
+        activeDays.formUnion(archivedActivityDays.filter {
+            $0.calendarIdentifier == calendarIdentifier
+        }.map(\.dayKey).filter {
+                $0 <= today && ordinalDate(for: $0, calendar: calendar) != nil
+        })
         guard !activeDays.isEmpty else { return ReadingMotivationStreaks(current: 0, longest: 0) }
 
         var longest = 0
         var run = 0
-        var previous: Date?
-        for day in activeDays.sorted() {
-            if let previous,
-                calendar.date(byAdding: .day, value: 1, to: previous) == day
-            {
+        var previous: String?
+        for dayKey in activeDays.sorted() {
+            if let previous, nextDayKey(after: previous, calendar: calendar) == dayKey {
                 run += 1
             } else {
                 run = 1
             }
             longest = max(longest, run)
-            previous = day
+            previous = dayKey
         }
 
         var cursor = today
         if !activeDays.contains(cursor) {
-            guard let yesterday = calendar.date(byAdding: .day, value: -1, to: today),
+            guard let yesterday = previousDayKey(before: today, calendar: calendar),
                 activeDays.contains(yesterday)
             else {
                 return ReadingMotivationStreaks(current: 0, longest: longest)
@@ -206,10 +239,60 @@ public enum ReadingMotivationCalculations {
         var current = 0
         while activeDays.contains(cursor) {
             current += 1
-            guard let previousDay = calendar.date(byAdding: .day, value: -1, to: cursor) else { break }
+            guard let previousDay = previousDayKey(before: cursor, calendar: calendar) else { break }
             cursor = previousDay
         }
         return ReadingMotivationStreaks(current: current, longest: longest)
+    }
+
+    public static func archiveExpiredActivityDays(
+        sessions: [InkampStatsSessionRecord],
+        before cutoff: Date,
+        existing: Set<ReadingMotivationActivityDay>,
+        calendar: Calendar,
+        now: Date
+    ) -> Set<ReadingMotivationActivityDay> {
+        let expired = normalizedSessions(sessions, now: now).filter { $0.endedAt < cutoff }
+        let days = dailyTotals(sessions: expired, calendar: calendar, now: now)
+        let existingKeys = Set(existing.map(\.dayKey))
+        let additions = days
+            .map { ReadingMotivationActivityDay(date: $0.day, calendar: calendar) }
+            .filter { !existingKeys.contains($0.dayKey) }
+        return existing.union(additions)
+    }
+
+    public static func migrateLegacyActivityDays(
+        staleDates: Set<Date>,
+        sessions: [InkampStatsSessionRecord],
+        before cutoff: Date,
+        calendar: Calendar,
+        now: Date
+    ) -> Set<ReadingMotivationActivityDay> {
+        // v1 stored local-midnight instants without the source time zone and included
+        // still-retained sessions. Rebuild overlapping days from sessions; freeze orphaned
+        // markers as UTC date identities so they are never reinterpreted after travel.
+        let normalized = normalizedSessions(sessions, now: now)
+        var migrated = archiveExpiredActivityDays(
+            sessions: sessions,
+            before: cutoff,
+            existing: [],
+            calendar: calendar,
+            now: now
+        )
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(secondsFromGMT: 0) ?? calendar.timeZone
+        for marker in staleDates {
+            let hasSessionSource = normalized.contains {
+                $0.startedAt < marker.addingTimeInterval(25 * 3600) && $0.endedAt > marker
+            }
+            guard !hasSessionSource else { continue }
+            migrated.insert(
+                ReadingMotivationActivityDay(
+                    date: marker, calendar: utc, timeZoneIdentifier: "legacy-UTC"
+                )
+            )
+        }
+        return migrated
     }
 
     public static func weeklyReceipt(
@@ -218,7 +301,7 @@ public enum ReadingMotivationCalculations {
         weekOffset: Int,
         calendar: Calendar,
         now: Date,
-        archivedActivityDays: [Date] = []
+        archivedActivityDays: [ReadingMotivationActivityDay] = []
     ) -> ReadingMotivationWeeklyReceipt {
         let current = calendar.dateInterval(of: .weekOfYear, for: now)
             ?? DateInterval(start: calendar.startOfDay(for: now), duration: 7 * 24 * 3600)
@@ -251,6 +334,43 @@ public enum ReadingMotivationCalculations {
                 archivedActivityDays: archivedActivityDays
             ).current
         )
+    }
+
+    private static func localDayKey(_ date: Date, calendar: Calendar) -> String {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(
+            format: "%04d-%02d-%02d",
+            components.year ?? 0,
+            components.month ?? 0,
+            components.day ?? 0
+        )
+    }
+
+    private static func nextDayKey(after key: String, calendar: Calendar) -> String? {
+        guard let date = ordinalDate(for: key, calendar: calendar),
+            let next = calendar.date(byAdding: .day, value: 1, to: date)
+        else { return nil }
+        return localDayKey(next, calendar: calendar)
+    }
+
+    private static func previousDayKey(before key: String, calendar: Calendar) -> String? {
+        guard let date = ordinalDate(for: key, calendar: calendar),
+            let previous = calendar.date(byAdding: .day, value: -1, to: date)
+        else { return nil }
+        return localDayKey(previous, calendar: calendar)
+    }
+
+    fileprivate static func ordinalDate(
+        for key: String,
+        calendar: Calendar
+    ) -> Date? {
+        let parts = key.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3, parts[0] > 0 else { return nil }
+        let components = DateComponents(year: parts[0], month: parts[1], day: parts[2])
+        guard let date = calendar.date(from: components) else { return nil }
+        let verified = calendar.dateComponents([.year, .month, .day], from: date)
+        guard verified.year == parts[0], verified.month == parts[1], verified.day == parts[2] else { return nil }
+        return date
     }
 
     /// Audio uses its known remaining content and current playback rate. Ebooks
@@ -412,29 +532,69 @@ public struct ReadingMotivationNotificationCandidate: Equatable, Sendable {
 
 public struct ReadingMotivationNotificationState: Codable, Equatable, Sendable {
     public var consumedDayKey: String?
+    public var consumedDayKeys: Set<String>
     public var pendingKind: ReadingMotivationNotificationKind?
     public var pendingDayKey: String?
     public var pendingDeliveryDate: Date?
 
     public init(
         consumedDayKey: String? = nil,
+        consumedDayKeys: Set<String> = [],
         pendingKind: ReadingMotivationNotificationKind? = nil,
         pendingDayKey: String? = nil,
         pendingDeliveryDate: Date? = nil
     ) {
         self.consumedDayKey = consumedDayKey
+        var keys = consumedDayKeys
+        if let consumedDayKey { keys.insert(consumedDayKey) }
+        self.consumedDayKeys = Self.bounded(keys)
         self.pendingKind = pendingKind
         self.pendingDayKey = pendingDayKey
         self.pendingDeliveryDate = pendingDeliveryDate
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case consumedDayKey
+        case consumedDayKeys
+        case pendingKind
+        case pendingDayKey
+        case pendingDeliveryDate
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            consumedDayKey: try values.decodeIfPresent(String.self, forKey: .consumedDayKey),
+            consumedDayKeys: try values.decodeIfPresent(Set<String>.self, forKey: .consumedDayKeys) ?? [],
+            pendingKind: try values.decodeIfPresent(ReadingMotivationNotificationKind.self, forKey: .pendingKind),
+            pendingDayKey: try values.decodeIfPresent(String.self, forKey: .pendingDayKey),
+            pendingDeliveryDate: try values.decodeIfPresent(Date.self, forKey: .pendingDeliveryDate)
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encodeIfPresent(consumedDayKey, forKey: .consumedDayKey)
+        try values.encode(consumedDayKeys, forKey: .consumedDayKeys)
+        try values.encodeIfPresent(pendingKind, forKey: .pendingKind)
+        try values.encodeIfPresent(pendingDayKey, forKey: .pendingDayKey)
+        try values.encodeIfPresent(pendingDeliveryDate, forKey: .pendingDeliveryDate)
+    }
+
     public static let empty = ReadingMotivationNotificationState()
 
-    public mutating func markDelivered(on date: Date, calendar: Calendar) {
-        consumedDayKey = ReadingMotivationNotificationPolicy.localDayKey(date, calendar: calendar)
-        pendingKind = nil
-        pendingDayKey = nil
-        pendingDeliveryDate = nil
+    public func hasConsumedDayKey(_ key: String) -> Bool {
+        consumedDayKeys.contains(key) || consumedDayKey == key
+    }
+
+    public mutating func consume(dayKey: String) {
+        consumedDayKey = dayKey
+        consumedDayKeys.insert(dayKey)
+        consumedDayKeys = Self.bounded(consumedDayKeys)
+    }
+
+    private static func bounded(_ keys: Set<String>) -> Set<String> {
+        Set(keys.sorted().suffix(400))
     }
 }
 
@@ -528,14 +688,16 @@ public enum ReadingMotivationNotificationPolicy {
             }
             .max { $0.kind.priority < $1.kind.priority }
 
-        if state.consumedDayKey == dayKey {
-            return state.pendingDayKey == dayKey ? .cancelPending : .none
+        if state.hasConsumedDayKey(dayKey) {
+            return state.pendingKind == nil ? .none : .cancelPending
         }
         guard let selected else {
             return state.pendingKind == nil ? .none : .cancelPending
         }
         if state.pendingDayKey == dayKey, let pendingKind = state.pendingKind {
-            guard selected.kind.priority > pendingKind.priority else { return .none }
+            if selected.kind == pendingKind, selected.deliveryDate == state.pendingDeliveryDate {
+                return .none
+            }
             return .replacePending(kind: selected.kind, dayKey: dayKey)
         }
         return .schedule(kind: selected.kind, dayKey: dayKey)
@@ -566,7 +728,7 @@ public protocol ReadingMotivationNotificationScheduling: Sendable {
     func requestAuthorization() async -> Bool
     func schedule(_ request: ReadingMotivationNotificationRequest) async throws
     func cancelPending(identifier: String) async
-    func deliveredIdentifiers() async -> Set<String>
+    func deliveredNotifications() async -> [String: Date]
     func removeDelivered(identifiers: Set<String>) async
 }
 
@@ -603,6 +765,10 @@ public actor ReadingMotivationNotificationCoordinator {
     private let stateStore: any ReadingMotivationNotificationStateStoring
     private var state: ReadingMotivationNotificationState = .empty
     private var hasLoadedState = false
+    private var transactionActive = false
+    private var transactionWaiters: [CheckedContinuation<Void, Never>] = []
+    private var latestPreferenceRevision: UInt64 = 0
+    private var latestRequestRevision: UInt64 = 0
 
     public init(
         scheduler: any ReadingMotivationNotificationScheduling,
@@ -626,28 +792,48 @@ public actor ReadingMotivationNotificationCoordinator {
         candidates: [ReadingMotivationNotificationCandidate],
         enabled: Bool,
         now: Date,
-        calendar: Calendar
+        calendar: Calendar,
+        preferenceRevision: UInt64 = 0,
+        requestRevision: UInt64 = 0
     ) async throws -> ReadingMotivationNotificationDecision {
+        await beginTransaction()
+        defer { endTransaction() }
         await loadStateIfNeeded()
-        let currentDay = ReadingMotivationNotificationPolicy.localDayKey(now, calendar: calendar)
-        let currentIdentifier = Self.identifier(for: currentDay)
-        let delivered = await scheduler.deliveredIdentifiers()
-        let pendingWasDelivered = state.pendingDayKey.map {
-            delivered.contains(Self.identifier(for: $0))
-        } ?? false
-        if delivered.contains(currentIdentifier)
-            || pendingWasDelivered
-            || (state.pendingDayKey == currentDay
-                && state.pendingDeliveryDate.map { $0 <= now } == true)
-        {
-            state.consumedDayKey = currentDay
-            state.pendingKind = nil
-            state.pendingDayKey = nil
-            state.pendingDeliveryDate = nil
-            await stateStore.save(state)
-            await scheduler.cancelPending(identifier: currentIdentifier)
-            await scheduler.removeDelivered(identifiers: [currentIdentifier])
+        guard preferenceRevision >= latestPreferenceRevision,
+            requestRevision >= latestRequestRevision
+        else { return .none }
+        latestPreferenceRevision = preferenceRevision
+        latestRequestRevision = requestRevision
+
+        var deliveredIdentifiers: Set<String> = []
+        for (identifier, deliveredAt) in await scheduler.deliveredNotifications() {
+            guard let requestDay = Self.dayKey(from: identifier, calendar: calendar) else { continue }
+            deliveredIdentifiers.insert(identifier)
+            state.consume(dayKey: requestDay)
+            let actualDay = ReadingMotivationNotificationPolicy.localDayKey(deliveredAt, calendar: calendar)
+            state.consume(dayKey: actualDay)
+            if state.pendingDayKey == requestDay || state.pendingDayKey == actualDay {
+                if let pendingDay = state.pendingDayKey {
+                    await scheduler.cancelPending(identifier: Self.identifier(for: pendingDay))
+                }
+                clearPendingState()
+            }
         }
+        if let pendingDay = state.pendingDayKey,
+            let deliveryDate = state.pendingDeliveryDate,
+            deliveryDate <= now
+        {
+            state.consume(dayKey: pendingDay)
+            state.consume(
+                dayKey: ReadingMotivationNotificationPolicy.localDayKey(deliveryDate, calendar: calendar)
+            )
+            await scheduler.cancelPending(identifier: Self.identifier(for: pendingDay))
+            clearPendingState()
+        }
+        if !deliveredIdentifiers.isEmpty {
+            await scheduler.removeDelivered(identifiers: deliveredIdentifiers)
+        }
+        await stateStore.save(state)
 
         let authorized = await scheduler.authorization() == .authorized
         let decision = ReadingMotivationNotificationPolicy.decide(
@@ -662,12 +848,10 @@ public actor ReadingMotivationNotificationCoordinator {
             case .none:
                 break
             case .cancelPending:
-                if let dayKey = state.pendingDayKey {
-                    await scheduler.cancelPending(identifier: Self.identifier(for: dayKey))
+                if let pendingDay = state.pendingDayKey {
+                    await scheduler.cancelPending(identifier: Self.identifier(for: pendingDay))
                 }
-                state.pendingKind = nil
-                state.pendingDayKey = nil
-                state.pendingDeliveryDate = nil
+                clearPendingState()
                 await stateStore.save(state)
             case .schedule(let kind, let dayKey), .replacePending(let kind, let dayKey):
                 if let oldDay = state.pendingDayKey {
@@ -689,9 +873,7 @@ public actor ReadingMotivationNotificationCoordinator {
                 do {
                     try await scheduler.schedule(request)
                 } catch {
-                    state.pendingKind = nil
-                    state.pendingDayKey = nil
-                    state.pendingDeliveryDate = nil
+                    clearPendingState()
                     await stateStore.save(state)
                     throw error
                 }
@@ -701,25 +883,59 @@ public actor ReadingMotivationNotificationCoordinator {
 
     public func markDelivered(
         dayKey: String,
-        at date: Date = Date(),
+        deliveredAt: Date? = nil,
         calendar: Calendar = .current
     ) async {
+        await beginTransaction()
+        defer { endTransaction() }
         await loadStateIfNeeded()
-        let localDay = ReadingMotivationNotificationPolicy.localDayKey(date, calendar: calendar)
-        state.consumedDayKey = localDay
-        if state.pendingDayKey == dayKey || state.pendingDayKey == localDay {
+        guard ReadingMotivationCalculations.ordinalDate(for: dayKey, calendar: calendar) != nil else { return }
+        state.consume(dayKey: dayKey)
+        let actualDay = deliveredAt.map {
+            ReadingMotivationNotificationPolicy.localDayKey($0, calendar: calendar)
+        }
+        if let actualDay { state.consume(dayKey: actualDay) }
+        if state.pendingDayKey == dayKey || state.pendingDayKey == actualDay {
             if let pendingDay = state.pendingDayKey {
                 await scheduler.cancelPending(identifier: Self.identifier(for: pendingDay))
             }
-            state.pendingKind = nil
-            state.pendingDayKey = nil
-            state.pendingDeliveryDate = nil
+            clearPendingState()
         }
         await stateStore.save(state)
+        await scheduler.removeDelivered(identifiers: [Self.identifier(for: dayKey)])
     }
 
     public static func identifier(for dayKey: String) -> String {
         "reading-motivation." + dayKey
+    }
+
+    private static func dayKey(from identifier: String, calendar: Calendar) -> String? {
+        let prefix = "reading-motivation."
+        guard identifier.hasPrefix(prefix) else { return nil }
+        let key = String(identifier.dropFirst(prefix.count))
+        return ReadingMotivationCalculations.ordinalDate(for: key, calendar: calendar) == nil ? nil : key
+    }
+
+    private func beginTransaction() async {
+        guard transactionActive else {
+            transactionActive = true
+            return
+        }
+        await withCheckedContinuation { transactionWaiters.append($0) }
+    }
+
+    private func endTransaction() {
+        guard !transactionWaiters.isEmpty else {
+            transactionActive = false
+            return
+        }
+        transactionWaiters.removeFirst().resume()
+    }
+
+    private func clearPendingState() {
+        state.pendingKind = nil
+        state.pendingDayKey = nil
+        state.pendingDeliveryDate = nil
     }
 
     private func loadStateIfNeeded() async {

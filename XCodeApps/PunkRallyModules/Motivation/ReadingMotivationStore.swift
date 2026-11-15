@@ -11,6 +11,9 @@ final class ReadingMotivationStore {
     private(set) var settings: ReadingMotivationSettings
     private(set) var notificationMessage = "Reminders are off"
     private(set) var revision = 0
+    private var notificationPreferencesRevision: UInt64 = 0
+    private var notificationRequestRevision: UInt64 = 0
+    private var notificationToggleRevision: UInt64 = 0
 
     private init() {
         if let data = UserDefaults.standard.data(forKey: Self.settingsKey),
@@ -129,6 +132,7 @@ final class ReadingMotivationStore {
     }
 
     func setGoals(reading: Int, listening: Int) {
+        notificationPreferencesRevision &+= 1
         settings = ReadingMotivationSettings(
             dailyReadingGoalMinutes: reading,
             dailyListeningGoalMinutes: listening,
@@ -161,6 +165,7 @@ final class ReadingMotivationStore {
     }
 
     func setQuietTime(_ date: Date) {
+        notificationPreferencesRevision &+= 1
         let components = Calendar.current.dateComponents([.hour, .minute], from: date)
         settings = ReadingMotivationSettings(
             dailyReadingGoalMinutes: settings.dailyReadingGoalMinutes,
@@ -175,18 +180,24 @@ final class ReadingMotivationStore {
     }
 
     func setNotificationsEnabled(_ enabled: Bool) async -> Bool {
+        notificationPreferencesRevision &+= 1
+        notificationToggleRevision &+= 1
+        let toggleRevision = notificationToggleRevision
         #if os(iOS)
         if enabled {
             let authorized = await ReadingMotivationNotifications.shared.requestPermission()
             guard authorized else {
-                notificationMessage = "Permission not granted · check iOS Settings"
-                revision &+= 1
+                if toggleRevision == notificationToggleRevision {
+                    notificationMessage = "Permission not granted · check iOS Settings"
+                    revision &+= 1
+                }
                 return false
             }
         }
         #else
         if enabled { return false }
         #endif
+        guard toggleRevision == notificationToggleRevision else { return false }
         settings = ReadingMotivationSettings(
             dailyReadingGoalMinutes: settings.dailyReadingGoalMinutes,
             dailyListeningGoalMinutes: settings.dailyListeningGoalMinutes,
@@ -203,31 +214,37 @@ final class ReadingMotivationStore {
 
     func refreshNotifications(now: Date = Date()) async {
         #if os(iOS)
+        notificationRequestRevision &+= 1
+        let requestRevision = notificationRequestRevision
+        let preferenceRevision = notificationPreferencesRevision
         let calendar = Calendar.current
         let candidates = notificationCandidates(now: now, calendar: calendar)
-        if settings.notificationsEnabled {
-            notificationMessage = await ReadingMotivationNotifications.shared.isAuthorized()
-                ? "Reminders are on" : "Permission not granted · check iOS Settings"
-        } else {
-            notificationMessage = "Reminders are off"
-        }
         await ReadingMotivationNotifications.shared.reconcile(
             candidates: candidates,
             enabled: settings.notificationsEnabled,
             now: now,
-            calendar: calendar
+            calendar: calendar,
+            preferenceRevision: preferenceRevision,
+            requestRevision: requestRevision
         )
+        let authorized = await ReadingMotivationNotifications.shared.isAuthorized()
+        notificationMessage = !settings.notificationsEnabled
+            ? "Reminders are off"
+            : (authorized ? "Reminders are on" : "Permission not granted · check iOS Settings")
         #else
         notificationMessage = settings.notificationsEnabled
             ? "Local reminders are available on iPhone" : "Reminders are off"
         #endif
     }
 
-    func recordNotificationDelivered(dayKey: String) async {
+    func recordNotificationDelivered(dayKey: String, deliveredAt: Date?) async {
         #if os(iOS)
-        await ReadingMotivationNotifications.shared.markDelivered(dayKey: dayKey)
+        await ReadingMotivationNotifications.shared.markDelivered(
+            dayKey: dayKey, deliveredAt: deliveredAt
+        )
         #else
         _ = dayKey
+        _ = deliveredAt
         #endif
     }
 

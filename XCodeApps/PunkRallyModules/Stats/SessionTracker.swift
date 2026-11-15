@@ -24,11 +24,12 @@ final class SessionTracker {
 
     private let sessionsKey = "punkRally.stats.sessions.v1"
     private let finishedKey = "punkRally.stats.finished.v1"
-    private let streakDaysKey = "punkRally.stats.streakDays.v1"
+    private let streakDaysKey = "punkRally.stats.streakDays.v2"
+    private let legacyStreakDaysKey = "punkRally.stats.streakDays.v1"
 
     private var sessions: [PRMediaSession] = []
     private var finished: [PRFinishedBook] = []
-    private var archivedActivityDays: Set<Date> = []
+    private var archivedActivityDays: Set<ReadingMotivationActivityDay> = []
 
     /// Bumped whenever aggregates change so SwiftUI refreshes.
     private(set) var revision: Int = 0
@@ -72,8 +73,8 @@ final class SessionTracker {
         return records
     }
 
-    func motivationArchivedActivityDays() -> [Date] {
-        archivedActivityDays.sorted()
+    func motivationArchivedActivityDays() -> [ReadingMotivationActivityDay] {
+        archivedActivityDays.sorted { $0.id < $1.id }
     }
 
     /// Begin a session for a media item.
@@ -113,7 +114,6 @@ final class SessionTracker {
         session.endProgress = progress
         sessions.append(session)
         activeSession = nil
-        archiveActivityDays(at: ended)
 
         if let progress, progress >= 0.95 {
             recordFinished(mediaID: session.mediaID, mediaTitle: session.mediaTitle)
@@ -155,7 +155,6 @@ final class SessionTracker {
     func applyMergedSyncDocument(_ document: InkampStatsSyncDocument) {
         sessions = document.sessions.map(Self.fromSyncSession)
         finished = document.finished.map(Self.fromSyncFinished)
-        archiveActivityDays()
         revision &+= 1
         persist()
         Task { await ReadingMotivationStore.shared.refreshNotifications() }
@@ -163,10 +162,17 @@ final class SessionTracker {
 
     /// Prune sessions older than 1 year to keep storage small.
     func pruneOldSessions() {
-        archiveActivityDays()
-        let cutoff = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
+        let now = Date()
+        let cutoff = Calendar.current.date(byAdding: .year, value: -1, to: now) ?? now
+        archivedActivityDays = ReadingMotivationCalculations.archiveExpiredActivityDays(
+            sessions: sessions.map(Self.toSyncSession),
+            before: cutoff,
+            existing: archivedActivityDays,
+            calendar: Calendar.current,
+            now: now
+        )
         sessions.removeAll { $0.endedAt < cutoff }
-        scheduleSave()
+        persist()
     }
 
     /// Compute the full stats snapshot (includes live active session time).
@@ -240,11 +246,24 @@ final class SessionTracker {
             finished = decoded
         }
         if let data = defaults.data(forKey: streakDaysKey),
-            let decoded = try? JSONDecoder().decode(Set<Date>.self, from: data)
+            let decoded = try? JSONDecoder().decode(Set<ReadingMotivationActivityDay>.self, from: data)
         {
             archivedActivityDays = decoded
+        } else if let data = defaults.data(forKey: legacyStreakDaysKey),
+            let legacy = try? JSONDecoder().decode(Set<Date>.self, from: data)
+        {
+            let now = Date()
+            let cutoff = Calendar.current.date(byAdding: .year, value: -1, to: now) ?? now
+            archivedActivityDays = ReadingMotivationCalculations.migrateLegacyActivityDays(
+                staleDates: legacy,
+                sessions: sessions.map(Self.toSyncSession),
+                before: cutoff,
+                calendar: Calendar.current,
+                now: now
+            )
+            persist()
+            defaults.removeObject(forKey: legacyStreakDaysKey)
         }
-        archiveActivityDays()
     }
 
     private func scheduleSave() {
@@ -265,18 +284,6 @@ final class SessionTracker {
         }
         if let data = try? JSONEncoder().encode(archivedActivityDays) {
             defaults.set(data, forKey: streakDaysKey)
-        }
-    }
-
-    private func archiveActivityDays(at now: Date = Date()) {
-        let days = ReadingMotivationCalculations.dailyTotals(
-            sessions: sessions.map(Self.toSyncSession),
-            calendar: Calendar.current,
-            now: now
-        )
-        archivedActivityDays.formUnion(days.map(\.day))
-        if let data = try? JSONEncoder().encode(archivedActivityDays) {
-            UserDefaults.standard.set(data, forKey: streakDaysKey)
         }
     }
 

@@ -41,19 +41,26 @@ final class ReadingMotivationNotifications {
         candidates: [ReadingMotivationNotificationCandidate],
         enabled: Bool,
         now: Date,
-        calendar: Calendar
+        calendar: Calendar,
+        preferenceRevision: UInt64,
+        requestRevision: UInt64
     ) async {
         do {
             try await coordinator.reconcile(
-                candidates: candidates, enabled: enabled, now: now, calendar: calendar
+                candidates: candidates,
+                enabled: enabled,
+                now: now,
+                calendar: calendar,
+                preferenceRevision: preferenceRevision,
+                requestRevision: requestRevision
             )
         } catch {
             notificationSchedulingFailed()
         }
     }
 
-    func markDelivered(dayKey: String) async {
-        await coordinator.markDelivered(dayKey: dayKey)
+    func markDelivered(dayKey: String, deliveredAt: Date?) async {
+        await coordinator.markDelivered(dayKey: dayKey, deliveredAt: deliveredAt)
     }
 
     private func notificationSchedulingFailed() {
@@ -108,10 +115,15 @@ private final class UserNotificationScheduler: NSObject,
         center.removePendingNotificationRequests(withIdentifiers: [identifier])
     }
 
-    func deliveredIdentifiers() async -> Set<String> {
+    func deliveredNotifications() async -> [String: Date] {
         await withCheckedContinuation { continuation in
             center.getDeliveredNotifications { notifications in
-                continuation.resume(returning: Set(notifications.map(\.request.identifier)))
+                var deliveries: [String: Date] = [:]
+                for notification in notifications {
+                    let identifier = notification.request.identifier
+                    deliveries[identifier] = max(deliveries[identifier] ?? .distantPast, notification.date)
+                }
+                continuation.resume(returning: deliveries)
             }
         }
     }
@@ -125,7 +137,7 @@ private final class UserNotificationScheduler: NSObject,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        Self.postDelivered(notification.request.identifier)
+        Self.postDelivered(notification.request.identifier, deliveredAt: notification.date)
         completionHandler([.banner, .sound])
     }
 
@@ -134,17 +146,23 @@ private final class UserNotificationScheduler: NSObject,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        Self.postDelivered(response.notification.request.identifier)
+        Self.postDelivered(
+            response.notification.request.identifier,
+            deliveredAt: response.notification.date
+        )
         completionHandler()
     }
 
-    private static func postDelivered(_ identifier: String) {
+    private static func postDelivered(_ identifier: String, deliveredAt: Date) {
         let prefix = "reading-motivation."
         guard identifier.hasPrefix(prefix) else { return }
         NotificationCenter.default.post(
             name: .readingMotivationNotificationDelivered,
             object: nil,
-            userInfo: ["dayKey": String(identifier.dropFirst(prefix.count))]
+            userInfo: [
+                "dayKey": String(identifier.dropFirst(prefix.count)),
+                "deliveredAt": deliveredAt,
+            ]
         )
     }
 

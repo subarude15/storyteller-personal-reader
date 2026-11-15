@@ -195,7 +195,12 @@ public struct PunkRallyTabView: View {
                 NotificationCenter.default.publisher(for: .readingMotivationNotificationDelivered)
             ) { note in
                 guard let dayKey = note.userInfo?["dayKey"] as? String else { return }
-                Task { await ReadingMotivationStore.shared.recordNotificationDelivered(dayKey: dayKey) }
+                let deliveredAt = note.userInfo?["deliveredAt"] as? Date
+                Task {
+                    await ReadingMotivationStore.shared.recordNotificationDelivered(
+                        dayKey: dayKey, deliveredAt: deliveredAt
+                    )
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSSystemTimeZoneDidChange)) { _ in
                 Task { await ReadingMotivationStore.shared.refreshNotifications() }
