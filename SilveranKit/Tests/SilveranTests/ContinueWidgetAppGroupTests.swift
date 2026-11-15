@@ -353,6 +353,92 @@ struct ContinueWidgetSnapshotTests {
         #expect(!source.contains("streakActivityDayKey: last.streakActivityDayKey"))
         #expect(!source.contains("streakDays: streakDays ?? last.streakDays"))
     }
+
+    @Test func updateAuthoritativeStreakPreservesItemTimingAndNoopsUnchanged() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("continue-streak-only-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        }
+        let store = PausableContinueWidgetFileStore(root: root)
+        ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        ContinueWidgetSnapshotStore.publish(
+            title: "Piranesi",
+            subtitle: "Clarke",
+            isPlaying: true,
+            kind: .audiobook,
+            coverData: Data([0x01, 0x02]),
+            progress: 0.42,
+            elapsedSeconds: 900,
+            durationSeconds: 3600,
+            hasLiveSession: true,
+            rate: 1.25,
+            streakDays: 0,
+            streakActivityDayKey: "2026-11-10",
+            fileStore: store
+        )
+        let before = try #require(store.readSnapshot(in: root))
+
+        ContinueWidgetSnapshotStore.updateAuthoritativeStreak(
+            streakDays: 3,
+            streakActivityDayKey: "2026-11-15",
+            fileStore: store
+        )
+        let updated = try #require(store.readSnapshot(in: root))
+        #expect(updated.streakDays == 3)
+        #expect(updated.streakActivityDayKey == "2026-11-15")
+        #expect(updated.title == before.title)
+        #expect(updated.subtitle == before.subtitle)
+        #expect(updated.isPlaying == before.isPlaying)
+        #expect(updated.kind == before.kind)
+        #expect(updated.progress == before.progress)
+        #expect(updated.elapsedSeconds == before.elapsedSeconds)
+        #expect(updated.durationSeconds == before.durationSeconds)
+        #expect(updated.rate == before.rate)
+        #expect(updated.hasLiveSession == before.hasLiveSession)
+        #expect(updated.coverFilename == before.coverFilename)
+
+        let generatedAt = updated.generatedAt
+        ContinueWidgetSnapshotStore.updateAuthoritativeStreak(
+            streakDays: 3,
+            streakActivityDayKey: "2026-11-15",
+            fileStore: store
+        )
+        let unchanged = try #require(store.readSnapshot(in: root))
+        #expect(unchanged.generatedAt == generatedAt)
+        #expect(unchanged.streakDays == 3)
+
+        // Same count, new activity anchor still publishes.
+        ContinueWidgetSnapshotStore.updateAuthoritativeStreak(
+            streakDays: 3,
+            streakActivityDayKey: "2026-11-16",
+            fileStore: store
+        )
+        let reanchored = try #require(store.readSnapshot(in: root))
+        #expect(reanchored.streakDays == 3)
+        #expect(reanchored.streakActivityDayKey == "2026-11-16")
+        #expect(reanchored.progress == 0.42)
+        #expect(reanchored.rate == 1.25)
+    }
+
+    @Test func sessionTrackerSourcePublishesStreakIndependentOfNotificationOptIn() throws {
+        let trackerURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("XCodeApps/PunkRallyModules/Stats/SessionTracker.swift")
+        let source = try String(contentsOf: trackerURL, encoding: .utf8)
+        #expect(source.contains("updateAuthoritativeStreak("))
+        #expect(source.contains("publishAuthoritativeStreakIfNeeded"))
+        #expect(source.contains("shouldRunCadence("))
+        #expect(source.contains("shouldReconcileNotificationsOnTick("))
+        #expect(source.contains("shouldPublishAuthoritativeStreak("))
+        // Cadence starts from shouldRunCadence; notifications stay separately gated.
+        #expect(source.contains("shouldRunCadence(\n                    hasActiveSession: self.activeSession != nil"))
+    }
 }
 
 /// Directory-backed Continue publish seam with a suspension point on snapshot read.

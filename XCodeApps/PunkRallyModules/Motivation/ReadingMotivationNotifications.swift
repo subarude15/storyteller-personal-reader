@@ -115,6 +115,14 @@ private final class UserNotificationScheduler: NSObject,
         center.removePendingNotificationRequests(withIdentifiers: [identifier])
     }
 
+    func pendingIdentifiers() async -> Set<String> {
+        await withCheckedContinuation { continuation in
+            center.getPendingNotificationRequests { requests in
+                continuation.resume(returning: Set(requests.map(\.identifier)))
+            }
+        }
+    }
+
     func deliveredNotifications() async -> [String: Date] {
         await withCheckedContinuation { continuation in
             center.getDeliveredNotifications { notifications in

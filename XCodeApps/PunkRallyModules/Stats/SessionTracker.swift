@@ -12,6 +12,7 @@
 
 import Foundation
 import Observation
+import SilveranAppleWidgets
 import SilveranKit
 
 /// Tracks reading/listening sessions locally and computes home/Stats aggregates.
@@ -38,8 +39,12 @@ final class SessionTracker {
     private var activeSession: PRMediaSession?
 
     private var saveTask: Task<Void, Never>?
-    /// Session-owned motivation reconcile loop (not Home-owned). Cancelled on end.
+    /// Session-owned motivation cadence (streak publish + optional reminders).
+    /// Not Home-owned. Cancelled on end, including under-30s short sessions.
     private var motivationReconcileTask: Task<Void, Never>?
+    /// Last streak values pushed to the Continue widget from this process.
+    private var lastPublishedWidgetStreakDays: Int?
+    private var lastPublishedWidgetStreakDayKey: String?
 
     private init() {
         load()
@@ -94,7 +99,7 @@ final class SessionTracker {
             startedAt: Date()
         )
         revision &+= 1
-        startMotivationReconcileLoopIfNeeded()
+        startMotivationCadenceLoopIfNeeded()
     }
 
     /// End the active session and record its duration.
@@ -110,7 +115,7 @@ final class SessionTracker {
         guard ReadingMotivationCalculations.isRecordableSession(duration: duration) else {
             activeSession = nil
             revision &+= 1
-            stopMotivationReconcileLoopAndRefresh()
+            stopMotivationCadenceLoopAndRefresh(publishStreak: false)
             return
         }
 
@@ -127,14 +132,16 @@ final class SessionTracker {
         revision &+= 1
         scheduleSave()
         StatsSyncCoordinator.shared.scheduleSyncAfterLocalChange()
-        stopMotivationReconcileLoopAndRefresh()
+        stopMotivationCadenceLoopAndRefresh(publishStreak: true)
     }
 
-    /// Restart periodic motivation reconcile when an active session survives
+    /// Restart periodic motivation cadence when an active session survives
     /// foreground restore or notification opt-in mid-session.
     func syncMotivationReconcileLoop() {
         if activeSession != nil {
-            startMotivationReconcileLoopIfNeeded()
+            startMotivationCadenceLoopIfNeeded()
+            // Foreground restore: publish immediately if already retained.
+            publishAuthoritativeStreakIfNeeded()
         } else {
             motivationReconcileTask?.cancel()
             motivationReconcileTask = nil
@@ -311,10 +318,9 @@ final class SessionTracker {
         endSession()
     }
 
-    private func startMotivationReconcileLoopIfNeeded() {
+    private func startMotivationCadenceLoopIfNeeded() {
         motivationReconcileTask?.cancel()
-        guard ReadingMotivationActiveSessionReconcilePolicy.shouldReconcileOnTick(
-            notificationsEnabled: ReadingMotivationStore.shared.settings.notificationsEnabled,
+        guard ReadingMotivationActiveSessionReconcilePolicy.shouldRunCadence(
             hasActiveSession: activeSession != nil
         ) else {
             motivationReconcileTask = nil
@@ -325,20 +331,71 @@ final class SessionTracker {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(interval))
                 guard let self, !Task.isCancelled else { return }
-                guard ReadingMotivationActiveSessionReconcilePolicy.shouldReconcileOnTick(
-                    notificationsEnabled: ReadingMotivationStore.shared.settings.notificationsEnabled,
+                guard ReadingMotivationActiveSessionReconcilePolicy.shouldRunCadence(
                     hasActiveSession: self.activeSession != nil
                 ) else { return }
-                // Uses motivationSessionRecords(at:) live elapsed via refresh path.
-                await ReadingMotivationStore.shared.refreshNotifications()
+                // Authoritative streak at retention / day change — independent of reminders.
+                self.publishAuthoritativeStreakIfNeeded()
+                if ReadingMotivationActiveSessionReconcilePolicy.shouldReconcileNotificationsOnTick(
+                    notificationsEnabled: ReadingMotivationStore.shared.settings.notificationsEnabled
+                ) {
+                    // Uses motivationSessionRecords(at:) live elapsed via refresh path.
+                    await ReadingMotivationStore.shared.refreshNotifications()
+                }
             }
         }
     }
 
-    private func stopMotivationReconcileLoopAndRefresh() {
+    private func stopMotivationCadenceLoopAndRefresh(publishStreak: Bool) {
         motivationReconcileTask?.cancel()
         motivationReconcileTask = nil
+        if publishStreak {
+            publishAuthoritativeStreakIfNeeded()
+        }
         Task { await ReadingMotivationStore.shared.refreshNotifications() }
+    }
+
+    /// Push current streak+activity anchor into the shared Continue snapshot.
+    /// Runs from SessionTracker lifecycle (not a Home-only timer) so the widget
+    /// stays honest while Home is off-screen. Arbitrary iOS suspension can still
+    /// delay ticks until foreground restore.
+    private func publishAuthoritativeStreakIfNeeded(now: Date = Date()) {
+        let calendar = Calendar.current
+        let records = motivationSessionRecords(at: now)
+        let effectiveElapsed: TimeInterval
+        if let active = activeSession {
+            effectiveElapsed = now.timeIntervalSince(active.startedAt)
+        } else if let last = sessions.last {
+            // Retained end path: closed session already appended.
+            effectiveElapsed = last.durationSeconds
+        } else {
+            return
+        }
+        let streakDays = ReadingMotivationCalculations.streaks(
+            sessions: records,
+            calendar: calendar,
+            now: now,
+            archivedActivityDays: motivationArchivedActivityDays()
+        ).current
+        let activityDayKey = ReadingMotivationCalculations.streakActivityDayKey(
+            sessions: records,
+            calendar: calendar,
+            now: now,
+            archivedActivityDays: motivationArchivedActivityDays()
+        )
+        guard ReadingMotivationActiveSessionReconcilePolicy.shouldPublishAuthoritativeStreak(
+            sessionElapsed: effectiveElapsed,
+            streakDays: streakDays,
+            activityDayKey: activityDayKey,
+            lastPublishedStreakDays: lastPublishedWidgetStreakDays,
+            lastPublishedActivityDayKey: lastPublishedWidgetStreakDayKey
+        ) else { return }
+        ContinueWidgetSnapshotStore.updateAuthoritativeStreak(
+            streakDays: streakDays,
+            streakActivityDayKey: activityDayKey
+        )
+        lastPublishedWidgetStreakDays = streakDays
+        lastPublishedWidgetStreakDayKey = activityDayKey
     }
 
     private static func toSyncSession(_ session: PRMediaSession) -> InkampStatsSessionRecord {

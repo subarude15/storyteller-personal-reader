@@ -27,6 +27,7 @@ private actor TestMotivationScheduler: ReadingMotivationNotificationScheduling {
     var requests: [String: ReadingMotivationNotificationRequest] = [:]
     var delivered: [String: Date] = [:]
     var authorizationRequests = 0
+    var scheduleCallCount = 0
     var pauseNextSchedule = false
     var pausedScheduleEntered = false
     var scheduleStartWaiter: CheckedContinuation<Void, Never>?
@@ -39,6 +40,10 @@ private actor TestMotivationScheduler: ReadingMotivationNotificationScheduling {
     var pausedRemoveEntered = false
     var removeStartWaiter: CheckedContinuation<Void, Never>?
     var removeRelease: CheckedContinuation<Void, Never>?
+    var pauseNextPendingIdentifiers = false
+    var pausedPendingIdentifiersEntered = false
+    var pendingIdentifiersStartWaiter: CheckedContinuation<Void, Never>?
+    var pendingIdentifiersRelease: CheckedContinuation<Void, Never>?
     var failNextSchedule = false
 
     func authorization() async -> ReadingMotivationNotificationAuthorization { status }
@@ -47,6 +52,7 @@ private actor TestMotivationScheduler: ReadingMotivationNotificationScheduling {
         return status == .authorized
     }
     func schedule(_ request: ReadingMotivationNotificationRequest) async throws {
+        scheduleCallCount += 1
         if pauseNextSchedule {
             pauseNextSchedule = false
             pausedScheduleEntered = true
@@ -72,6 +78,17 @@ private actor TestMotivationScheduler: ReadingMotivationNotificationScheduling {
         }
         requests.removeValue(forKey: identifier)
     }
+    func pendingIdentifiers() async -> Set<String> {
+        if pauseNextPendingIdentifiers {
+            pauseNextPendingIdentifiers = false
+            pausedPendingIdentifiersEntered = true
+            pendingIdentifiersStartWaiter?.resume()
+            pendingIdentifiersStartWaiter = nil
+            await withCheckedContinuation { pendingIdentifiersRelease = $0 }
+            pausedPendingIdentifiersEntered = false
+        }
+        return Set(requests.keys)
+    }
     func deliveredNotifications() async -> [String: Date] { delivered }
     func removeDelivered(identifiers: Set<String>) async {
         if pauseNextRemove {
@@ -85,6 +102,7 @@ private actor TestMotivationScheduler: ReadingMotivationNotificationScheduling {
         for identifier in identifiers { delivered.removeValue(forKey: identifier) }
     }
     func pendingCount() -> Int { requests.count }
+    func scheduleCalls() -> Int { scheduleCallCount }
     func setAuthorization(_ value: ReadingMotivationNotificationAuthorization) { status = value }
     func authorizationRequestCount() -> Int { authorizationRequests }
     func setDelivered(identifier: String, at date: Date) { delivered[identifier] = date }
@@ -114,6 +132,15 @@ private actor TestMotivationScheduler: ReadingMotivationNotificationScheduling {
     func resumePausedRemove() {
         removeRelease?.resume()
         removeRelease = nil
+    }
+    func pauseNextPendingIdentifiersCall() { pauseNextPendingIdentifiers = true }
+    func waitForPausedPendingIdentifiers() async {
+        if pausedPendingIdentifiersEntered { return }
+        await withCheckedContinuation { pendingIdentifiersStartWaiter = $0 }
+    }
+    func resumePausedPendingIdentifiers() {
+        pendingIdentifiersRelease?.resume()
+        pendingIdentifiersRelease = nil
     }
     func clearDelivered() { delivered.removeAll() }
     func failNextScheduleCall() { failNextSchedule = true }
@@ -685,6 +712,38 @@ struct ReadingMotivationTests {
         ) == nil)
     }
 
+    @Test func projectedFinishNearCompletionEstimatesRemainingNotFinished() {
+        let now = date(2026, 11, 15, 14)
+        // 99.5% with known length + playback rate still has remaining content.
+        let nearComplete = ReadingMotivationCalculations.projectedFinish(
+            sessions: [],
+            mediaID: "book-1",
+            progress: 0.995,
+            totalUnits: 1000,
+            playbackRate: 1,
+            calendar: calendar,
+            now: now
+        )
+        guard case .estimate(let finish, let basis) = nearComplete else {
+            Issue.record("Expected remaining estimate at 99.5%, not finished")
+            return
+        }
+        #expect(abs(finish.timeIntervalSince(now) - 5) < 0.01)
+        #expect(basis.contains("1"))
+        #expect(ReadingMotivationCalculations.projectedFinish(
+            sessions: [], mediaID: "book-1", progress: 0.995, totalUnits: nil,
+            playbackRate: 1, calendar: calendar, now: now
+        ) == nil)
+        #expect(ReadingMotivationCalculations.projectedFinish(
+            sessions: [], mediaID: "book-1", progress: 1, totalUnits: nil,
+            playbackRate: 1, calendar: calendar, now: now
+        ) == .finished)
+        #expect(ReadingMotivationCalculations.projectedFinish(
+            sessions: [], mediaID: "book-1", progress: 1.0, totalUnits: 1000,
+            playbackRate: 1, calendar: calendar, now: now
+        ) == .finished)
+    }
+
     @Test func projectedFinishCountsPlateauAndMissingCheckpointsBetweenProgress() {
         let now = date(2026, 11, 15, 14)
         // 0.1 → 0.1 → 0.2: stalled middle hour still belongs to the interval.
@@ -862,6 +921,44 @@ struct ReadingMotivationTests {
         #expect(ContinueWidgetTiming.calculate(
             progress: 0.5, elapsedSeconds: 150, durationSeconds: 100, rate: 1
         )?.remainingWallSeconds == 0)
+    }
+
+    @Test func widgetTimingRetainsKnownElapsedWhenDurationUnknown() {
+        let knownElapsed = ContinueWidgetTiming.calculate(
+            progress: 0.4, elapsedSeconds: 900, durationSeconds: nil, rate: 1
+        )
+        #expect(knownElapsed?.elapsedSeconds == 900)
+        #expect(knownElapsed?.remainingWallSeconds == nil)
+        // Do not fabricate elapsed from progress when total is absent.
+        #expect(ContinueWidgetTiming.calculate(
+            progress: 0.5, elapsedSeconds: nil, durationSeconds: nil, rate: 1
+        ) == nil)
+        #expect(ContinueWidgetTiming.calculate(
+            progress: nil, elapsedSeconds: nil, durationSeconds: nil, rate: nil
+        ) == nil)
+        #expect(ContinueWidgetTiming.calculate(
+            progress: 0.2, elapsedSeconds: .nan, durationSeconds: nil, rate: 1
+        ) == nil)
+        #expect(ContinueWidgetTiming.calculate(
+            progress: 0.2, elapsedSeconds: .infinity, durationSeconds: nil, rate: 1
+        ) == nil)
+
+        let timed = ContinueWidgetSnapshot(
+            title: "Book", kind: .audiobook, progress: 0.4,
+            elapsedSeconds: 900, durationSeconds: nil, rate: 1
+        )
+        #expect(timed.elapsedText == "15m")
+        #expect(timed.lengthText == nil)
+        #expect(timed.elapsedLengthText == "15m elapsed")
+        #expect(timed.remainingText == nil)
+        #expect(timed.progressCaption?.contains("15m elapsed") == true)
+
+        let ebook = ContinueWidgetSnapshot(
+            title: "Book", kind: .ebook, progress: 0.4,
+            elapsedSeconds: 900, durationSeconds: nil
+        )
+        #expect(ebook.elapsedText == nil)
+        #expect(ebook.elapsedLengthText == nil)
     }
 
     @Test func oldWidgetSnapshotDecodesWithoutNewMotivationFields() throws {
@@ -1778,6 +1875,23 @@ struct ReadingMotivationTests {
 
     @Test func activeSessionReconcileCadenceGuardsOptInAndRequiresLiveSession() {
         #expect(
+            ReadingMotivationActiveSessionReconcilePolicy.shouldRunCadence(hasActiveSession: true)
+        )
+        #expect(
+            !ReadingMotivationActiveSessionReconcilePolicy.shouldRunCadence(hasActiveSession: false)
+        )
+        #expect(
+            ReadingMotivationActiveSessionReconcilePolicy.shouldReconcileNotificationsOnTick(
+                notificationsEnabled: true
+            )
+        )
+        #expect(
+            !ReadingMotivationActiveSessionReconcilePolicy.shouldReconcileNotificationsOnTick(
+                notificationsEnabled: false
+            )
+        )
+        // Notification reconcile still requires both opt-in and live session.
+        #expect(
             ReadingMotivationActiveSessionReconcilePolicy.shouldReconcileOnTick(
                 notificationsEnabled: true, hasActiveSession: true
             )
@@ -1793,5 +1907,144 @@ struct ReadingMotivationTests {
             )
         )
         #expect(ReadingMotivationActiveSessionReconcilePolicy.tickIntervalSeconds == 30)
+
+        #expect(
+            ReadingMotivationActiveSessionReconcilePolicy.shouldPublishAuthoritativeStreak(
+                sessionElapsed: 30, streakDays: 1, activityDayKey: "2026-11-15",
+                lastPublishedStreakDays: nil, lastPublishedActivityDayKey: nil
+            )
+        )
+        #expect(
+            !ReadingMotivationActiveSessionReconcilePolicy.shouldPublishAuthoritativeStreak(
+                sessionElapsed: 29.9, streakDays: 1, activityDayKey: "2026-11-15",
+                lastPublishedStreakDays: nil, lastPublishedActivityDayKey: nil
+            )
+        )
+        #expect(
+            !ReadingMotivationActiveSessionReconcilePolicy.shouldPublishAuthoritativeStreak(
+                sessionElapsed: 60, streakDays: 2, activityDayKey: "2026-11-15",
+                lastPublishedStreakDays: 2, lastPublishedActivityDayKey: "2026-11-15"
+            )
+        )
+        #expect(
+            ReadingMotivationActiveSessionReconcilePolicy.shouldPublishAuthoritativeStreak(
+                sessionElapsed: 60, streakDays: 2, activityDayKey: "2026-11-16",
+                lastPublishedStreakDays: 2, lastPublishedActivityDayKey: "2026-11-15"
+            )
+        )
+        #expect(
+            ReadingMotivationActiveSessionReconcilePolicy.shouldPublishAuthoritativeStreak(
+                sessionElapsed: 60, streakDays: 3, activityDayKey: "2026-11-15",
+                lastPublishedStreakDays: 2, lastPublishedActivityDayKey: "2026-11-15"
+            )
+        )
+    }
+
+    @Test func restartWithPhantomPendingInstallsMissingOSRequestOnce() async throws {
+        let now = date(2026, 11, 15, 18)
+        let delivery = date(2026, 11, 15, 20)
+        let dayKey = "2026-11-15"
+        let candidate = ReadingMotivationNotificationCandidate(kind: .rescue, deliveryDate: delivery)
+        let scheduler = TestMotivationScheduler()
+        // Crash: ledger saved pending before schedule installed the OS request.
+        let storage = TestMotivationStateStore(
+            ReadingMotivationNotificationState(
+                pendingKind: .rescue,
+                pendingDayKey: dayKey,
+                pendingDeliveryDate: delivery
+            )
+        )
+        let (restarted, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: now)
+        #expect(try await restarted.reconcile(
+            candidates: [candidate], enabled: true, now: now, calendar: calendar
+        ) == .schedule(kind: .rescue, dayKey: dayKey))
+        #expect(await scheduler.pendingCount() == 1)
+        #expect(await scheduler.scheduleCalls() == 1)
+        #expect(await scheduler.pendingKind(for: ReadingMotivationNotificationCoordinator.identifier(for: dayKey)) == .rescue)
+
+        // Identical pending already in OS remains idempotent.
+        #expect(try await restarted.reconcile(
+            candidates: [candidate], enabled: true, now: now, calendar: calendar
+        ) == .none)
+        #expect(await scheduler.scheduleCalls() == 1)
+        #expect(await scheduler.pendingCount() == 1)
+    }
+
+    @Test func expiredOrDeliveredPhantomPendingNeverReinstalls() async throws {
+        let now = date(2026, 11, 15, 21)
+        let dayKey = "2026-11-15"
+        let scheduler = TestMotivationScheduler()
+        let storage = TestMotivationStateStore(
+            ReadingMotivationNotificationState(
+                pendingKind: .pace,
+                pendingDayKey: dayKey,
+                pendingDeliveryDate: date(2026, 11, 15, 20)
+            )
+        )
+        let (coordinator, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: now)
+        #expect(try await coordinator.reconcile(
+            candidates: [.init(kind: .pace, deliveryDate: date(2026, 11, 15, 20))],
+            enabled: true, now: now, calendar: calendar
+        ) == .none)
+        #expect(await scheduler.scheduleCalls() == 0)
+        #expect(await scheduler.pendingCount() == 0)
+        #expect(await storage.load().hasConsumedDayKey(dayKey))
+
+        let deliveredStorage = TestMotivationStateStore(
+            ReadingMotivationNotificationState(
+                pendingKind: .rescue,
+                pendingDayKey: "2026-11-16",
+                pendingDeliveryDate: date(2026, 11, 16, 20)
+            )
+        )
+        await scheduler.setDelivered(
+            identifier: ReadingMotivationNotificationCoordinator.identifier(for: "2026-11-16"),
+            at: date(2026, 11, 16, 20)
+        )
+        let deliveryNow = date(2026, 11, 16, 18)
+        let (deliveredCoordinator, clock) = makeCoordinator(
+            scheduler: scheduler, stateStore: deliveredStorage, now: deliveryNow
+        )
+        clock.advance(to: deliveryNow)
+        #expect(try await deliveredCoordinator.reconcile(
+            candidates: [.init(kind: .rescue, deliveryDate: date(2026, 11, 16, 20))],
+            enabled: true, now: deliveryNow, calendar: calendar
+        ) == .none)
+        #expect(await scheduler.scheduleCalls() == 0)
+        #expect(await deliveredStorage.load().hasConsumedDayKey("2026-11-16"))
+    }
+
+    @Test func pendingInspectionSuspensionConsumesDeliveryBeforeReinstall() async throws {
+        let now = date(2026, 11, 15, 18)
+        let delivery = date(2026, 11, 15, 20)
+        let dayKey = "2026-11-15"
+        let identifier = ReadingMotivationNotificationCoordinator.identifier(for: dayKey)
+        let candidate = ReadingMotivationNotificationCandidate(kind: .rescue, deliveryDate: delivery)
+        let scheduler = TestMotivationScheduler()
+        let storage = TestMotivationStateStore(
+            ReadingMotivationNotificationState(
+                pendingKind: .rescue,
+                pendingDayKey: dayKey,
+                pendingDeliveryDate: delivery
+            )
+        )
+        let (coordinator, clock) = makeCoordinator(
+            scheduler: scheduler, stateStore: storage, now: now
+        )
+        await scheduler.pauseNextPendingIdentifiersCall()
+        let recovering = Task {
+            try await coordinator.reconcile(
+                candidates: [candidate], enabled: true, now: now, calendar: calendar
+            )
+        }
+        await scheduler.waitForPausedPendingIdentifiers()
+        // Delivery lands while pending inspection is suspended.
+        await scheduler.setDelivered(identifier: identifier, at: delivery)
+        clock.advance(to: delivery)
+        await scheduler.resumePausedPendingIdentifiers()
+        #expect(try await recovering.value == .none)
+        #expect(await scheduler.scheduleCalls() == 0)
+        #expect(await storage.load().hasConsumedDayKey(dayKey))
+        #expect(await storage.load().pendingKind == nil)
     }
 }

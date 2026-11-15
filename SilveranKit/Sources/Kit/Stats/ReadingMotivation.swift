@@ -383,7 +383,9 @@ public enum ReadingMotivationCalculations {
         now: Date
     ) -> ReadingMotivationFinishProjection? {
         guard progress.isFinite, progress >= 0 else { return nil }
-        if progress >= 0.995 { return .finished }
+        // Only confirmed full progress is finished. Near-complete (e.g. 99.5%)
+        // with known length still has remaining content to estimate.
+        if progress >= 1 { return .finished }
         guard let totalUnits, totalUnits.isFinite, totalUnits > 0 else { return nil }
         let remaining = totalUnits * (1 - progress)
         guard remaining.isFinite, remaining > 0 else { return nil }
@@ -564,11 +566,20 @@ public struct ContinueWidgetTiming: Equatable, Sendable {
         durationSeconds: Double?,
         rate: Double?
     ) -> ContinueWidgetTiming? {
-        guard let durationSeconds, durationSeconds.isFinite, durationSeconds > 0 else { return nil }
+        let knownElapsed: Double? = {
+            guard let elapsedSeconds, elapsedSeconds.isFinite else { return nil }
+            return max(elapsedSeconds, 0)
+        }()
+        guard let durationSeconds, durationSeconds.isFinite, durationSeconds > 0 else {
+            // Independently known elapsed stands alone; never invent from progress
+            // when total length is absent. Remaining stays unknown.
+            guard let elapsed = knownElapsed else { return nil }
+            return ContinueWidgetTiming(elapsedSeconds: elapsed, remainingWallSeconds: nil)
+        }
         let duration = durationSeconds
         let elapsed: Double
-        if let elapsedSeconds, elapsedSeconds.isFinite {
-            elapsed = min(max(elapsedSeconds, 0), duration)
+        if let knownElapsed {
+            elapsed = min(knownElapsed, duration)
         } else if let progress, progress.isFinite {
             elapsed = min(max(progress, 0), 1) * duration
         } else {
@@ -838,18 +849,49 @@ public struct ReadingMotivationNotificationRequest: Equatable, Sendable {
     }
 }
 
-/// Session-lifecycle cadence for motivation reconcile while reading/listening is
-/// ongoing (including when Home is not visible). iOS may suspend or delay timer
-/// ticks in the background; foreground restore must restart the loop rather than
-/// assuming background delivery.
+/// Session-lifecycle cadence while reading/listening is ongoing (including when
+/// Home is not visible). Owns authoritative streak publication and, when opted
+/// in, notification reconcile. iOS may suspend or delay timer ticks in the
+/// background; foreground restore must restart the loop rather than assuming
+/// background delivery.
 public enum ReadingMotivationActiveSessionReconcilePolicy: Sendable {
     public static let tickIntervalSeconds: TimeInterval = 30
 
+    /// Cadence runs for any live session — streak publish must not depend on
+    /// notification opt-in. Notification eligibility stays gated separately.
+    public static func shouldRunCadence(hasActiveSession: Bool) -> Bool {
+        hasActiveSession
+    }
+
+    public static func shouldReconcileNotificationsOnTick(
+        notificationsEnabled: Bool
+    ) -> Bool {
+        notificationsEnabled
+    }
+
+    /// Publish once the live session is retained (≥30s) and streak/anchor is new
+    /// or changed (including first retention publish and local-day rollover).
+    public static func shouldPublishAuthoritativeStreak(
+        sessionElapsed: TimeInterval,
+        streakDays: Int,
+        activityDayKey: String,
+        lastPublishedStreakDays: Int?,
+        lastPublishedActivityDayKey: String?
+    ) -> Bool {
+        guard ReadingMotivationCalculations.isRecordableSession(duration: sessionElapsed)
+        else { return false }
+        if lastPublishedStreakDays != streakDays { return true }
+        if lastPublishedActivityDayKey != activityDayKey { return true }
+        return false
+    }
+
+    /// Legacy name: notification reconcile only when opted in *and* live.
     public static func shouldReconcileOnTick(
         notificationsEnabled: Bool,
         hasActiveSession: Bool
     ) -> Bool {
-        notificationsEnabled && hasActiveSession
+        shouldRunCadence(hasActiveSession: hasActiveSession)
+            && shouldReconcileNotificationsOnTick(notificationsEnabled: notificationsEnabled)
     }
 }
 
@@ -869,6 +911,8 @@ public protocol ReadingMotivationNotificationScheduling: Sendable {
     func requestAuthorization() async -> Bool
     func schedule(_ request: ReadingMotivationNotificationRequest) async throws
     func cancelPending(identifier: String) async
+    /// Currently installed pending request identifiers (OS truth, not ledger).
+    func pendingIdentifiers() async -> Set<String>
     func deliveredNotifications() async -> [String: Date]
     func removeDelivered(identifiers: Set<String>) async
 }
@@ -969,7 +1013,14 @@ public actor ReadingMotivationNotificationCoordinator {
         )
         switch decision {
             case .none:
-                return .none
+                return try await recoverMissingPendingInstallIfNeeded(
+                    candidates: candidates,
+                    enabled: enabled,
+                    authorized: authorized,
+                    now: now,
+                    referenceNow: referenceNow,
+                    calendar: calendar
+                )
             case .cancelPending:
                 await abandonPending(referenceNow: referenceNow, calendar: calendar)
                 return .cancelPending
@@ -1117,6 +1168,107 @@ public actor ReadingMotivationNotificationCoordinator {
         state.pendingKind = nil
         state.pendingDayKey = nil
         state.pendingDeliveryDate = nil
+    }
+
+    /// Crash recovery: ledger may retain a future unconsumed pending intent that
+    /// never reached the OS (`save` then terminate before `schedule`). Reinstall
+    /// the same stable identifier after revalidating clock/deliveries/expiry.
+    private func recoverMissingPendingInstallIfNeeded(
+        candidates: [ReadingMotivationNotificationCandidate],
+        enabled: Bool,
+        authorized: Bool,
+        now: Date,
+        referenceNow: Date,
+        calendar: Calendar
+    ) async throws -> ReadingMotivationNotificationDecision {
+        guard enabled, authorized,
+            let pendingDay = state.pendingDayKey,
+            let pendingKind = state.pendingKind,
+            let deliveryDate = state.pendingDeliveryDate,
+            !state.hasConsumedDayKey(pendingDay),
+            deliveryDate > referenceNow
+        else { return .none }
+
+        let identifier = Self.identifier(for: pendingDay)
+        let osPending = await scheduler.pendingIdentifiers()
+        var liveNow = max(now, clock.now())
+        await ingestDelivered(calendar: calendar)
+        liveNow = max(now, clock.now())
+        await consumeExpiredPending(now: liveNow, calendar: calendar)
+        await stateStore.save(state)
+
+        guard state.pendingDayKey == pendingDay,
+            state.pendingKind == pendingKind,
+            state.pendingDeliveryDate == deliveryDate,
+            !state.hasConsumedDayKey(pendingDay),
+            deliveryDate > liveNow
+        else { return .none }
+
+        if osPending.contains(identifier) {
+            return .none
+        }
+
+        // Re-query after suspension; delivery/dismissal during inspection must win.
+        let osPendingAgain = await scheduler.pendingIdentifiers()
+        liveNow = max(now, clock.now())
+        await ingestDelivered(calendar: calendar)
+        liveNow = max(now, clock.now())
+        await consumeExpiredPending(now: liveNow, calendar: calendar)
+        await stateStore.save(state)
+
+        guard state.pendingDayKey == pendingDay,
+            state.pendingKind == pendingKind,
+            let stillDelivery = state.pendingDeliveryDate,
+            stillDelivery == deliveryDate,
+            !state.hasConsumedDayKey(pendingDay),
+            stillDelivery > liveNow
+        else { return .none }
+
+        if osPendingAgain.contains(identifier) {
+            return .none
+        }
+
+        // Candidates must still select this identical pending intent.
+        let liveDecision = ReadingMotivationNotificationPolicy.decide(
+            candidates: candidates,
+            state: state,
+            enabled: enabled,
+            authorized: authorized,
+            now: liveNow,
+            calendar: calendar
+        )
+        guard case .none = liveDecision,
+            candidates.contains(where: {
+                $0.kind == pendingKind
+                    && $0.deliveryDate == stillDelivery
+                    && $0.deliveryDate > liveNow
+                    && ReadingMotivationNotificationPolicy.localDayKey(
+                        $0.deliveryDate, calendar: calendar
+                    ) == pendingDay
+            })
+        else { return .none }
+
+        let request = ReadingMotivationNotificationRequest(
+            identifier: identifier,
+            kind: pendingKind,
+            deliveryDate: stillDelivery
+        )
+        do {
+            try await scheduler.schedule(request)
+        } catch {
+            clearPendingState()
+            await stateStore.save(state)
+            throw error
+        }
+        await ingestDelivered(calendar: calendar)
+        liveNow = max(now, clock.now())
+        await consumeExpiredPending(now: liveNow, calendar: calendar)
+        await stateStore.save(state)
+        if state.hasConsumedDayKey(pendingDay) {
+            await abandonPending(referenceNow: liveNow, calendar: calendar)
+            return .cancelPending
+        }
+        return .schedule(kind: pendingKind, dayKey: pendingDay)
     }
 
     private func abandonPending(referenceNow: Date, calendar: Calendar) async {

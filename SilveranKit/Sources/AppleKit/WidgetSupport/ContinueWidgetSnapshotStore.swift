@@ -138,8 +138,12 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
     }
 
     public var elapsedLengthText: String? {
-        guard let elapsedText, let lengthText else { return nil }
-        return elapsedText + " / " + lengthText
+        guard let elapsedText else { return nil }
+        if let lengthText {
+            return elapsedText + " / " + lengthText
+        }
+        // Known elapsed with unknown total: still paint an elapsed caption.
+        return elapsedText + " elapsed"
     }
 
     public var streakText: String? {
@@ -617,6 +621,77 @@ public enum ContinueWidgetSnapshotStore {
 
     static func coversDirectory(in container: URL) -> URL {
         container.appendingPathComponent(coversDirectoryName, isDirectory: true)
+    }
+
+    /// Atomic streak-only update under the existing publish lock. Reads the
+    /// current snapshot, updates only streak/anchor/`generatedAt`, and never
+    /// overwrites title/progress/transport from pre-lock values. No-ops (no
+    /// write/reload) when streak data is unchanged. Must not call `publish`.
+    public static func updateAuthoritativeStreak(
+        streakDays: Int,
+        streakActivityDayKey: String,
+        fileStore: (any ContinueWidgetSnapshotFileStoring)? = nil,
+    ) {
+        let normalizedDays = max(0, streakDays)
+        let normalizedKey = streakActivityDayKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedKey.isEmpty else { return }
+
+        SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "streak")
+        let store = fileStore ?? AppGroupContinueWidgetSnapshotFileStore()
+        guard let container = store.resolveContainer() else { return }
+
+        var shouldReload = false
+        publishLock.lock()
+        do {
+            try store.ensureDirectories(in: container)
+            guard var snapshot = store.readSnapshot(in: container), snapshot.hasItem else {
+                publishLock.unlock()
+                return
+            }
+            if snapshot.streakDays == normalizedDays,
+                snapshot.streakActivityDayKey == normalizedKey
+            {
+                publishLock.unlock()
+                return
+            }
+
+            snapshot.streakDays = normalizedDays
+            snapshot.streakActivityDayKey = normalizedKey
+            snapshot.generatedAt = Date()
+
+            let previousPaint = lastPublishedPaintSignature
+            let previousTransport = lastPublishedTransportSignature
+            let previousReload = lastReloadDate
+            let paintChanged = previousPaint != snapshot.paintSignature
+            let transportChanged = previousTransport != snapshot.transportSignature
+            let now = Date()
+
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.sortedKeys]
+            let data = try encoder.encode(snapshot)
+            try store.writeSnapshotData(data, to: container)
+            rememberLastSnapshot(snapshot)
+
+            let progressTickDue =
+                now.timeIntervalSince(previousReload) >= progressReloadInterval
+            shouldReload =
+                transportChanged || (paintChanged && progressTickDue)
+                || now.timeIntervalSince(previousReload) >= 300
+
+            lastPublishedPaintSignature = snapshot.paintSignature
+            lastPublishedTransportSignature = snapshot.transportSignature
+            if shouldReload { lastReloadDate = now }
+            publishLock.unlock()
+        } catch {
+            publishLock.unlock()
+            print("[ContinueWidget] streak update failed: \(error)")
+            return
+        }
+
+        if shouldReload {
+            reloadTimelines()
+        }
     }
 
     /// Test hook: reset in-process publish signatures between injectable-store runs.
