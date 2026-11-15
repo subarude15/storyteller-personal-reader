@@ -3,6 +3,25 @@ import SilveranAppleWidgets
 import SilveranKit
 import Testing
 
+private final class TestMotivationClock: ReadingMotivationClock, @unchecked Sendable {
+    private let lock = NSLock()
+    private var instant: Date
+
+    init(_ instant: Date) { self.instant = instant }
+
+    func now() -> Date {
+        lock.lock()
+        defer { lock.unlock() }
+        return instant
+    }
+
+    func advance(to date: Date) {
+        lock.lock()
+        instant = date
+        lock.unlock()
+    }
+}
+
 private actor TestMotivationScheduler: ReadingMotivationNotificationScheduling {
     var status: ReadingMotivationNotificationAuthorization = .authorized
     var requests: [String: ReadingMotivationNotificationRequest] = [:]
@@ -12,6 +31,10 @@ private actor TestMotivationScheduler: ReadingMotivationNotificationScheduling {
     var pausedScheduleEntered = false
     var scheduleStartWaiter: CheckedContinuation<Void, Never>?
     var scheduleRelease: CheckedContinuation<Void, Never>?
+    var pauseNextCancel = false
+    var pausedCancelEntered = false
+    var cancelStartWaiter: CheckedContinuation<Void, Never>?
+    var cancelRelease: CheckedContinuation<Void, Never>?
     var failNextSchedule = false
 
     func authorization() async -> ReadingMotivationNotificationAuthorization { status }
@@ -34,7 +57,17 @@ private actor TestMotivationScheduler: ReadingMotivationNotificationScheduling {
         }
         requests[request.identifier] = request
     }
-    func cancelPending(identifier: String) async { requests.removeValue(forKey: identifier) }
+    func cancelPending(identifier: String) async {
+        if pauseNextCancel {
+            pauseNextCancel = false
+            pausedCancelEntered = true
+            cancelStartWaiter?.resume()
+            cancelStartWaiter = nil
+            await withCheckedContinuation { cancelRelease = $0 }
+            pausedCancelEntered = false
+        }
+        requests.removeValue(forKey: identifier)
+    }
     func deliveredNotifications() async -> [String: Date] { delivered }
     func removeDelivered(identifiers: Set<String>) async {
         for identifier in identifiers { delivered.removeValue(forKey: identifier) }
@@ -51,6 +84,15 @@ private actor TestMotivationScheduler: ReadingMotivationNotificationScheduling {
     func resumePausedSchedule() {
         scheduleRelease?.resume()
         scheduleRelease = nil
+    }
+    func pauseNextCancelCall() { pauseNextCancel = true }
+    func waitForPausedCancel() async {
+        if pausedCancelEntered { return }
+        await withCheckedContinuation { cancelStartWaiter = $0 }
+    }
+    func resumePausedCancel() {
+        cancelRelease?.resume()
+        cancelRelease = nil
     }
     func failNextScheduleCall() { failNextSchedule = true }
     func pendingKind(for identifier: String) -> ReadingMotivationNotificationKind? {
@@ -249,7 +291,8 @@ struct ReadingMotivationTests {
                 date: date(2026, 11, 12), calendar: calendar
             )]
         )
-        #expect(streak.current == 2)
+        // Nov12 archived + Nov13/14 sessions, now=Nov15 → yesterday grace keeps current=3.
+        #expect(streak.current == 3)
         #expect(streak.longest == 3)
     }
 
@@ -498,6 +541,89 @@ struct ReadingMotivationTests {
         ) == nil)
     }
 
+    @Test func projectedFinishCountsPlateauAndMissingCheckpointsBetweenProgress() {
+        let now = date(2026, 11, 15, 14)
+        // 0.1 → 0.1 → 0.2: stalled middle hour still belongs to the interval.
+        let plateau = [
+            session(start: date(2026, 11, 13), end: date(2026, 11, 13, 13), progress: 0.1),
+            session(start: date(2026, 11, 14), end: date(2026, 11, 14, 13), progress: 0.1),
+            session(start: date(2026, 11, 15), end: date(2026, 11, 15, 13), progress: 0.2),
+        ]
+        let estimate = ReadingMotivationCalculations.projectedFinish(
+            sessions: plateau, mediaID: "book-1", progress: 0.2, totalUnits: 300,
+            playbackRate: nil, calendar: calendar, now: now
+        )
+        guard case .estimate(let finish, _) = estimate else {
+            Issue.record("Expected plateau interval to establish pace")
+            return
+        }
+        // 0.1 of 300 units over 2h → 15 units/h; remaining 240 units → 16h.
+        #expect(abs(finish.timeIntervalSince(now) - 16 * 3600) < 1)
+
+        let withMissingMid = [
+            session(start: date(2026, 11, 13), end: date(2026, 11, 13, 13), progress: 0.1),
+            session(start: date(2026, 11, 14), end: date(2026, 11, 14, 13), progress: nil),
+            session(start: date(2026, 11, 15), end: date(2026, 11, 15, 13), progress: 0.2),
+        ]
+        guard case .estimate(let missingFinish, _) = ReadingMotivationCalculations.projectedFinish(
+            sessions: withMissingMid, mediaID: "book-1", progress: 0.2, totalUnits: 300,
+            playbackRate: nil, calendar: calendar, now: now
+        ) else {
+            Issue.record("Expected missing mid-checkpoint work to count")
+            return
+        }
+        #expect(abs(missingFinish.timeIntervalSince(now) - 16 * 3600) < 1)
+
+        let regression = [
+            session(start: date(2026, 11, 13), end: date(2026, 11, 13, 13), progress: 0.3),
+            session(start: date(2026, 11, 14), end: date(2026, 11, 14, 13), progress: 0.1),
+        ]
+        #expect(ReadingMotivationCalculations.projectedFinish(
+            sessions: regression, mediaID: "book-1", progress: 0.1, totalUnits: 300,
+            playbackRate: nil, calendar: calendar, now: now
+        ) == nil)
+    }
+
+    @Test func clippedSessionProjectionClearsFutureCheckpoints() {
+        let historicalNow = date(2026, 11, 14, 12)
+        let early = session(
+            start: date(2026, 11, 13), end: date(2026, 11, 13, 13), progress: 0.1
+        )
+        // Ends after the historical reference with a later-only checkpoint of 0.5.
+        let crossing = session(
+            start: date(2026, 11, 14, 10),
+            end: date(2026, 11, 14, 16),
+            progress: 0.5
+        )
+        let withoutFuture = ReadingMotivationCalculations.projectedFinish(
+            sessions: [early, crossing],
+            mediaID: "book-1",
+            progress: 0.1,
+            totalUnits: 300,
+            playbackRate: nil,
+            calendar: calendar,
+            now: historicalNow
+        )
+        // Clipped crossing keeps time but clears endProgress, so no second checkpoint.
+        #expect(withoutFuture == nil)
+
+        let afterCrossingEnds = ReadingMotivationCalculations.projectedFinish(
+            sessions: [early, crossing],
+            mediaID: "book-1",
+            progress: 0.5,
+            totalUnits: 300,
+            playbackRate: nil,
+            calendar: calendar,
+            now: date(2026, 11, 14, 17)
+        )
+        guard case .estimate(let finish, _) = afterCrossingEnds else {
+            Issue.record("Expected pace once the future checkpoint is actually observed")
+            return
+        }
+        // 0.4 of 300 over 6h → 20 units/h; remaining 150 → 7.5h.
+        #expect(abs(finish.timeIntervalSince(date(2026, 11, 14, 17)) - 7.5 * 3600) < 1)
+    }
+
     @Test func knownAudioRateProducesWallClockFinishEstimate() {
         let now = date(2026, 11, 15)
         let estimate = ReadingMotivationCalculations.projectedFinish(
@@ -707,8 +833,10 @@ struct ReadingMotivationTests {
         let candidates = ReadingMotivationNotificationPolicy.candidates(
             now: now,
             quietDeliveryDate: quiet,
-            actualSeconds: 0,
-            dailyGoalSeconds: 3600,
+            readingSeconds: 0,
+            readingGoalSeconds: 3600,
+            listeningSeconds: 0,
+            listeningGoalSeconds: 0,
             activityDaysThisWeek: 2,
             calendar: calendar
         )
@@ -719,14 +847,67 @@ struct ReadingMotivationTests {
         ) == .schedule(kind: .rescue, dayKey: "2026-11-15"))
 
         let metGoal = ReadingMotivationNotificationPolicy.candidates(
-            now: now, quietDeliveryDate: quiet, actualSeconds: 3600,
-            dailyGoalSeconds: 3600, activityDaysThisWeek: 2, calendar: calendar
+            now: now, quietDeliveryDate: quiet,
+            readingSeconds: 3600, readingGoalSeconds: 3600,
+            listeningSeconds: 0, listeningGoalSeconds: 0,
+            activityDaysThisWeek: 2, calendar: calendar
         )
         #expect(metGoal.map(\.kind) == [.receipt])
         #expect(ReadingMotivationNotificationPolicy.candidates(
-            now: now, quietDeliveryDate: date(2026, 11, 15, 17), actualSeconds: 0,
-            dailyGoalSeconds: 3600, activityDaysThisWeek: 2, calendar: calendar
+            now: now, quietDeliveryDate: date(2026, 11, 15, 17),
+            readingSeconds: 0, readingGoalSeconds: 3600,
+            listeningSeconds: 0, listeningGoalSeconds: 0,
+            activityDaysThisWeek: 2, calendar: calendar
         ).isEmpty)
+    }
+
+    @Test func independentReadingAndListeningGoalsDoNotSuppressEachOther() {
+        let now = date(2026, 11, 15, 18)
+        let quiet = ReadingMotivationNotificationPolicy.quietDeliveryDate(
+            on: now, hour: 20, minute: 30, calendar: calendar
+        )!
+        // 30m goals each; 60m listening / 0 reading must still nudge reading.
+        let listeningOnly = ReadingMotivationNotificationPolicy.candidates(
+            now: now, quietDeliveryDate: quiet,
+            readingSeconds: 0, readingGoalSeconds: 1800,
+            listeningSeconds: 3600, listeningGoalSeconds: 1800,
+            activityDaysThisWeek: 0, calendar: calendar
+        )
+        #expect(Set(listeningOnly.map(\.kind)) == Set([.rescue, .pace]))
+        #expect(ReadingMotivationNotificationPolicy.decide(
+            candidates: listeningOnly, state: .empty, enabled: true, authorized: true,
+            now: now, calendar: calendar
+        ) == .schedule(kind: .rescue, dayKey: "2026-11-15"))
+
+        let readingOnly = ReadingMotivationNotificationPolicy.candidates(
+            now: now, quietDeliveryDate: quiet,
+            readingSeconds: 3600, readingGoalSeconds: 1800,
+            listeningSeconds: 0, listeningGoalSeconds: 1800,
+            activityDaysThisWeek: 0, calendar: calendar
+        )
+        #expect(Set(readingOnly.map(\.kind)) == Set([.rescue, .pace]))
+
+        let bothMet = ReadingMotivationNotificationPolicy.candidates(
+            now: now, quietDeliveryDate: quiet,
+            readingSeconds: 1800, readingGoalSeconds: 1800,
+            listeningSeconds: 1800, listeningGoalSeconds: 1800,
+            activityDaysThisWeek: 0, calendar: calendar
+        )
+        #expect(bothMet.isEmpty)
+
+        #expect(ReadingMotivationNotificationPolicy.decide(
+            candidates: listeningOnly, state: .empty, enabled: false, authorized: true,
+            now: now, calendar: calendar
+        ) == .none)
+        #expect(ReadingMotivationNotificationPolicy.decide(
+            candidates: listeningOnly, state: .empty, enabled: true, authorized: false,
+            now: now, calendar: calendar
+        ) == .none)
+        let consumed = ReadingMotivationNotificationState(consumedDayKey: "2026-11-15")
+        #expect(ReadingMotivationNotificationPolicy.decide(
+            candidates: listeningOnly, state: consumed, enabled: true, authorized: true,
+            now: now, calendar: calendar
+        ) == .none)
     }
 
     @Test func morningLaunchSchedulesQuietTimeCandidateWithoutFurtherInteraction() async throws {
@@ -737,8 +918,10 @@ struct ReadingMotivationTests {
         let candidates = ReadingMotivationNotificationPolicy.candidates(
             now: morning,
             quietDeliveryDate: quiet,
-            actualSeconds: 0,
-            dailyGoalSeconds: 3600,
+            readingSeconds: 0,
+            readingGoalSeconds: 3600,
+            listeningSeconds: 0,
+            listeningGoalSeconds: 0,
             activityDaysThisWeek: 0,
             calendar: calendar
         )
@@ -762,8 +945,10 @@ struct ReadingMotivationTests {
         let afterGoal = ReadingMotivationNotificationPolicy.candidates(
             now: date(2026, 11, 15, 12),
             quietDeliveryDate: quiet,
-            actualSeconds: 3600,
-            dailyGoalSeconds: 3600,
+            readingSeconds: 3600,
+            readingGoalSeconds: 3600,
+            listeningSeconds: 0,
+            listeningGoalSeconds: 0,
             activityDaysThisWeek: 0,
             calendar: calendar
         )
@@ -787,8 +972,10 @@ struct ReadingMotivationTests {
         let morningCandidates = ReadingMotivationNotificationPolicy.candidates(
             now: date(2026, 11, 15, 8),
             quietDeliveryDate: quiet,
-            actualSeconds: 0,
-            dailyGoalSeconds: 3600,
+            readingSeconds: 0,
+            readingGoalSeconds: 3600,
+            listeningSeconds: 0,
+            listeningGoalSeconds: 0,
             activityDaysThisWeek: 0,
             calendar: calendar
         )
@@ -802,8 +989,10 @@ struct ReadingMotivationTests {
         let progressed = ReadingMotivationNotificationPolicy.candidates(
             now: now,
             quietDeliveryDate: quiet,
-            actualSeconds: 2000,
-            dailyGoalSeconds: 3600,
+            readingSeconds: 2000,
+            readingGoalSeconds: 3600,
+            listeningSeconds: 0,
+            listeningGoalSeconds: 0,
             activityDaysThisWeek: 0,
             calendar: calendar
         )
@@ -1232,5 +1421,53 @@ struct ReadingMotivationTests {
         #expect(await scheduler.pendingCount() == 1)
         #expect(await scheduler.pendingKind(for: "reading-motivation.2026-11-15") == .rescue)
         #expect(await scheduler.pendingDate(for: "reading-motivation.2026-11-15") == laterQuiet)
+    }
+
+    @Test func lateDeliveryDuringReplacementCancelConsumesDayWithoutReinstall() async throws {
+        let start = date(2026, 11, 15, 18)
+        let delivery = date(2026, 11, 15, 20)
+        let dayKey = "2026-11-15"
+        let clock = TestMotivationClock(start)
+        let scheduler = TestMotivationScheduler()
+        let storage = TestMotivationStateStore()
+        let coordinator = ReadingMotivationNotificationCoordinator(
+            scheduler: scheduler, stateStore: storage, clock: clock
+        )
+        let receipt = ReadingMotivationNotificationCandidate(kind: .receipt, deliveryDate: delivery)
+        let rescue = ReadingMotivationNotificationCandidate(kind: .rescue, deliveryDate: delivery)
+        #expect(try await coordinator.reconcile(
+            candidates: [receipt], enabled: true, now: start, calendar: calendar,
+            preferenceRevision: 1, requestRevision: 1
+        ) == .schedule(kind: .receipt, dayKey: dayKey))
+        #expect(await scheduler.pendingCount() == 1)
+
+        await scheduler.pauseNextCancelCall()
+        let replacing = Task {
+            try await coordinator.reconcile(
+                candidates: [receipt, rescue], enabled: true, now: start, calendar: calendar,
+                preferenceRevision: 1, requestRevision: 2
+            )
+        }
+        await scheduler.waitForPausedCancel()
+        // OS delivers the OLD request while replacement is awaiting cancel.
+        clock.advance(to: delivery.addingTimeInterval(30))
+        await scheduler.setDelivered(
+            identifier: ReadingMotivationNotificationCoordinator.identifier(for: dayKey),
+            at: delivery
+        )
+        await scheduler.resumePausedCancel()
+
+        let decision = try await replacing.value
+        #expect(decision == .cancelPending || decision == .none)
+        #expect(await storage.load().hasConsumedDayKey(dayKey))
+        #expect(await storage.load().pendingKind == nil)
+        #expect(await scheduler.pendingCount() == 0)
+
+        // Max one motivational notification per day: no replacement after late delivery.
+        #expect(try await coordinator.reconcile(
+            candidates: [rescue], enabled: true, now: clock.now(), calendar: calendar,
+            preferenceRevision: 1, requestRevision: 3
+        ) == .none)
+        #expect(await scheduler.pendingCount() == 0)
     }
 }

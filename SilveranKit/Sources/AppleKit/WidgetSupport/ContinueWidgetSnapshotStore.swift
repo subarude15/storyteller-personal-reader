@@ -257,6 +257,57 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
     }
 }
 
+/// Injectable App Group / file seam for Continue snapshot publication tests.
+public protocol ContinueWidgetSnapshotFileStoring: Sendable {
+    func resolveContainer() -> URL?
+    func ensureDirectories(in container: URL) throws
+    func readSnapshot(in container: URL) -> ContinueWidgetSnapshot?
+    func writeSnapshotData(_ data: Data, to container: URL) throws
+    func existingCoverFilename(in container: URL) -> String?
+    func writeCoverData(_ data: Data, to container: URL) throws -> String
+}
+
+public struct AppGroupContinueWidgetSnapshotFileStore: ContinueWidgetSnapshotFileStoring {
+    public init() {}
+
+    public func resolveContainer() -> URL? {
+        SilveranWidgetSnapshotStore.sharedContainerURL()
+    }
+
+    public func ensureDirectories(in container: URL) throws {
+        try FileManager.default.createDirectory(
+            at: container, withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: ContinueWidgetSnapshotStore.coversDirectory(in: container),
+            withIntermediateDirectories: true
+        )
+    }
+
+    public func readSnapshot(in container: URL) -> ContinueWidgetSnapshot? {
+        ContinueWidgetSnapshotStore.readSnapshotFile(in: container)
+    }
+
+    public func writeSnapshotData(_ data: Data, to container: URL) throws {
+        try data.write(
+            to: ContinueWidgetSnapshotStore.snapshotURL(in: container),
+            options: [.atomic]
+        )
+    }
+
+    public func existingCoverFilename(in container: URL) -> String? {
+        readSnapshot(in: container)?.coverFilename
+    }
+
+    public func writeCoverData(_ data: Data, to container: URL) throws -> String {
+        let name = "continue_cover.dat"
+        let url = ContinueWidgetSnapshotStore.coversDirectory(in: container)
+            .appendingPathComponent(name, isDirectory: false)
+        try data.write(to: url, options: [.atomic])
+        return name
+    }
+}
+
 public enum ContinueWidgetSnapshotStore {
     private static let snapshotFilename = "continue-now.json"
     private static let coversDirectoryName = "ContinueCovers"
@@ -357,38 +408,32 @@ public enum ContinueWidgetSnapshotStore {
         rate: Double? = nil,
         streakDays: Int? = nil,
         streakActivityDayKey: String? = nil,
+        fileStore: (any ContinueWidgetSnapshotFileStoring)? = nil,
     ) {
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "publish")
-        guard let container = SilveranWidgetSnapshotStore.sharedContainerURL() else {
+        let store = fileStore ?? AppGroupContinueWidgetSnapshotFileStore()
+        guard let container = store.resolveContainer() else {
             print("[ContinueWidget] publish skipped — App group container unavailable")
             return
         }
 
+        // Serialize read → streak/cover preserve → write → signature update so a
+        // concurrent audio tick cannot overwrite a fresher Home streak with a
+        // stale previous snapshot. reloadTimelines stays outside the lock.
+        var shouldReload = false
+        publishLock.lock()
         do {
-            try FileManager.default.createDirectory(
-                at: container,
-                withIntermediateDirectories: true,
-            )
-            let covers = coversDirectory(in: container)
-            try FileManager.default.createDirectory(
-                at: covers,
-                withIntermediateDirectories: true,
-            )
+            try store.ensureDirectories(in: container)
 
             var coverFilename: String?
             if let coverData, !coverData.isEmpty {
-                let name = "continue_cover.dat"
-                let url = covers.appendingPathComponent(name, isDirectory: false)
-                try coverData.write(to: url, options: [.atomic])
-                coverFilename = name
-            } else if let existing = readSnapshotFile(in: container)?.coverFilename,
-                title != nil
-            {
+                coverFilename = try store.writeCoverData(coverData, to: container)
+            } else if title != nil {
                 // Keep last cover while the same session refreshes without image bytes.
-                coverFilename = existing
+                coverFilename = store.existingCoverFilename(in: container)
             }
 
-            let previous = readSnapshotFile(in: container)
+            let previous = store.readSnapshot(in: container)
             let snapshot = ContinueWidgetSnapshot(
                 generatedAt: Date(),
                 title: title,
@@ -408,40 +453,43 @@ public enum ContinueWidgetSnapshotStore {
                 streakActivityDayKey: streakActivityDayKey ?? previous?.streakActivityDayKey,
             )
 
-            publishLock.lock()
             let previousPaint = lastPublishedPaintSignature
             let previousTransport = lastPublishedTransportSignature
             let previousReload = lastReloadDate
-            publishLock.unlock()
-
             let paintChanged = previousPaint != snapshot.paintSignature
             let transportChanged = previousTransport != snapshot.transportSignature
             let now = Date()
-
-            guard paintChanged || transportChanged else { return }
+            guard paintChanged || transportChanged else {
+                publishLock.unlock()
+                return
+            }
 
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.sortedKeys]
             let data = try encoder.encode(snapshot)
-            try data.write(to: snapshotURL(in: container), options: [.atomic])
+            try store.writeSnapshotData(data, to: container)
+            // UserDefaults only — must not re-enter publishLock.
             rememberLastSnapshot(snapshot)
 
             let progressTickDue =
                 now.timeIntervalSince(previousReload) >= progressReloadInterval
-            let reloadNow =
-                transportChanged || (paintChanged && progressTickDue) || now.timeIntervalSince(previousReload) >= 300
+            shouldReload =
+                transportChanged || (paintChanged && progressTickDue)
+                || now.timeIntervalSince(previousReload) >= 300
 
-            publishLock.lock()
             lastPublishedPaintSignature = snapshot.paintSignature
             lastPublishedTransportSignature = snapshot.transportSignature
-            if reloadNow { lastReloadDate = now }
+            if shouldReload { lastReloadDate = now }
             publishLock.unlock()
-
-            guard reloadNow else { return }
-            reloadTimelines()
         } catch {
+            publishLock.unlock()
             print("[ContinueWidget] publish failed: \(error)")
+            return
+        }
+
+        if shouldReload {
+            reloadTimelines()
         }
     }
 
@@ -506,7 +554,7 @@ public enum ContinueWidgetSnapshotStore {
 
     // MARK: - Paths
 
-    private static func readSnapshotFile(in container: URL) -> ContinueWidgetSnapshot? {
+    static func readSnapshotFile(in container: URL) -> ContinueWidgetSnapshot? {
         let url = snapshotURL(in: container)
         guard let data = try? Data(contentsOf: url) else { return nil }
         let decoder = JSONDecoder()
@@ -514,12 +562,21 @@ public enum ContinueWidgetSnapshotStore {
         return try? decoder.decode(ContinueWidgetSnapshot.self, from: data)
     }
 
-    private static func snapshotURL(in container: URL) -> URL {
+    static func snapshotURL(in container: URL) -> URL {
         container.appendingPathComponent(snapshotFilename, isDirectory: false)
     }
 
-    private static func coversDirectory(in container: URL) -> URL {
+    static func coversDirectory(in container: URL) -> URL {
         container.appendingPathComponent(coversDirectoryName, isDirectory: true)
+    }
+
+    /// Test hook: reset in-process publish signatures between injectable-store runs.
+    public static func resetPublishSignaturesForTesting() {
+        publishLock.lock()
+        lastPublishedPaintSignature = nil
+        lastPublishedTransportSignature = nil
+        lastReloadDate = .distantPast
+        publishLock.unlock()
     }
 }
 

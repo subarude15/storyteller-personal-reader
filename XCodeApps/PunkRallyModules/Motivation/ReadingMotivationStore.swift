@@ -274,8 +274,10 @@ final class ReadingMotivationStore {
         return ReadingMotivationNotificationPolicy.candidates(
             now: now,
             quietDeliveryDate: quiet,
-            actualSeconds: todayProgress.seconds,
-            dailyGoalSeconds: Double(settings.dailyReadingGoalMinutes + settings.dailyListeningGoalMinutes) * 60,
+            readingSeconds: todayProgress.readingSeconds,
+            readingGoalSeconds: Double(settings.dailyReadingGoalMinutes) * 60,
+            listeningSeconds: todayProgress.listeningSeconds,
+            listeningGoalSeconds: Double(settings.dailyListeningGoalMinutes) * 60,
             activityDaysThisWeek: receipt.activityDays,
             calendar: calendar
         )

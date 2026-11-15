@@ -389,27 +389,54 @@ public enum ReadingMotivationCalculations {
             seconds = remaining / min(playbackRate, 4)
             basis = "At \(String(format: "%.2g", min(playbackRate, 4)))× playback"
         } else {
+            // Pace uses wall time across the whole interval between real progress
+            // checkpoints, including stalled/rereading sessions and missing mid
+            // checkpoints. Only positive advances contribute units; regressions
+            // restart the baseline instead of inventing negative pace.
             let observations = normalizedSessions(sessions, now: now)
                 .filter { session in
-                    guard session.mediaID == mediaID,
-                        paceKind.map({ session.kind == $0 }) ?? true,
-                        session.endProgress?.isFinite == true
-                    else { return false }
-                    return true
+                    session.mediaID == mediaID
+                        && (paceKind.map({ session.kind == $0 }) ?? true)
                 }
-                .filter { ($0.endProgress ?? -1) >= 0 && ($0.endProgress ?? 2) <= 1 }
                 .sorted { $0.endedAt < $1.endedAt }
             var unitsGained: Double = 0
             var secondsSpent: TimeInterval = 0
-            for (previous, current) in zip(observations, observations.dropFirst()) {
-                guard let previousProgress = previous.endProgress,
-                    let currentProgress = current.endProgress,
-                    currentProgress > previousProgress
-                else { continue }
-                let work = min(current.durationSeconds, current.endedAt.timeIntervalSince(current.startedAt))
+            var baselineProgress: Double?
+            var pendingSeconds: TimeInterval = 0
+            for session in observations {
+                let work = min(
+                    session.durationSeconds,
+                    session.endedAt.timeIntervalSince(session.startedAt)
+                )
                 guard work.isFinite, work > 0 else { continue }
-                unitsGained += totalUnits * (currentProgress - previousProgress)
-                secondsSpent += work
+                let checkpoint: Double? = {
+                    guard let progress = session.endProgress,
+                        progress.isFinite,
+                        progress >= 0,
+                        progress <= 1
+                    else { return nil }
+                    return progress
+                }()
+                if let progress = checkpoint {
+                    if let baseline = baselineProgress {
+                        if progress > baseline {
+                            unitsGained += totalUnits * (progress - baseline)
+                            secondsSpent += pendingSeconds + work
+                            baselineProgress = progress
+                            pendingSeconds = 0
+                        } else if progress < baseline {
+                            baselineProgress = progress
+                            pendingSeconds = 0
+                        } else {
+                            pendingSeconds += work
+                        }
+                    } else {
+                        baselineProgress = progress
+                        pendingSeconds = 0
+                    }
+                } else if baselineProgress != nil {
+                    pendingSeconds += work
+                }
             }
             guard unitsGained.isFinite, unitsGained > 0, secondsSpent > 0 else { return nil }
             seconds = remaining / (unitsGained / secondsSpent)
@@ -484,6 +511,7 @@ public enum ReadingMotivationCalculations {
 
             var endedAt = session.endedAt
             var duration = min(session.durationSeconds, originalSpan)
+            var clippedToNow = false
             if endedAt > now {
                 // Historical reference (e.g. prior-week Sunday night): keep the
                 // valid earlier portion instead of discarding the whole session.
@@ -491,6 +519,7 @@ public enum ReadingMotivationCalculations {
                 guard clippedSpan.isFinite, clippedSpan > 0 else { continue }
                 duration = duration * (clippedSpan / originalSpan)
                 endedAt = now
+                clippedToNow = true
                 guard duration.isFinite, duration > 0 else { continue }
             }
 
@@ -503,6 +532,11 @@ public enum ReadingMotivationCalculations {
             var valid = session
             valid.endedAt = endedAt
             valid.durationSeconds = min(duration, endedAt.timeIntervalSince(session.startedAt))
+            // endProgress is observed at endedAt. Clipping to a historical "now"
+            // must not retain a checkpoint that only existed after that reference.
+            if clippedToNow {
+                valid.endProgress = nil
+            }
             byID[session.id] = valid
         }
         return byID.values.sorted {
@@ -673,27 +707,27 @@ public enum ReadingMotivationNotificationPolicy {
         )
     }
 
-    /// Build same-day candidates from actual goal progress; arbitration happens in `decide`.
+    /// Build same-day candidates from independently evaluated reading/listening
+    /// goals; arbitration of a single daily kind happens in `decide`.
     ///
-    /// Pace/rescue eligibility is evaluated against quiet-time expectations using
-    /// current progress so a morning launch can schedule tonight's reminder without
+    /// Pace/rescue eligibility uses quiet-time expectations against each configured
+    /// goal so over-complete listening cannot suppress an unmet reading goal (and
+    /// the converse). A morning launch can still schedule tonight's reminder without
     /// waiting for a later app/session event. Current candidates only — obsolete
     /// higher-priority kinds drop out when progress makes them ineligible.
     public static func candidates(
         now: Date,
         quietDeliveryDate: Date?,
-        actualSeconds: Double,
-        dailyGoalSeconds: Double,
+        readingSeconds: Double,
+        readingGoalSeconds: Double,
+        listeningSeconds: Double,
+        listeningGoalSeconds: Double,
         activityDaysThisWeek: Int,
         calendar: Calendar
     ) -> [ReadingMotivationNotificationCandidate] {
         guard let quietDeliveryDate,
             quietDeliveryDate > now,
-            localDayKey(quietDeliveryDate, calendar: calendar) == localDayKey(now, calendar: calendar),
-            actualSeconds.isFinite,
-            actualSeconds >= 0,
-            dailyGoalSeconds.isFinite,
-            dailyGoalSeconds > 0
+            localDayKey(quietDeliveryDate, calendar: calendar) == localDayKey(now, calendar: calendar)
         else { return [] }
 
         let day = calendar.dateInterval(of: .day, for: now)
@@ -701,10 +735,18 @@ public enum ReadingMotivationNotificationPolicy {
             min(max(quietDeliveryDate.timeIntervalSince($0.start) / $0.duration, 0), 1)
         } ?? 0
         var result: [ReadingMotivationNotificationCandidate] = []
-        if actualSeconds < dailyGoalSeconds * quietFraction {
+        if goalNeedsNudge(
+            actualSeconds: readingSeconds, goalSeconds: readingGoalSeconds, fraction: quietFraction
+        ) || goalNeedsNudge(
+            actualSeconds: listeningSeconds, goalSeconds: listeningGoalSeconds, fraction: quietFraction
+        ) {
             result.append(.init(kind: .pace, deliveryDate: quietDeliveryDate))
         }
-        if actualSeconds < dailyGoalSeconds * 0.5 {
+        if goalNeedsNudge(
+            actualSeconds: readingSeconds, goalSeconds: readingGoalSeconds, fraction: 0.5
+        ) || goalNeedsNudge(
+            actualSeconds: listeningSeconds, goalSeconds: listeningGoalSeconds, fraction: 0.5
+        ) {
             result.append(.init(kind: .rescue, deliveryDate: quietDeliveryDate))
         }
         if activityDaysThisWeek > 0,
@@ -715,6 +757,21 @@ public enum ReadingMotivationNotificationPolicy {
             result.append(.init(kind: .receipt, deliveryDate: quietDeliveryDate))
         }
         return result
+    }
+
+    /// A configured goal (strictly positive finite seconds) still needs a nudge
+    /// when actual progress is below the expected fraction. Zero/invalid goals are
+    /// ignored so they neither fabricate nor suppress reminders.
+    private static func goalNeedsNudge(
+        actualSeconds: Double,
+        goalSeconds: Double,
+        fraction: Double
+    ) -> Bool {
+        guard goalSeconds.isFinite, goalSeconds > 0,
+            actualSeconds.isFinite, actualSeconds >= 0,
+            fraction.isFinite, fraction >= 0
+        else { return false }
+        return actualSeconds < goalSeconds * fraction
     }
 
     public static func decide(
@@ -770,6 +827,16 @@ public struct ReadingMotivationNotificationRequest: Equatable, Sendable {
     }
 }
 
+/// Injectable wall clock so reconcile can revalidate time after scheduler awaits.
+public protocol ReadingMotivationClock: Sendable {
+    func now() -> Date
+}
+
+public struct SystemReadingMotivationClock: ReadingMotivationClock {
+    public init() {}
+    public func now() -> Date { Date() }
+}
+
 /// Injectable boundary for the iOS notification center and deterministic tests.
 public protocol ReadingMotivationNotificationScheduling: Sendable {
     func authorization() async -> ReadingMotivationNotificationAuthorization
@@ -808,9 +875,11 @@ public actor UserDefaultsReadingMotivationNotificationStateStore: ReadingMotivat
 }
 
 /// Serializes permission, pending replacement, and the one-delivery-per-day ledger.
+/// The transaction gate orders callers; it does not control OS delivery timing.
 public actor ReadingMotivationNotificationCoordinator {
     private let scheduler: any ReadingMotivationNotificationScheduling
     private let stateStore: any ReadingMotivationNotificationStateStoring
+    private let clock: any ReadingMotivationClock
     private var state: ReadingMotivationNotificationState = .empty
     private var hasLoadedState = false
     private var transactionActive = false
@@ -820,10 +889,12 @@ public actor ReadingMotivationNotificationCoordinator {
 
     public init(
         scheduler: any ReadingMotivationNotificationScheduling,
-        stateStore: any ReadingMotivationNotificationStateStoring
+        stateStore: any ReadingMotivationNotificationStateStoring,
+        clock: any ReadingMotivationClock = SystemReadingMotivationClock()
     ) {
         self.scheduler = scheduler
         self.stateStore = stateStore
+        self.clock = clock
     }
 
     /// Called only from the explicit opt-in control, never during app startup.
@@ -853,69 +924,101 @@ public actor ReadingMotivationNotificationCoordinator {
         latestPreferenceRevision = preferenceRevision
         latestRequestRevision = requestRevision
 
-        var deliveredIdentifiers: Set<String> = []
-        for (identifier, deliveredAt) in await scheduler.deliveredNotifications() {
-            guard let requestDay = Self.dayKey(from: identifier, calendar: calendar) else { continue }
-            deliveredIdentifiers.insert(identifier)
-            state.consume(dayKey: requestDay)
-            let actualDay = ReadingMotivationNotificationPolicy.localDayKey(deliveredAt, calendar: calendar)
-            state.consume(dayKey: actualDay)
-            if state.pendingDayKey == requestDay || state.pendingDayKey == actualDay {
-                if let pendingDay = state.pendingDayKey {
-                    await scheduler.cancelPending(identifier: Self.identifier(for: pendingDay))
-                }
-                clearPendingState()
-            }
-        }
-        if let pendingDay = state.pendingDayKey,
-            let deliveryDate = state.pendingDeliveryDate,
-            deliveryDate <= now
-        {
-            state.consume(dayKey: pendingDay)
-            state.consume(
-                dayKey: ReadingMotivationNotificationPolicy.localDayKey(deliveryDate, calendar: calendar)
-            )
-            await scheduler.cancelPending(identifier: Self.identifier(for: pendingDay))
-            clearPendingState()
-        }
-        if !deliveredIdentifiers.isEmpty {
-            await scheduler.removeDelivered(identifiers: deliveredIdentifiers)
-        }
+        // Caller `now` is a reference instant; after awaits the injected clock is
+        // authoritative so a late OS delivery cannot be followed by a replacement.
+        var referenceNow = max(now, clock.now())
+        await ingestDelivered(calendar: calendar)
+        await consumeExpiredPending(now: referenceNow, calendar: calendar)
         await stateStore.save(state)
 
         let authorized = await scheduler.authorization() == .authorized
+        referenceNow = max(now, clock.now())
         let decision = ReadingMotivationNotificationPolicy.decide(
             candidates: candidates,
             state: state,
             enabled: enabled,
             authorized: authorized,
-            now: now,
+            now: referenceNow,
             calendar: calendar
         )
         switch decision {
             case .none:
-                break
+                return .none
             case .cancelPending:
                 if let pendingDay = state.pendingDayKey {
                     await scheduler.cancelPending(identifier: Self.identifier(for: pendingDay))
                 }
                 clearPendingState()
                 await stateStore.save(state)
-            case .schedule(let kind, let dayKey), .replacePending(let kind, let dayKey):
+                return .cancelPending
+            case .schedule(_, let dayKey), .replacePending(_, let dayKey):
+                let intendedReplace: Bool = {
+                    if case .replacePending = decision { return true }
+                    return false
+                }()
+                await ingestDelivered(calendar: calendar)
+                referenceNow = max(now, clock.now())
+                await consumeExpiredPending(now: referenceNow, calendar: calendar)
+                if state.hasConsumedDayKey(dayKey) {
+                    await abandonPending()
+                    return .cancelPending
+                }
+
+                let liveDecision = ReadingMotivationNotificationPolicy.decide(
+                    candidates: candidates,
+                    state: state,
+                    enabled: enabled,
+                    authorized: authorized,
+                    now: referenceNow,
+                    calendar: calendar
+                )
+                let installKind: ReadingMotivationNotificationKind
+                let installDay: String
+                switch liveDecision {
+                    case .schedule(let liveKind, let liveDay), .replacePending(let liveKind, let liveDay):
+                        installKind = liveKind
+                        installDay = liveDay
+                    case .cancelPending:
+                        if let pendingDay = state.pendingDayKey {
+                            await scheduler.cancelPending(identifier: Self.identifier(for: pendingDay))
+                        }
+                        clearPendingState()
+                        await stateStore.save(state)
+                        return .cancelPending
+                    case .none:
+                        return .none
+                }
+
                 if let oldDay = state.pendingDayKey {
                     await scheduler.cancelPending(identifier: Self.identifier(for: oldDay))
                 }
+                // Cancel awaits do not control OS delivery of the old request.
+                await ingestDelivered(calendar: calendar)
+                referenceNow = max(now, clock.now())
+                await consumeExpiredPending(now: referenceNow, calendar: calendar)
+                if state.hasConsumedDayKey(installDay) {
+                    clearPendingState()
+                    await stateStore.save(state)
+                    return .cancelPending
+                }
                 guard let deliveryDate = candidates.first(where: {
-                    $0.kind == kind && $0.deliveryDate > now
-                        && ReadingMotivationNotificationPolicy.localDayKey($0.deliveryDate, calendar: calendar) == dayKey
-                })?.deliveryDate else { break }
+                    $0.kind == installKind
+                        && $0.deliveryDate > referenceNow
+                        && ReadingMotivationNotificationPolicy.localDayKey(
+                            $0.deliveryDate, calendar: calendar
+                        ) == installDay
+                })?.deliveryDate else {
+                    clearPendingState()
+                    await stateStore.save(state)
+                    return .none
+                }
                 let request = ReadingMotivationNotificationRequest(
-                    identifier: Self.identifier(for: dayKey),
-                    kind: kind,
+                    identifier: Self.identifier(for: installDay),
+                    kind: installKind,
                     deliveryDate: deliveryDate
                 )
-                state.pendingKind = kind
-                state.pendingDayKey = dayKey
+                state.pendingKind = installKind
+                state.pendingDayKey = installDay
                 state.pendingDeliveryDate = deliveryDate
                 await stateStore.save(state)
                 do {
@@ -925,8 +1028,17 @@ public actor ReadingMotivationNotificationCoordinator {
                     await stateStore.save(state)
                     throw error
                 }
+                await ingestDelivered(calendar: calendar)
+                referenceNow = max(now, clock.now())
+                await consumeExpiredPending(now: referenceNow, calendar: calendar)
+                if state.hasConsumedDayKey(installDay) {
+                    await abandonPending()
+                    return .cancelPending
+                }
+                return intendedReplace
+                    ? .replacePending(kind: installKind, dayKey: installDay)
+                    : .schedule(kind: installKind, dayKey: installDay)
         }
-        return decision
     }
 
     public func markDelivered(
@@ -984,6 +1096,52 @@ public actor ReadingMotivationNotificationCoordinator {
         state.pendingKind = nil
         state.pendingDayKey = nil
         state.pendingDeliveryDate = nil
+    }
+
+    private func abandonPending() async {
+        if let pendingDay = state.pendingDayKey {
+            await scheduler.cancelPending(identifier: Self.identifier(for: pendingDay))
+        }
+        clearPendingState()
+        await stateStore.save(state)
+    }
+
+    /// Fold OS-delivered motivation notifications into the consumed-day ledger.
+    private func ingestDelivered(calendar: Calendar) async {
+        var deliveredIdentifiers: Set<String> = []
+        for (identifier, deliveredAt) in await scheduler.deliveredNotifications() {
+            guard let requestDay = Self.dayKey(from: identifier, calendar: calendar) else { continue }
+            deliveredIdentifiers.insert(identifier)
+            state.consume(dayKey: requestDay)
+            let actualDay = ReadingMotivationNotificationPolicy.localDayKey(
+                deliveredAt, calendar: calendar
+            )
+            state.consume(dayKey: actualDay)
+            if state.pendingDayKey == requestDay || state.pendingDayKey == actualDay {
+                if let pendingDay = state.pendingDayKey {
+                    await scheduler.cancelPending(identifier: Self.identifier(for: pendingDay))
+                }
+                clearPendingState()
+            }
+        }
+        if !deliveredIdentifiers.isEmpty {
+            await scheduler.removeDelivered(identifiers: deliveredIdentifiers)
+        }
+    }
+
+    /// Conservatively consume the day when a pending delivery boundary is already past
+    /// (crash/restart gap or await that outlived the scheduled fire time).
+    private func consumeExpiredPending(now: Date, calendar: Calendar) async {
+        guard let pendingDay = state.pendingDayKey,
+            let deliveryDate = state.pendingDeliveryDate,
+            deliveryDate <= now
+        else { return }
+        state.consume(dayKey: pendingDay)
+        state.consume(
+            dayKey: ReadingMotivationNotificationPolicy.localDayKey(deliveryDate, calendar: calendar)
+        )
+        await scheduler.cancelPending(identifier: Self.identifier(for: pendingDay))
+        clearPendingState()
     }
 
     private func loadStateIfNeeded() async {

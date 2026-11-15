@@ -124,4 +124,139 @@ struct ContinueWidgetSnapshotTests {
         // A legacy payload must not render dead transport buttons.
         #expect(!snapshot.supportsTransportControls)
     }
+
+    @Test func concurrentPublishPreservesFresherStreakAcrossAudioHomeRace() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("continue-publish-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        }
+
+        let store = PausableContinueWidgetFileStore(root: root)
+        ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        ContinueWidgetSnapshotStore.publish(
+            title: "Piranesi",
+            subtitle: "Clarke",
+            isPlaying: false,
+            kind: .ebook,
+            coverData: nil,
+            streakDays: 3,
+            streakActivityDayKey: "2026-11-14",
+            fileStore: store
+        )
+        #expect(store.readSnapshot(in: root)?.streakDays == 3)
+
+        store.pauseNextRead()
+        let audioDone = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            // Audio tick: nil streak should preserve whatever it read.
+            ContinueWidgetSnapshotStore.publish(
+                title: "Piranesi",
+                subtitle: "Clarke",
+                isPlaying: true,
+                kind: .audiobook,
+                coverData: nil,
+                hasLiveSession: true,
+                streakDays: nil,
+                streakActivityDayKey: nil,
+                fileStore: store
+            )
+            audioDone.signal()
+        }
+        store.waitForPausedRead()
+        // Home publishes a fresher streak while audio still holds the publish lock.
+        let homeDone = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            ContinueWidgetSnapshotStore.publish(
+                title: "Piranesi",
+                subtitle: "Clarke",
+                isPlaying: false,
+                kind: .ebook,
+                coverData: nil,
+                streakDays: 5,
+                streakActivityDayKey: "2026-11-15",
+                fileStore: store
+            )
+            homeDone.signal()
+        }
+        // Without an atomic publish lock, home would finish first and audio would
+        // overwrite streak 5 with the stale preserved 3 after resume.
+        Thread.sleep(forTimeInterval: 0.05)
+        store.resumePausedRead()
+        #expect(audioDone.wait(timeout: .now() + 2) == .success)
+        #expect(homeDone.wait(timeout: .now() + 2) == .success)
+
+        let final = store.readSnapshot(in: root)
+        #expect(final?.streakDays == 5)
+        #expect(final?.streakActivityDayKey == "2026-11-15")
+    }
+}
+
+/// Directory-backed Continue publish seam with a suspension point on snapshot read.
+private final class PausableContinueWidgetFileStore: ContinueWidgetSnapshotFileStoring, @unchecked Sendable {
+    let root: URL
+    private let lock = NSLock()
+    private var pauseRead = false
+    private let readStarted = DispatchSemaphore(value: 0)
+    private let readGate = DispatchSemaphore(value: 0)
+
+    init(root: URL) { self.root = root }
+
+    func resolveContainer() -> URL? { root }
+
+    func ensureDirectories(in container: URL) throws {
+        try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: ContinueWidgetSnapshotStore.coversDirectory(in: container),
+            withIntermediateDirectories: true
+        )
+    }
+
+    func readSnapshot(in container: URL) -> ContinueWidgetSnapshot? {
+        lock.lock()
+        let shouldPause = pauseRead
+        if shouldPause { pauseRead = false }
+        lock.unlock()
+        if shouldPause {
+            readStarted.signal()
+            readGate.wait()
+        }
+        return ContinueWidgetSnapshotStore.readSnapshotFile(in: container)
+    }
+
+    func writeSnapshotData(_ data: Data, to container: URL) throws {
+        try data.write(
+            to: ContinueWidgetSnapshotStore.snapshotURL(in: container),
+            options: [.atomic]
+        )
+    }
+
+    func existingCoverFilename(in container: URL) -> String? {
+        ContinueWidgetSnapshotStore.readSnapshotFile(in: container)?.coverFilename
+    }
+
+    func writeCoverData(_ data: Data, to container: URL) throws -> String {
+        let name = "continue_cover.dat"
+        let url = ContinueWidgetSnapshotStore.coversDirectory(in: container)
+            .appendingPathComponent(name, isDirectory: false)
+        try data.write(to: url, options: [.atomic])
+        return name
+    }
+
+    func pauseNextRead() {
+        lock.lock()
+        pauseRead = true
+        lock.unlock()
+    }
+
+    func waitForPausedRead() {
+        readStarted.wait()
+    }
+
+    func resumePausedRead() {
+        readGate.signal()
+    }
+
 }
