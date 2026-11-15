@@ -974,12 +974,22 @@ public enum ReadingMotivationActiveSessionReconcilePolicy: Sendable {
         streakDays: Int,
         activityDayKey: String,
         lastPublishedStreakDays: Int?,
-        lastPublishedActivityDayKey: String?
+        lastPublishedActivityDayKey: String?,
+        todayActiveMinutes: Int? = nil,
+        lastPublishedTodayActiveMinutes: Int? = nil,
+        dailyGoalMinutes: Int? = nil,
+        lastPublishedDailyGoalMinutes: Int? = nil
     ) -> Bool {
         guard ReadingMotivationCalculations.isRecordableSession(duration: sessionElapsed)
         else { return false }
         if lastPublishedStreakDays != streakDays { return true }
         if lastPublishedActivityDayKey != activityDayKey { return true }
+        if let todayActiveMinutes, lastPublishedTodayActiveMinutes != todayActiveMinutes {
+            return true
+        }
+        if let dailyGoalMinutes, lastPublishedDailyGoalMinutes != dailyGoalMinutes {
+            return true
+        }
         return false
     }
 

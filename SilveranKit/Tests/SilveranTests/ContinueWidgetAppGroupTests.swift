@@ -1425,6 +1425,184 @@ struct ContinueWidgetCurrentSnapshotTests {
         #expect(source.contains("hasActiveSession: self.activeSession != nil"))
         #expect(source.contains("notificationsEnabled: ReadingMotivationStore.shared.settings.notificationsEnabled"))
     }
+
+    @Test func streakWidgetKindIsUniqueAndExcludedFromContinueKinds() {
+        let streakKind = SilveranWidgetConstants.streakWidgetKind
+        #expect(streakKind == "inkamp.streak.medium.v1")
+        #expect(!SilveranWidgetConstants.continueWidgetKinds.contains(streakKind))
+        #expect(streakKind != SilveranWidgetConstants.readingWidgetKind)
+        #expect(ContinueWidgetSnapshotStore.timelineKindsToReload == SilveranWidgetConstants.continueWidgetKinds)
+    }
+
+    @Test func streakGoalPresentationCoversFiveTiersAndEveningUrgency() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let daytime = try #require(calendar.date(from: DateComponents(
+            year: 2026, month: 11, day: 15, hour: 14, minute: 0
+        )))
+        let evening = try #require(calendar.date(from: DateComponents(
+            year: 2026, month: 11, day: 15, hour: 20, minute: 15
+        )))
+
+        func makeSnapshot(minutes: Double, goal: Int = 30, streak: Int = 4, longest: Int = 9) -> ContinueWidgetSnapshot {
+            ContinueWidgetSnapshot(
+                generatedAt: daytime,
+                title: "Piranesi",
+                subtitle: "Susanna Clarke",
+                kind: .audiobook,
+                streakDays: streak,
+                streakActivityDayKey: "2026-11-15",
+                todayActiveSeconds: minutes * 60,
+                dailyGoalMinutes: goal,
+                todayGoalDayKey: "2026-11-15",
+                longestStreakDays: longest
+            )
+        }
+
+        // 0% -> Critical Red
+        let tier0 = InkAmpStreakGoalPresentation.resolve(from: makeSnapshot(minutes: 0), now: daytime, calendar: calendar)
+        #expect(tier0.tier == .criticalRed)
+        #expect(tier0.isEveningUrgent == false)
+        #expect(tier0.countdownHeadline == "30m to go")
+        #expect(tier0.todayRatioText == "0/30m today")
+
+        // 10% (3/30) -> Sparked Orange
+        let tier1 = InkAmpStreakGoalPresentation.resolve(from: makeSnapshot(minutes: 3), now: daytime, calendar: calendar)
+        #expect(tier1.tier == .sparked)
+        #expect(tier1.countdownHeadline == "27m to go")
+        #expect(tier1.todayRatioText == "3/30m today")
+
+        // 33% (10/30) -> Rolling Amber
+        let tier2 = InkAmpStreakGoalPresentation.resolve(from: makeSnapshot(minutes: 10), now: daytime, calendar: calendar)
+        #expect(tier2.tier == .rolling)
+        #expect(tier2.countdownHeadline == "20m to go")
+
+        // 60% (18/30) -> Home Stretch Aqua
+        let tier3 = InkAmpStreakGoalPresentation.resolve(from: makeSnapshot(minutes: 18), now: daytime, calendar: calendar)
+        #expect(tier3.tier == .homeStretch)
+        #expect(tier3.countdownHeadline == "12m to go")
+        #expect(tier3.streakBadgeText == "🔥 4d streak · Best 9d")
+
+        // 100%+ (32/30) -> Completed Green (even at night)
+        let tier4 = InkAmpStreakGoalPresentation.resolve(from: makeSnapshot(minutes: 32, streak: 5, longest: 5), now: evening, calendar: calendar)
+        #expect(tier4.tier == .completed)
+        #expect(tier4.isEveningUrgent == false)
+        #expect(tier4.countdownHeadline == "Goal done!")
+        #expect(tier4.streakBadgeText == "🔥 5-day streak")
+
+        // Evening urgency: >= 20:00 and < 50% escalates to Critical Red
+        let eveningLagging = InkAmpStreakGoalPresentation.resolve(from: makeSnapshot(minutes: 10), now: evening, calendar: calendar)
+        #expect(eveningLagging.tier == .criticalRed)
+        #expect(eveningLagging.isEveningUrgent == true)
+        #expect(eveningLagging.statusSubline == "Midnight closes in")
+
+        // Evening >= 50% stays Home Stretch Aqua
+        let eveningOnTrack = InkAmpStreakGoalPresentation.resolve(from: makeSnapshot(minutes: 18), now: evening, calendar: calendar)
+        #expect(eveningOnTrack.tier == .homeStretch)
+        #expect(eveningOnTrack.isEveningUrgent == false)
+    }
+
+    @Test func resolvingStreakResetsTodayActiveSecondsOnNewDay() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let yesterday = try #require(calendar.date(from: DateComponents(
+            year: 2026, month: 11, day: 14, hour: 21, minute: 0
+        )))
+        let todayMorning = try #require(calendar.date(from: DateComponents(
+            year: 2026, month: 11, day: 15, hour: 8, minute: 0
+        )))
+
+        let snapshot = ContinueWidgetSnapshot(
+            generatedAt: yesterday,
+            title: "Piranesi",
+            kind: .audiobook,
+            streakDays: 4,
+            streakActivityDayKey: "2026-11-14",
+            todayActiveSeconds: 22 * 60,
+            dailyGoalMinutes: 30,
+            todayGoalDayKey: "2026-11-14",
+            longestStreakDays: 12
+        )
+
+        let resolved = snapshot.resolvingStreak(at: todayMorning, calendar: calendar)
+        #expect(resolved.streakDays == 4)
+        #expect(resolved.todayActiveSeconds == 0)
+        #expect(resolved.todayGoalDayKey == "2026-11-15")
+        let goal = InkAmpStreakGoalPresentation.resolve(from: snapshot, now: todayMorning, calendar: calendar)
+        #expect(goal.doneMinutes == 0)
+        #expect(goal.minutesLeft == 30)
+        #expect(goal.tier == .criticalRed)
+        #expect(goal.streakDays == 4)
+    }
+
+    @Test func publishAndUpdateAuthoritativeStreakPersistAndPreserveGoalFields() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("streak-widget-fields-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        }
+        let store = PausableContinueWidgetFileStore(root: root)
+        ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+
+        ContinueWidgetSnapshotStore.publish(
+            title: "The Reddening",
+            subtitle: "Adam Nevill",
+            isPlaying: false,
+            kind: .audiobook,
+            coverData: Data([0x01, 0x02]),
+            progress: 0.25,
+            elapsedSeconds: 600,
+            durationSeconds: 2400,
+            hasLiveSession: true,
+            streakDays: 3,
+            streakActivityDayKey: "2026-11-15",
+            todayActiveSeconds: 15.0 * 60.0,
+            dailyGoalMinutes: 30,
+            todayGoalDayKey: "2026-11-15",
+            longestStreakDays: 7,
+            fileStore: store
+        )
+
+        // Live audio tick omitting goal/streak preserves existing authoritative values.
+        ContinueWidgetSnapshotStore.publishLiveMirror(
+            title: "The Reddening",
+            subtitle: "Adam Nevill",
+            isPlaying: true,
+            kind: .audiobook,
+            coverData: nil,
+            progress: 0.30,
+            elapsedSeconds: 720,
+            durationSeconds: 2400,
+            hasLiveSession: true,
+            fileStore: store
+        )
+        let afterAudio = try #require(store.readSnapshot(in: root))
+        #expect(afterAudio.todayActiveSeconds == 15.0 * 60.0)
+        #expect(afterAudio.dailyGoalMinutes == 30)
+        #expect(afterAudio.todayGoalDayKey == "2026-11-15")
+        #expect(afterAudio.longestStreakDays == 7)
+
+        // Authoritative goal update advances today's seconds and goal without losing item timing.
+        let updatedOK = ContinueWidgetSnapshotStore.updateAuthoritativeStreak(
+            streakDays: 4,
+            streakActivityDayKey: "2026-11-15",
+            todayActiveSeconds: 24.0 * 60.0,
+            dailyGoalMinutes: 45,
+            todayGoalDayKey: "2026-11-15",
+            longestStreakDays: 8,
+            fileStore: store
+        )
+        #expect(updatedOK)
+        let afterGoalUpdate = try #require(store.readSnapshot(in: root))
+        #expect(afterGoalUpdate.streakDays == 4)
+        #expect(afterGoalUpdate.todayActiveSeconds == 24.0 * 60.0)
+        #expect(afterGoalUpdate.dailyGoalMinutes == 45)
+        #expect(afterGoalUpdate.longestStreakDays == 8)
+        #expect(afterGoalUpdate.progress == 0.30)
+        #expect(afterGoalUpdate.isPlaying == true)
+    }
 }
 
 /// Directory-backed Continue publish seam with a suspension point on snapshot read.

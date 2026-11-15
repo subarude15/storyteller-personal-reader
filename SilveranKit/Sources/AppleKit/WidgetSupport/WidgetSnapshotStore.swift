@@ -20,6 +20,7 @@ public enum SilveranWidgetConstants {
     /// paid team) — Sideload + ink+amp use group.com.punkrally.reader.
     public static let fallbackAppGroupIdentifier = AppGroupContainer.fallbackAppGroupIdentifier
     public static let readingWidgetKind = "SilveranReadingWidget"
+    public static let streakWidgetKind = "inkamp.streak.medium.v1"
     /// Four Continue + Next Up kinds (light/dark × medium/large).
     ///
     /// Medium uses v3. Installed v2 Medium Home Screen tiles stayed on a cached

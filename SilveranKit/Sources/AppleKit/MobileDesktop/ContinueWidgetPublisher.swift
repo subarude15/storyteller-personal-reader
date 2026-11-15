@@ -11,6 +11,31 @@ import SilveranAppleWidgets
 import SilveranKit
 import UIKit
 
+public struct ContinueWidgetMotivationSnapshot: Sendable, Equatable {
+    public let streakDays: Int
+    public let activityDayKey: String
+    public let todayActiveSeconds: Double
+    public let dailyGoalMinutes: Int
+    public let todayGoalDayKey: String
+    public let longestStreakDays: Int
+
+    public init(
+        streakDays: Int,
+        activityDayKey: String,
+        todayActiveSeconds: Double,
+        dailyGoalMinutes: Int,
+        todayGoalDayKey: String,
+        longestStreakDays: Int
+    ) {
+        self.streakDays = streakDays
+        self.activityDayKey = activityDayKey
+        self.todayActiveSeconds = todayActiveSeconds
+        self.dailyGoalMinutes = dailyGoalMinutes
+        self.todayGoalDayKey = todayGoalDayKey
+        self.longestStreakDays = longestStreakDays
+    }
+}
+
 @MainActor
 public enum ContinueWidgetPublisher {
     private static var installed = false
@@ -69,6 +94,7 @@ public enum ContinueWidgetPublisher {
         upNext: [ContinueWidgetUpNextDraft] = [],
         itemID: String? = nil,
         streakProvider: (@MainActor () -> (days: Int, dayKey: String))? = nil,
+        motivationProvider: (@MainActor () -> ContinueWidgetMotivationSnapshot)? = nil,
     ) {
         publishSerial &+= 1
         let serial = publishSerial
@@ -89,11 +115,13 @@ public enum ContinueWidgetPublisher {
                     upNext: upNext,
                     serial: serial,
                     authoritativeStreakProvider: streakProvider,
+                    motivationProvider: motivationProvider,
                 )
                 return
             }
             guard serial == publishSerial else { return }
             let streak = streakProvider?()
+            let motivation = motivationProvider?()
             ContinueWidgetSnapshotStore.publish(
                 title: title,
                 subtitle: subtitle,
@@ -105,8 +133,12 @@ public enum ContinueWidgetPublisher {
                 hasLiveSession: false,
                 upNext: upNext,
                 itemID: itemID,
-                streakDays: streak?.days,
-                streakActivityDayKey: streak?.dayKey,
+                streakDays: motivation?.streakDays ?? streak?.days,
+                streakActivityDayKey: motivation?.activityDayKey ?? streak?.dayKey,
+                todayActiveSeconds: motivation?.todayActiveSeconds,
+                dailyGoalMinutes: motivation?.dailyGoalMinutes,
+                todayGoalDayKey: motivation?.todayGoalDayKey,
+                longestStreakDays: motivation?.longestStreakDays,
             )
         }
     }
@@ -175,6 +207,7 @@ public enum ContinueWidgetPublisher {
         upNext: [ContinueWidgetUpNextDraft]? = nil,
         serial: UInt64? = nil,
         authoritativeStreakProvider: (@MainActor () -> (days: Int, dayKey: String))? = nil,
+        motivationProvider: (@MainActor () -> ContinueWidgetMotivationSnapshot)? = nil,
     ) async {
         guard serial == nil || serial == publishSerial else { return }
         guard let snapshot else {
@@ -230,6 +263,7 @@ public enum ContinueWidgetPublisher {
         // Refresh streak only AFTER every artwork/session await. The provider and
         // synchronous locked store write cannot suspend this main-actor turn.
         let streak = authoritativeStreakProvider?()
+        let motivation = motivationProvider?()
         ContinueWidgetSnapshotStore.publishLiveMirror(
             title: snapshot.title,
             subtitle: snapshot.author ?? snapshot.chapterLabel,
@@ -243,8 +277,12 @@ public enum ContinueWidgetPublisher {
             rate: snapshot.playbackRate,
             upNext: queue,
             itemID: ContinueWidgetItemID.from(sessionKind: snapshot.kind),
-            authoritativeStreakDays: streak?.days,
-            authoritativeStreakActivityDayKey: streak?.dayKey,
+            authoritativeStreakDays: motivation?.streakDays ?? streak?.days,
+            authoritativeStreakActivityDayKey: motivation?.activityDayKey ?? streak?.dayKey,
+            authoritativeTodayActiveSeconds: motivation?.todayActiveSeconds,
+            authoritativeDailyGoalMinutes: motivation?.dailyGoalMinutes,
+            authoritativeTodayGoalDayKey: motivation?.todayGoalDayKey,
+            authoritativeLongestStreakDays: motivation?.longestStreakDays,
         )
     }
 

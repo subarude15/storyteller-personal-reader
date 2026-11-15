@@ -127,6 +127,14 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
     /// Local calendar day (`yyyy-MM-dd`) of the activity that anchors `streakDays`.
     /// Dated to real activity, not each subsequent audio/snapshot publish.
     public var streakActivityDayKey: String?
+    /// Today's combined active reading + listening seconds.
+    public var todayActiveSeconds: Double?
+    /// Daily active goal in minutes (default 30 when unset).
+    public var dailyGoalMinutes: Int?
+    /// Local calendar day (`yyyy-MM-dd`) for `todayActiveSeconds`.
+    public var todayGoalDayKey: String?
+    /// Longest-ever recorded streak in days.
+    public var longestStreakDays: Int?
     /// True while the app holds a live audio session, i.e. transport buttons can
     /// actually do something. False for the "Home Continue" fallback card.
     public var hasLiveSession: Bool?
@@ -157,6 +165,10 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         itemID: String? = nil,
         streakDays: Int? = nil,
         streakActivityDayKey: String? = nil,
+        todayActiveSeconds: Double? = nil,
+        dailyGoalMinutes: Int? = nil,
+        todayGoalDayKey: String? = nil,
+        longestStreakDays: Int? = nil,
     ) {
         self.generatedAt = generatedAt
         self.title = title
@@ -173,6 +185,13 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
             let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : trimmed
         }
+        self.todayActiveSeconds = todayActiveSeconds.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        self.dailyGoalMinutes = dailyGoalMinutes.map { max(1, $0) }
+        self.todayGoalDayKey = todayGoalDayKey.flatMap { key in
+            let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        self.longestStreakDays = longestStreakDays.map { max(0, $0) }
         self.hasLiveSession = hasLiveSession
         self.rate = rate.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
         self.upNext = upNext
@@ -266,6 +285,14 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
             now: now,
             calendar: calendar
         )
+        let normalized = Self.normalizedLocalCalendar(from: calendar)
+        let todayKey = ReadingMotivationCalculations.localDayKey(now, calendar: normalized)
+        let goalAnchor = todayGoalDayKey
+            ?? ReadingMotivationCalculations.localDayKey(generatedAt, calendar: normalized)
+        if goalAnchor != todayKey {
+            copy.todayActiveSeconds = 0
+            copy.todayGoalDayKey = todayKey
+        }
         return copy
     }
 
@@ -390,6 +417,14 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         } else {
             percent = ""
         }
+        let todayDoneMinutes: String
+        if let todayActiveSeconds, todayActiveSeconds.isFinite, todayActiveSeconds >= 0 {
+            todayDoneMinutes = String(Int(todayActiveSeconds / 60))
+        } else {
+            todayDoneMinutes = ""
+        }
+        let goalMinutesText: String = dailyGoalMinutes.map { String($0) } ?? ""
+        let longestStreakText: String = longestStreakDays.map { String($0) } ?? ""
         let parts: [String] = [
             mediaIdentity,
             title ?? "",
@@ -401,6 +436,9 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
             elapsedLengthText ?? "",
             remainingText ?? "",
             streakText ?? "",
+            todayDoneMinutes,
+            goalMinutesText,
+            longestStreakText,
             queueSignature,
         ]
         return parts.joined(separator: "|")
@@ -630,6 +668,10 @@ public enum ContinueWidgetSnapshotStore {
         itemID: String? = nil,
         authoritativeStreakDays: Int? = nil,
         authoritativeStreakActivityDayKey: String? = nil,
+        authoritativeTodayActiveSeconds: Double? = nil,
+        authoritativeDailyGoalMinutes: Int? = nil,
+        authoritativeTodayGoalDayKey: String? = nil,
+        authoritativeLongestStreakDays: Int? = nil,
         fileStore: (any ContinueWidgetSnapshotFileStoring)? = nil,
     ) {
         publish(
@@ -648,6 +690,10 @@ public enum ContinueWidgetSnapshotStore {
             itemID: itemID,
             streakDays: authoritativeStreakDays,
             streakActivityDayKey: authoritativeStreakActivityDayKey,
+            todayActiveSeconds: authoritativeTodayActiveSeconds,
+            dailyGoalMinutes: authoritativeDailyGoalMinutes,
+            todayGoalDayKey: authoritativeTodayGoalDayKey,
+            longestStreakDays: authoritativeLongestStreakDays,
             fileStore: fileStore
         )
     }
@@ -671,6 +717,10 @@ public enum ContinueWidgetSnapshotStore {
         itemID: String? = nil,
         streakDays: Int? = nil,
         streakActivityDayKey: String? = nil,
+        todayActiveSeconds: Double? = nil,
+        dailyGoalMinutes: Int? = nil,
+        todayGoalDayKey: String? = nil,
+        longestStreakDays: Int? = nil,
         fileStore: (any ContinueWidgetSnapshotFileStoring)? = nil,
     ) {
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "publish")
@@ -731,6 +781,10 @@ public enum ContinueWidgetSnapshotStore {
                 // Preserve the activity anchor across audio-only publishes; never
                 // re-date it from generatedAt or progress ticks.
                 streakActivityDayKey: streakActivityDayKey ?? previousSnapshot?.streakActivityDayKey,
+                todayActiveSeconds: todayActiveSeconds ?? previousSnapshot?.todayActiveSeconds,
+                dailyGoalMinutes: dailyGoalMinutes ?? previousSnapshot?.dailyGoalMinutes,
+                todayGoalDayKey: todayGoalDayKey ?? previousSnapshot?.todayGoalDayKey,
+                longestStreakDays: longestStreakDays ?? previousSnapshot?.longestStreakDays,
             )
 
             let previousReload = lastReloadDate
@@ -837,6 +891,8 @@ public enum ContinueWidgetSnapshotStore {
             debugLog("[ContinueWidget] reload kind=\(kind)")
             WidgetCenter.shared.reloadTimelines(ofKind: kind)
         }
+        WidgetCenter.shared.reloadTimelines(ofKind: SilveranWidgetConstants.streakWidgetKind)
+        debugLog("[ContinueWidget] reload kind=\(SilveranWidgetConstants.streakWidgetKind)")
         // ofKind: bursts can be coalesced to a single kind, which left compact
         // tiles on an old timeline while the large kind refreshed. Follow with
         // reloadAll so every registered family reads the shared snapshot.
@@ -965,11 +1021,22 @@ public enum ContinueWidgetSnapshotStore {
     public static func updateAuthoritativeStreak(
         streakDays: Int,
         streakActivityDayKey: String,
+        todayActiveSeconds: Double? = nil,
+        dailyGoalMinutes: Int? = nil,
+        todayGoalDayKey: String? = nil,
+        longestStreakDays: Int? = nil,
         fileStore: (any ContinueWidgetSnapshotFileStoring)? = nil,
     ) -> Bool {
         let normalizedDays = max(0, streakDays)
         let normalizedKey = streakActivityDayKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedKey.isEmpty else { return false }
+        let normalizedTodaySeconds = todayActiveSeconds.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        let normalizedGoalMinutes = dailyGoalMinutes.map { max(1, $0) }
+        let normalizedGoalDayKey = todayGoalDayKey.flatMap { key in
+            let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        let normalizedLongest = longestStreakDays.map { max(0, $0) }
 
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "streak")
         let store = fileStore ?? AppGroupContinueWidgetSnapshotFileStore()
@@ -983,8 +1050,16 @@ public enum ContinueWidgetSnapshotStore {
                 publishLock.unlock()
                 return false
             }
+            let nextTodaySeconds = normalizedTodaySeconds ?? snapshot.todayActiveSeconds
+            let nextGoalMinutes = normalizedGoalMinutes ?? snapshot.dailyGoalMinutes
+            let nextGoalDayKey = normalizedGoalDayKey ?? snapshot.todayGoalDayKey
+            let nextLongest = normalizedLongest ?? snapshot.longestStreakDays
             if snapshot.streakDays == normalizedDays,
-                snapshot.streakActivityDayKey == normalizedKey
+                snapshot.streakActivityDayKey == normalizedKey,
+                snapshot.todayActiveSeconds == nextTodaySeconds,
+                snapshot.dailyGoalMinutes == nextGoalMinutes,
+                snapshot.todayGoalDayKey == nextGoalDayKey,
+                snapshot.longestStreakDays == nextLongest
             {
                 publishLock.unlock()
                 return true
@@ -993,6 +1068,10 @@ public enum ContinueWidgetSnapshotStore {
             let previous = snapshot
             snapshot.streakDays = normalizedDays
             snapshot.streakActivityDayKey = normalizedKey
+            snapshot.todayActiveSeconds = nextTodaySeconds
+            snapshot.dailyGoalMinutes = nextGoalMinutes
+            snapshot.todayGoalDayKey = nextGoalDayKey
+            snapshot.longestStreakDays = nextLongest
             snapshot.generatedAt = Date()
 
             let previousReload = lastReloadDate
