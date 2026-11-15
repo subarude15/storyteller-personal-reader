@@ -62,7 +62,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ./scripts/test --filter 'ContinueWidgetAppGroupTests/(concurrentPublishPreservesFresherStreakAcrossAudioHomeRace|publishLiveMirrorSeamPreservesFresherHomeStreakDuringAudioRace)' 2>&1 | tee widget-race-diagnostic.log
+          swift test list 2>&1 | tee widget-test-inventory.log
+          ./scripts/test --filter 'concurrentPublishPreservesFresherStreakAcrossAudioHomeRace|publishLiveMirrorSeamPreservesFresherHomeStreakDuringAudioRace' 2>&1 | tee widget-race-diagnostic.log
           python3 -c 'from pathlib import Path; s=Path("widget-race-diagnostic.log").read_text(); names=["concurrentPublishPreservesFresherStreakAcrossAudioHomeRace", "publishLiveMirrorSeamPreservesFresherHomeStreakDuringAudioRace"]; assert all("Test " + n + "() started." in s for n in names), "Both diagnostic tests must actually execute"'
 
       - name: Run Swift package tests
@@ -80,5 +81,6 @@ jobs:
           path: |
             reading-motivation-tests.log
             widget-race-diagnostic.log
+            widget-test-inventory.log
           if-no-files-found: warn
           retention-days: 14
