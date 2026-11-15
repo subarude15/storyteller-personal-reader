@@ -579,9 +579,9 @@ private struct HomeTabView: View {
                 ScrollGeometryProbe(name: "home").frame(width: 1, height: 1)
             }
 #endif
-            // Home owns its mini-player inset at the scroll boundary so the last
-            // stats row clears the bar plus 24pt when the bar is visible.
-            .punkRallyMiniPlayerInset(topClearance: 24)
+            // The scroll root observes the rendered bar's height, including
+            // clearance, even after asynchronous reveal or cover dismissal.
+            .punkRallyMiniPlayerScrollInset(topClearance: 24)
             .background(chrome.bg)
             .navigationTitle("ink+amp")
             .toolbar {

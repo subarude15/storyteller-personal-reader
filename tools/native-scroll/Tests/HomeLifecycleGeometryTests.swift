@@ -14,6 +14,10 @@ final class HomeLifecycleGeometryTests: XCTestCase {
         try matrix(flow: "async")
     }
 
+    func testHeadlessStartupSessionThenReleasedHomeBottomMatrix() throws {
+        try matrix(flow: "launch")
+    }
+
     private func matrix(flow: String) throws {
         for orientation in [UIDeviceOrientation.portrait, .landscapeLeft] {
             for type in ["normal", "accessibility"] {
@@ -73,7 +77,7 @@ final class HomeLifecycleGeometryTests: XCTestCase {
                             dismiss.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
                             XCTAssertTrue(cover.waitForNonExistence(timeout: 10))
                             XCTAssertTrue(element("geometry.player", app).waitForExistence(timeout: 10))
-                        } else {
+                        } else if flow == "async" {
                             let scroll = app.scrollViews["geometry.scroll.home"]
                             XCTAssertTrue(scroll.waitForExistence(timeout: 15))
                             XCTAssertFalse(element("geometry.player", app).exists)
@@ -93,6 +97,15 @@ final class HomeLifecycleGeometryTests: XCTestCase {
                                 CFNotificationName(rawValue: "com.punkrally.geometry.publish-session" as CFString),
                                 nil, nil, true)
                             XCTAssertTrue(element("geometry.player", app).waitForExistence(timeout: 10))
+                        } else {
+                            before = try waitForState(app) { s in
+                                s["rootRestored"] as? Bool == true
+                                    && s["monitorHasSnapshot"] as? Bool == true
+                                    && s["presenterHasCard"] as? Bool == false
+                                    && s["policyDocked"] as? Bool == true
+                            }
+                            XCTAssertFalse(element("geometry.lifecycle.cover", app).exists)
+                            attach(app, activity: activity, name: "\(name)-headless-startup", payload: before)
                         }
                         let scroll = app.scrollViews["geometry.scroll.home"]
                         XCTAssertTrue(scroll.waitForExistence(timeout: 15))

@@ -39,14 +39,13 @@ struct MoreTabView: View {
             }
             // Reserve at the displayed content INSIDE the navigation stack.
             // An inset outside NavigationStack does not reach pushed scroll views.
-            .punkRallyMiniPlayerInset()
+            .punkRallyMiniPlayerScrollInset()
 #if INKAMP_GEOMETRY_HARNESS
             .accessibilityIdentifier("geometry.more.list")
 #endif
             .navigationTitle(InkAmpPrimaryTab.more.title)
             .navigationDestination(for: InkAmpMoreNavRoute.self) { route in
                 moreDestinationView(route)
-                    .punkRallyMiniPlayerInset()
             }
         }
         .task { await reloadAttention() }
@@ -141,15 +140,20 @@ struct MoreTabView: View {
         switch route {
             case .downloads:
                 DownloadsView()
+                    .punkRallyMiniPlayerInset()
             case .settings:
                 SettingsView()
+                    .punkRallyMiniPlayerInset()
             case .stats:
+                // Stats owns its measured reservation on its ScrollView.
                 StatsView()
             case .requestsActivity(let requestID):
                 RequestActivityView(initialRequestID: requestID)
                     .id(requestID ?? "request-activity-list")
+                    .punkRallyMiniPlayerInset()
             case .services:
                 ServicesHealthView()
+                    .punkRallyMiniPlayerInset()
         }
     }
 

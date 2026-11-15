@@ -11,7 +11,7 @@ import UIKit
 public enum InkAmpGeometryLifecycle {
     public static var isEnabled: Bool {
         Bundle.main.bundleIdentifier == "com.punkrally.reader.geometry"
-            && ["cover", "async"].contains(flow)
+            && ["cover", "async", "launch"].contains(flow)
     }
     public static var flow: String {
         ProcessInfo.processInfo.environment["INKAMP_GEOMETRY_LIFECYCLE"] ?? ""
@@ -46,7 +46,7 @@ public enum InkAmpGeometryLifecycle {
 
     static func prepareStartup() async {
         guard isEnabled else { return }
-        if flow == "cover" { await publishSession() }
+        if flow == "cover" || flow == "launch" { await publishSession() }
     }
 
     static func publishSession() async {

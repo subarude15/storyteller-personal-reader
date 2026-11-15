@@ -80,11 +80,21 @@ xcodebuild test -project InkAmpGeometry.xcodeproj -scheme InkAmpGeometry \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 ```
 
-## Lifecycle-only reproduction extension (no production layout change)
+## Lifecycle matrix and measured scroll-root correction
 
-`HomeLifecycleGeometryTests` adds two 8-case flows (portrait/landscape,
-normal/accessibility3, playing/paused). The entire original test file and the
-More correction remain byte-identical.
+`HomeLifecycleGeometryTests` adds three 8-case flows (24 final native cases:
+portrait/landscape, normal/accessibility3, playing/paused). The entire original
+48-case test file, including More -> Stats and stop/collapse assertions, remains
+byte-identical. The user-confirmed released-scroll obstruction on device is the
+failing acceptance case; simulator non-reproduction does not negate it.
+
+The production correction uses `punkRallyMiniPlayerScrollInset` directly on
+Home's ScrollView, More's List and the Stats destination's ScrollView. An
+intrinsically sized overlay measures the actual rendered player (including Home's
+existing top clearance); `safeAreaPadding` on that same scrolling root consumes
+the measured height. No copied player-height constant, navigation-container
+reservation or second Stats reservation is used. Hidden content measures zero.
+Other destinations retain their existing inset strategy without a second wrapper.
 
 - **Cover:** the real private `iOSRootView` awaits local prerequisites, restores
   local `PlayerBookData` through the original `PlayerPresenter.present`, and
@@ -98,6 +108,10 @@ More correction remain byte-identical.
   toolbar touch, keyboard, URL, app relaunch or foreground transition. Publication
   records the actual UIKit Home probe at that instant; the test asserts it was
   already at rest/bottom before measuring the revealed bar and scrolling again.
+- **Headless startup:** publish local session data during the real root's startup
+  prerequisite seam, with no card. Verify the observed live docked player and the
+  same released-bottom geometry/tap contract. This is local startup publication,
+  not real persisted-engine transport restoration.
 - The state probe records real presenter/monitor/policy state, cover appear/
   disappear counts, publication count, and native Home measurements. Each
   transition/final case retains JSON, frames, screenshot and accessibility text,
@@ -105,7 +119,8 @@ More correction remain byte-identical.
 - `INKAMP_GEOMETRY_FIXTURE=0` is mandatory for these flows; `liveContent` and its
   production move/opacity transition are used, not `MiniPlayerGeometryFixture`.
   New framework data seams require DEBUG, the exact unsigned geometry bundle
-  ID, and `INKAMP_GEOMETRY_LIFECYCLE=cover|async`. No Release behavior is enabled.
+  ID, and `INKAMP_GEOMETRY_LIFECYCLE=cover|async|launch`. Data seams are inactive in
+  Release; the measured scroll-root layout correction is production code.
 
 **Remaining limits:** this is the actual root wrapper/AnyView and an injected
 local MediaViewModel, not authenticated migration/network startup. The audio
@@ -115,11 +130,13 @@ player controls; the true audio player's internal setup/onDisappear/engine
 teardown is NOT exercised. The real presenter and full-screen presentation/
 dismissal remain unchanged. AppDelegate/background hooks, device library/cache
 races, live media/artwork, exact device/OS/zoom and genuine persisted-session
-transport restore remain unrepresented. GREEN means these added lifecycle
-conditions did not reproduce the device symptom, not that Home is fixed.
+transport restore remain unrepresented. GREEN verifies the candidate against the
+native regression assertions, not that the original device failure is fixed.
+On-device released-scroll/tap confirmation remains a separate acceptance gate.
 
 `Home scroll native geometry` runs on push to `cursor/home-scroll-clearance-v2`
-and `cursor/home-lifecycle-native-repro`, with a 75-minute job budget for the
+and `cursor/home-lifecycle-native-repro` / `cursor/home-scroll-root-reservation`,
+with a 75-minute job budget for the
 expanded native suite, and retains logs/results for 14 days. A build/probe/setup
 failure is a harness failure, **not** a reproduced layout regression. Read
 assertions and attachments before choosing any production correction. No PR,

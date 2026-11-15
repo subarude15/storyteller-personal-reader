@@ -2,7 +2,7 @@ name: Home scroll native geometry
 
 on:
   push:
-    branches: [cursor/home-scroll-clearance-v2, cursor/home-lifecycle-native-repro]
+    branches: [cursor/home-scroll-clearance-v2, cursor/home-lifecycle-native-repro, cursor/home-scroll-root-reservation]
   workflow_dispatch:
 
 permissions:

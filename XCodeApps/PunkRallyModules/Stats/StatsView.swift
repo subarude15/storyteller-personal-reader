@@ -10,6 +10,9 @@
 //  SPDX-License-Identifier: AGPL-3.0-only
 
 import SwiftUI
+#if os(iOS)
+import SilveranAppleKit
+#endif
 
 /// Stats destination — reading/listening time, daily goal, streak, finished count, average session.
 /// Hosted under More (not a primary tab). Expects an enclosing NavigationStack.
@@ -56,6 +59,9 @@ struct StatsView: View {
         .background(alignment: .topLeading) {
             ScrollGeometryProbe(name: "stats").frame(width: 1, height: 1)
         }
+#endif
+#if os(iOS)
+        .punkRallyMiniPlayerScrollInset()
 #endif
         .background(chrome.bg)
         .navigationTitle("Stats")

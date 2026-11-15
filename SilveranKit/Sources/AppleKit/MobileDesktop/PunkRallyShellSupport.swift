@@ -325,7 +325,40 @@ public struct PunkRallyMiniPlayerBar: View {
     }
 }
 
+/// Own the reservation on the scrolling surface, not on its navigation host.
+/// Measuring the displayed bar (including its clearance) avoids a second height
+/// constant and makes late session/cover transitions invalidate the scroll root.
+private struct PunkRallyMiniPlayerScrollInset: ViewModifier {
+    let topClearance: CGFloat
+    @State private var playerHeight: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .safeAreaPadding(.bottom, playerHeight)
+            .overlay(alignment: .bottom) {
+                // A concrete, intrinsically sized container also reports zero
+                // when GlobalMiniPlayerBar's conditional content disappears.
+                VStack(spacing: 0) {
+                    PunkRallyMiniPlayerBar(topClearance: topClearance)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    proxy.size.height
+                } action: { height in
+                    playerHeight = max(0, height)
+                }
+            }
+    }
+}
+
 extension View {
+    /// Apply ONCE to ScrollView/List inside NavigationStack (or its destination).
+    /// The overlay and its measured scroll clearance share one owner; do not
+    /// combine with punkRallyMiniPlayerInset on a surrounding container.
+    public func punkRallyMiniPlayerScrollInset(topClearance: CGFloat = 0) -> some View {
+        modifier(PunkRallyMiniPlayerScrollInset(topClearance: topClearance))
+    }
+
     /// Pads content and places GlobalMiniPlayerBar above the tab bar (or sheet
     /// bottom). Use on every tab root **and** every sheet that can sit over
     /// playback (Find, show, Import, Settings, …) so close/stop stay reachable.
