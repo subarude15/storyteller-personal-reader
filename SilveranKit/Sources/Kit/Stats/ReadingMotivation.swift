@@ -386,8 +386,8 @@ public enum ReadingMotivationCalculations {
         let basis: String
         if let playbackRate {
             guard playbackRate.isFinite, playbackRate > 0 else { return nil }
-            seconds = remaining / min(playbackRate, 4)
-            basis = "At \(String(format: "%.2g", min(playbackRate, 4)))× playback"
+            seconds = remaining / playbackRate
+            basis = "At \(String(format: "%.2g", playbackRate))× playback"
         } else {
             // Pace uses wall time across the whole interval between real progress
             // checkpoints, including stalled/rereading sessions and missing mid
@@ -438,6 +438,9 @@ public enum ReadingMotivationCalculations {
                     pendingSeconds += work
                 }
             }
+            // Work after the last advancing checkpoint remains observed effort,
+            // not free time. Include trailing stalls/missing checkpoints too.
+            secondsSpent += pendingSeconds
             guard unitsGained.isFinite, unitsGained > 0, secondsSpent > 0 else { return nil }
             seconds = remaining / (unitsGained / secondsSpent)
             basis = paceBasis
@@ -568,7 +571,9 @@ public struct ContinueWidgetTiming: Equatable, Sendable {
         let remaining: Double?
         if let rate {
             guard rate.isFinite, rate > 0 else { return nil }
-            remaining = max(0, duration - elapsed) / min(max(rate, 0.25), 4)
+            let wallSeconds = max(0, duration - elapsed) / rate
+            guard wallSeconds.isFinite else { return nil }
+            remaining = wallSeconds
         } else {
             remaining = nil
         }
@@ -1062,6 +1067,9 @@ public actor ReadingMotivationNotificationCoordinator {
             ReadingMotivationNotificationPolicy.localDayKey($0, calendar: calendar)
         }
         if let actualDay { state.consume(dayKey: actualDay) }
+        // Preserve both delivery dates before cancellation can suspend or the
+        // user can dismiss the OS evidence during a cross-midnight delivery.
+        await stateStore.save(state)
         if state.pendingDayKey == dayKey || state.pendingDayKey == actualDay {
             if let pendingDay = state.pendingDayKey {
                 await scheduler.cancelPending(identifier: Self.identifier(for: pendingDay))

@@ -228,6 +228,76 @@ struct ReadingMotivationTests {
         return (coordinator, clock)
     }
 
+    @Test func trailingPlateauAndMissingCheckpointsCountObservedWork() {
+        let now = date(2026, 11, 15, 12)
+        for trailingProgress: Double? in [0.2, nil] {
+            let records = [
+                session(start: date(2026, 11, 15, 0), end: date(2026, 11, 15, 1), progress: 0.1),
+                session(start: date(2026, 11, 15, 1), end: date(2026, 11, 15, 2), progress: 0.2),
+                session(start: date(2026, 11, 15, 2), end: now, progress: trailingProgress)
+            ]
+            let projection = ReadingMotivationCalculations.projectedFinish(
+                sessions: records, mediaID: "book-1", progress: 0.2, totalUnits: 100,
+                playbackRate: nil, calendar: calendar, now: now
+            )
+            guard case .estimate(let finish, _) = projection else {
+                Issue.record("Expected an estimate from observed checkpoint work")
+                continue
+            }
+            // Ten units / eleven hours: remaining eighty units take eighty-eight hours.
+            #expect(abs(finish.timeIntervalSince(now) - 316_800) <= 1)
+        }
+    }
+
+    @Test func knownPositivePlaybackRatesAreNotSilentlyClamped() {
+        let now = date(2026, 11, 15)
+        for rate in [0.1, 8.0] {
+            let timing = ContinueWidgetTiming.calculate(
+                progress: 0, elapsedSeconds: 0, durationSeconds: 160, rate: rate
+            )
+            #expect(timing?.remainingWallSeconds == 160 / rate)
+            let projection = ReadingMotivationCalculations.projectedFinish(
+                sessions: [], mediaID: "book-1", progress: 0, totalUnits: 160,
+                playbackRate: rate, calendar: calendar, now: now
+            )
+            guard case .estimate(let finish, _) = projection else {
+                Issue.record("Expected known-rate projection")
+                continue
+            }
+            #expect(finish.timeIntervalSince(now) == 160 / rate)
+        }
+    }
+
+    @Test func explicitDeliveryPersistsActualDayBeforeSuspendingCancellation() async throws {
+        let actualNow = date(2026, 11, 16, 0)
+        let scheduler = TestMotivationScheduler()
+        let storage = TestMotivationStateStore(.init(
+            pendingKind: .rescue, pendingDayKey: "2026-11-15",
+            pendingDeliveryDate: date(2026, 11, 15, 20)
+        ))
+        let (coordinator, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: actualNow)
+        await scheduler.pauseNextCancelCall()
+        let marking = Task {
+            await coordinator.markDelivered(
+                dayKey: "2026-11-15", deliveredAt: actualNow, calendar: calendar
+            )
+        }
+        await scheduler.waitForPausedCancel()
+        let crashCheckpoint = await storage.load()
+        #expect(crashCheckpoint.hasConsumedDayKey("2026-11-15"))
+        #expect(crashCheckpoint.hasConsumedDayKey("2026-11-16"))
+        await scheduler.clearDelivered()
+        await scheduler.resumePausedCancel()
+        await marking.value
+        let (restarted, _) = makeCoordinator(
+            scheduler: scheduler, stateStore: TestMotivationStateStore(crashCheckpoint), now: actualNow
+        )
+        #expect(try await restarted.reconcile(
+            candidates: [.init(kind: .pace, deliveryDate: date(2026, 11, 16, 12))],
+            enabled: true, now: actualNow, calendar: calendar
+        ) == .none)
+    }
+
     @Test func settingsMigrateMissingValuesToExplicitDefaults() throws {
         let oldData = Data(#"{"notificationsEnabled":false}"#.utf8)
         let value = try JSONDecoder().decode(ReadingMotivationSettings.self, from: oldData)
