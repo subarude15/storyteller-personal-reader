@@ -454,6 +454,13 @@ struct ContinueWidgetSnapshotTests {
         #expect(reanchored.streakActivityDayKey == "2026-11-16")
         #expect(reanchored.progress == 0.42)
         #expect(reanchored.rate == 1.25)
+        #expect(ContinueWidgetSnapshotStore.updateAuthoritativeStreak(
+            streakDays: 0, streakActivityDayKey: "2026-11-16", fileStore: store
+        ))
+        let corrected = try #require(store.readSnapshot(in: root))
+        #expect(corrected.streakDays == 0)
+        #expect(corrected.progress == 0.42)
+        #expect(corrected.rate == 1.25)
     }
 
     @Test func sessionTrackerSourcePublishesStreakIndependentOfNotificationOptIn() throws {
@@ -464,6 +471,10 @@ struct ContinueWidgetSnapshotTests {
             .deletingLastPathComponent()
             .appendingPathComponent("XCodeApps/PunkRallyModules/Stats/SessionTracker.swift")
         let source = try String(contentsOf: trackerURL, encoding: .utf8)
+        let syncBody = try #require(source.components(
+            separatedBy: "func applyMergedSyncDocument("
+        ).last?.components(separatedBy: "/// Prune sessions").first)
+        #expect(syncBody.contains("publishAuthoritativeStreakIfNeeded(force: true)"))
         #expect(source.contains("updateAuthoritativeStreak("))
         #expect(source.contains("publishAuthoritativeStreakIfNeeded"))
         #expect(source.contains("shouldRunCadence("))

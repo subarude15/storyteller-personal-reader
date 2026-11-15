@@ -181,6 +181,7 @@ final class SessionTracker {
         finished = document.finished.map(Self.fromSyncFinished)
         revision &+= 1
         persist()
+        publishAuthoritativeStreakIfNeeded(force: true)
         Task { await ReadingMotivationStore.shared.refreshNotifications() }
     }
 
@@ -361,7 +362,7 @@ final class SessionTracker {
     /// Runs from SessionTracker lifecycle (not a Home-only timer) so the widget
     /// stays honest while Home is off-screen. Arbitrary iOS suspension can still
     /// delay ticks until foreground restore.
-    private func publishAuthoritativeStreakIfNeeded(now: Date = Date()) {
+    private func publishAuthoritativeStreakIfNeeded(now: Date = Date(), force: Bool = false) {
         let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: .current)
         let records = motivationSessionRecords(at: now)
         let effectiveElapsed: TimeInterval
@@ -371,7 +372,7 @@ final class SessionTracker {
             // Retained end path: closed session already appended.
             effectiveElapsed = last.durationSeconds
         } else {
-            return
+            effectiveElapsed = 0
         }
         let streakDays = ReadingMotivationCalculations.streaks(
             sessions: records,
@@ -385,7 +386,9 @@ final class SessionTracker {
             now: now,
             archivedActivityDays: motivationArchivedActivityDays()
         )
-        guard ReadingMotivationActiveSessionReconcilePolicy.shouldPublishAuthoritativeStreak(
+        // Sync imports can increase OR decrease activity with no live session.
+        // The shared store still no-ops identical authoritative data.
+        guard force || ReadingMotivationActiveSessionReconcilePolicy.shouldPublishAuthoritativeStreak(
             sessionElapsed: effectiveElapsed,
             streakDays: streakDays,
             activityDayKey: activityDayKey,

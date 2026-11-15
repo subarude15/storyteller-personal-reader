@@ -334,6 +334,7 @@ private struct HomeTabView: View {
     @State private var tracker = SessionTracker.shared
     @State private var motivation = ReadingMotivationStore.shared
     @State private var liveAudioSnapshot: AudioSessionSnapshot?
+    @State private var liveAudioSnapshotObservedAt: Date?
     @State private var statsTick = 0
 
     private var chrome: PunkRallyTheme.Chrome {
@@ -424,6 +425,7 @@ private struct HomeTabView: View {
                 Task { await publishContinueWidget() }
                 Task {
                     liveAudioSnapshot = await AudioSessionActor.shared.currentSnapshot()
+                    liveAudioSnapshotObservedAt = Date()
                     await motivation.refreshNotifications()
                 }
             }
@@ -462,7 +464,10 @@ private struct HomeTabView: View {
             }
             .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in
                 statsTick &+= 1
-                Task { liveAudioSnapshot = await AudioSessionActor.shared.currentSnapshot() }
+                Task {
+                    liveAudioSnapshot = await AudioSessionActor.shared.currentSnapshot()
+                    liveAudioSnapshotObservedAt = Date()
+                }
             }
             .sheet(isPresented: $showMotivationSettings) {
                 ReadingMotivationSettingsView()
@@ -529,7 +534,8 @@ private struct HomeTabView: View {
                         if let item, let projection = motivation.finishProjection(
                             for: item,
                             playbackRate: playbackRate(for: item),
-                            liveSnapshot: liveAudioSnapshot
+                            liveSnapshot: liveAudioSnapshot,
+                            liveSnapshotObservedAt: liveAudioSnapshotObservedAt
                         ) {
                             Text(projectedFinishLabel(projection))
                                 .font(.caption)

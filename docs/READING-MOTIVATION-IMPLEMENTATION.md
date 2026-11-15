@@ -48,6 +48,10 @@ The iOS Swift compile, WidgetKit rendering/reload behavior, App Group sharing on
 
 ## Final consistency follow-up
 
+Sync document application now forces an authoritative shared-widget streak refresh even without an active session or visible Home, including correction down to zero; unchanged shared data still no-ops. The shared-store downward-correction regression and explicit sync-call source assertion cover the seam (not native UI lifecycle execution).
+
+Home records each live audio snapshot's observation instant in the same non-suspending main-actor update. A playing item's projection is anchored to that observation rather than a later render clock; a paused item's hypothetical resume-now estimate uses current time. The shared projection regression checks unchanged playing forecasts between refreshes and the paused distinction. These follow-up tests still require exact-tip native CI.
+
 - Authoritative streak publication returns success (including an already-matching persisted snapshot). SessionTracker caches only success, so no-container/no-item/write failures remain retryable; a regression creates the snapshot after the first failed attempt.
 - Home passes its live audio snapshot into projection. Matching audio/podcast items use current elapsed, duration and rate from that same snapshot, not a stale queue fraction; mismatched items do not inherit its timing and unknown live duration stays unknown. Pure shared-policy regression covers live timing overriding stale progress and item mismatch.
 - A legacy pending intent without a fire date is ambiguous after dismissal. Reconciliation conservatively consumes its requested day and current day, persists before OS cancellation, and declines another notification rather than risk a duplicate. This may suppress a reminder for one day on legacy migration.

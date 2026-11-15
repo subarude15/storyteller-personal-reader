@@ -86,6 +86,7 @@ final class ReadingMotivationStore {
         for item: HomeMixedItem,
         playbackRate: Double?,
         liveSnapshot: AudioSessionSnapshot? = nil,
+        liveSnapshotObservedAt: Date? = nil,
         now: Date = Date()
     ) -> ReadingMotivationFinishProjection? {
         let mediaID: String
@@ -126,7 +127,7 @@ final class ReadingMotivationStore {
             return ReadingMotivationCalculations.projectedAudioFinish(
                 snapshot: liveSnapshot, expectedMediaID: mediaID,
                 calendar: ReadingMotivationCalculations.normalizedLocalCalendar(from: .current),
-                now: now
+                now: now, observedAt: liveSnapshotObservedAt
             )
         }
         return ReadingMotivationCalculations.projectedFinish(

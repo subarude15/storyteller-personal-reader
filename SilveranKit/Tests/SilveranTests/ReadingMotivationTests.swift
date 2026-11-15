@@ -1204,6 +1204,26 @@ struct ReadingMotivationTests {
             return
         }
         #expect(finish.timeIntervalSince(now) == 10)
+        // Re-rendering between snapshot refreshes must not move a playing
+        // item's finish date later just because the UI clock advanced.
+        #expect(ReadingMotivationCalculations.projectedAudioFinish(
+            snapshot: live, expectedMediaID: "podcast/episode", calendar: calendar,
+            now: now.addingTimeInterval(7), observedAt: now
+        ) == result)
+        let paused = AudioSessionSnapshot(
+            kind: .podcast("episode"), title: "Episode", author: nil,
+            isPlaying: false, chapterLabel: nil, bookProgress: 0.2, playbackRate: 2,
+            elapsedSeconds: 80, durationSeconds: 100
+        )
+        let pausedResult = ReadingMotivationCalculations.projectedAudioFinish(
+            snapshot: paused, expectedMediaID: "podcast/episode", calendar: calendar,
+            now: now.addingTimeInterval(7), observedAt: now
+        )
+        guard case .estimate(let pausedFinish, _) = pausedResult else {
+            Issue.record("Expected paused-item forecast assuming playback resumes now")
+            return
+        }
+        #expect(pausedFinish.timeIntervalSince(finish) == 7)
         #expect(ReadingMotivationCalculations.projectedAudioFinish(
             snapshot: live, expectedMediaID: "podcast/another", calendar: calendar, now: now
         ) == nil)

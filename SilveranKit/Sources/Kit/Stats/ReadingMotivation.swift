@@ -403,7 +403,8 @@ public enum ReadingMotivationCalculations {
         snapshot: AudioSessionSnapshot,
         expectedMediaID: String,
         calendar: Calendar,
-        now: Date
+        now: Date,
+        observedAt: Date? = nil
     ) -> ReadingMotivationFinishProjection? {
         guard audioMediaID(for: snapshot) == expectedMediaID,
             snapshot.elapsedSeconds.isFinite, snapshot.elapsedSeconds >= 0
@@ -414,7 +415,8 @@ public enum ReadingMotivationCalculations {
         return projectedFinish(
             sessions: [], mediaID: expectedMediaID, progress: progress,
             totalUnits: duration, playbackRate: snapshot.playbackRate,
-            calendar: calendar, now: now
+            calendar: calendar,
+            now: snapshot.isPlaying ? min(now, observedAt ?? now) : now
         )
     }
 
