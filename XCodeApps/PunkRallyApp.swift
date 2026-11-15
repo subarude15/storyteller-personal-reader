@@ -125,8 +125,8 @@ public struct PunkRallyTabView: View {
             .punkRallySheets(showSettings: $showSettings)
     }
 
-    /// Notification / scene lifecycle chain — isolated so `rootShell` type-checks.
-    private var shellWithLifecycle: some View {
+    /// Navigation / intake lifecycle chain — split from `shellWithLifecycle` so Swift type-checks cleanly.
+    private var shellWithNavigationLifecycle: some View {
         shellBase
             .onReceive(NotificationCenter.default.publisher(for: .inkampShowManualDownloads)) { _ in
                 openMoreDestination(.downloads)
@@ -199,6 +199,11 @@ public struct PunkRallyTabView: View {
                 }
                 consumePendingWidgetDeepLinkIfNeeded()
             }
+    }
+
+    /// Sync / scene lifecycle / reading-motivation chain — isolated so `rootShell` type-checks.
+    private var shellWithLifecycle: some View {
+        shellWithNavigationLifecycle
             .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyRetryStatsSync)
             ) { _ in

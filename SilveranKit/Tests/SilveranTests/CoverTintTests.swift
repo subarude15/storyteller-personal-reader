@@ -207,11 +207,15 @@ private func expectAccessible(_ palette: CoverTintPalette) {
 private final class Gate: @unchecked Sendable {
     private let semaphore = DispatchSemaphore(value: 0)
     func open() { semaphore.signal() }
-    func waitBlocking() { semaphore.wait() }
+    func waitBlocking() {
+        let result = semaphore.wait(timeout: .now() + 10)
+        #expect(result == .success, "CoverTint gate timed out waiting to resume within 10 seconds")
+    }
     func wait() async {
         await withCheckedContinuation { continuation in
-            DispatchQueue.global().async {
-                self.semaphore.wait()
+            Thread.detachNewThread {
+                let result = self.semaphore.wait(timeout: .now() + 10)
+                #expect(result == .success, "CoverTint gate timed out within 10 seconds")
                 continuation.resume()
             }
         }
@@ -225,6 +229,7 @@ private final class Gate: @unchecked Sendable {
     let blue = solidPixels(20, 40, 200)
     let redStarted = Gate()
     let releaseRed = Gate()
+    defer { releaseRed.open() }
 
     let staleRed = Task { @MainActor in
         await model.update(itemID: "book:red", samplePixels: {

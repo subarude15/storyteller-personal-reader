@@ -623,7 +623,7 @@ struct ContinueWidgetSnapshotTests {
     }
 }
 
-@Suite("Continue widget current snapshot selection")
+@Suite("Continue widget current snapshot selection", .serialized)
 struct ContinueWidgetCurrentSnapshotTests {
     private var troop: ContinueWidgetSnapshot {
         ContinueWidgetSnapshot(
@@ -1065,12 +1065,13 @@ struct ContinueWidgetCurrentSnapshotTests {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("continue-publish-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let store = PausableContinueWidgetFileStore(root: root)
         defer {
+            store.resetAndRelease()
             try? FileManager.default.removeItem(at: root)
             ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
         }
 
-        let store = PausableContinueWidgetFileStore(root: root)
         ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
         ContinueWidgetSnapshotStore.publish(
             title: "Piranesi",
@@ -1086,7 +1087,7 @@ struct ContinueWidgetCurrentSnapshotTests {
 
         store.pauseNextRead()
         let audioDone = DispatchSemaphore(value: 0)
-        DispatchQueue.global().async {
+        Thread.detachNewThread {
             // Audio tick: nil streak should preserve whatever it read.
             ContinueWidgetSnapshotStore.publish(
                 title: "Piranesi",
@@ -1101,10 +1102,11 @@ struct ContinueWidgetCurrentSnapshotTests {
             )
             audioDone.signal()
         }
-        store.waitForPausedRead()
+        try store.waitForPausedRead()
         // Home publishes a fresher streak while audio still holds the publish lock.
+        store.expectContenderPublish()
         let homeDone = DispatchSemaphore(value: 0)
-        DispatchQueue.global().async {
+        Thread.detachNewThread {
             ContinueWidgetSnapshotStore.publish(
                 title: "Piranesi",
                 subtitle: "Clarke",
@@ -1117,12 +1119,13 @@ struct ContinueWidgetCurrentSnapshotTests {
             )
             homeDone.signal()
         }
+        try store.waitForContenderPublish()
         // Without an atomic publish lock, home would finish first and audio would
         // overwrite streak 5 with the stale preserved 3 after resume.
         Thread.sleep(forTimeInterval: 0.05)
         store.resumePausedRead()
-        #expect(audioDone.wait(timeout: .now() + 2) == .success)
-        #expect(homeDone.wait(timeout: .now() + 2) == .success)
+        #expect(audioDone.wait(timeout: .now() + 10) == .success)
+        #expect(homeDone.wait(timeout: .now() + 10) == .success)
 
         let final = store.readSnapshot(in: root)
         #expect(final?.streakDays == 5)
@@ -1165,12 +1168,13 @@ struct ContinueWidgetCurrentSnapshotTests {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("continue-live-mirror-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let store = PausableContinueWidgetFileStore(root: root)
         defer {
+            store.resetAndRelease()
             try? FileManager.default.removeItem(at: root)
             ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
         }
 
-        let store = PausableContinueWidgetFileStore(root: root)
         ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
         ContinueWidgetSnapshotStore.publish(
             title: "Piranesi",
@@ -1185,7 +1189,7 @@ struct ContinueWidgetCurrentSnapshotTests {
 
         store.pauseNextRead()
         let audioDone = DispatchSemaphore(value: 0)
-        DispatchQueue.global().async {
+        Thread.detachNewThread {
             // Real publisher/audio seam: no pre-read streak re-assert.
             ContinueWidgetSnapshotStore.publishLiveMirror(
                 title: "Piranesi",
@@ -1198,9 +1202,10 @@ struct ContinueWidgetCurrentSnapshotTests {
             )
             audioDone.signal()
         }
-        store.waitForPausedRead()
+        try store.waitForPausedRead()
+        store.expectContenderPublish()
         let homeDone = DispatchSemaphore(value: 0)
-        DispatchQueue.global().async {
+        Thread.detachNewThread {
             ContinueWidgetSnapshotStore.publish(
                 title: "Piranesi",
                 subtitle: "Clarke",
@@ -1213,10 +1218,11 @@ struct ContinueWidgetCurrentSnapshotTests {
             )
             homeDone.signal()
         }
+        try store.waitForContenderPublish()
         Thread.sleep(forTimeInterval: 0.05)
         store.resumePausedRead()
-        #expect(audioDone.wait(timeout: .now() + 2) == .success)
-        #expect(homeDone.wait(timeout: .now() + 2) == .success)
+        #expect(audioDone.wait(timeout: .now() + 10) == .success)
+        #expect(homeDone.wait(timeout: .now() + 10) == .success)
 
         let final = store.readSnapshot(in: root)
         #expect(final?.streakDays == 7)
@@ -1426,12 +1432,23 @@ private final class PausableContinueWidgetFileStore: ContinueWidgetSnapshotFileS
     let root: URL
     private let lock = NSLock()
     private var pauseRead = false
+    private var awaitingContender = false
     private let readStarted = DispatchSemaphore(value: 0)
     private let readGate = DispatchSemaphore(value: 0)
+    private let contenderEntered = DispatchSemaphore(value: 0)
 
     init(root: URL) { self.root = root }
 
-    func resolveContainer() -> URL? { root }
+    func resolveContainer() -> URL? {
+        lock.lock()
+        let shouldSignalContender = awaitingContender
+        if shouldSignalContender { awaitingContender = false }
+        lock.unlock()
+        if shouldSignalContender {
+            contenderEntered.signal()
+        }
+        return root
+    }
 
     func ensureDirectories(in container: URL) throws {
         try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
@@ -1448,7 +1465,8 @@ private final class PausableContinueWidgetFileStore: ContinueWidgetSnapshotFileS
         lock.unlock()
         if shouldPause {
             readStarted.signal()
-            readGate.wait()
+            let released = readGate.wait(timeout: .now() + 10)
+            #expect(released == .success, "Paused snapshot read was not released within 10 seconds")
         }
         return ContinueWidgetSnapshotStore.readSnapshotFile(in: container)
     }
@@ -1478,12 +1496,43 @@ private final class PausableContinueWidgetFileStore: ContinueWidgetSnapshotFileS
         lock.unlock()
     }
 
-    func waitForPausedRead() {
-        readStarted.wait()
+    func waitForPausedRead() throws {
+        try #require(
+            readStarted.wait(timeout: .now() + 10) == .success,
+            "Publish never reached its snapshot-read suspension point within 10 seconds"
+        )
+    }
+
+    func expectContenderPublish() {
+        lock.lock()
+        awaitingContender = true
+        lock.unlock()
+    }
+
+    func waitForContenderPublish() throws {
+        try #require(
+            contenderEntered.wait(timeout: .now() + 10) == .success,
+            "Contending publish never entered resolveContainer within 10 seconds"
+        )
     }
 
     func resumePausedRead() {
         readGate.signal()
     }
 
+    func resetAndRelease() {
+        lock.lock()
+        let wasPaused = pauseRead
+        let wasAwaitingContender = awaitingContender
+        pauseRead = false
+        awaitingContender = false
+        lock.unlock()
+        if wasPaused {
+            readStarted.signal()
+        }
+        if wasAwaitingContender {
+            contenderEntered.signal()
+        }
+        readGate.signal()
+    }
 }
