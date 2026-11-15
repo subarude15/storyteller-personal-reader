@@ -37,12 +37,16 @@ struct MoreTabView: View {
                     }
                 }
             }
+            // Reserve at the displayed content INSIDE the navigation stack.
+            // An inset outside NavigationStack does not reach pushed scroll views.
+            .punkRallyMiniPlayerInset()
 #if INKAMP_GEOMETRY_HARNESS
             .accessibilityIdentifier("geometry.more.list")
 #endif
             .navigationTitle(InkAmpPrimaryTab.more.title)
             .navigationDestination(for: InkAmpMoreNavRoute.self) { route in
                 moreDestinationView(route)
+                    .punkRallyMiniPlayerInset()
             }
         }
         .task { await reloadAttention() }

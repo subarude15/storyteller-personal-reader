@@ -1,9 +1,17 @@
 # Home scroll native geometry baseline
 
-This is a **CI-only diagnostic harness**, not a layout correction or a release.
+This is a **CI-only native regression harness**, not a release.
 It runs the production `PunkRallyTabView`, Home's `NavigationStack -> ScrollView`
 and `punkRallyMiniPlayerInset(topClearance: 24)`, the real Home Stats action,
 More -> Stats, and the real `InkAmpMiniPlayerChrome` in an unsigned simulator host.
+
+The separately authorized More correction removes the inset outside its
+NavigationStack and applies it to the visible List or pushed destination inside
+that stack. The previous List is not another on-screen reservation when a
+destination is pushed. No height constants or duplicate nested insets are added.
+Its eight measured RED assertions remain unchanged; GREEN requires native CI.
+Home's production inset policy has not been changed: its faithful renderer and
+restoration matrices must first reproduce a failure before any Home correction.
 
 ## Reproduction evidence
 

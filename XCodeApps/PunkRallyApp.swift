@@ -110,7 +110,6 @@ public struct PunkRallyTabView: View {
                 .tag(InkAmpPrimaryTab.podcasts)
 
             MoreTabView(path: $morePath, showSettings: $showSettings)
-                .punkRallyMiniPlayerInset()
                 .tabItem {
                     Label(InkAmpPrimaryTab.more.title, systemImage: InkAmpPrimaryTab.more.systemImage)
                 }
