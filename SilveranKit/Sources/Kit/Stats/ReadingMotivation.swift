@@ -486,8 +486,9 @@ public enum ReadingMotivationCalculations {
         // against the first unrepresentable bound before conversion.
         let roundedUp = seconds.rounded(.up)
         guard roundedUp.isFinite, roundedUp > 0, roundedUp < 0x1p63 else { return nil }
-        guard let finishDate = calendar.date(byAdding: .second, value: Int(roundedUp), to: now)
-        else { return nil }
+        // Preserve subsecond precision rather than promoting floating-point
+        // multiplication noise (e.g. 5.000000000000004) to an extra second.
+        let finishDate = now.addingTimeInterval(seconds)
         guard finishDate.timeIntervalSince1970.isFinite else { return nil }
         return .estimate(date: finishDate, basis: basis)
     }
@@ -1362,6 +1363,10 @@ public actor ReadingMotivationNotificationCoordinator {
         state.consume(
             dayKey: ReadingMotivationNotificationPolicy.localDayKey(deliveryDate, calendar: calendar)
         )
+        // If OS evidence was dismissed, a late cross-midnight delivery cannot
+        // be distinguished from an on-time one. Suppress another today too.
+        state.consume(dayKey: ReadingMotivationNotificationPolicy.localDayKey(now, calendar: calendar))
+        await stateStore.save(state)
         await scheduler.cancelPending(identifier: Self.identifier(for: pendingDay))
         clearPendingState()
     }

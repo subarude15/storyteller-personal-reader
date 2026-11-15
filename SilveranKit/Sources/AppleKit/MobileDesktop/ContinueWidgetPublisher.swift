@@ -55,19 +55,18 @@ public enum ContinueWidgetPublisher {
         coverData: Data?,
         progress: Double? = nil,
         durationSeconds: Double? = nil,
-        streakDays: Int? = nil,
-        streakActivityDayKey: String? = nil,
+        streakProvider: (@MainActor () -> (days: Int, dayKey: String))? = nil,
     ) {
         Task { @MainActor in
             let session = await AudioSessionActor.shared.currentSnapshot()
             if session != nil {
                 await publishSession(
                     session,
-                    authoritativeStreakDays: streakDays,
-                    authoritativeStreakActivityDayKey: streakActivityDayKey
+                    authoritativeStreakProvider: streakProvider
                 )
                 return
             }
+            let streak = streakProvider?()
             ContinueWidgetSnapshotStore.publish(
                 title: title,
                 subtitle: subtitle,
@@ -77,8 +76,8 @@ public enum ContinueWidgetPublisher {
                 progress: progress,
                 durationSeconds: durationSeconds,
                 hasLiveSession: false,
-                streakDays: streakDays,
-                streakActivityDayKey: streakActivityDayKey,
+                streakDays: streak?.days,
+                streakActivityDayKey: streak?.dayKey,
             )
         }
     }
@@ -103,8 +102,7 @@ public enum ContinueWidgetPublisher {
 
     private static func publishSession(
         _ snapshot: AudioSessionSnapshot?,
-        authoritativeStreakDays: Int? = nil,
-        authoritativeStreakActivityDayKey: String? = nil
+        authoritativeStreakProvider: (@MainActor () -> (days: Int, dayKey: String))? = nil
     ) async {
         guard let snapshot else {
             // Session ended — keep title/cover, clear playing so the tile isn't stuck.
@@ -150,6 +148,9 @@ public enum ContinueWidgetPublisher {
             }
         }
 
+        // Refresh only AFTER every artwork/session await. The provider and
+        // synchronous locked store write cannot suspend this main-actor turn.
+        let streak = authoritativeStreakProvider?()
         ContinueWidgetSnapshotStore.publishLiveMirror(
             title: snapshot.title,
             subtitle: snapshot.author ?? snapshot.chapterLabel,
@@ -161,8 +162,8 @@ public enum ContinueWidgetPublisher {
             durationSeconds: snapshot.durationSeconds,
             hasLiveSession: true,
             rate: snapshot.playbackRate,
-            authoritativeStreakDays: authoritativeStreakDays,
-            authoritativeStreakActivityDayKey: authoritativeStreakActivityDayKey
+            authoritativeStreakDays: streak?.days,
+            authoritativeStreakActivityDayKey: streak?.dayKey
         )
     }
 

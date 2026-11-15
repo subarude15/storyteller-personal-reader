@@ -989,10 +989,13 @@ struct ReadingMotivationTests {
         ) == nil)
     }
 
-    @Test func dismissedLegacyUndatedPendingIntentCannotInstallAgainToday() async throws {
+    @Test(arguments: [false, true])
+    func dismissedAmbiguousPendingIntentCannotInstallAgainToday(hasOldFireDate: Bool) async throws {
         let now = date(2026, 11, 15, 12)
         let storage = TestMotivationStateStore(ReadingMotivationNotificationState(
-            pendingKind: .rescue, pendingDayKey: "2026-11-15"
+            pendingKind: .rescue,
+            pendingDayKey: hasOldFireDate ? "2026-11-14" : "2026-11-15",
+            pendingDeliveryDate: hasOldFireDate ? date(2026, 11, 14, 20) : nil
         ))
         let scheduler = TestMotivationScheduler()
         let (coordinator, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: now)

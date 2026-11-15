@@ -790,8 +790,6 @@ private struct HomeTabView: View {
                 }
         }
 
-        let now = Date()
-        let calendar = Calendar.current
         ContinueWidgetPublisher.publishHomeContinue(
             title: item.title,
             subtitle: item.subtitle,
@@ -799,13 +797,22 @@ private struct HomeTabView: View {
             coverData: coverData,
             progress: item.progress,
             durationSeconds: item.durationSeconds,
-            streakDays: motivation.streaks.current,
-            streakActivityDayKey: ReadingMotivationCalculations.streakActivityDayKey(
-                sessions: SessionTracker.shared.motivationSessionRecords(at: now),
-                calendar: calendar,
-                now: now,
-                archivedActivityDays: SessionTracker.shared.motivationArchivedActivityDays()
-            ),
+            streakProvider: {
+                let now = Date()
+                let calendar = Calendar.current
+                let sessions = SessionTracker.shared.motivationSessionRecords(at: now)
+                let archived = SessionTracker.shared.motivationArchivedActivityDays()
+                return (
+                    days: ReadingMotivationCalculations.streaks(
+                        sessions: sessions, calendar: calendar, now: now,
+                        archivedActivityDays: archived
+                    ).current,
+                    dayKey: ReadingMotivationCalculations.streakActivityDayKey(
+                        sessions: sessions, calendar: calendar, now: now,
+                        archivedActivityDays: archived
+                    )
+                )
+            },
         )
     }
 }

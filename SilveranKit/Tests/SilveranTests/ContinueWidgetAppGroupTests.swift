@@ -1,5 +1,5 @@
 import Foundation
-import SilveranAppleWidgets
+@testable import SilveranAppleWidgets
 import Testing
 
 /// Regression coverage for the sideloaded Continue widget's two historical
@@ -374,6 +374,17 @@ struct ContinueWidgetSnapshotTests {
         #expect(!source.contains("streakDays: last.streakDays"))
         #expect(!source.contains("streakActivityDayKey: last.streakActivityDayKey"))
         #expect(!source.contains("streakDays: streakDays ?? last.streakDays"))
+        // iOS-only publisher is not a SwiftPM macOS runtime target. This source
+        // integration check complements store behavior tests; it is not device QA.
+        let sessionBody = try #require(source.components(
+            separatedBy: "private static func publishSession("
+        ).last?.components(separatedBy: "private static func handleToggleFromWidget(").first)
+        let refresh = try #require(sessionBody.range(of: "let streak = authoritativeStreakProvider?()"))
+        let write = try #require(sessionBody.range(
+            of: "ContinueWidgetSnapshotStore.publishLiveMirror(", options: .backwards
+        ))
+        #expect(refresh.lowerBound < write.lowerBound)
+        #expect(!sessionBody[refresh.lowerBound..<write.lowerBound].contains("await "))
     }
 
     @Test func updateAuthoritativeStreakPreservesItemTimingAndNoopsUnchanged() throws {
