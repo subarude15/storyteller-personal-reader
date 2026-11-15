@@ -165,6 +165,14 @@ private struct InkAmpContinueWidgetView: View {
         return InkAmpContinueLink.continueURL
     }
 
+    private var subtitleLine: String? {
+        let values = [snapshot.subtitle, snapshot.streakText]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !values.isEmpty else { return nil }
+        return values.joined(separator: " · ")
+    }
+
     // MARK: System small
 
     private var smallBody: some View {
@@ -223,7 +231,7 @@ private struct InkAmpContinueWidgetView: View {
                 }
                 titleBlock(lineLimit: 2, titleFont: .headline)
                     .padding(.top, 1)
-                if let subtitle = snapshot.subtitle, !subtitle.isEmpty {
+                if let subtitle = subtitleLine {
                     Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(InkAmpWidgetPalette.secondary)
@@ -325,7 +333,7 @@ private struct InkAmpContinueWidgetView: View {
                 Text(displayTitle)
                     .font(.headline)
                     .lineLimit(1)
-                Text(displaySubtitle)
+                Text(subtitleLine ?? displaySubtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -436,7 +444,7 @@ private struct InkAmpContinueWidgetView: View {
             return subtitle
         }
         if snapshot.hasItem {
-            return snapshot.remainingText ?? "Tap to continue"
+            return snapshot.remainingStatusText ?? "Tap to continue"
         }
         if ContinueWidgetSnapshotStore.lastTitleFallback() != nil {
             return "Open ink+amp"

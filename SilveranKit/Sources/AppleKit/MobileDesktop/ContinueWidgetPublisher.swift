@@ -55,11 +55,12 @@ public enum ContinueWidgetPublisher {
         coverData: Data?,
         progress: Double? = nil,
         durationSeconds: Double? = nil,
+        streakDays: Int? = nil,
     ) {
         Task { @MainActor in
             let session = await AudioSessionActor.shared.currentSnapshot()
             if session != nil {
-                await publishSession(session)
+                await publishSession(session, streakDays: streakDays)
                 return
             }
             ContinueWidgetSnapshotStore.publish(
@@ -71,6 +72,7 @@ public enum ContinueWidgetPublisher {
                 progress: progress,
                 durationSeconds: durationSeconds,
                 hasLiveSession: false,
+                streakDays: streakDays,
             )
         }
     }
@@ -93,7 +95,10 @@ public enum ContinueWidgetPublisher {
         }
     }
 
-    private static func publishSession(_ snapshot: AudioSessionSnapshot?) async {
+    private static func publishSession(
+        _ snapshot: AudioSessionSnapshot?,
+        streakDays: Int? = nil
+    ) async {
         guard let snapshot else {
             // Session ended — keep title/cover, clear playing so the tile isn't stuck.
             let last = ContinueWidgetSnapshotStore.loadSnapshot()
@@ -109,6 +114,7 @@ public enum ContinueWidgetPublisher {
                 durationSeconds: last.durationSeconds,
                 hasLiveSession: false,
                 rate: last.rate,
+                streakDays: last.streakDays,
             )
             return
         }
@@ -147,6 +153,7 @@ public enum ContinueWidgetPublisher {
             durationSeconds: snapshot.durationSeconds,
             hasLiveSession: true,
             rate: snapshot.playbackRate,
+            streakDays: streakDays ?? ContinueWidgetSnapshotStore.loadSnapshot().streakDays,
         )
     }
 

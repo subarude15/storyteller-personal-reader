@@ -41,6 +41,8 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
     public var progress: Double?
     public var elapsedSeconds: Double?
     public var durationSeconds: Double?
+    /// Real current/longest-independent streak count from SessionTracker.
+    public var streakDays: Int?
     /// True while the app holds a live audio session, i.e. transport buttons can
     /// actually do something. False for the "Home Continue" fallback card.
     public var hasLiveSession: Bool?
@@ -59,6 +61,7 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         durationSeconds: Double? = nil,
         hasLiveSession: Bool? = nil,
         rate: Double? = nil,
+        streakDays: Int? = nil,
     ) {
         self.generatedAt = generatedAt
         self.title = title
@@ -67,11 +70,12 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         self.isPlaying = isPlaying
         self.kind = kind
         self.deepLink = deepLink
-        self.progress = progress
-        self.elapsedSeconds = elapsedSeconds
-        self.durationSeconds = durationSeconds
+        self.progress = progress.flatMap { $0.isFinite ? $0 : nil }
+        self.elapsedSeconds = elapsedSeconds.flatMap { $0.isFinite ? $0 : nil }
+        self.durationSeconds = durationSeconds.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        self.streakDays = streakDays.map { max(0, $0) }
         self.hasLiveSession = hasLiveSession
-        self.rate = rate
+        self.rate = rate.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
     }
 
     public static let empty = ContinueWidgetSnapshot()
@@ -93,7 +97,7 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
     }
 
     public var clampedProgress: Double? {
-        progress.map { min(max($0, 0), 1) }
+        progress.flatMap { $0.isFinite ? min(max($0, 0), 1) : nil }
     }
 
     public var percentComplete: Int? {
@@ -102,30 +106,58 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
 
     /// "12m left" / "1h 5m left" when a duration is known.
     public var remainingText: String? {
-        guard let durationSeconds, durationSeconds > 0 else { return nil }
-        let elapsed = elapsedSeconds ?? ((clampedProgress ?? 0) * durationSeconds)
-        let remaining = max(0, durationSeconds - elapsed)
-        guard remaining > 0 else { return nil }
+        guard let timing = widgetTiming,
+            let remaining = timing.remainingWallSeconds,
+            remaining > 0
+        else { return nil }
         return Self.durationText(remaining) + " left"
     }
 
+    public var remainingStatusText: String? {
+        guard isTimedKind else { return nil }
+        return isFinished ? "Finished" : (remainingText ?? "Remaining time unknown")
+    }
+
     public var elapsedText: String? {
-        guard let durationSeconds, durationSeconds > 0 else { return nil }
-        let elapsed = max(0, elapsedSeconds ?? ((clampedProgress ?? 0) * durationSeconds))
-        return Self.durationText(elapsed)
+        guard let timing = widgetTiming else { return nil }
+        return Self.durationText(timing.elapsedSeconds)
+    }
+
+    public var lengthText: String? {
+        guard kind != .ebook else { return nil }
+        guard let durationSeconds, durationSeconds.isFinite, durationSeconds > 0 else { return nil }
+        return Self.durationText(durationSeconds)
+    }
+
+    public var elapsedLengthText: String? {
+        guard let elapsedText, let lengthText else { return nil }
+        return elapsedText + " / " + lengthText
+    }
+
+    public var streakText: String? {
+        guard let streakDays else { return nil }
+        return streakDays == 0 ? "Start a streak today" : String(streakDays) + "-day streak"
     }
 
     /// Compact "31% · 12m left" style caption for the tile.
     public var progressCaption: String? {
         var parts: [String] = []
         if let percentComplete { parts.append("\(percentComplete)%") }
-        if let remainingText { parts.append(remainingText) }
+        if let elapsedLengthText { parts.append(elapsedLengthText) }
+        if let remainingText {
+            parts.append(remainingText)
+        } else if isTimedKind && !isFinished {
+            parts.append("Remaining unknown")
+        }
         guard !parts.isEmpty else { return nil }
         return parts.joined(separator: " · ")
     }
 
     public static func durationText(_ seconds: Double) -> String {
-        let total = Int(seconds.rounded())
+        guard seconds.isFinite, seconds >= 0 else { return "0m" }
+        if seconds == 0 { return "0m" }
+        if seconds < 60 { return "<1m" }
+        let total = Int(min(seconds.rounded(), Double(Int.max / 2)))
         let hours = total / 3600
         let minutes = (total % 3600) / 60
         if hours > 0 {
@@ -146,6 +178,9 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
             deepLink ?? "",
             (hasLiveSession ?? false) ? "1" : "0",
             percentComplete.map(String.init) ?? "",
+            elapsedLengthText ?? "",
+            remainingText ?? "",
+            streakText ?? "",
         ].joined(separator: "|")
     }
 
@@ -153,6 +188,27 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
     var transportSignature: String {
         [title ?? "", isPlaying ? "1" : "0", kind?.rawValue ?? "",
          (hasLiveSession ?? false) ? "1" : "0"].joined(separator: "|")
+    }
+
+    private var widgetTiming: ContinueWidgetTiming? {
+        guard kind != .ebook else { return nil }
+        return ContinueWidgetTiming.calculate(
+            progress: progress,
+            elapsedSeconds: elapsedSeconds,
+            durationSeconds: durationSeconds,
+            rate: rate,
+        )
+    }
+
+    private var isTimedKind: Bool {
+        switch kind {
+            case .audiobook, .readaloud, .podcast: return true
+            case .ebook, .none: return false
+        }
+    }
+
+    private var isFinished: Bool {
+        clampedProgress == 1 || widgetTiming?.remainingWallSeconds == 0
     }
 }
 
@@ -254,6 +310,7 @@ public enum ContinueWidgetSnapshotStore {
         durationSeconds: Double? = nil,
         hasLiveSession: Bool = false,
         rate: Double? = nil,
+        streakDays: Int? = nil,
     ) {
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "publish")
         guard let container = SilveranWidgetSnapshotStore.sharedContainerURL() else {
@@ -298,6 +355,7 @@ public enum ContinueWidgetSnapshotStore {
                 durationSeconds: durationSeconds,
                 hasLiveSession: hasLiveSession,
                 rate: rate,
+                streakDays: streakDays ?? readSnapshotFile(in: container)?.streakDays,
             )
 
             publishLock.lock()
@@ -364,6 +422,7 @@ public enum ContinueWidgetSnapshotStore {
             durationSeconds: session.durationSeconds,
             hasLiveSession: true,
             rate: session.playbackRate,
+            streakDays: loadSnapshot().streakDays,
         )
     }
 
@@ -383,6 +442,7 @@ public enum ContinueWidgetSnapshotStore {
             durationSeconds: last.durationSeconds,
             hasLiveSession: false,
             rate: last.rate,
+            streakDays: last.streakDays,
         )
     }
 

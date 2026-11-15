@@ -24,9 +24,11 @@ final class SessionTracker {
 
     private let sessionsKey = "punkRally.stats.sessions.v1"
     private let finishedKey = "punkRally.stats.finished.v1"
+    private let streakDaysKey = "punkRally.stats.streakDays.v1"
 
     private var sessions: [PRMediaSession] = []
     private var finished: [PRFinishedBook] = []
+    private var archivedActivityDays: Set<Date> = []
 
     /// Bumped whenever aggregates change so SwiftUI refreshes.
     private(set) var revision: Int = 0
@@ -48,6 +50,30 @@ final class SessionTracker {
 
     var allFinished: [PRFinishedBook] {
         finished
+    }
+
+    /// Shared calculation input, including the active session's real elapsed time.
+    func motivationSessionRecords(at now: Date = Date()) -> [InkampStatsSessionRecord] {
+        var records = sessions.map(Self.toSyncSession)
+        if let activeSession, now > activeSession.startedAt {
+            records.append(
+                InkampStatsSessionRecord(
+                    id: activeSession.id,
+                    kind: activeSession.kind == .reading ? .reading : .listening,
+                    mediaID: activeSession.mediaID,
+                    mediaTitle: activeSession.mediaTitle,
+                    startedAt: activeSession.startedAt,
+                    endedAt: now,
+                    durationSeconds: now.timeIntervalSince(activeSession.startedAt),
+                    endProgress: activeSession.endProgress
+                )
+            )
+        }
+        return records
+    }
+
+    func motivationArchivedActivityDays() -> [Date] {
+        archivedActivityDays.sorted()
     }
 
     /// Begin a session for a media item.
@@ -87,6 +113,7 @@ final class SessionTracker {
         session.endProgress = progress
         sessions.append(session)
         activeSession = nil
+        archiveActivityDays(at: ended)
 
         if let progress, progress >= 0.95 {
             recordFinished(mediaID: session.mediaID, mediaTitle: session.mediaTitle)
@@ -94,6 +121,7 @@ final class SessionTracker {
         revision &+= 1
         scheduleSave()
         StatsSyncCoordinator.shared.scheduleSyncAfterLocalChange()
+        Task { await ReadingMotivationStore.shared.refreshNotifications() }
     }
 
     /// Title for an in-flight or recent session (podcast finish labeling).
@@ -111,6 +139,7 @@ final class SessionTracker {
         revision &+= 1
         scheduleSave()
         StatsSyncCoordinator.shared.scheduleSyncAfterLocalChange()
+        Task { await ReadingMotivationStore.shared.refreshNotifications() }
     }
 
     /// Export local ledger for Storyteller Stats blob.
@@ -126,12 +155,15 @@ final class SessionTracker {
     func applyMergedSyncDocument(_ document: InkampStatsSyncDocument) {
         sessions = document.sessions.map(Self.fromSyncSession)
         finished = document.finished.map(Self.fromSyncFinished)
+        archiveActivityDays()
         revision &+= 1
         persist()
+        Task { await ReadingMotivationStore.shared.refreshNotifications() }
     }
 
     /// Prune sessions older than 1 year to keep storage small.
     func pruneOldSessions() {
+        archiveActivityDays()
         let cutoff = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
         sessions.removeAll { $0.endedAt < cutoff }
         scheduleSave()
@@ -141,65 +173,46 @@ final class SessionTracker {
     var snapshot: PRStatsSnapshot {
         let calendar = Calendar.current
         let now = Date()
-
-        func startOfDay(_ date: Date) -> Date {
-            calendar.startOfDay(for: date)
-        }
-
-        let todayStart = startOfDay(now)
-        let weekStart = calendar.date(byAdding: .day, value: -6, to: todayStart) ?? todayStart
-
-        let live: TimeInterval = {
-            guard let active = activeSession else { return 0 }
-            let elapsed = now.timeIntervalSince(active.startedAt)
-            return elapsed >= 30 ? elapsed : 0
-        }()
-        let liveKind = activeSession?.kind
-        let liveStartedAt = activeSession?.startedAt
-
-        var todaySeconds = sessions
-            .filter { $0.endedAt >= todayStart }
-            .reduce(0) { $0 + $1.durationSeconds }
-        var weekSeconds = sessions
-            .filter { $0.endedAt >= weekStart }
-            .reduce(0) { $0 + $1.durationSeconds }
-
-        if live > 0, let liveStartedAt, liveStartedAt >= todayStart {
-            todaySeconds += live
-        }
-        if live > 0, let liveStartedAt, liveStartedAt >= weekStart {
-            weekSeconds += live
-        }
-
-        let streakDays = computeStreak(
-            calendar: calendar,
-            today: todayStart,
-            activeCountsToday: live > 0
+        let records = motivationSessionRecords(at: now)
+        let days = ReadingMotivationCalculations.dailyTotals(
+            sessions: records, calendar: calendar, now: now
         )
+        let today = calendar.startOfDay(for: now)
+        let todaySeconds = days.first(where: { $0.day == today })?.seconds ?? 0
+        let weekSeconds = ReadingMotivationCalculations.weeklyReceipt(
+            sessions: records,
+            finished: finished.map(Self.toSyncFinished),
+            weekOffset: 0,
+            calendar: calendar,
+            now: now
+        ).seconds
+        let streakDays = ReadingMotivationCalculations.streaks(
+            sessions: records,
+            calendar: calendar,
+            now: now,
+            archivedActivityDays: motivationArchivedActivityDays()
+        ).current
 
         let thirtyDaysAgo = calendar.date(byAdding: .day, value: -30, to: now) ?? now
         let finished30d = finished.filter { $0.finishedAt >= thirtyDaysAgo }.count
 
-        let allDurations = sessions.map(\.durationSeconds) + (live > 0 ? [live] : [])
+        let allDurations = records.compactMap { session -> TimeInterval? in
+            let span = session.endedAt.timeIntervalSince(session.startedAt)
+            guard session.durationSeconds.isFinite, session.durationSeconds > 0, span > 0 else { return nil }
+            return min(session.durationSeconds, span)
+        }
         let avgSession = allDurations.isEmpty
             ? 0
             : allDurations.reduce(0, +) / Double(allDurations.count)
 
         let recentDays = (0..<7).reversed().map { offset -> PRDailyAggregate in
-            let day = calendar.date(byAdding: .day, value: -offset, to: todayStart) ?? todayStart
-            var listen = sessionsForDay(day, kind: .listening, calendar: calendar)
-            var read = sessionsForDay(day, kind: .reading, calendar: calendar)
-            if live > 0,
-                let liveStartedAt,
-                calendar.isDate(liveStartedAt, inSameDayAs: day),
-                let liveKind
-            {
-                switch liveKind {
-                    case .listening: listen += live
-                    case .reading: read += live
-                }
-            }
-            return PRDailyAggregate(day: day, listenSeconds: listen, readSeconds: read)
+            let day = calendar.date(byAdding: .day, value: -offset, to: today) ?? today
+            let activity = days.first(where: { $0.day == day })
+            return PRDailyAggregate(
+                day: day,
+                listenSeconds: activity?.listeningSeconds ?? 0,
+                readSeconds: activity?.readingSeconds ?? 0
+            )
         }
 
         return PRStatsSnapshot(
@@ -226,6 +239,12 @@ final class SessionTracker {
         {
             finished = decoded
         }
+        if let data = defaults.data(forKey: streakDaysKey),
+            let decoded = try? JSONDecoder().decode(Set<Date>.self, from: data)
+        {
+            archivedActivityDays = decoded
+        }
+        archiveActivityDays()
     }
 
     private func scheduleSave() {
@@ -244,42 +263,24 @@ final class SessionTracker {
         if let data = try? JSONEncoder().encode(finished) {
             defaults.set(data, forKey: finishedKey)
         }
+        if let data = try? JSONEncoder().encode(archivedActivityDays) {
+            defaults.set(data, forKey: streakDaysKey)
+        }
+    }
+
+    private func archiveActivityDays(at now: Date = Date()) {
+        let days = ReadingMotivationCalculations.dailyTotals(
+            sessions: sessions.map(Self.toSyncSession),
+            calendar: Calendar.current,
+            now: now
+        )
+        archivedActivityDays.formUnion(days.map(\.day))
+        if let data = try? JSONEncoder().encode(archivedActivityDays) {
+            UserDefaults.standard.set(data, forKey: streakDaysKey)
+        }
     }
 
     // MARK: - Helpers
-
-    private func sessionsForDay(_ day: Date, kind: PRMediaSession.Kind, calendar: Calendar) -> TimeInterval {
-        sessions
-            .filter { calendar.isDate($0.endedAt, inSameDayAs: day) && $0.kind == kind }
-            .reduce(0) { $0 + $1.durationSeconds }
-    }
-
-    private func computeStreak(calendar: Calendar, today: Date, activeCountsToday: Bool) -> Int {
-        // Count consecutive days (ending today or yesterday) with any session.
-        var daysWithSessions = Set(
-            sessions.map { calendar.startOfDay(for: $0.endedAt) }
-        )
-        if activeCountsToday {
-            daysWithSessions.insert(today)
-        }
-
-        var streak = 0
-        var cursor = today
-        if !daysWithSessions.contains(cursor) {
-            // Allow streak to persist if today hasn't started yet, but yesterday counted.
-            guard let yesterday = calendar.date(byAdding: .day, value: -1, to: cursor),
-                daysWithSessions.contains(yesterday)
-            else { return 0 }
-            cursor = yesterday
-        }
-
-        while daysWithSessions.contains(cursor) {
-            streak += 1
-            guard let prev = calendar.date(byAdding: .day, value: -1, to: cursor) else { break }
-            cursor = prev
-        }
-        return streak
-    }
 
     private func closeActiveIfNeeded() {
         guard activeSession != nil else { return }

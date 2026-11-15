@@ -86,10 +86,11 @@ struct ContinueWidgetSnapshotTests {
             title: "Piranesi",
             progress: 0.5,
             durationSeconds: 3600,
+            rate: 1,
         )
         #expect(snapshot.percentComplete == 50)
         #expect(snapshot.remainingText == "30m left")
-        #expect(snapshot.progressCaption == "50% · 30m left")
+        #expect(snapshot.progressCaption == "50% · 30m / 1h · 30m left")
     }
 
     @Test func clampingAndDurationFormatting() {
