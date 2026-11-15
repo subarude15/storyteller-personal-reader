@@ -58,6 +58,11 @@ final class AudioSessionMonitor {
             return
         }
 
+        #if os(iOS) && DEBUG
+        // Only artwork I/O is omitted for the local lifecycle data seam.
+        // Snapshot observation, live visibility and transitions stay production.
+        if InkAmpGeometryLifecycle.isEnabled { return }
+        #endif
         if case .podcast = snapshot.kind {
             coverBookID = nil
             let url = PodcastPlayerPresenter.shared.artworkURL
@@ -188,6 +193,9 @@ struct GlobalMiniPlayerBar: View {
             },
         )
         .animation(.spring(response: 0.35, dampingFraction: 0.82), value: snapshot.isPlaying)
+        #if os(iOS) && DEBUG
+        .modifier(GeometryLifecyclePlayerMarker())
+        #endif
     }
 
     @ViewBuilder

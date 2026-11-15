@@ -1468,7 +1468,27 @@ public actor AudioSessionActor {
         snapshotObservers.removeValue(forKey: id)
     }
 
+    #if DEBUG
+    // Local data seam ONLY in the unsigned native geometry host. Publication
+    // still traverses the real actor observer/monitor/live-policy pipeline.
+    private var geometryLifecycleSnapshot: AudioSessionSnapshot?
+    private var usesGeometryLifecycleSnapshot: Bool {
+        Bundle.main.bundleIdentifier == "com.punkrally.reader.geometry"
+            && ["cover", "async"].contains(
+                ProcessInfo.processInfo.environment["INKAMP_GEOMETRY_LIFECYCLE"] ?? "")
+    }
+    public func publishGeometryLifecycleSnapshot(_ snapshot: AudioSessionSnapshot?) {
+        guard usesGeometryLifecycleSnapshot else { return }
+        geometryLifecycleSnapshot = snapshot
+        currentKind = snapshot?.kind
+        notifySnapshotObservers(snapshot)
+    }
+    #endif
+
     public func currentSnapshot() async -> AudioSessionSnapshot? {
+        #if DEBUG
+        if usesGeometryLifecycleSnapshot { return geometryLifecycleSnapshot }
+        #endif
         switch currentKind {
             case .audiobook:
                 return (await makeState()).flatMap(audiobookSnapshot(from:))

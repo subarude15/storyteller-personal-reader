@@ -2,7 +2,7 @@ name: Home scroll native geometry
 
 on:
   push:
-    branches: [cursor/home-scroll-clearance-v2]
+    branches: [cursor/home-scroll-clearance-v2, cursor/home-lifecycle-native-repro]
   workflow_dispatch:
 
 permissions:
@@ -15,7 +15,7 @@ concurrency:
 jobs:
   geometry:
     runs-on: macos-15
-    timeout-minutes: 55
+    timeout-minutes: 75
     env:
       HOMEBREW_NO_AUTO_UPDATE: '1'
     steps:

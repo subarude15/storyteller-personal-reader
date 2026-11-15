@@ -282,10 +282,21 @@ public struct PunkRallyTabView: View {
             shellWithLifecycle
                 .fullScreenCover(item: PlayerPresenter.shared.cardItemBinding) { wrapper in
                     NavigationStack {
+                        #if INKAMP_GEOMETRY_HARNESS
+                        if InkAmpGeometryLifecycle.isEnabled {
+                            GeometryLifecycleLocalPlayer()
+                        } else {
+                            PunkRallyPlayerHost.playerView(
+                                for: wrapper.data,
+                                onFailure: { showShellToast("Can't open yet · try again") }
+                            )
+                        }
+                        #else
                         PunkRallyPlayerHost.playerView(
                             for: wrapper.data,
                             onFailure: { showShellToast("Can't open yet · try again") }
                         )
+                        #endif
                     }
                     .formatSwitchDiscrepancyDialog()
                 }

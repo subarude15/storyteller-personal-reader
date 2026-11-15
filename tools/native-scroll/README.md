@@ -80,11 +80,50 @@ xcodebuild test -project InkAmpGeometry.xcodeproj -scheme InkAmpGeometry \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 ```
 
+## Lifecycle-only reproduction extension (no production layout change)
+
+`HomeLifecycleGeometryTests` adds two 8-case flows (portrait/landscape,
+normal/accessibility3, playing/paused). The entire original test file and the
+More correction remain byte-identical.
+
+- **Cover:** the real private `iOSRootView` awaits local prerequisites, restores
+  local `PlayerBookData` through the original `PlayerPresenter.present`, and
+  mounts the production shell's existing `fullScreenCover`. The test observes
+  the cover and live visibility policy, minimizes through the unchanged
+  `PlayerPresenter.dismissCard`, then scrolls/releases/measures and coordinate-taps Stats.
+- **Async-at-bottom:** with no session/card, first scroll/release/settle Home at
+  its native bottom. Only then post a cross-process Darwin notification to
+  publish local snapshot DATA through `AudioSessionActor`'s actual observer ->
+  `AudioSessionMonitor.apply` -> live policy/transition path. There is no nav
+  toolbar touch, keyboard, URL, app relaunch or foreground transition. Publication
+  records the actual UIKit Home probe at that instant; the test asserts it was
+  already at rest/bottom before measuring the revealed bar and scrolling again.
+- The state probe records real presenter/monitor/policy state, cover appear/
+  disappear counts, publication count, and native Home measurements. Each
+  transition/final case retains JSON, frames, screenshot and accessibility text,
+  even on an assertion or setup failure. Geometry tolerances are not relaxed.
+- `INKAMP_GEOMETRY_FIXTURE=0` is mandatory for these flows; `liveContent` and its
+  production move/opacity transition are used, not `MiniPlayerGeometryFixture`.
+  New framework data seams require DEBUG, the exact unsigned geometry bundle
+  ID, and `INKAMP_GEOMETRY_LIFECYCLE=cover|async`. No Release behavior is enabled.
+
+**Remaining limits:** this is the actual root wrapper/AnyView and an injected
+local MediaViewModel, not authenticated migration/network startup. The audio
+engine snapshot data, persisted-route resolution, and cover image I/O are local.
+Inside the actual full-screen cover, a local content pane replaces file/audio
+player controls; the true audio player's internal setup/onDisappear/engine
+teardown is NOT exercised. The real presenter and full-screen presentation/
+dismissal remain unchanged. AppDelegate/background hooks, device library/cache
+races, live media/artwork, exact device/OS/zoom and genuine persisted-session
+transport restore remain unrepresented. GREEN means these added lifecycle
+conditions did not reproduce the device symptom, not that Home is fixed.
+
 `Home scroll native geometry` runs on push to `cursor/home-scroll-clearance-v2`
-and retains logs/results for 14 days. A build/probe/setup failure is a harness
-failure, **not** a reproduced layout regression. Read assertions and attachments
-before choosing the smallest production correction. No PR, tag, release or
-production rollout is part of this baseline submission.
+and `cursor/home-lifecycle-native-repro`, with a 75-minute job budget for the
+expanded native suite, and retains logs/results for 14 days. A build/probe/setup
+failure is a harness failure, **not** a reproduced layout regression. Read
+assertions and attachments before choosing any production correction. No PR,
+tag, release or production rollout is authorized by this diagnostic extension.
 
 ## Initial measured baseline (f6dab706)
 

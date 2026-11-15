@@ -6,11 +6,23 @@ import SilveranKit
 /// network library, audio engine or signing/deployment route.
 @main
 struct GeometryHarnessApp: App {
-    init() { InkAmpGeometryFixture.seedStats() }
+    init() {
+        InkAmpGeometryFixture.seedStats()
+        if InkAmpGeometryLifecycle.isEnabled {
+            InkAmpGeometryLifecycle.configure(book: InkAmpGeometryFixture.playerData)
+        }
+    }
 
     var body: some Scene {
         WindowGroup {
-            PunkRallyTabView()
+            Group {
+                if InkAmpGeometryLifecycle.isEnabled {
+                    GeometryLifecycleProductionRoot(root: AnyView(PunkRallyTabView()),
+                        library: InkAmpGeometryFixture.localLibrary)
+                } else {
+                    PunkRallyTabView()
+                }
+            }
                 .dynamicTypeSize(
                     ProcessInfo.processInfo.environment["INKAMP_GEOMETRY_DYNAMIC_TYPE"] == "accessibility"
                         ? .accessibility3 : .large
@@ -59,6 +71,13 @@ enum InkAmpGeometryFixture {
             tags: nil, collections: nil, ebook: nil, audiobook: nil,
             readaloud: aligned, status: nil, position: position, rating: nil,
             duration: index == 0 ? 54960 : 7200)
+    }
+
+    static var localLibrary: BookLibrary {
+        BookLibrary(bookMetaData: books, ebookCoverCache: [:], audiobookCoverCache: [:])
+    }
+    static var playerData: PlayerBookData {
+        PlayerBookData(metadata: books[0], localMediaPath: nil, category: .audio)
     }
 
     static var queue: (continueItem: HomeMixedItem?, upNext: [HomeMixedItem]) {
