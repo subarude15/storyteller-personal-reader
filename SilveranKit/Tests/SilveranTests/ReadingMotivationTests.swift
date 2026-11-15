@@ -35,6 +35,10 @@ private actor TestMotivationScheduler: ReadingMotivationNotificationScheduling {
     var pausedCancelEntered = false
     var cancelStartWaiter: CheckedContinuation<Void, Never>?
     var cancelRelease: CheckedContinuation<Void, Never>?
+    var pauseNextRemove = false
+    var pausedRemoveEntered = false
+    var removeStartWaiter: CheckedContinuation<Void, Never>?
+    var removeRelease: CheckedContinuation<Void, Never>?
     var failNextSchedule = false
 
     func authorization() async -> ReadingMotivationNotificationAuthorization { status }
@@ -70,6 +74,14 @@ private actor TestMotivationScheduler: ReadingMotivationNotificationScheduling {
     }
     func deliveredNotifications() async -> [String: Date] { delivered }
     func removeDelivered(identifiers: Set<String>) async {
+        if pauseNextRemove {
+            pauseNextRemove = false
+            pausedRemoveEntered = true
+            removeStartWaiter?.resume()
+            removeStartWaiter = nil
+            await withCheckedContinuation { removeRelease = $0 }
+            pausedRemoveEntered = false
+        }
         for identifier in identifiers { delivered.removeValue(forKey: identifier) }
     }
     func pendingCount() -> Int { requests.count }
@@ -94,6 +106,16 @@ private actor TestMotivationScheduler: ReadingMotivationNotificationScheduling {
         cancelRelease?.resume()
         cancelRelease = nil
     }
+    func pauseNextRemoveCall() { pauseNextRemove = true }
+    func waitForPausedRemove() async {
+        if pausedRemoveEntered { return }
+        await withCheckedContinuation { removeStartWaiter = $0 }
+    }
+    func resumePausedRemove() {
+        removeRelease?.resume()
+        removeRelease = nil
+    }
+    func clearDelivered() { delivered.removeAll() }
     func failNextScheduleCall() { failNextSchedule = true }
     func pendingKind(for identifier: String) -> ReadingMotivationNotificationKind? {
         requests[identifier]?.kind
@@ -189,6 +211,21 @@ struct ReadingMotivationTests {
             durationSeconds: duration ?? end.timeIntervalSince(start),
             endProgress: progress,
         )
+    }
+
+    /// Fixed-date coordinator fixtures must inject a fake clock; the system clock
+    /// makes `max(fixtureNow, clock.now())` wall-time dependent.
+    private func makeCoordinator(
+        scheduler: TestMotivationScheduler,
+        stateStore: TestMotivationStateStore = TestMotivationStateStore(),
+        now: Date,
+        clock: TestMotivationClock? = nil
+    ) -> (ReadingMotivationNotificationCoordinator, TestMotivationClock) {
+        let clock = clock ?? TestMotivationClock(now)
+        let coordinator = ReadingMotivationNotificationCoordinator(
+            scheduler: scheduler, stateStore: stateStore, clock: clock
+        )
+        return (coordinator, clock)
     }
 
     @Test func settingsMigrateMissingValuesToExplicitDefaults() throws {
@@ -930,9 +967,7 @@ struct ReadingMotivationTests {
 
         let scheduler = TestMotivationScheduler()
         let storage = TestMotivationStateStore()
-        let coordinator = ReadingMotivationNotificationCoordinator(
-            scheduler: scheduler, stateStore: storage
-        )
+        let (coordinator, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: morning)
         #expect(try await coordinator.reconcile(
             candidates: candidates, enabled: true, now: morning, calendar: calendar,
             preferenceRevision: 1, requestRevision: 1
@@ -966,9 +1001,7 @@ struct ReadingMotivationTests {
             on: now, hour: 20, minute: 30, calendar: calendar
         )!
         let scheduler = TestMotivationScheduler()
-        let coordinator = ReadingMotivationNotificationCoordinator(
-            scheduler: scheduler, stateStore: TestMotivationStateStore()
-        )
+        let (coordinator, _) = makeCoordinator(scheduler: scheduler, now: now)
         let morningCandidates = ReadingMotivationNotificationPolicy.candidates(
             now: date(2026, 11, 15, 8),
             quietDeliveryDate: quiet,
@@ -1054,7 +1087,7 @@ struct ReadingMotivationTests {
         )
         let scheduler = TestMotivationScheduler()
         let storage = TestMotivationStateStore()
-        let first = ReadingMotivationNotificationCoordinator(scheduler: scheduler, stateStore: storage)
+        let (first, clock) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: now)
         #expect(try await first.reconcile(
             candidates: [candidate], enabled: true, now: now, calendar: calendar
         ) == .schedule(kind: .rescue, dayKey: dayKey))
@@ -1063,7 +1096,7 @@ struct ReadingMotivationTests {
         ) == .none)
         #expect(await scheduler.pendingCount() == 1)
 
-        let afterRestart = ReadingMotivationNotificationCoordinator(scheduler: scheduler, stateStore: storage)
+        let (afterRestart, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: now, clock: clock)
         #expect(try await afterRestart.reconcile(
             candidates: [candidate], enabled: true, now: now, calendar: calendar
         ) == .none)
@@ -1079,9 +1112,7 @@ struct ReadingMotivationTests {
         let now = date(2026, 11, 15, 18)
         let delivery = date(2026, 11, 15, 20)
         let scheduler = TestMotivationScheduler()
-        let coordinator = ReadingMotivationNotificationCoordinator(
-            scheduler: scheduler, stateStore: TestMotivationStateStore()
-        )
+        let (coordinator, _) = makeCoordinator(scheduler: scheduler, now: now)
         let receipt = ReadingMotivationNotificationCandidate(kind: .receipt, deliveryDate: delivery)
         let rescue = ReadingMotivationNotificationCandidate(kind: .rescue, deliveryDate: delivery)
         #expect(try await coordinator.reconcile(
@@ -1099,9 +1130,7 @@ struct ReadingMotivationTests {
 
     @Test func permissionIsRequestedOnlyByExplicitOptInAction() async {
         let scheduler = TestMotivationScheduler()
-        let coordinator = ReadingMotivationNotificationCoordinator(
-            scheduler: scheduler, stateStore: TestMotivationStateStore()
-        )
+        let (coordinator, _) = makeCoordinator(scheduler: scheduler, now: date(2026, 11, 15, 18))
         await scheduler.setAuthorization(.denied)
         #expect(!(await coordinator.requestPermission()))
         #expect(await scheduler.authorizationRequestCount() == 0)
@@ -1119,8 +1148,8 @@ struct ReadingMotivationTests {
                 pendingDeliveryDate: date(2026, 11, 16, 8)
             )
         )
-        let coordinator = ReadingMotivationNotificationCoordinator(
-            scheduler: scheduler, stateStore: storage
+        let (coordinator, _) = makeCoordinator(
+            scheduler: scheduler, stateStore: storage, now: date(2026, 11, 15, 23)
         )
         await coordinator.markDelivered(
             dayKey: "2026-11-16", deliveredAt: date(2026, 11, 15, 23), calendar: calendar
@@ -1140,7 +1169,7 @@ struct ReadingMotivationTests {
         )
         await storage.pauseNextLoadCall()
         let scheduler = TestMotivationScheduler()
-        let coordinator = ReadingMotivationNotificationCoordinator(scheduler: scheduler, stateStore: storage)
+        let (coordinator, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: now)
 
         let first = Task {
             try await coordinator.reconcile(
@@ -1177,7 +1206,7 @@ struct ReadingMotivationTests {
         let scheduler = TestMotivationScheduler()
         await scheduler.pauseNextScheduleCall()
         let storage = TestMotivationStateStore()
-        let coordinator = ReadingMotivationNotificationCoordinator(scheduler: scheduler, stateStore: storage)
+        let (coordinator, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: now)
 
         let enabled = Task {
             try await coordinator.reconcile(
@@ -1217,9 +1246,7 @@ struct ReadingMotivationTests {
         let rescue = ReadingMotivationNotificationCandidate(kind: .rescue, deliveryDate: delivery)
         let scheduler = TestMotivationScheduler()
         await scheduler.pauseNextScheduleCall()
-        let coordinator = ReadingMotivationNotificationCoordinator(
-            scheduler: scheduler, stateStore: TestMotivationStateStore()
-        )
+        let (coordinator, _) = makeCoordinator(scheduler: scheduler, now: now)
         let lower = Task {
             try await coordinator.reconcile(
                 candidates: [receipt], enabled: true, now: now, calendar: cal,
@@ -1261,7 +1288,7 @@ struct ReadingMotivationTests {
         let scheduler = TestMotivationScheduler()
         await scheduler.pauseNextScheduleCall()
         let storage = TestMotivationStateStore()
-        let coordinator = ReadingMotivationNotificationCoordinator(scheduler: scheduler, stateStore: storage)
+        let (coordinator, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: now)
         let scheduling = Task {
             try await coordinator.reconcile(
                 candidates: [candidate], enabled: true, now: now, calendar: cal,
@@ -1295,7 +1322,7 @@ struct ReadingMotivationTests {
         let scheduler = TestMotivationScheduler()
         await scheduler.failNextScheduleCall()
         let storage = TestMotivationStateStore()
-        let coordinator = ReadingMotivationNotificationCoordinator(scheduler: scheduler, stateStore: storage)
+        let (coordinator, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: now)
         do {
             _ = try await coordinator.reconcile(
                 candidates: [candidate], enabled: true, now: now, calendar: calendar,
@@ -1326,12 +1353,13 @@ struct ReadingMotivationTests {
                 pendingDeliveryDate: date(2026, 11, 14, 20)
             )
         )
-        let coordinator = ReadingMotivationNotificationCoordinator(scheduler: scheduler, stateStore: storage)
+        let now = date(2026, 11, 15, 18)
+        let (coordinator, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: now)
         let candidate = ReadingMotivationNotificationCandidate(
             kind: .pace, deliveryDate: date(2026, 11, 15, 20)
         )
         #expect(try await coordinator.reconcile(
-            candidates: [candidate], enabled: true, now: date(2026, 11, 15, 18), calendar: calendar,
+            candidates: [candidate], enabled: true, now: now, calendar: calendar,
             preferenceRevision: 1, requestRevision: 1
         ) == .schedule(kind: .pace, dayKey: today))
         let afterFirstLaunch = await storage.load()
@@ -1353,7 +1381,9 @@ struct ReadingMotivationTests {
     @Test func consumedDayHistorySurvivesJumpForwardAndBack() async throws {
         let scheduler = TestMotivationScheduler()
         let storage = TestMotivationStateStore()
-        let coordinator = ReadingMotivationNotificationCoordinator(scheduler: scheduler, stateStore: storage)
+        let (coordinator, _) = makeCoordinator(
+            scheduler: scheduler, stateStore: storage, now: date(2026, 11, 15, 18)
+        )
         let today = ReadingMotivationNotificationCandidate(
             kind: .rescue, deliveryDate: date(2026, 11, 15, 20)
         )
@@ -1400,9 +1430,7 @@ struct ReadingMotivationTests {
     @Test func quietTimeChangeReschedulesSameKindAndKeepsHigherPriority() async throws {
         let now = date(2026, 11, 15, 18)
         let scheduler = TestMotivationScheduler()
-        let coordinator = ReadingMotivationNotificationCoordinator(
-            scheduler: scheduler, stateStore: TestMotivationStateStore()
-        )
+        let (coordinator, _) = makeCoordinator(scheduler: scheduler, now: now)
         let firstQuiet = date(2026, 11, 15, 20)
         let laterQuiet = date(2026, 11, 15, 21)
         let rescue = ReadingMotivationNotificationCandidate(kind: .rescue, deliveryDate: firstQuiet)
@@ -1430,8 +1458,8 @@ struct ReadingMotivationTests {
         let clock = TestMotivationClock(start)
         let scheduler = TestMotivationScheduler()
         let storage = TestMotivationStateStore()
-        let coordinator = ReadingMotivationNotificationCoordinator(
-            scheduler: scheduler, stateStore: storage, clock: clock
+        let (coordinator, _) = makeCoordinator(
+            scheduler: scheduler, stateStore: storage, now: start, clock: clock
         )
         let receipt = ReadingMotivationNotificationCandidate(kind: .receipt, deliveryDate: delivery)
         let rescue = ReadingMotivationNotificationCandidate(kind: .rescue, deliveryDate: delivery)
@@ -1469,5 +1497,153 @@ struct ReadingMotivationTests {
             preferenceRevision: 1, requestRevision: 3
         ) == .none)
         #expect(await scheduler.pendingCount() == 0)
+    }
+
+    @Test func ingestDeliveredPersistsConsumedDaysBeforeRemoveAndSurvivesCrashAtRemoval() async throws {
+        let requestDay = "2026-11-15"
+        let actualDay = "2026-11-16"
+        let now = date(2026, 11, 16, 8)
+        let deliveredAt = date(2026, 11, 16, 0)
+        let scheduler = TestMotivationScheduler()
+        let storage = TestMotivationStateStore(
+            ReadingMotivationNotificationState(
+                pendingKind: .rescue,
+                pendingDayKey: requestDay,
+                pendingDeliveryDate: date(2026, 11, 15, 20)
+            )
+        )
+        await scheduler.setDelivered(
+            identifier: ReadingMotivationNotificationCoordinator.identifier(for: requestDay),
+            at: deliveredAt
+        )
+        let (coordinator, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: now)
+        await scheduler.pauseNextRemoveCall()
+
+        let ingesting = Task {
+            try await coordinator.reconcile(
+                candidates: [], enabled: true, now: now, calendar: calendar,
+                preferenceRevision: 1, requestRevision: 1
+            )
+        }
+        await scheduler.waitForPausedRemove()
+        // Durable ledger must already contain requested + actual days before OS evidence drops.
+        let midCrash = await storage.load()
+        #expect(midCrash.hasConsumedDayKey(requestDay))
+        #expect(midCrash.hasConsumedDayKey(actualDay))
+        #expect(midCrash.pendingDayKey == nil)
+
+        // Crash at removal: abandon in-flight reconcile, clear OS evidence, restart.
+        ingesting.cancel()
+        await scheduler.clearDelivered()
+        await scheduler.resumePausedRemove()
+        _ = try? await ingesting.value
+
+        let (restarted, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: now)
+        let nextQuiet = ReadingMotivationNotificationPolicy.quietDeliveryDate(
+            on: now, hour: 20, minute: 30, calendar: calendar
+        )!
+        let nextCandidates = ReadingMotivationNotificationPolicy.candidates(
+            now: now,
+            quietDeliveryDate: nextQuiet,
+            readingSeconds: 0,
+            readingGoalSeconds: 3600,
+            listeningSeconds: 0,
+            listeningGoalSeconds: 0,
+            activityDaysThisWeek: 0,
+            calendar: calendar
+        )
+        #expect(try await restarted.reconcile(
+            candidates: nextCandidates, enabled: true, now: now, calendar: calendar,
+            preferenceRevision: 1, requestRevision: 1
+        ) == .none)
+        #expect(await storage.load().hasConsumedDayKey(requestDay))
+        #expect(await storage.load().hasConsumedDayKey(actualDay))
+        #expect(await scheduler.pendingCount() == 0)
+    }
+
+    @Test func liveInProgressElapsedMeetingGoalCancelsPendingBeforeQuietTime() async throws {
+        let morning = date(2026, 11, 15, 8)
+        let quiet = ReadingMotivationNotificationPolicy.quietDeliveryDate(
+            on: morning, hour: 20, minute: 30, calendar: calendar
+        )!
+        let scheduler = TestMotivationScheduler()
+        let storage = TestMotivationStateStore()
+        let (coordinator, clock) = makeCoordinator(
+            scheduler: scheduler, stateStore: storage, now: morning
+        )
+        let morningCandidates = ReadingMotivationNotificationPolicy.candidates(
+            now: morning,
+            quietDeliveryDate: quiet,
+            readingSeconds: 0,
+            readingGoalSeconds: 1800,
+            listeningSeconds: 0,
+            listeningGoalSeconds: 0,
+            activityDaysThisWeek: 0,
+            calendar: calendar
+        )
+        #expect(try await coordinator.reconcile(
+            candidates: morningCandidates, enabled: true, now: morning, calendar: calendar,
+            preferenceRevision: 1, requestRevision: 1
+        ) == .schedule(kind: .rescue, dayKey: "2026-11-15"))
+        #expect(await scheduler.pendingCount() == 1)
+
+        // Active-session tick: live in-progress elapsed (SessionTracker.motivationSessionRecords)
+        // meets the reading goal before quiet time.
+        let now = date(2026, 11, 15, 12)
+        clock.advance(to: now)
+        let liveRecords = [
+            session(start: date(2026, 11, 15, 10), end: now, kind: .reading)
+        ]
+        let todayStart = calendar.startOfDay(for: now)
+        let todayProgress = ReadingMotivationCalculations.dailyTotals(
+            sessions: liveRecords, calendar: calendar, now: now
+        ).first(where: { $0.day == todayStart })
+        #expect((todayProgress?.readingSeconds ?? 0) >= 1800)
+        let afterLive = ReadingMotivationNotificationPolicy.candidates(
+            now: now,
+            quietDeliveryDate: quiet,
+            readingSeconds: todayProgress?.readingSeconds ?? 0,
+            readingGoalSeconds: 1800,
+            listeningSeconds: todayProgress?.listeningSeconds ?? 0,
+            listeningGoalSeconds: 0,
+            activityDaysThisWeek: 0,
+            calendar: calendar
+        )
+        #expect(afterLive.isEmpty)
+        #expect(try await coordinator.reconcile(
+            candidates: afterLive, enabled: true, now: now, calendar: calendar,
+            preferenceRevision: 1, requestRevision: 2
+        ) == .cancelPending)
+        #expect(await scheduler.pendingCount() == 0)
+
+        // Repeated tick / end must not reinstall or duplicate.
+        #expect(try await coordinator.reconcile(
+            candidates: afterLive, enabled: true, now: now, calendar: calendar,
+            preferenceRevision: 1, requestRevision: 3
+        ) == .none)
+        #expect(try await coordinator.reconcile(
+            candidates: afterLive, enabled: true, now: now, calendar: calendar,
+            preferenceRevision: 1, requestRevision: 4
+        ) == .none)
+        #expect(await scheduler.pendingCount() == 0)
+    }
+
+    @Test func activeSessionReconcileCadenceGuardsOptInAndRequiresLiveSession() {
+        #expect(
+            ReadingMotivationActiveSessionReconcilePolicy.shouldReconcileOnTick(
+                notificationsEnabled: true, hasActiveSession: true
+            )
+        )
+        #expect(
+            !ReadingMotivationActiveSessionReconcilePolicy.shouldReconcileOnTick(
+                notificationsEnabled: false, hasActiveSession: true
+            )
+        )
+        #expect(
+            !ReadingMotivationActiveSessionReconcilePolicy.shouldReconcileOnTick(
+                notificationsEnabled: true, hasActiveSession: false
+            )
+        )
+        #expect(ReadingMotivationActiveSessionReconcilePolicy.tickIntervalSeconds == 30)
     }
 }

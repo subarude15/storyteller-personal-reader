@@ -827,6 +827,21 @@ public struct ReadingMotivationNotificationRequest: Equatable, Sendable {
     }
 }
 
+/// Session-lifecycle cadence for motivation reconcile while reading/listening is
+/// ongoing (including when Home is not visible). iOS may suspend or delay timer
+/// ticks in the background; foreground restore must restart the loop rather than
+/// assuming background delivery.
+public enum ReadingMotivationActiveSessionReconcilePolicy: Sendable {
+    public static let tickIntervalSeconds: TimeInterval = 30
+
+    public static func shouldReconcileOnTick(
+        notificationsEnabled: Bool,
+        hasActiveSession: Bool
+    ) -> Bool {
+        notificationsEnabled && hasActiveSession
+    }
+}
+
 /// Injectable wall clock so reconcile can revalidate time after scheduler awaits.
 public protocol ReadingMotivationClock: Sendable {
     func now() -> Date
@@ -1107,6 +1122,9 @@ public actor ReadingMotivationNotificationCoordinator {
     }
 
     /// Fold OS-delivered motivation notifications into the consumed-day ledger.
+    /// Persist requested+actual consumed days before removing OS delivery evidence
+    /// so a crash at removal still retains both days after restart (UserDefaults
+    /// save is best-effort; not a power-loss durability claim beyond that API).
     private func ingestDelivered(calendar: Calendar) async {
         var deliveredIdentifiers: Set<String> = []
         for (identifier, deliveredAt) in await scheduler.deliveredNotifications() {
@@ -1125,6 +1143,7 @@ public actor ReadingMotivationNotificationCoordinator {
             }
         }
         if !deliveredIdentifiers.isEmpty {
+            await stateStore.save(state)
             await scheduler.removeDelivered(identifiers: deliveredIdentifiers)
         }
     }

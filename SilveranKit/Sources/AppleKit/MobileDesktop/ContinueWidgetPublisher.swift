@@ -63,8 +63,8 @@ public enum ContinueWidgetPublisher {
             if session != nil {
                 await publishSession(
                     session,
-                    streakDays: streakDays,
-                    streakActivityDayKey: streakActivityDayKey
+                    authoritativeStreakDays: streakDays,
+                    authoritativeStreakActivityDayKey: streakActivityDayKey
                 )
                 return
             }
@@ -103,14 +103,16 @@ public enum ContinueWidgetPublisher {
 
     private static func publishSession(
         _ snapshot: AudioSessionSnapshot?,
-        streakDays: Int? = nil,
-        streakActivityDayKey: String? = nil
+        authoritativeStreakDays: Int? = nil,
+        authoritativeStreakActivityDayKey: String? = nil
     ) async {
         guard let snapshot else {
             // Session ended — keep title/cover, clear playing so the tile isn't stuck.
+            // Do not pre-read and re-assert streak: a Home publish can land between
+            // load and the store lock; nil preserves the freshest locked value.
             let last = ContinueWidgetSnapshotStore.loadSnapshot()
             guard last.isPlaying || (last.hasLiveSession ?? false) else { return }
-            ContinueWidgetSnapshotStore.publish(
+            ContinueWidgetSnapshotStore.publishLiveMirror(
                 title: last.title,
                 subtitle: last.subtitle,
                 isPlaying: false,
@@ -120,9 +122,7 @@ public enum ContinueWidgetPublisher {
                 elapsedSeconds: last.elapsedSeconds,
                 durationSeconds: last.durationSeconds,
                 hasLiveSession: false,
-                rate: last.rate,
-                streakDays: last.streakDays,
-                streakActivityDayKey: last.streakActivityDayKey,
+                rate: last.rate
             )
             return
         }
@@ -150,8 +150,7 @@ public enum ContinueWidgetPublisher {
             }
         }
 
-        let last = ContinueWidgetSnapshotStore.loadSnapshot()
-        ContinueWidgetSnapshotStore.publish(
+        ContinueWidgetSnapshotStore.publishLiveMirror(
             title: snapshot.title,
             subtitle: snapshot.author ?? snapshot.chapterLabel,
             isPlaying: snapshot.isPlaying,
@@ -162,8 +161,8 @@ public enum ContinueWidgetPublisher {
             durationSeconds: snapshot.durationSeconds,
             hasLiveSession: true,
             rate: snapshot.playbackRate,
-            streakDays: streakDays ?? last.streakDays,
-            streakActivityDayKey: streakActivityDayKey ?? last.streakActivityDayKey,
+            authoritativeStreakDays: authoritativeStreakDays,
+            authoritativeStreakActivityDayKey: authoritativeStreakActivityDayKey
         )
     }
 

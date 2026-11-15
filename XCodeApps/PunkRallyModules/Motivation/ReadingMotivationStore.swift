@@ -208,6 +208,7 @@ final class ReadingMotivationStore {
         )
         notificationMessage = enabled ? "Reminders are on" : "Reminders are off"
         save()
+        SessionTracker.shared.syncMotivationReconcileLoop()
         await refreshNotifications()
         return true
     }

@@ -213,8 +213,16 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
 
     /// Identity for "did anything the widget paints change?" comparisons —
     /// deliberately excludes `generatedAt`.
-    var paintSignature: String {
-        [
+    public var paintSignature: String {
+        // Typed intermediates avoid `String.init` overload explosion that made
+        // Swift 6.2 unable to type-check this expression in reasonable time.
+        let percent: String
+        if let percentComplete {
+            percent = String(percentComplete)
+        } else {
+            percent = ""
+        }
+        let parts: [String] = [
             title ?? "",
             subtitle ?? "",
             coverFilename ?? "",
@@ -222,11 +230,12 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
             kind?.rawValue ?? "",
             deepLink ?? "",
             (hasLiveSession ?? false) ? "1" : "0",
-            percentComplete.map(String.init) ?? "",
+            percent,
             elapsedLengthText ?? "",
             remainingText ?? "",
             streakText ?? "",
-        ].joined(separator: "|")
+        ]
+        return parts.joined(separator: "|")
     }
 
     /// Transport state identity — changes flip the play/pause glyph right away.
@@ -391,6 +400,43 @@ public enum ContinueWidgetSnapshotStore {
 
     // MARK: - Publishing
 
+    /// Audio / session-end mirror used by ContinueWidgetPublisher and live-session
+    /// republish. Pass streak only when this call carries Home-authoritative values;
+    /// nil lets the locked publish preserve whatever is currently stored.
+    public static func publishLiveMirror(
+        title: String?,
+        subtitle: String?,
+        isPlaying: Bool,
+        kind: ContinueWidgetKindTag?,
+        coverData: Data?,
+        deepLink: String = InkAmpContinueLink.continueURL.absoluteString,
+        progress: Double? = nil,
+        elapsedSeconds: Double? = nil,
+        durationSeconds: Double? = nil,
+        hasLiveSession: Bool,
+        rate: Double? = nil,
+        authoritativeStreakDays: Int? = nil,
+        authoritativeStreakActivityDayKey: String? = nil,
+        fileStore: (any ContinueWidgetSnapshotFileStoring)? = nil,
+    ) {
+        publish(
+            title: title,
+            subtitle: subtitle,
+            isPlaying: isPlaying,
+            kind: kind,
+            coverData: coverData,
+            deepLink: deepLink,
+            progress: progress,
+            elapsedSeconds: elapsedSeconds,
+            durationSeconds: durationSeconds,
+            hasLiveSession: hasLiveSession,
+            rate: rate,
+            streakDays: authoritativeStreakDays,
+            streakActivityDayKey: authoritativeStreakActivityDayKey,
+            fileStore: fileStore
+        )
+    }
+
     /// Publish the Continue / Now Playing tile. Pass `coverData` when available;
     /// nil keeps the previous cover file when a title is present. Title-only
     /// writes are OK (cover bytes may be nil for ebook / uncached covers).
@@ -509,7 +555,7 @@ public enum ContinueWidgetSnapshotStore {
             case .readaloud: kind = .readaloud
             case .podcast: kind = .podcast
         }
-        publish(
+        publishLiveMirror(
             title: session.title,
             subtitle: session.author ?? session.chapterLabel,
             isPlaying: session.isPlaying,
@@ -519,9 +565,7 @@ public enum ContinueWidgetSnapshotStore {
             elapsedSeconds: session.elapsedSeconds,
             durationSeconds: session.durationSeconds,
             hasLiveSession: true,
-            rate: session.playbackRate,
-            streakDays: loadSnapshot().streakDays,
-            streakActivityDayKey: loadSnapshot().streakActivityDayKey,
+            rate: session.playbackRate
         )
     }
 
@@ -530,7 +574,7 @@ public enum ContinueWidgetSnapshotStore {
     public static func markSessionInactive() {
         let last = loadSnapshot()
         guard last.hasItem else { return }
-        publish(
+        publishLiveMirror(
             title: last.title,
             subtitle: last.subtitle,
             isPlaying: false,
@@ -540,9 +584,7 @@ public enum ContinueWidgetSnapshotStore {
             elapsedSeconds: last.elapsedSeconds,
             durationSeconds: last.durationSeconds,
             hasLiveSession: false,
-            rate: last.rate,
-            streakDays: last.streakDays,
-            streakActivityDayKey: last.streakActivityDayKey,
+            rate: last.rate
         )
     }
 

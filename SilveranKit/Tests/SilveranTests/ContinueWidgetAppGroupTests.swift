@@ -192,6 +192,113 @@ struct ContinueWidgetSnapshotTests {
         #expect(final?.streakDays == 5)
         #expect(final?.streakActivityDayKey == "2026-11-15")
     }
+
+    @Test func paintSignatureTracksProgressTimingStreakAndExcludesGeneratedAt() {
+        let base = ContinueWidgetSnapshot(
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            title: "Piranesi",
+            subtitle: "Clarke",
+            isPlaying: false,
+            kind: .audiobook,
+            progress: 0.25,
+            elapsedSeconds: 900,
+            durationSeconds: 3600,
+            streakDays: 2,
+            streakActivityDayKey: "2026-11-14",
+            hasLiveSession: true,
+            rate: 1
+        )
+        var laterStamp = base
+        laterStamp.generatedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        #expect(base.paintSignature == laterStamp.paintSignature)
+
+        var progressChanged = base
+        progressChanged.progress = 0.5
+        #expect(progressChanged.paintSignature != base.paintSignature)
+
+        var timingChanged = base
+        timingChanged.elapsedSeconds = 1800
+        #expect(timingChanged.paintSignature != base.paintSignature)
+
+        var streakChanged = base
+        streakChanged.streakDays = 5
+        #expect(streakChanged.paintSignature != base.paintSignature)
+    }
+
+    @Test func publishLiveMirrorSeamPreservesFresherHomeStreakDuringAudioRace() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("continue-live-mirror-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        }
+
+        let store = PausableContinueWidgetFileStore(root: root)
+        ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        ContinueWidgetSnapshotStore.publish(
+            title: "Piranesi",
+            subtitle: "Clarke",
+            isPlaying: false,
+            kind: .ebook,
+            coverData: nil,
+            streakDays: 3,
+            streakActivityDayKey: "2026-11-14",
+            fileStore: store
+        )
+
+        store.pauseNextRead()
+        let audioDone = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            // Real publisher/audio seam: no pre-read streak re-assert.
+            ContinueWidgetSnapshotStore.publishLiveMirror(
+                title: "Piranesi",
+                subtitle: "Clarke",
+                isPlaying: true,
+                kind: .audiobook,
+                coverData: nil,
+                hasLiveSession: true,
+                fileStore: store
+            )
+            audioDone.signal()
+        }
+        store.waitForPausedRead()
+        let homeDone = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            ContinueWidgetSnapshotStore.publish(
+                title: "Piranesi",
+                subtitle: "Clarke",
+                isPlaying: false,
+                kind: .ebook,
+                coverData: nil,
+                streakDays: 7,
+                streakActivityDayKey: "2026-11-15",
+                fileStore: store
+            )
+            homeDone.signal()
+        }
+        Thread.sleep(forTimeInterval: 0.05)
+        store.resumePausedRead()
+        #expect(audioDone.wait(timeout: .now() + 2) == .success)
+        #expect(homeDone.wait(timeout: .now() + 2) == .success)
+
+        let final = store.readSnapshot(in: root)
+        #expect(final?.streakDays == 7)
+        #expect(final?.streakActivityDayKey == "2026-11-15")
+    }
+
+    @Test func continueWidgetPublisherSourceDoesNotPreassertStoredStreak() throws {
+        let publisherURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/AppleKit/MobileDesktop/ContinueWidgetPublisher.swift")
+        let source = try String(contentsOf: publisherURL, encoding: .utf8)
+        #expect(source.contains("publishLiveMirror("))
+        #expect(!source.contains("streakDays: last.streakDays"))
+        #expect(!source.contains("streakActivityDayKey: last.streakActivityDayKey"))
+        #expect(!source.contains("streakDays: streakDays ?? last.streakDays"))
+    }
 }
 
 /// Directory-backed Continue publish seam with a suspension point on snapshot read.

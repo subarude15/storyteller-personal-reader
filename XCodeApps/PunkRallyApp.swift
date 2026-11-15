@@ -162,6 +162,8 @@ public struct PunkRallyTabView: View {
                 if phase == .active {
                     _ = PodcastDownloadStore.shared.runOvernightPruneIfDue()
                     ContinueWidgetPublisher.consumePendingWidgetCommands()
+                    // Background suspension can drop session-owned ticks; restore.
+                    SessionTracker.shared.syncMotivationReconcileLoop()
                     Task { await ReadingMotivationStore.shared.refreshNotifications() }
                     NotificationCenter.default.post(
                         name: .punkRallyHomeQueueDidChange,

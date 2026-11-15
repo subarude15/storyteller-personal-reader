@@ -38,6 +38,8 @@ final class SessionTracker {
     private var activeSession: PRMediaSession?
 
     private var saveTask: Task<Void, Never>?
+    /// Session-owned motivation reconcile loop (not Home-owned). Cancelled on end.
+    private var motivationReconcileTask: Task<Void, Never>?
 
     private init() {
         load()
@@ -90,6 +92,7 @@ final class SessionTracker {
             startedAt: Date()
         )
         revision &+= 1
+        startMotivationReconcileLoopIfNeeded()
     }
 
     /// End the active session and record its duration.
@@ -105,6 +108,7 @@ final class SessionTracker {
         guard duration >= 30 else {
             activeSession = nil
             revision &+= 1
+            stopMotivationReconcileLoopAndRefresh()
             return
         }
 
@@ -121,7 +125,18 @@ final class SessionTracker {
         revision &+= 1
         scheduleSave()
         StatsSyncCoordinator.shared.scheduleSyncAfterLocalChange()
-        Task { await ReadingMotivationStore.shared.refreshNotifications() }
+        stopMotivationReconcileLoopAndRefresh()
+    }
+
+    /// Restart periodic motivation reconcile when an active session survives
+    /// foreground restore or notification opt-in mid-session.
+    func syncMotivationReconcileLoop() {
+        if activeSession != nil {
+            startMotivationReconcileLoopIfNeeded()
+        } else {
+            motivationReconcileTask?.cancel()
+            motivationReconcileTask = nil
+        }
     }
 
     /// Title for an in-flight or recent session (podcast finish labeling).
@@ -292,6 +307,36 @@ final class SessionTracker {
     private func closeActiveIfNeeded() {
         guard activeSession != nil else { return }
         endSession()
+    }
+
+    private func startMotivationReconcileLoopIfNeeded() {
+        motivationReconcileTask?.cancel()
+        guard ReadingMotivationActiveSessionReconcilePolicy.shouldReconcileOnTick(
+            notificationsEnabled: ReadingMotivationStore.shared.settings.notificationsEnabled,
+            hasActiveSession: activeSession != nil
+        ) else {
+            motivationReconcileTask = nil
+            return
+        }
+        motivationReconcileTask = Task { @MainActor [weak self] in
+            let interval = ReadingMotivationActiveSessionReconcilePolicy.tickIntervalSeconds
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(interval))
+                guard let self, !Task.isCancelled else { return }
+                guard ReadingMotivationActiveSessionReconcilePolicy.shouldReconcileOnTick(
+                    notificationsEnabled: ReadingMotivationStore.shared.settings.notificationsEnabled,
+                    hasActiveSession: self.activeSession != nil
+                ) else { return }
+                // Uses motivationSessionRecords(at:) live elapsed via refresh path.
+                await ReadingMotivationStore.shared.refreshNotifications()
+            }
+        }
+    }
+
+    private func stopMotivationReconcileLoopAndRefresh() {
+        motivationReconcileTask?.cancel()
+        motivationReconcileTask = nil
+        Task { await ReadingMotivationStore.shared.refreshNotifications() }
     }
 
     private static func toSyncSession(_ session: PRMediaSession) -> InkampStatsSessionRecord {
