@@ -627,18 +627,19 @@ public enum ContinueWidgetSnapshotStore {
     /// current snapshot, updates only streak/anchor/`generatedAt`, and never
     /// overwrites title/progress/transport from pre-lock values. No-ops (no
     /// write/reload) when streak data is unchanged. Must not call `publish`.
+    @discardableResult
     public static func updateAuthoritativeStreak(
         streakDays: Int,
         streakActivityDayKey: String,
         fileStore: (any ContinueWidgetSnapshotFileStoring)? = nil,
-    ) {
+    ) -> Bool {
         let normalizedDays = max(0, streakDays)
         let normalizedKey = streakActivityDayKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedKey.isEmpty else { return }
+        guard !normalizedKey.isEmpty else { return false }
 
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "streak")
         let store = fileStore ?? AppGroupContinueWidgetSnapshotFileStore()
-        guard let container = store.resolveContainer() else { return }
+        guard let container = store.resolveContainer() else { return false }
 
         var shouldReload = false
         publishLock.lock()
@@ -646,13 +647,13 @@ public enum ContinueWidgetSnapshotStore {
             try store.ensureDirectories(in: container)
             guard var snapshot = store.readSnapshot(in: container), snapshot.hasItem else {
                 publishLock.unlock()
-                return
+                return false
             }
             if snapshot.streakDays == normalizedDays,
                 snapshot.streakActivityDayKey == normalizedKey
             {
                 publishLock.unlock()
-                return
+                return true
             }
 
             snapshot.streakDays = normalizedDays
@@ -686,12 +687,13 @@ public enum ContinueWidgetSnapshotStore {
         } catch {
             publishLock.unlock()
             print("[ContinueWidget] streak update failed: \(error)")
-            return
+            return false
         }
 
         if shouldReload {
             reloadTimelines()
         }
+        return true
     }
 
     /// Test hook: reset in-process publish signatures between injectable-store runs.

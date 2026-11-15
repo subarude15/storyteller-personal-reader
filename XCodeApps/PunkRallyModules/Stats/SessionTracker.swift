@@ -390,10 +390,10 @@ final class SessionTracker {
             lastPublishedStreakDays: lastPublishedWidgetStreakDays,
             lastPublishedActivityDayKey: lastPublishedWidgetStreakDayKey
         ) else { return }
-        ContinueWidgetSnapshotStore.updateAuthoritativeStreak(
+        guard ContinueWidgetSnapshotStore.updateAuthoritativeStreak(
             streakDays: streakDays,
             streakActivityDayKey: activityDayKey
-        )
+        ) else { return }
         lastPublishedWidgetStreakDays = streakDays
         lastPublishedWidgetStreakDayKey = activityDayKey
     }

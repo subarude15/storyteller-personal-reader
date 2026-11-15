@@ -287,6 +287,28 @@ struct ContinueWidgetSnapshotTests {
         #expect(final?.streakActivityDayKey == "2026-11-15")
     }
 
+    @Test func authoritativeStreakRetriesAfterSnapshotBecomesAvailable() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("continue-retry-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        }
+        let store = PausableContinueWidgetFileStore(root: root)
+        #expect(!ContinueWidgetSnapshotStore.updateAuthoritativeStreak(
+            streakDays: 1, streakActivityDayKey: "2026-11-15", fileStore: store
+        ))
+        ContinueWidgetSnapshotStore.publish(
+            title: "Book", subtitle: nil, isPlaying: false, kind: .ebook,
+            coverData: nil, fileStore: store
+        )
+        #expect(ContinueWidgetSnapshotStore.updateAuthoritativeStreak(
+            streakDays: 1, streakActivityDayKey: "2026-11-15", fileStore: store
+        ))
+        #expect(store.readSnapshot(in: root)?.streakDays == 1)
+    }
+
     @Test func unchangedPaintPersistsRawRateAndTiming() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("continue-raw-\(UUID().uuidString)", isDirectory: true)
