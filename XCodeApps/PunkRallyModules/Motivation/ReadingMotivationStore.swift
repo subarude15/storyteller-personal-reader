@@ -154,6 +154,7 @@ final class ReadingMotivationStore {
             quietMinute: settings.quietMinute
         )
         save()
+        SessionTracker.shared.publishMotivationWidgetSnapshotNow()
         Task { await refreshNotifications() }
     }
 
@@ -188,6 +189,7 @@ final class ReadingMotivationStore {
             quietMinute: components.minute ?? 30
         )
         save()
+        SessionTracker.shared.publishMotivationWidgetSnapshotNow()
         Task { await refreshNotifications() }
     }
 

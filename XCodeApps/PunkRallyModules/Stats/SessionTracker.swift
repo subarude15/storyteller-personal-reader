@@ -42,9 +42,11 @@ final class SessionTracker {
     /// Session-owned motivation cadence (streak publish + optional reminders).
     /// Not Home-owned. Cancelled on end, including under-30s short sessions.
     private var motivationReconcileTask: Task<Void, Never>?
-    /// Last streak values pushed to the Continue widget from this process.
+    /// Last streak & goal values pushed to the Continue/Streak widgets from this process.
     private var lastPublishedWidgetStreakDays: Int?
     private var lastPublishedWidgetStreakDayKey: String?
+    private var lastPublishedWidgetTodayMinutes: Int?
+    private var lastPublishedWidgetGoalMinutes: Int?
 
     private init() {
         load()
@@ -374,13 +376,55 @@ final class SessionTracker {
         Task { await ReadingMotivationStore.shared.refreshNotifications() }
     }
 
-    /// Push current streak+activity anchor into the shared Continue snapshot.
+    func currentWidgetMotivationValues(at now: Date = Date()) -> (
+        streakDays: Int,
+        activityDayKey: String,
+        todayActiveSeconds: Double,
+        dailyGoalMinutes: Int,
+        todayGoalDayKey: String,
+        longestStreakDays: Int
+    ) {
+        let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: .current)
+        let records = motivationSessionRecords(at: now)
+        let archived = motivationArchivedActivityDays()
+        let streaks = ReadingMotivationCalculations.streaks(
+            sessions: records,
+            calendar: calendar,
+            now: now,
+            archivedActivityDays: archived
+        )
+        let activityDayKey = ReadingMotivationCalculations.streakActivityDayKey(
+            sessions: records,
+            calendar: calendar,
+            now: now,
+            archivedActivityDays: archived
+        )
+        let todayStart = calendar.startOfDay(for: now)
+        let todayProgress = ReadingMotivationCalculations.dailyTotals(
+            sessions: records,
+            calendar: calendar,
+            now: now
+        ).first(where: { $0.day == todayStart })
+            ?? ReadingMotivationDay(day: todayStart, readingSeconds: 0, listeningSeconds: 0)
+        return (
+            streakDays: streaks.current,
+            activityDayKey: activityDayKey,
+            todayActiveSeconds: todayProgress.seconds,
+            dailyGoalMinutes: ReadingMotivationStore.shared.settings.dailyReadingGoalMinutes,
+            todayGoalDayKey: ReadingMotivationCalculations.localDayKey(now, calendar: calendar),
+            longestStreakDays: streaks.longest
+        )
+    }
+
+    func publishMotivationWidgetSnapshotNow(now: Date = Date()) {
+        publishAuthoritativeStreakIfNeeded(now: now, force: true)
+    }
+
+    /// Push current streak+activity anchor and today's goal progress into the shared widget snapshot.
     /// Runs from SessionTracker lifecycle (not a Home-only timer) so the widget
     /// stays honest while Home is off-screen. Arbitrary iOS suspension can still
     /// delay ticks until foreground restore.
     private func publishAuthoritativeStreakIfNeeded(now: Date = Date(), force: Bool = false) {
-        let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: .current)
-        let records = motivationSessionRecords(at: now)
         let effectiveElapsed: TimeInterval
         if let active = activeSession {
             effectiveElapsed = now.timeIntervalSince(active.startedAt)
@@ -390,33 +434,33 @@ final class SessionTracker {
         } else {
             effectiveElapsed = 0
         }
-        let streakDays = ReadingMotivationCalculations.streaks(
-            sessions: records,
-            calendar: calendar,
-            now: now,
-            archivedActivityDays: motivationArchivedActivityDays()
-        ).current
-        let activityDayKey = ReadingMotivationCalculations.streakActivityDayKey(
-            sessions: records,
-            calendar: calendar,
-            now: now,
-            archivedActivityDays: motivationArchivedActivityDays()
-        )
+        let values = currentWidgetMotivationValues(at: now)
+        let todayMinutes = ReadingMotivationCalculations.wholeMinutes(values.todayActiveSeconds) ?? 0
         // Sync imports can increase OR decrease activity with no live session.
         // The shared store still no-ops identical authoritative data.
         guard force || ReadingMotivationActiveSessionReconcilePolicy.shouldPublishAuthoritativeStreak(
             sessionElapsed: effectiveElapsed,
-            streakDays: streakDays,
-            activityDayKey: activityDayKey,
+            streakDays: values.streakDays,
+            activityDayKey: values.activityDayKey,
             lastPublishedStreakDays: lastPublishedWidgetStreakDays,
-            lastPublishedActivityDayKey: lastPublishedWidgetStreakDayKey
+            lastPublishedActivityDayKey: lastPublishedWidgetStreakDayKey,
+            todayActiveMinutes: todayMinutes,
+            lastPublishedTodayActiveMinutes: lastPublishedWidgetTodayMinutes,
+            dailyGoalMinutes: values.dailyGoalMinutes,
+            lastPublishedDailyGoalMinutes: lastPublishedWidgetGoalMinutes
         ) else { return }
         guard ContinueWidgetSnapshotStore.updateAuthoritativeStreak(
-            streakDays: streakDays,
-            streakActivityDayKey: activityDayKey
+            streakDays: values.streakDays,
+            streakActivityDayKey: values.activityDayKey,
+            todayActiveSeconds: values.todayActiveSeconds,
+            dailyGoalMinutes: values.dailyGoalMinutes,
+            todayGoalDayKey: values.todayGoalDayKey,
+            longestStreakDays: values.longestStreakDays
         ) else { return }
-        lastPublishedWidgetStreakDays = streakDays
-        lastPublishedWidgetStreakDayKey = activityDayKey
+        lastPublishedWidgetStreakDays = values.streakDays
+        lastPublishedWidgetStreakDayKey = values.activityDayKey
+        lastPublishedWidgetTodayMinutes = todayMinutes
+        lastPublishedWidgetGoalMinutes = values.dailyGoalMinutes
     }
 
     private static func toSyncSession(_ session: PRMediaSession) -> InkampStatsSessionRecord {

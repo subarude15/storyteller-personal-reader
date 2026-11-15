@@ -491,6 +491,7 @@ private struct HomeTabView: View {
     @State private var motivation = ReadingMotivationStore.shared
     @State private var liveAudioSnapshot: AudioSessionSnapshot?
     @State private var liveAudioSnapshotObservedAt: Date?
+    @State private var liveAudioObserverID: UUID?
     @State private var statsTick = 0
     @State private var mediumPickerItem: HomeMixedItem? = nil
 
@@ -641,9 +642,22 @@ private struct HomeTabView: View {
                 Task { await mediaViewModel?.refreshMetadata(source: "HomeMixed") }
                 Task { await publishContinueWidget() }
                 Task {
-                    liveAudioSnapshot = await AudioSessionActor.shared.currentSnapshot()
-                    liveAudioSnapshotObservedAt = Date()
+                    if let existing = liveAudioObserverID {
+                        await AudioSessionActor.shared.removeSnapshotObserver(id: existing)
+                    }
+                    liveAudioObserverID = await AudioSessionActor.shared.addSnapshotObserver { snapshot in
+                        Task { @MainActor in
+                            liveAudioSnapshot = snapshot
+                            liveAudioSnapshotObservedAt = Date()
+                        }
+                    }
                     await motivation.refreshNotifications()
+                }
+            }
+            .onDisappear {
+                if let id = liveAudioObserverID {
+                    liveAudioObserverID = nil
+                    Task { await AudioSessionActor.shared.removeSnapshotObserver(id: id) }
                 }
             }
             .onChange(of: widgetQueueKey) { _, _ in
@@ -1272,6 +1286,11 @@ private struct HomeTabView: View {
                 kind: nil,
                 coverData: nil,
                 upNext: [],
+                streakProvider: {
+                    let v = SessionTracker.shared.currentWidgetMotivationValues()
+                    return (days: v.streakDays, dayKey: v.activityDayKey)
+                },
+                motivationProvider: { homeWidgetMotivationSnapshot() },
             )
             return
         }
@@ -1288,21 +1307,23 @@ private struct HomeTabView: View {
             upNext: upNext,
             itemID: item.id,
             streakProvider: {
-                let now = Date()
-                let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: .current)
-                let sessions = SessionTracker.shared.motivationSessionRecords(at: now)
-                let archived = SessionTracker.shared.motivationArchivedActivityDays()
-                return (
-                    days: ReadingMotivationCalculations.streaks(
-                        sessions: sessions, calendar: calendar, now: now,
-                        archivedActivityDays: archived
-                    ).current,
-                    dayKey: ReadingMotivationCalculations.streakActivityDayKey(
-                        sessions: sessions, calendar: calendar, now: now,
-                        archivedActivityDays: archived
-                    )
-                )
+                let v = SessionTracker.shared.currentWidgetMotivationValues()
+                return (days: v.streakDays, dayKey: v.activityDayKey)
             },
+            motivationProvider: { homeWidgetMotivationSnapshot() },
+        )
+    }
+
+    @MainActor
+    private func homeWidgetMotivationSnapshot() -> ContinueWidgetMotivationSnapshot {
+        let v = SessionTracker.shared.currentWidgetMotivationValues()
+        return ContinueWidgetMotivationSnapshot(
+            streakDays: v.streakDays,
+            activityDayKey: v.activityDayKey,
+            todayActiveSeconds: v.todayActiveSeconds,
+            dailyGoalMinutes: v.dailyGoalMinutes,
+            todayGoalDayKey: v.todayGoalDayKey,
+            longestStreakDays: v.longestStreakDays
         )
     }
 

@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import SilveranKit
 
 /// Light / dark Continue + Next Up Home Screen tiles.
 public enum InkAmpWidgetTheme: String, Sendable, CaseIterable {
@@ -460,5 +461,144 @@ public enum ContinueWidgetReloadPolicy {
             return true
         }
         return now.timeIntervalSince(lastReload) >= 300
+    }
+}
+
+/// 5-tier daily progress + evening urgency state for `InkAmpStreakMediumWidget`.
+public enum InkAmpStreakMotivationTier: String, Sendable, Equatable {
+    case criticalRed
+    case sparked
+    case rolling
+    case homeStretch
+    case completed
+
+    public func accentHex(for theme: InkAmpWidgetTheme) -> String {
+        switch (self, theme) {
+            case (.criticalRed, .light): return "#DC2626"
+            case (.criticalRed, .dark): return "#FF4D4D"
+            case (.sparked, .light): return "#D94E1F"
+            case (.sparked, .dark): return "#FF6B35"
+            case (.rolling, .light): return "#C27803"
+            case (.rolling, .dark): return "#F59E0B"
+            case (.homeStretch, .light): return "#0E7C86"
+            case (.homeStretch, .dark): return "#14B8A6"
+            case (.completed, .light): return "#15803D"
+            case (.completed, .dark): return "#22C55E"
+        }
+    }
+}
+
+/// Resolved today-goal progress, countdown copy, streak badge, and color tier
+/// for the medium Streak + Continue widget.
+public struct InkAmpStreakGoalPresentation: Sendable, Equatable {
+    public let doneMinutes: Int
+    public let goalMinutes: Int
+    public let minutesLeft: Int
+    public let progressFraction: Double
+    public let percentText: String
+    public let todayRatioText: String
+    public let countdownHeadline: String
+    public let statusSubline: String
+    public let streakDays: Int
+    public let longestStreakDays: Int
+    public let streakBadgeText: String
+    public let tier: InkAmpStreakMotivationTier
+    public let isEveningUrgent: Bool
+
+    public static func resolve(
+        from snapshot: ContinueWidgetSnapshot,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> InkAmpStreakGoalPresentation {
+        let normalizedCalendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: calendar)
+        let resolved = snapshot.resolvingStreak(at: now, calendar: normalizedCalendar)
+        let defaultGoal = ReadingMotivationSettings().dailyReadingGoalMinutes
+        let goalMinutes = max(1, resolved.dailyGoalMinutes ?? defaultGoal)
+        let activeSeconds = max(0, resolved.todayActiveSeconds ?? 0)
+        let doneMinutes = ReadingMotivationCalculations.wholeMinutes(activeSeconds) ?? 0
+        let minutesLeft = max(0, goalMinutes - doneMinutes)
+        let isGoalComplete = doneMinutes >= goalMinutes
+        let rawFraction = min(1.0, max(0.0, activeSeconds / Double(goalMinutes * 60)))
+        let progressFraction: Double
+        if isGoalComplete {
+            progressFraction = 1.0
+        } else if activeSeconds > 0 && doneMinutes == 0 {
+            progressFraction = max(rawFraction, 0.02)
+        } else {
+            progressFraction = rawFraction
+        }
+        let localHour = normalizedCalendar.component(.hour, from: now)
+        let isEveningUrgent = !isGoalComplete && localHour >= 20 && progressFraction < 0.50
+        let tier: InkAmpStreakMotivationTier
+        if isGoalComplete {
+            tier = .completed
+        } else if isEveningUrgent || activeSeconds <= 0 {
+            tier = .criticalRed
+        } else if progressFraction < 0.25 {
+            tier = .sparked
+        } else if progressFraction < 0.50 {
+            tier = .rolling
+        } else {
+            tier = .homeStretch
+        }
+        let percentValue: Int
+        if isGoalComplete {
+            percentValue = 100
+        } else if activeSeconds > 0 {
+            percentValue = min(99, max(1, Int((rawFraction * 100).rounded())))
+        } else {
+            percentValue = 0
+        }
+        let streakDays = max(0, resolved.streakDays ?? 0)
+        let longestStreakDays = max(streakDays, max(0, resolved.longestStreakDays ?? 0))
+        let countdownHeadline = isGoalComplete ? "Goal done!" : "\(minutesLeft)m to go"
+        let todayRatioText: String
+        if activeSeconds > 0 && doneMinutes == 0 {
+            todayRatioText = "<1/\(goalMinutes)m today"
+        } else {
+            todayRatioText = "\(doneMinutes)/\(goalMinutes)m today"
+        }
+        let statusSubline: String
+        switch tier {
+            case .completed:
+                statusSubline = streakDays >= 2 ? "Streak locked in" : "Daily goal crushed"
+            case .criticalRed:
+                statusSubline = isEveningUrgent ? "Midnight closes in" : "Start today's minutes"
+            case .sparked:
+                statusSubline = "Sparked · keep going"
+            case .rolling:
+                statusSubline = "Building momentum"
+            case .homeStretch:
+                statusSubline = "Home stretch"
+        }
+        let streakBadgeText: String
+        if streakDays >= 2 {
+            if longestStreakDays > streakDays {
+                streakBadgeText = "🔥 \(streakDays)d streak · Best \(longestStreakDays)d"
+            } else {
+                streakBadgeText = "🔥 \(streakDays)-day streak"
+            }
+        } else if streakDays == 1 {
+            streakBadgeText = "🔥 Day 1 · 1 more for streak"
+        } else {
+            streakBadgeText = longestStreakDays >= 2
+                ? "Start streak · Best \(longestStreakDays)d"
+                : "2 days starts a streak"
+        }
+        return InkAmpStreakGoalPresentation(
+            doneMinutes: doneMinutes,
+            goalMinutes: goalMinutes,
+            minutesLeft: minutesLeft,
+            progressFraction: progressFraction,
+            percentText: "\(percentValue)%",
+            todayRatioText: todayRatioText,
+            countdownHeadline: countdownHeadline,
+            statusSubline: statusSubline,
+            streakDays: streakDays,
+            longestStreakDays: longestStreakDays,
+            streakBadgeText: streakBadgeText,
+            tier: tier,
+            isEveningUrgent: isEveningUrgent
+        )
     }
 }

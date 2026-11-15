@@ -27,6 +27,7 @@ struct SilveranReaderWidgets: WidgetBundle {
         InkAmpLightLargeWidget()
         InkAmpDarkMediumWidget()
         InkAmpDarkLargeWidget()
+        InkAmpStreakMediumWidget()
         SilveranReadingWidget()
     }
 }
@@ -107,6 +108,18 @@ struct InkAmpContinueEntry: TimelineEntry {
             resolved: InkAmpContinueTimelineResolver.placeholder(sample: placeholderSnapshot),
         )
     }
+
+    static var streakPlaceholder: InkAmpContinueEntry {
+        var sample = placeholderSnapshot
+        sample.streakDays = 4
+        sample.todayActiveSeconds = 18 * 60
+        sample.dailyGoalMinutes = 30
+        sample.longestStreakDays = 12
+        return InkAmpContinueEntry(
+            date: Date(),
+            resolved: InkAmpContinueTimelineResolver.placeholder(sample: sample),
+        )
+    }
 }
 
 struct InkAmpContinueTimelineProvider: TimelineProvider {
@@ -120,7 +133,9 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
 
     func placeholder(in context: Context) -> InkAmpContinueEntry {
         Self.logger.notice("provider bundle=\(Self.bundleRole, privacy: .public) phase=placeholder event=start")
-        let entry = InkAmpContinueEntry.placeholder
+        let entry = kind == SilveranWidgetConstants.streakWidgetKind
+            ? InkAmpContinueEntry.streakPlaceholder
+            : InkAmpContinueEntry.placeholder
         log(
             phase: .placeholder,
             preview: context.isPreview,
@@ -174,11 +189,28 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
         let raw = Self.loadSnapshot()
         let entry = InkAmpContinueEntry(date: update.entryDate, resolved: update.resolved)
         var entries = [entry]
+        let dayEnd = calendar.dateInterval(of: .day, for: update.entryDate)?.end
+        // For Streak + Goal, transition cleanly to Evening Urgency at 8:00 PM local time.
+        if kind == SilveranWidgetConstants.streakWidgetKind,
+            let eveningBoundary = calendar.date(
+                bySettingHour: 20, minute: 0, second: 0, of: update.entryDate
+            ),
+            eveningBoundary > update.entryDate,
+            dayEnd.map({ eveningBoundary < $0 }) ?? true
+        {
+            entries.append(
+                InkAmpContinueEntry(
+                    date: eveningBoundary,
+                    resolved: InkAmpContinueTimelineResolver.resolveLive(
+                        loaded: raw.resolvingStreak(at: eveningBoundary, calendar: calendar),
+                        phase: .timeline
+                    )
+                )
+            )
+        }
         // Day-boundary entry expires/recomputes streak text even if Home never
         // republishes and audio-session updates keep refreshing the snapshot.
-        if let dayEnd = calendar.dateInterval(of: .day, for: update.entryDate)?.end,
-            dayEnd > update.entryDate
-        {
+        if let dayEnd, dayEnd > update.entryDate {
             entries.append(
                 InkAmpContinueEntry(
                     date: dayEnd,
@@ -317,10 +349,27 @@ struct InkAmpDarkLargeWidget: Widget {
     }
 }
 
+struct InkAmpStreakMediumWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(
+            kind: SilveranWidgetConstants.streakWidgetKind,
+            provider: InkAmpContinueTimelineProvider(
+                kind: SilveranWidgetConstants.streakWidgetKind,
+                theme: .light,
+            ),
+        ) { entry in
+            InkAmpStreakMediumWidgetView(entry: entry)
+        }
+        .configurationDisplayName("ink+amp · Streak & Goal")
+        .description("Your most recent book or podcast alongside today's reading goal countdown and streak.")
+        .supportedFamilies([.systemMedium])
+        .contentMarginsDisabled()
+    }
+}
+
 // MARK: - Shared view
 
 struct InkAmpContinueWidgetView: View {
-    @Environment(\.displayScale) private var displayScale
     let entry: InkAmpContinueEntry
     let theme: InkAmpWidgetTheme
     let layout: InkAmpContinueWidgetLayout
@@ -351,20 +400,7 @@ struct InkAmpContinueWidgetView: View {
     }
 
     private func statusBadgePill(compact: Bool) -> some View {
-        HStack(spacing: compact ? 3 : 4) {
-            Image(systemName: statusBadge.symbolName)
-                .font(.system(size: compact ? 7.5 : 8.5, weight: .bold))
-            Text(statusBadge.label)
-                .font(.system(size: compact ? 8 : 9, weight: .bold))
-                .tracking(compact ? 0.45 : 0.55)
-        }
-        .foregroundStyle(colors.accent)
-        .padding(.horizontal, compact ? 6 : 7)
-        .padding(.vertical, compact ? 3 : 4)
-        .background(
-            Capsule(style: .continuous)
-                .fill(colors.accent.opacity(theme == .light ? 0.14 : 0.18))
-        )
+        InkAmpStatusBadgePill(badge: statusBadge, compact: compact, theme: theme, colors: colors)
     }
 
     private var subtitleLine: String? {
@@ -876,24 +912,342 @@ struct InkAmpContinueWidgetView: View {
         kind: ContinueWidgetKindTag?,
         size: CGFloat,
     ) -> some View {
+        InkAmpWidgetCoverView(
+            filename: filename,
+            kind: kind,
+            width: size,
+            height: size,
+            cornerRadius: 8,
+            theme: theme,
+            colors: colors,
+        )
+    }
+}
+
+// MARK: - Medium Streak + Goal Widget
+
+struct InkAmpStreakMediumWidgetView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let entry: InkAmpContinueEntry
+
+    private var theme: InkAmpWidgetTheme { colorScheme == .dark ? .dark : .light }
+    private var colors: InkAmpWidgetColors { InkAmpWidgetColors(theme: theme) }
+    private var snapshot: ContinueWidgetSnapshot { entry.snapshot }
+    private var goal: InkAmpStreakGoalPresentation {
+        InkAmpStreakGoalPresentation.resolve(from: snapshot, now: entry.date)
+    }
+    private var statusBadge: InkAmpContinueStatusBadge {
+        InkAmpContinueWidgetActions.statusBadge(for: snapshot)
+    }
+    private var tierColor: Color {
+        Color(hex: goal.tier.accentHex(for: theme))
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            leftNowPlayingColumn
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            rightGoalCard
+                .frame(width: 132)
+                .frame(maxHeight: .infinity)
+        }
+        .padding(14)
+        .containerBackground(for: .widget) {
+            colors.background
+        }
+        .inkAmpLiveContent(isPlaceholder: entry.isPlaceholder)
+    }
+
+    @ViewBuilder
+    private var leftNowPlayingColumn: some View {
+        if entry.showsEmptyState {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("ink+amp")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(colors.accent)
+                HStack(alignment: .top, spacing: 8) {
+                    InkAmpWidgetCoverView(
+                        filename: nil,
+                        kind: nil,
+                        width: 42,
+                        height: 56,
+                        cornerRadius: 7,
+                        theme: theme,
+                        colors: colors,
+                    )
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Nothing in progress")
+                            .font(.system(size: 12.5, weight: .bold))
+                            .foregroundStyle(colors.primary)
+                            .lineLimit(2)
+                        Text("Open ink+amp to read or listen")
+                            .font(.system(size: 10))
+                            .foregroundStyle(colors.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 0)
+                Link(destination: InkAmpContinueWidgetActions.openAppURL()) {
+                    Text("Open ink+amp")
+                        .font(.system(size: 10.5, weight: .bold))
+                        .foregroundStyle(colors.continueLabel)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(colors.continueFill)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 5) {
+                Link(destination: InkAmpContinueWidgetActions.continueURL(for: snapshot)) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        InkAmpStatusBadgePill(
+                            badge: statusBadge,
+                            compact: true,
+                            theme: theme,
+                            colors: colors,
+                        )
+                        HStack(alignment: .top, spacing: 8) {
+                            InkAmpWidgetCoverView(
+                                filename: snapshot.coverFilename,
+                                kind: snapshot.kind,
+                                width: 42,
+                                height: 56,
+                                cornerRadius: 7,
+                                theme: theme,
+                                colors: colors,
+                            )
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(snapshot.title ?? "")
+                                    .font(.system(size: 12.5, weight: .bold))
+                                    .foregroundStyle(colors.primary)
+                                    .lineLimit(2)
+                                    .minimumScaleFactor(0.85)
+                                    .multilineTextAlignment(.leading)
+
+                                if let subtitle = snapshot.subtitle?
+                                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                                    !subtitle.isEmpty
+                                {
+                                    Text(subtitle)
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(colors.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        if let progress = snapshot.clampedProgress {
+                            InkAmpThemedProgressBar(
+                                progress: progress,
+                                fill: colors.progress,
+                                track: colors.progressTrack,
+                                height: 4,
+                            )
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Continue, \(snapshot.title ?? "")")
+
+                Spacer(minLength: 0)
+
+                leftActionRow
+            }
+        }
+    }
+
+    private var leftActionRow: some View {
+        HStack(spacing: 6) {
+            if let caption = snapshot.progressCaption {
+                Text(caption)
+                    .font(.system(size: 9.5, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(colors.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            Spacer(minLength: 2)
+            #if os(iOS)
+            if InkAmpContinueWidgetActions.showsInlineTransport(for: snapshot) {
+                Button(intent: ContinuePlayPauseIntent()) {
+                    HStack(spacing: 4) {
+                        Image(systemName: snapshot.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 9.5, weight: .bold))
+                        Text(snapshot.isPlaying ? "Pause" : "Play")
+                            .font(.system(size: 10.5, weight: .bold))
+                    }
+                    .foregroundStyle(colors.continueLabel)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(colors.continueFill)
+                    )
+                }
+                .buttonStyle(.plain)
+            } else {
+                continuePillLink
+            }
+            #else
+            continuePillLink
+            #endif
+        }
+    }
+
+    private var continuePillLink: some View {
+        Link(destination: InkAmpContinueWidgetActions.continueURL(for: snapshot)) {
+            HStack(spacing: 3) {
+                Text("Continue")
+                    .font(.system(size: 10.5, weight: .bold))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8.5, weight: .bold))
+            }
+            .foregroundStyle(colors.continueLabel)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(colors.continueFill)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var rightGoalCard: some View {
+        let glowFill = tierColor.opacity(theme == .light ? 0.11 : 0.16)
+        let glowStroke = tierColor.opacity(theme == .light ? 0.30 : 0.42)
+        let ringTrack = tierColor.opacity(theme == .light ? 0.16 : 0.22)
+        return Link(destination: InkAmpContinueLink.homeURL) {
+            VStack(spacing: 4) {
+                ZStack {
+                    Circle()
+                        .stroke(ringTrack, lineWidth: 5)
+                    Circle()
+                        .trim(from: 0, to: goal.progressFraction)
+                        .stroke(tierColor, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                    if goal.tier == .completed {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(tierColor)
+                    } else {
+                        Text(goal.percentText)
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(colors.primary)
+                            .minimumScaleFactor(0.75)
+                    }
+                }
+                .frame(width: 44, height: 44)
+
+                VStack(spacing: 1) {
+                    Text(goal.countdownHeadline)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(tierColor)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    Text(goal.todayRatioText)
+                        .font(.system(size: 9.5, weight: .medium, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(colors.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+
+                Spacer(minLength: 0)
+
+                Text(goal.streakBadgeText)
+                    .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                    .foregroundStyle(tierColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3.5)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(tierColor.opacity(theme == .light ? 0.14 : 0.20))
+                    )
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(glowFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(glowStroke, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(goal.todayRatioText), \(goal.countdownHeadline), \(goal.streakBadgeText)")
+    }
+}
+
+// MARK: - Shared Widget Building Blocks
+
+private struct InkAmpStatusBadgePill: View {
+    let badge: InkAmpContinueStatusBadge
+    let compact: Bool
+    let theme: InkAmpWidgetTheme
+    let colors: InkAmpWidgetColors
+
+    var body: some View {
+        HStack(spacing: compact ? 3 : 4) {
+            Image(systemName: badge.symbolName)
+                .font(.system(size: compact ? 7.5 : 8.5, weight: .bold))
+            Text(badge.label)
+                .font(.system(size: compact ? 8 : 9, weight: .bold))
+                .tracking(compact ? 0.45 : 0.55)
+        }
+        .foregroundStyle(colors.accent)
+        .padding(.horizontal, compact ? 6 : 7)
+        .padding(.vertical, compact ? 3 : 4)
+        .background(
+            Capsule(style: .continuous)
+                .fill(colors.accent.opacity(theme == .light ? 0.14 : 0.18))
+        )
+    }
+}
+
+private struct InkAmpWidgetCoverView: View {
+    @Environment(\.displayScale) private var displayScale
+    let filename: String?
+    let kind: ContinueWidgetKindTag?
+    let width: CGFloat
+    let height: CGFloat
+    let cornerRadius: CGFloat
+    let theme: InkAmpWidgetTheme
+    let colors: InkAmpWidgetColors
+
+    var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(colors.coverFallback)
-            if let image = coverImage(filename: filename, maxPoints: size) {
+            if let image = coverImage(filename: filename, maxPoints: max(width, height)) {
                 image
                     .resizable()
                     .inkAmpFullColorRendering()
                     .scaledToFill()
             } else {
                 Image(systemName: coverSymbol(kind))
-                    .font(.system(size: size * 0.32, weight: .semibold))
+                    .font(.system(size: min(width, height) * 0.34, weight: .semibold))
                     .foregroundStyle(colors.secondary)
             }
         }
-        .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .stroke(colors.accent.opacity(theme == .light ? 0.35 : 0.2), lineWidth: 1)
         )
     }
@@ -1116,6 +1470,28 @@ private enum InkAmpMediumWidgetPreviewData {
             ),
         )
     }
+
+    static var streakAquaEntry: InkAmpContinueEntry {
+        InkAmpContinueEntry(
+            date: Date(),
+            snapshot: ContinueWidgetSnapshot(
+                title: "The Southern Book Club's Guide to Slaying Vampires",
+                subtitle: "Grady Hendrix",
+                isPlaying: true,
+                kind: .audiobook,
+                deepLink: InkAmpContinueLink.continueURL.absoluteString,
+                progress: 0.37,
+                elapsedSeconds: 11_880,
+                durationSeconds: 32_400,
+                hasLiveSession: true,
+                rate: 1.25,
+                streakDays: 4,
+                todayActiveSeconds: 18 * 60,
+                dailyGoalMinutes: 30,
+                longestStreakDays: 12,
+            ),
+        )
+    }
 }
 
 /// Constrains Medium chrome to a realistic systemMedium canvas so vertical overflow is visible.
@@ -1150,6 +1526,12 @@ private struct InkAmpMediumSystemSizedPreview: View {
     InkAmpDarkMediumWidget()
 } timeline: {
     InkAmpMediumWidgetPreviewData.longTitleEntry
+}
+
+#Preview("Streak + Goal (Medium)", as: .systemMedium) {
+    InkAmpStreakMediumWidget()
+} timeline: {
+    InkAmpMediumWidgetPreviewData.streakAquaEntry
 }
 
 #Preview("Medium fixed canvas · light") {
