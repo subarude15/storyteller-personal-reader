@@ -287,6 +287,34 @@ struct ContinueWidgetSnapshotTests {
         #expect(final?.streakActivityDayKey == "2026-11-15")
     }
 
+    @Test func unchangedPaintPersistsRawRateAndTiming() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("continue-raw-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        }
+        let store = PausableContinueWidgetFileStore(root: root)
+        ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        ContinueWidgetSnapshotStore.publish(
+            title: "Piranesi", subtitle: nil, isPlaying: false, kind: .audiobook,
+            coverData: nil, progress: 0.1, elapsedSeconds: 60,
+            durationSeconds: 600, rate: 1, fileStore: store
+        )
+        let before = try #require(store.readSnapshot(in: root))
+        ContinueWidgetSnapshotStore.publish(
+            title: "Piranesi", subtitle: nil, isPlaying: false, kind: .audiobook,
+            coverData: nil, progress: 0.101, elapsedSeconds: 61,
+            durationSeconds: 600, rate: 0.999, fileStore: store
+        )
+        let after = try #require(store.readSnapshot(in: root))
+        #expect(before.paintSignature == after.paintSignature)
+        #expect(after.rate == 0.999)
+        #expect(after.elapsedSeconds == 61)
+        #expect(after.progress == 0.101)
+    }
+
     @Test func unchangedPaintPersistsNewStreakAnchor() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("continue-anchor-\(UUID().uuidString)", isDirectory: true)

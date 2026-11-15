@@ -159,6 +159,12 @@ public enum ReadingMotivationFinishProjection: Equatable, Sendable {
 }
 
 public enum ReadingMotivationCalculations {
+    /// Keep live contributions consistent with the existing persisted-session
+    /// threshold so a discarded short session cannot create a temporary streak.
+    public static func isRecordableSession(duration: TimeInterval) -> Bool {
+        duration.isFinite && duration >= 30
+    }
+
     /// Splits real, deduplicated session time across local calendar days.
     public static func dailyTotals(
         sessions: [InkampStatsSessionRecord],
@@ -1140,6 +1146,8 @@ public actor ReadingMotivationNotificationCoordinator {
                 deliveredAt, calendar: calendar
             )
             state.consume(dayKey: actualDay)
+            // Persist before *any* scheduler await, not just evidence removal.
+            await stateStore.save(state)
             if state.pendingDayKey == requestDay || state.pendingDayKey == actualDay {
                 if let pendingDay = state.pendingDayKey {
                     await scheduler.cancelPending(identifier: Self.identifier(for: pendingDay))

@@ -228,6 +228,43 @@ struct ReadingMotivationTests {
         return (coordinator, clock)
     }
 
+    @Test func liveAndEndedSessionRetentionHaveIdenticalBoundary() {
+        #expect(!ReadingMotivationCalculations.isRecordableSession(duration: 29.999))
+        #expect(ReadingMotivationCalculations.isRecordableSession(duration: 30))
+        #expect(ReadingMotivationCalculations.isRecordableSession(duration: 31))
+        #expect(!ReadingMotivationCalculations.isRecordableSession(duration: .nan))
+        #expect(!ReadingMotivationCalculations.isRecordableSession(duration: .infinity))
+    }
+
+    @Test func ingestionPersistsActualDayBeforeCancellationCanSuspend() async throws {
+        let actualNow = date(2026, 11, 16, 0)
+        let scheduler = TestMotivationScheduler()
+        let storage = TestMotivationStateStore(.init(
+            pendingKind: .rescue, pendingDayKey: "2026-11-15",
+            pendingDeliveryDate: date(2026, 11, 15, 20)
+        ))
+        await scheduler.setDelivered(identifier: "reading-motivation.2026-11-15", at: actualNow)
+        let (coordinator, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: actualNow)
+        await scheduler.pauseNextCancelCall()
+        let ingesting = Task {
+            try await coordinator.reconcile(candidates: [], enabled: true, now: actualNow, calendar: calendar)
+        }
+        await scheduler.waitForPausedCancel()
+        let crashCheckpoint = await storage.load()
+        #expect(crashCheckpoint.hasConsumedDayKey("2026-11-15"))
+        #expect(crashCheckpoint.hasConsumedDayKey("2026-11-16"))
+        await scheduler.clearDelivered()
+        await scheduler.resumePausedCancel()
+        _ = try await ingesting.value
+        let (restarted, _) = makeCoordinator(
+            scheduler: scheduler, stateStore: TestMotivationStateStore(crashCheckpoint), now: actualNow
+        )
+        #expect(try await restarted.reconcile(
+            candidates: [.init(kind: .pace, deliveryDate: date(2026, 11, 16, 12))],
+            enabled: true, now: actualNow, calendar: calendar
+        ) == .none)
+    }
+
     @Test func trailingPlateauAndMissingCheckpointsCountObservedWork() {
         let now = date(2026, 11, 15, 12)
         for trailingProgress: Double? in [0.2, nil] {

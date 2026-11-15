@@ -58,7 +58,9 @@ final class SessionTracker {
     /// Shared calculation input, including the active session's real elapsed time.
     func motivationSessionRecords(at now: Date = Date()) -> [InkampStatsSessionRecord] {
         var records = sessions.map(Self.toSyncSession)
-        if let activeSession, now > activeSession.startedAt {
+        if let activeSession, ReadingMotivationCalculations.isRecordableSession(
+            duration: now.timeIntervalSince(activeSession.startedAt)
+        ) {
             records.append(
                 InkampStatsSessionRecord(
                     id: activeSession.id,
@@ -105,7 +107,7 @@ final class SessionTracker {
         let duration = ended.timeIntervalSince(active.startedAt)
 
         // Only record sessions of meaningful length (≥ 30 seconds).
-        guard duration >= 30 else {
+        guard ReadingMotivationCalculations.isRecordableSession(duration: duration) else {
             activeSession = nil
             revision &+= 1
             stopMotivationReconcileLoopAndRefresh()
