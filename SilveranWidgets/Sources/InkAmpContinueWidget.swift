@@ -75,7 +75,13 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
             return
         }
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "continue.snapshot")
-        completion(InkAmpContinueEntry(date: Date(), snapshot: Self.loadSnapshot()))
+        let now = Date()
+        completion(
+            InkAmpContinueEntry(
+                date: now,
+                snapshot: Self.loadSnapshot().resolvingStreak(at: now)
+            )
+        )
     }
 
     func getTimeline(
@@ -83,12 +89,32 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
         completion: @escaping (Timeline<InkAmpContinueEntry>) -> Void,
     ) {
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "continue.timeline")
-        let snapshot = Self.loadSnapshot()
-        let entry = InkAmpContinueEntry(date: Date(), snapshot: snapshot)
+        let calendar = Calendar.current
+        let now = Date()
+        let raw = Self.loadSnapshot()
+        let entry = InkAmpContinueEntry(
+            date: now,
+            snapshot: raw.resolvingStreak(at: now, calendar: calendar)
+        )
         // Playback state is pushed by the app (`reloadTimelines`); this cadence is
         // only a safety net, so it stays inside WidgetKit's reload budget.
-        let refresh: TimeInterval = snapshot.isPlaying ? 5 * 60 : 15 * 60
-        completion(Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(refresh))))
+        let refresh: TimeInterval = raw.isPlaying ? 5 * 60 : 15 * 60
+        let cadenceDate = now.addingTimeInterval(refresh)
+        var entries = [entry]
+        // Day-boundary entry expires/recomputes streak text even if Home never
+        // republishes and audio-session updates keep refreshing the snapshot.
+        if let dayEnd = calendar.dateInterval(of: .day, for: now)?.end, dayEnd > now {
+            entries.append(
+                InkAmpContinueEntry(
+                    date: dayEnd,
+                    snapshot: raw.resolvingStreak(at: dayEnd, calendar: calendar)
+                )
+            )
+        }
+        let nextRefresh = ([cadenceDate] + entries.dropFirst().map(\.date))
+            .filter { $0 > now }
+            .min() ?? cadenceDate
+        completion(Timeline(entries: entries, policy: .after(nextRefresh)))
     }
 
     static func loadSnapshot() -> ContinueWidgetSnapshot {

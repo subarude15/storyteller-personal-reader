@@ -43,6 +43,9 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
     public var durationSeconds: Double?
     /// Real current/longest-independent streak count from SessionTracker.
     public var streakDays: Int?
+    /// Local calendar day (`yyyy-MM-dd`) of the activity that anchors `streakDays`.
+    /// Dated to real activity, not each subsequent audio/snapshot publish.
+    public var streakActivityDayKey: String?
     /// True while the app holds a live audio session, i.e. transport buttons can
     /// actually do something. False for the "Home Continue" fallback card.
     public var hasLiveSession: Bool?
@@ -62,6 +65,7 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         hasLiveSession: Bool? = nil,
         rate: Double? = nil,
         streakDays: Int? = nil,
+        streakActivityDayKey: String? = nil,
     ) {
         self.generatedAt = generatedAt
         self.title = title
@@ -74,6 +78,10 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         self.elapsedSeconds = elapsedSeconds.flatMap { $0.isFinite ? $0 : nil }
         self.durationSeconds = durationSeconds.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
         self.streakDays = streakDays.map { max(0, $0) }
+        self.streakActivityDayKey = streakActivityDayKey.flatMap { key in
+            let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
         self.hasLiveSession = hasLiveSession
         self.rate = rate.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
     }
@@ -137,6 +145,43 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
     public var streakText: String? {
         guard let streakDays else { return nil }
         return streakDays == 0 ? "Start a streak today" : String(streakDays) + "-day streak"
+    }
+
+    /// Expire stale streak counts on local calendar rollover while preserving
+    /// today/yesterday grace. Activity day is the anchor; `generatedAt` is only
+    /// a legacy fallback for snapshots written before the dated field existed.
+    public func resolvingStreak(
+        at now: Date,
+        calendar: Calendar = .current
+    ) -> ContinueWidgetSnapshot {
+        var copy = self
+        copy.streakDays = Self.resolvedStreakDays(
+            streakDays: streakDays,
+            activityDayKey: streakActivityDayKey,
+            generatedAt: generatedAt,
+            now: now,
+            calendar: calendar
+        )
+        return copy
+    }
+
+    public static func resolvedStreakDays(
+        streakDays: Int?,
+        activityDayKey: String?,
+        generatedAt: Date,
+        now: Date,
+        calendar: Calendar
+    ) -> Int? {
+        guard let streakDays else { return nil }
+        let today = ReadingMotivationCalculations.localDayKey(now, calendar: calendar)
+        let anchor = activityDayKey
+            ?? ReadingMotivationCalculations.localDayKey(generatedAt, calendar: calendar)
+        if anchor == today { return streakDays }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: now)) {
+            let yesterdayKey = ReadingMotivationCalculations.localDayKey(yesterday, calendar: calendar)
+            if anchor == yesterdayKey { return streakDays }
+        }
+        return 0
     }
 
     /// Compact "31% · 12m left" style caption for the tile.
@@ -311,6 +356,7 @@ public enum ContinueWidgetSnapshotStore {
         hasLiveSession: Bool = false,
         rate: Double? = nil,
         streakDays: Int? = nil,
+        streakActivityDayKey: String? = nil,
     ) {
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "publish")
         guard let container = SilveranWidgetSnapshotStore.sharedContainerURL() else {
@@ -342,6 +388,7 @@ public enum ContinueWidgetSnapshotStore {
                 coverFilename = existing
             }
 
+            let previous = readSnapshotFile(in: container)
             let snapshot = ContinueWidgetSnapshot(
                 generatedAt: Date(),
                 title: title,
@@ -355,7 +402,10 @@ public enum ContinueWidgetSnapshotStore {
                 durationSeconds: durationSeconds,
                 hasLiveSession: hasLiveSession,
                 rate: rate,
-                streakDays: streakDays ?? readSnapshotFile(in: container)?.streakDays,
+                streakDays: streakDays ?? previous?.streakDays,
+                // Preserve the activity anchor across audio-only publishes; never
+                // re-date it from generatedAt or progress ticks.
+                streakActivityDayKey: streakActivityDayKey ?? previous?.streakActivityDayKey,
             )
 
             publishLock.lock()
@@ -423,6 +473,7 @@ public enum ContinueWidgetSnapshotStore {
             hasLiveSession: true,
             rate: session.playbackRate,
             streakDays: loadSnapshot().streakDays,
+            streakActivityDayKey: loadSnapshot().streakActivityDayKey,
         )
     }
 
@@ -443,6 +494,7 @@ public enum ContinueWidgetSnapshotStore {
             hasLiveSession: false,
             rate: last.rate,
             streakDays: last.streakDays,
+            streakActivityDayKey: last.streakActivityDayKey,
         )
     }
 

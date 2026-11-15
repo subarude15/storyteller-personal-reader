@@ -411,6 +411,51 @@ struct ReadingMotivationTests {
         #expect(prior.activityDays == 1)
     }
 
+    @Test func priorWeekReceiptStreakClipsSundayToMondaySessionAtWeekEnd() {
+        // Sunday night → Monday morning: totals already split, but streak at the
+        // prior-week reference must keep Sunday's clipped portion.
+        let crossWeek = session(
+            start: date(2026, 11, 15, 22),
+            end: date(2026, 11, 16, 2)
+        )
+        let earlier = session(
+            start: date(2026, 11, 14, 12),
+            end: date(2026, 11, 14, 13)
+        )
+        let mondayNoon = date(2026, 11, 16, 12)
+        let prior = ReadingMotivationCalculations.weeklyReceipt(
+            sessions: [earlier, crossWeek],
+            finished: [],
+            weekOffset: -1,
+            calendar: calendar,
+            now: mondayNoon
+        )
+        let current = ReadingMotivationCalculations.weeklyReceipt(
+            sessions: [earlier, crossWeek],
+            finished: [],
+            weekOffset: 0,
+            calendar: calendar,
+            now: mondayNoon
+        )
+        #expect(prior.activityDays == 2)
+        #expect(prior.minutes == 180)
+        #expect(prior.streakDays == 2)
+        #expect(current.activityDays == 1)
+        #expect(current.minutes == 120)
+        #expect(current.streakDays == 3)
+
+        // Future-only activity at real-now still rejected (no fabricated progress).
+        let futureOnly = session(
+            start: date(2026, 11, 16, 18),
+            end: date(2026, 11, 16, 19)
+        )
+        let live = ReadingMotivationCalculations.streaks(
+            sessions: [futureOnly], calendar: calendar, now: mondayNoon
+        )
+        #expect(live.current == 0)
+        #expect(live.longest == 0)
+    }
+
     @Test func finishEstimateRequiresObservedPaceAndHandlesFinishedAndInvalidRates() {
         let now = date(2026, 11, 15, 14)
         let sessions = [
@@ -484,6 +529,54 @@ struct ReadingMotivationTests {
         #expect(calendar.component(.minute, from: dstFinish) == 30)
     }
 
+    @Test func projectedFinishRejectsIntMaxRoundingTrapAndExtremePace() {
+        let now = date(2026, 11, 15, 14)
+        // remaining / rate == Double(Int.max) rounds to 2^63 — old guard passed, Int trapped.
+        #expect(ReadingMotivationCalculations.projectedFinish(
+            sessions: [], mediaID: "book-1", progress: 0,
+            totalUnits: Double(Int.max), playbackRate: 1,
+            calendar: calendar, now: now
+        ) == nil)
+        #expect(ReadingMotivationCalculations.projectedFinish(
+            sessions: [], mediaID: "book-1", progress: 0,
+            totalUnits: 0x1p63, playbackRate: 1,
+            calendar: calendar, now: now
+        ) == nil)
+        // Adjacent representable value below 2^63 must not trap; calendar may still
+        // refuse an absurd finish date, which is preferable to a fabricated one.
+        let adjacent = ReadingMotivationCalculations.projectedFinish(
+            sessions: [], mediaID: "book-1", progress: 0,
+            totalUnits: 0x1p63.nextDown, playbackRate: 1,
+            calendar: calendar, now: now
+        )
+        if case .estimate(let finish, _) = adjacent {
+            #expect(finish.timeIntervalSince1970.isFinite)
+        }
+        let safeSeconds = 1_000_000.0
+        guard case .estimate(let safeFinish, _) = ReadingMotivationCalculations.projectedFinish(
+            sessions: [], mediaID: "book-1", progress: 0,
+            totalUnits: safeSeconds, playbackRate: 1,
+            calendar: calendar, now: now
+        ) else {
+            Issue.record("Expected finite estimate for a representable duration")
+            return
+        }
+        #expect(safeFinish.timeIntervalSince(now) == safeSeconds)
+
+        // Near-zero observed pace → huge remaining seconds → nil, not a trap/fake date.
+        let tinyPace = [
+            session(start: date(2026, 11, 13), end: date(2026, 11, 13, 12), duration: 1, progress: 0.0),
+            session(
+                start: date(2026, 11, 14), end: date(2026, 11, 14, 12), duration: 1,
+                progress: Double.leastNormalMagnitude
+            ),
+        ]
+        #expect(ReadingMotivationCalculations.projectedFinish(
+            sessions: tinyPace, mediaID: "book-1", progress: 0.01, totalUnits: 1_000_000,
+            playbackRate: nil, calendar: calendar, now: now
+        ) == nil)
+    }
+
     @Test func widgetTimingClampsOvershootAndAppliesSpeed() {
         let timing = ContinueWidgetTiming.calculate(
             progress: 0.4, elapsedSeconds: 80, durationSeconds: 100, rate: 2
@@ -509,6 +602,54 @@ struct ReadingMotivationTests {
         #expect(snapshot.title == "Book")
         #expect(snapshot.elapsedText == nil)
         #expect(snapshot.remainingText == nil)
+        #expect(snapshot.streakActivityDayKey == nil)
+    }
+
+    @Test func widgetStreakExpiresOnDayRolloverWithTodayYesterdayGrace() {
+        let activityDay = "2026-11-14"
+        let snapshot = ContinueWidgetSnapshot(
+            generatedAt: date(2026, 11, 16, 8),
+            title: "Book",
+            streakDays: 5,
+            streakActivityDayKey: activityDay
+        )
+        // Same activity day
+        #expect(snapshot.resolvingStreak(at: date(2026, 11, 14, 21), calendar: calendar).streakDays == 5)
+        // Yesterday grace
+        #expect(snapshot.resolvingStreak(at: date(2026, 11, 15, 9), calendar: calendar).streakDays == 5)
+        // Two local days later — expired even though generatedAt is "today"
+        #expect(snapshot.resolvingStreak(at: date(2026, 11, 16, 9), calendar: calendar).streakDays == 0)
+
+        // Audio-style republish keeps the activity anchor, not generatedAt.
+        let afterAudio = ContinueWidgetSnapshot(
+            generatedAt: date(2026, 11, 16, 22),
+            title: "Book",
+            progress: 0.55,
+            streakDays: 5,
+            streakActivityDayKey: activityDay
+        )
+        #expect(afterAudio.streakActivityDayKey == activityDay)
+        #expect(afterAudio.resolvingStreak(at: date(2026, 11, 16, 22), calendar: calendar).streakDays == 0)
+
+        // DST spring-forward local day still uses calendar day keys.
+        let dstAnchor = ContinueWidgetSnapshot(
+            generatedAt: date(2026, 3, 9, 12),
+            title: "Book",
+            streakDays: 2,
+            streakActivityDayKey: "2026-03-08"
+        )
+        #expect(dstAnchor.resolvingStreak(at: date(2026, 3, 9, 12), calendar: calendar).streakDays == 2)
+        #expect(dstAnchor.resolvingStreak(at: date(2026, 3, 10, 12), calendar: calendar).streakDays == 0)
+
+        // Old snapshot without activity key: generatedAt day is the legacy anchor.
+        let legacy = ContinueWidgetSnapshot(
+            generatedAt: date(2026, 11, 14, 18),
+            title: "Book",
+            streakDays: 3
+        )
+        #expect(legacy.streakActivityDayKey == nil)
+        #expect(legacy.resolvingStreak(at: date(2026, 11, 15, 10), calendar: calendar).streakDays == 3)
+        #expect(legacy.resolvingStreak(at: date(2026, 11, 16, 10), calendar: calendar).streakDays == 0)
     }
 
     @Test func widgetKeepsElapsedLengthButMarksUnknownSpeedHonestly() {
@@ -586,6 +727,92 @@ struct ReadingMotivationTests {
             now: now, quietDeliveryDate: date(2026, 11, 15, 17), actualSeconds: 0,
             dailyGoalSeconds: 3600, activityDaysThisWeek: 2, calendar: calendar
         ).isEmpty)
+    }
+
+    @Test func morningLaunchSchedulesQuietTimeCandidateWithoutFurtherInteraction() async throws {
+        let morning = date(2026, 11, 15, 8)
+        let quiet = ReadingMotivationNotificationPolicy.quietDeliveryDate(
+            on: morning, hour: 20, minute: 30, calendar: calendar
+        )!
+        let candidates = ReadingMotivationNotificationPolicy.candidates(
+            now: morning,
+            quietDeliveryDate: quiet,
+            actualSeconds: 0,
+            dailyGoalSeconds: 3600,
+            activityDaysThisWeek: 0,
+            calendar: calendar
+        )
+        #expect(Set(candidates.map(\.kind)) == Set([.rescue, .pace]))
+        #expect(candidates.allSatisfy { $0.deliveryDate == quiet })
+
+        let scheduler = TestMotivationScheduler()
+        let storage = TestMotivationStateStore()
+        let coordinator = ReadingMotivationNotificationCoordinator(
+            scheduler: scheduler, stateStore: storage
+        )
+        #expect(try await coordinator.reconcile(
+            candidates: candidates, enabled: true, now: morning, calendar: calendar,
+            preferenceRevision: 1, requestRevision: 1
+        ) == .schedule(kind: .rescue, dayKey: "2026-11-15"))
+        #expect(await scheduler.pendingCount() == 1)
+        #expect(await scheduler.pendingKind(for: "reading-motivation.2026-11-15") == .rescue)
+        #expect(await scheduler.pendingDate(for: "reading-motivation.2026-11-15") == quiet)
+
+        // Later progress that meets the goal cancels the pending quiet-time request.
+        let afterGoal = ReadingMotivationNotificationPolicy.candidates(
+            now: date(2026, 11, 15, 12),
+            quietDeliveryDate: quiet,
+            actualSeconds: 3600,
+            dailyGoalSeconds: 3600,
+            activityDaysThisWeek: 0,
+            calendar: calendar
+        )
+        #expect(afterGoal.isEmpty)
+        #expect(try await coordinator.reconcile(
+            candidates: afterGoal, enabled: true, now: date(2026, 11, 15, 12), calendar: calendar,
+            preferenceRevision: 1, requestRevision: 2
+        ) == .cancelPending)
+        #expect(await scheduler.pendingCount() == 0)
+    }
+
+    @Test func obsoleteRescueEligibilityYieldsToCurrentPaceCandidate() async throws {
+        let now = date(2026, 11, 15, 18)
+        let quiet = ReadingMotivationNotificationPolicy.quietDeliveryDate(
+            on: now, hour: 20, minute: 30, calendar: calendar
+        )!
+        let scheduler = TestMotivationScheduler()
+        let coordinator = ReadingMotivationNotificationCoordinator(
+            scheduler: scheduler, stateStore: TestMotivationStateStore()
+        )
+        let morningCandidates = ReadingMotivationNotificationPolicy.candidates(
+            now: date(2026, 11, 15, 8),
+            quietDeliveryDate: quiet,
+            actualSeconds: 0,
+            dailyGoalSeconds: 3600,
+            activityDaysThisWeek: 0,
+            calendar: calendar
+        )
+        #expect(try await coordinator.reconcile(
+            candidates: morningCandidates, enabled: true, now: now, calendar: calendar,
+            preferenceRevision: 1, requestRevision: 1
+        ) == .schedule(kind: .rescue, dayKey: "2026-11-15"))
+        #expect(await scheduler.pendingKind(for: "reading-motivation.2026-11-15") == .rescue)
+
+        // Half the goal met: rescue no longer eligible, pace still is.
+        let progressed = ReadingMotivationNotificationPolicy.candidates(
+            now: now,
+            quietDeliveryDate: quiet,
+            actualSeconds: 2000,
+            dailyGoalSeconds: 3600,
+            activityDaysThisWeek: 0,
+            calendar: calendar
+        )
+        #expect(Set(progressed.map(\.kind)) == Set([.pace]))
+        #expect(try await coordinator.reconcile(
+            candidates: progressed, enabled: true, now: now, calendar: calendar,
+            preferenceRevision: 1, requestRevision: 2
+        ) == .replacePending(kind: .pace, dayKey: "2026-11-15"))
+        #expect(await scheduler.pendingKind(for: "reading-motivation.2026-11-15") == .pace)
     }
 
     @Test func quietTimeResolvesOnTheLocalDSTCalendarDay() {

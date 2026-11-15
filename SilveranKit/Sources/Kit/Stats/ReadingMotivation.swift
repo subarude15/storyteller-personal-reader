@@ -336,16 +336,6 @@ public enum ReadingMotivationCalculations {
         )
     }
 
-    private static func localDayKey(_ date: Date, calendar: Calendar) -> String {
-        let components = calendar.dateComponents([.year, .month, .day], from: date)
-        return String(
-            format: "%04d-%02d-%02d",
-            components.year ?? 0,
-            components.month ?? 0,
-            components.day ?? 0
-        )
-    }
-
     private static func nextDayKey(after key: String, calendar: Calendar) -> String? {
         guard let date = ordinalDate(for: key, calendar: calendar),
             let next = calendar.date(byAdding: .day, value: 1, to: date)
@@ -426,11 +416,51 @@ public enum ReadingMotivationCalculations {
             basis = paceBasis
         }
         guard seconds.isFinite, seconds > 0 else { return nil }
-        guard seconds <= Double(Int.max),
-            let finishDate = calendar.date(byAdding: .second, value: Int(seconds.rounded(.up)), to: now)
+        // Double(Int.max) rounds to 2^63; Int(that) traps. Guard the rounded value
+        // against the first unrepresentable bound before conversion.
+        let roundedUp = seconds.rounded(.up)
+        guard roundedUp.isFinite, roundedUp > 0, roundedUp < 0x1p63 else { return nil }
+        guard let finishDate = calendar.date(byAdding: .second, value: Int(roundedUp), to: now)
         else { return nil }
         guard finishDate.timeIntervalSince1970.isFinite else { return nil }
         return .estimate(date: finishDate, basis: basis)
+    }
+
+    /// Local calendar day that anchors the current streak for widget dating.
+    /// Today if active today, otherwise yesterday when the streak still has grace, else today.
+    public static func streakActivityDayKey(
+        sessions: [InkampStatsSessionRecord],
+        calendar: Calendar,
+        now: Date,
+        archivedActivityDays: [ReadingMotivationActivityDay] = []
+    ) -> String {
+        let today = localDayKey(now, calendar: calendar)
+        var activeDays = Set(dailyTotals(sessions: sessions, calendar: calendar, now: now).map {
+            localDayKey($0.day, calendar: calendar)
+        })
+        let calendarIdentifier = String(describing: calendar.identifier)
+        activeDays.formUnion(archivedActivityDays.filter {
+            $0.calendarIdentifier == calendarIdentifier
+        }.map(\.dayKey).filter {
+            $0 <= today && ordinalDate(for: $0, calendar: calendar) != nil
+        })
+        if activeDays.contains(today) { return today }
+        if let yesterday = previousDayKey(before: today, calendar: calendar),
+            activeDays.contains(yesterday)
+        {
+            return yesterday
+        }
+        return today
+    }
+
+    public static func localDayKey(_ date: Date, calendar: Calendar) -> String {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(
+            format: "%04d-%02d-%02d",
+            components.year ?? 0,
+            components.month ?? 0,
+            components.day ?? 0
+        )
     }
 
     private static func normalizedSessions(
@@ -440,25 +470,39 @@ public enum ReadingMotivationCalculations {
         var byID: [UUID: InkampStatsSessionRecord] = [:]
         for session in sessions {
             let id = session.mediaID.trimmingCharacters(in: .whitespacesAndNewlines)
-            let span = session.endedAt.timeIntervalSince(session.startedAt)
+            let originalSpan = session.endedAt.timeIntervalSince(session.startedAt)
             guard !id.isEmpty,
                 session.startedAt.timeIntervalSince1970.isFinite,
                 session.endedAt.timeIntervalSince1970.isFinite,
                 session.startedAt <= session.endedAt,
-                session.endedAt <= now,
+                session.startedAt <= now,
                 session.durationSeconds.isFinite,
                 session.durationSeconds > 0,
-                span.isFinite,
-                span > 0
+                originalSpan.isFinite,
+                originalSpan > 0
             else { continue }
+
+            var endedAt = session.endedAt
+            var duration = min(session.durationSeconds, originalSpan)
+            if endedAt > now {
+                // Historical reference (e.g. prior-week Sunday night): keep the
+                // valid earlier portion instead of discarding the whole session.
+                let clippedSpan = now.timeIntervalSince(session.startedAt)
+                guard clippedSpan.isFinite, clippedSpan > 0 else { continue }
+                duration = duration * (clippedSpan / originalSpan)
+                endedAt = now
+                guard duration.isFinite, duration > 0 else { continue }
+            }
+
             if let prior = byID[session.id],
-                prior.endedAt > session.endedAt
-                    || (prior.endedAt == session.endedAt && prior.durationSeconds >= session.durationSeconds)
+                prior.endedAt > endedAt
+                    || (prior.endedAt == endedAt && prior.durationSeconds >= duration)
             {
                 continue
             }
             var valid = session
-            valid.durationSeconds = min(session.durationSeconds, span)
+            valid.endedAt = endedAt
+            valid.durationSeconds = min(duration, endedAt.timeIntervalSince(session.startedAt))
             byID[session.id] = valid
         }
         return byID.values.sorted {
@@ -630,6 +674,11 @@ public enum ReadingMotivationNotificationPolicy {
     }
 
     /// Build same-day candidates from actual goal progress; arbitration happens in `decide`.
+    ///
+    /// Pace/rescue eligibility is evaluated against quiet-time expectations using
+    /// current progress so a morning launch can schedule tonight's reminder without
+    /// waiting for a later app/session event. Current candidates only — obsolete
+    /// higher-priority kinds drop out when progress makes them ineligible.
     public static func candidates(
         now: Date,
         quietDeliveryDate: Date?,
@@ -648,15 +697,14 @@ public enum ReadingMotivationNotificationPolicy {
         else { return [] }
 
         let day = calendar.dateInterval(of: .day, for: now)
-        let dayFraction = day.map {
-            min(max(now.timeIntervalSince($0.start) / $0.duration, 0), 1)
+        let quietFraction = day.map {
+            min(max(quietDeliveryDate.timeIntervalSince($0.start) / $0.duration, 0), 1)
         } ?? 0
         var result: [ReadingMotivationNotificationCandidate] = []
-        if dayFraction >= 0.5, actualSeconds < dailyGoalSeconds * dayFraction {
+        if actualSeconds < dailyGoalSeconds * quietFraction {
             result.append(.init(kind: .pace, deliveryDate: quietDeliveryDate))
         }
-        let nearQuietTime = quietDeliveryDate.timeIntervalSince(now) <= 3600
-        if (dayFraction >= 0.75 || nearQuietTime), actualSeconds < dailyGoalSeconds * 0.5 {
+        if actualSeconds < dailyGoalSeconds * 0.5 {
             result.append(.init(kind: .rescue, deliveryDate: quietDeliveryDate))
         }
         if activityDaysThisWeek > 0,

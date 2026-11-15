@@ -56,11 +56,16 @@ public enum ContinueWidgetPublisher {
         progress: Double? = nil,
         durationSeconds: Double? = nil,
         streakDays: Int? = nil,
+        streakActivityDayKey: String? = nil,
     ) {
         Task { @MainActor in
             let session = await AudioSessionActor.shared.currentSnapshot()
             if session != nil {
-                await publishSession(session, streakDays: streakDays)
+                await publishSession(
+                    session,
+                    streakDays: streakDays,
+                    streakActivityDayKey: streakActivityDayKey
+                )
                 return
             }
             ContinueWidgetSnapshotStore.publish(
@@ -73,6 +78,7 @@ public enum ContinueWidgetPublisher {
                 durationSeconds: durationSeconds,
                 hasLiveSession: false,
                 streakDays: streakDays,
+                streakActivityDayKey: streakActivityDayKey,
             )
         }
     }
@@ -97,7 +103,8 @@ public enum ContinueWidgetPublisher {
 
     private static func publishSession(
         _ snapshot: AudioSessionSnapshot?,
-        streakDays: Int? = nil
+        streakDays: Int? = nil,
+        streakActivityDayKey: String? = nil
     ) async {
         guard let snapshot else {
             // Session ended — keep title/cover, clear playing so the tile isn't stuck.
@@ -115,6 +122,7 @@ public enum ContinueWidgetPublisher {
                 hasLiveSession: false,
                 rate: last.rate,
                 streakDays: last.streakDays,
+                streakActivityDayKey: last.streakActivityDayKey,
             )
             return
         }
@@ -142,6 +150,7 @@ public enum ContinueWidgetPublisher {
             }
         }
 
+        let last = ContinueWidgetSnapshotStore.loadSnapshot()
         ContinueWidgetSnapshotStore.publish(
             title: snapshot.title,
             subtitle: snapshot.author ?? snapshot.chapterLabel,
@@ -153,7 +162,8 @@ public enum ContinueWidgetPublisher {
             durationSeconds: snapshot.durationSeconds,
             hasLiveSession: true,
             rate: snapshot.playbackRate,
-            streakDays: streakDays ?? ContinueWidgetSnapshotStore.loadSnapshot().streakDays,
+            streakDays: streakDays ?? last.streakDays,
+            streakActivityDayKey: streakActivityDayKey ?? last.streakActivityDayKey,
         )
     }
 
