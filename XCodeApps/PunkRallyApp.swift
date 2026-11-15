@@ -141,6 +141,8 @@ public struct PunkRallyTabView: View {
                 #if os(iOS) || os(macOS)
                 RequestNotificationTapHandler.install()
                 #endif
+                ReadingMotivationNotifications.shared.install()
+                Task { await ReadingMotivationStore.shared.refreshNotifications() }
                 #if os(iOS)
                 ManualDownloadIntakeHandoff.installAppObserver {
                     NotificationCenter.default.post(
@@ -222,6 +224,9 @@ public struct PunkRallyTabView: View {
                     }
                     _ = PodcastDownloadStore.shared.runOvernightPruneIfDue()
                     ContinueWidgetPublisher.consumePendingWidgetCommands()
+                    // Background suspension can drop session-owned ticks; restore.
+                    SessionTracker.shared.syncMotivationReconcileLoop()
+                    Task { await ReadingMotivationStore.shared.refreshNotifications() }
                     NotificationCenter.default.post(
                         name: .punkRallyHomeQueueDidChange,
                         object: nil
@@ -273,6 +278,20 @@ public struct PunkRallyTabView: View {
                     }
                 }
             }
+            .onReceive(
+                NotificationCenter.default.publisher(for: .readingMotivationNotificationDelivered)
+            ) { note in
+                guard let dayKey = note.userInfo?["dayKey"] as? String else { return }
+                let deliveredAt = note.userInfo?["deliveredAt"] as? Date
+                Task {
+                    await ReadingMotivationStore.shared.recordNotificationDelivered(
+                        dayKey: dayKey, deliveredAt: deliveredAt
+                    )
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in
+                Task { await ReadingMotivationStore.shared.refreshNotifications() }
+            }
     }
 
     /// Book card + tab host (split from body for the type checker).
@@ -303,7 +322,6 @@ public struct PunkRallyTabView: View {
         }
         .formatSwitchDiscrepancyDialog()
     }
-
     private func openMoreDestination(_ destination: InkAmpMoreDestination) {
         selectedTab = .more
         morePath = NavigationPath()
@@ -460,10 +478,14 @@ private struct HomeTabView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(MediaViewModel.self) private var mediaViewModel: MediaViewModel?
     @State private var showSettings = false
+    @State private var showMotivationSettings = false
     @State private var showOfflineSheet = false
     @State private var podcastStore = PodcastDownloadStore.shared
     @State private var queueTick = 0
     @State private var tracker = SessionTracker.shared
+    @State private var motivation = ReadingMotivationStore.shared
+    @State private var liveAudioSnapshot: AudioSessionSnapshot?
+    @State private var liveAudioSnapshotObservedAt: Date?
     @State private var statsTick = 0
     @State private var mediumPickerItem: HomeMixedItem? = nil
 
@@ -484,12 +506,6 @@ private struct HomeTabView: View {
 
     private var chrome: PunkRallyTheme.Chrome {
         PunkRallyTheme.Chrome(scheme: colorScheme)
-    }
-
-    private var statsSnapshot: PRStatsSnapshot {
-        let _ = statsTick
-        let _ = tracker.revision
-        return tracker.snapshot
     }
 
     /// In-progress books + podcasts (Continue sources), last-touched order.
@@ -595,6 +611,13 @@ private struct HomeTabView: View {
                     }
                 }
 #endif
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showMotivationSettings = true
+                    } label: {
+                        Label("Reading motivation", systemImage: "target")
+                    }
+                }
                 if mediaViewModel?.hasServerConnectionIssue == true {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
@@ -612,6 +635,11 @@ private struct HomeTabView: View {
                 statsTick &+= 1
                 Task { await mediaViewModel?.refreshMetadata(source: "HomeMixed") }
                 Task { await publishContinueWidget() }
+                Task {
+                    liveAudioSnapshot = await AudioSessionActor.shared.currentSnapshot()
+                    liveAudioSnapshotObservedAt = Date()
+                    await motivation.refreshNotifications()
+                }
             }
             .onChange(of: widgetQueueKey) { _, _ in
                 Task { await publishContinueWidget() }
@@ -637,13 +665,26 @@ private struct HomeTabView: View {
             }
             .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyStatsSessionStart)
-            ) { _ in statsTick &+= 1 }
+            ) { _ in
+                statsTick &+= 1
+                Task { await publishContinueWidget() }
+            }
             .onReceive(
                 NotificationCenter.default.publisher(for: .punkRallyStatsSessionEnd)
-            ) { _ in statsTick &+= 1 }
+            ) { _ in
+                statsTick &+= 1
+                Task { await publishContinueWidget() }
+            }
             .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { _ in
                 queueTick &+= 1
                 statsTick &+= 1
+                Task {
+                    liveAudioSnapshot = await AudioSessionActor.shared.currentSnapshot()
+                    liveAudioSnapshotObservedAt = Date()
+                }
+            }
+            .sheet(isPresented: $showMotivationSettings) {
+                ReadingMotivationSettingsView()
             }
         }
         .confirmationDialog(
@@ -705,6 +746,17 @@ private struct HomeTabView: View {
                             .foregroundStyle(chrome.accent)
                         if let item {
                             KindBadgeView(kind: item.badge, scheme: colorScheme)
+                        }
+                        if let item, let projection = motivation.finishProjection(
+                            for: item,
+                            playbackRate: playbackRate(for: item),
+                            liveSnapshot: liveAudioSnapshot,
+                            liveSnapshotObservedAt: liveAudioSnapshotObservedAt
+                        ) {
+                            Text(projectedFinishLabel(projection))
+                                .font(.caption)
+                                .foregroundStyle(chrome.textMuted)
+                                .lineLimit(2)
                         }
                     }
                     Text(item?.title ?? "Nothing in progress")
@@ -803,14 +855,24 @@ private struct HomeTabView: View {
     }
 
     private var statsStrip: some View {
-        let snapshot = statsSnapshot
+        let _ = statsTick
+        let _ = tracker.revision
+        let _ = motivation.revision
+        let pins = motivation.settings.pinnedStats
         return Button {
             NotificationCenter.default.post(name: .punkRallyShowStats, object: nil)
         } label: {
             HStack(spacing: 12) {
-                statCell(snapshot.todaySeconds.hoursMinutes, "Today")
-                statCell(snapshot.weekSeconds.hoursMinutes, "This week")
-                statCell("\(snapshot.streakDays)", "Streak")
+                if pins.isEmpty {
+                    Text("Pin stats in Reading motivation settings")
+                        .font(.caption)
+                        .foregroundStyle(chrome.textMuted)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    ForEach(pins, id: \.self) { stat in
+                        statCell(motivation.value(for: stat), stat.label)
+                    }
+                }
             }
         }
         .buttonStyle(.plain)
@@ -924,6 +986,29 @@ private struct HomeTabView: View {
                 Label("View in Library", systemImage: "books.vertical")
             }
         }
+    }
+
+    private func projectedFinishLabel(_ projection: ReadingMotivationFinishProjection) -> String {
+        switch projection {
+            case .finished:
+                return "Finished"
+            case .estimate(let date, let basis):
+                return DateFormatter.localizedString(from: date, dateStyle: .medium, timeStyle: .none)
+                    + " · " + basis
+        }
+    }
+
+    private func playbackRate(for item: HomeMixedItem) -> Double? {
+        guard let liveAudioSnapshot else { return nil }
+        switch item {
+            case .book(let book, _, _, _):
+                guard liveAudioSnapshot.kind.bookID == book.id else { return nil }
+            case .podcast(let entry):
+                guard case .podcast(let episodeID) = liveAudioSnapshot.kind,
+                    episodeID == entry.episodeID
+                else { return nil }
+        }
+        return liveAudioSnapshot.playbackRate
     }
 
     @MainActor
@@ -1197,6 +1282,22 @@ private struct HomeTabView: View {
             durationSeconds: item.durationSeconds,
             upNext: upNext,
             itemID: item.id,
+            streakProvider: {
+                let now = Date()
+                let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: .current)
+                let sessions = SessionTracker.shared.motivationSessionRecords(at: now)
+                let archived = SessionTracker.shared.motivationArchivedActivityDays()
+                return (
+                    days: ReadingMotivationCalculations.streaks(
+                        sessions: sessions, calendar: calendar, now: now,
+                        archivedActivityDays: archived
+                    ).current,
+                    dayKey: ReadingMotivationCalculations.streakActivityDayKey(
+                        sessions: sessions, calendar: calendar, now: now,
+                        archivedActivityDays: archived
+                    )
+                )
+            },
         )
     }
 

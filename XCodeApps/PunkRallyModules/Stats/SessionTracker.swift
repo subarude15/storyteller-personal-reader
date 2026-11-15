@@ -12,6 +12,7 @@
 
 import Foundation
 import Observation
+import SilveranAppleWidgets
 import SilveranKit
 
 /// Tracks reading/listening sessions locally and computes home/Stats aggregates.
@@ -24,9 +25,12 @@ final class SessionTracker {
 
     private let sessionsKey = "punkRally.stats.sessions.v1"
     private let finishedKey = "punkRally.stats.finished.v1"
+    private let streakDaysKey = "punkRally.stats.streakDays.v2"
+    private let legacyStreakDaysKey = "punkRally.stats.streakDays.v1"
 
     private var sessions: [PRMediaSession] = []
     private var finished: [PRFinishedBook] = []
+    private var archivedActivityDays: Set<ReadingMotivationActivityDay> = []
 
     /// Bumped whenever aggregates change so SwiftUI refreshes.
     private(set) var revision: Int = 0
@@ -35,6 +39,12 @@ final class SessionTracker {
     private var activeSession: PRMediaSession?
 
     private var saveTask: Task<Void, Never>?
+    /// Session-owned motivation cadence (streak publish + optional reminders).
+    /// Not Home-owned. Cancelled on end, including under-30s short sessions.
+    private var motivationReconcileTask: Task<Void, Never>?
+    /// Last streak values pushed to the Continue widget from this process.
+    private var lastPublishedWidgetStreakDays: Int?
+    private var lastPublishedWidgetStreakDayKey: String?
 
     private init() {
         load()
@@ -48,6 +58,33 @@ final class SessionTracker {
 
     var allFinished: [PRFinishedBook] {
         finished
+    }
+
+    /// Shared calculation input, including the active session's real elapsed time.
+    func motivationSessionRecords(at now: Date = Date()) -> [InkampStatsSessionRecord] {
+        var records = sessions.map(Self.toSyncSession)
+        if let activeSession, ReadingMotivationCalculations.isRecordableSession(
+            duration: now.timeIntervalSince(activeSession.startedAt)
+        ) {
+            records.append(
+                InkampStatsSessionRecord(
+                    id: activeSession.id,
+                    kind: activeSession.kind == .reading ? .reading : .listening,
+                    mediaID: activeSession.mediaID,
+                    mediaTitle: activeSession.mediaTitle,
+                    startedAt: activeSession.startedAt,
+                    endedAt: now,
+                    durationSeconds: now.timeIntervalSince(activeSession.startedAt),
+                    endProgress: activeSession.endProgress,
+                    medium: activeSession.medium
+                )
+            )
+        }
+        return records
+    }
+
+    func motivationArchivedActivityDays() -> [ReadingMotivationActivityDay] {
+        archivedActivityDays.sorted { $0.id < $1.id }
     }
 
     /// Begin a session for a media item.
@@ -69,6 +106,7 @@ final class SessionTracker {
             medium: medium
         )
         revision &+= 1
+        startMotivationCadenceLoopIfNeeded()
     }
 
     /// End the active session and record its duration.
@@ -81,9 +119,10 @@ final class SessionTracker {
         let duration = ended.timeIntervalSince(active.startedAt)
 
         // Only record sessions of meaningful length (≥ 30 seconds).
-        guard duration >= 30 else {
+        guard ReadingMotivationCalculations.isRecordableSession(duration: duration) else {
             activeSession = nil
             revision &+= 1
+            stopMotivationCadenceLoopAndRefresh(publishStreak: false)
             return
         }
 
@@ -100,6 +139,20 @@ final class SessionTracker {
         revision &+= 1
         scheduleSave()
         StatsSyncCoordinator.shared.scheduleSyncAfterLocalChange()
+        stopMotivationCadenceLoopAndRefresh(publishStreak: true)
+    }
+
+    /// Restart periodic motivation cadence when an active session survives
+    /// foreground restore or notification opt-in mid-session.
+    func syncMotivationReconcileLoop() {
+        if activeSession != nil {
+            startMotivationCadenceLoopIfNeeded()
+            // Foreground restore: publish immediately if already retained.
+            publishAuthoritativeStreakIfNeeded()
+        } else {
+            motivationReconcileTask?.cancel()
+            motivationReconcileTask = nil
+        }
     }
 
     /// Title for an in-flight or recent session (podcast finish labeling).
@@ -117,6 +170,7 @@ final class SessionTracker {
         revision &+= 1
         scheduleSave()
         StatsSyncCoordinator.shared.scheduleSyncAfterLocalChange()
+        Task { await ReadingMotivationStore.shared.refreshNotifications() }
     }
 
     /// Export local ledger for Storyteller Stats blob.
@@ -134,97 +188,76 @@ final class SessionTracker {
         finished = document.finished.map(Self.fromSyncFinished)
         revision &+= 1
         persist()
+        publishAuthoritativeStreakIfNeeded(force: true)
+        Task { await ReadingMotivationStore.shared.refreshNotifications() }
     }
 
     /// Prune sessions older than 1 year to keep storage small.
     func pruneOldSessions() {
-        let cutoff = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
+        let now = Date()
+        let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: .current)
+        let cutoff = calendar.date(byAdding: .year, value: -1, to: now) ?? now
+        archivedActivityDays = ReadingMotivationCalculations.archiveExpiredActivityDays(
+            sessions: sessions.map(Self.toSyncSession),
+            before: cutoff,
+            existing: archivedActivityDays,
+            calendar: calendar,
+            now: now
+        )
         sessions.removeAll { $0.endedAt < cutoff }
-        scheduleSave()
+        persist()
     }
 
     /// Compute the full stats snapshot (includes live active session time).
     var snapshot: PRStatsSnapshot {
-        let calendar = Calendar.current
+        let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: .current)
         let now = Date()
-
-        func startOfDay(_ date: Date) -> Date {
-            calendar.startOfDay(for: date)
-        }
-
-        let todayStart = startOfDay(now)
-        let weekStart = calendar.date(byAdding: .day, value: -6, to: todayStart) ?? todayStart
-
-        let live: TimeInterval = {
-            guard let active = activeSession else { return 0 }
-            let elapsed = now.timeIntervalSince(active.startedAt)
-            return elapsed >= 30 ? elapsed : 0
-        }()
-        let liveKind = activeSession?.kind
-        let liveStartedAt = activeSession?.startedAt
-
-        var todaySeconds = sessions
-            .filter { $0.endedAt >= todayStart }
-            .reduce(0) { $0 + $1.durationSeconds }
-        var weekSeconds = sessions
-            .filter { $0.endedAt >= weekStart }
-            .reduce(0) { $0 + $1.durationSeconds }
-
-        if live > 0, let liveStartedAt, liveStartedAt >= todayStart {
-            todaySeconds += live
-        }
-        if live > 0, let liveStartedAt, liveStartedAt >= weekStart {
-            weekSeconds += live
-        }
-
-        let streakDays = computeStreak(
+        let records = motivationSessionRecords(at: now)
+        let days = ReadingMotivationCalculations.dailyTotals(
+            sessions: records, calendar: calendar, now: now
+        )
+        let today = calendar.startOfDay(for: now)
+        let todaySeconds = days.first(where: { $0.day == today })?.seconds ?? 0
+        let weekSeconds = ReadingMotivationCalculations.weeklyReceipt(
+            sessions: records,
+            finished: finished.map(Self.toSyncFinished),
+            weekOffset: 0,
             calendar: calendar,
-            today: todayStart,
-            activeCountsToday: live > 0
+            now: now
+        ).seconds
+        let streaks = ReadingMotivationCalculations.streaks(
+            sessions: records,
+            calendar: calendar,
+            now: now,
+            archivedActivityDays: motivationArchivedActivityDays()
         )
-        let longestStreakDays = Swift.max(
-            streakDays,
-            computeLongestStreak(
-                calendar: calendar,
-                today: todayStart,
-                activeCountsToday: live > 0
-            )
-        )
+        let streakDays = streaks.current
+        let longestStreakDays = streaks.longest
 
         let thirtyDaysAgo = calendar.date(byAdding: .day, value: -30, to: now) ?? now
         let finished30d = finished.filter { $0.finishedAt >= thirtyDaysAgo }.count
 
-        let sessions30d = sessions.filter { $0.endedAt >= thirtyDaysAgo }
-        var monthSeconds = sessions30d.reduce(0) { $0 + $1.durationSeconds }
-        if live > 0, let liveStartedAt, liveStartedAt >= thirtyDaysAgo {
-            monthSeconds += live
-        }
-        var activeBookIDs = Set(sessions30d.map(\.mediaID))
-        if live > 0, let activeMediaID = activeSession?.mediaID {
-            activeBookIDs.insert(activeMediaID)
-        }
-        let activeBooks30d = activeBookIDs.count
+        let monthStart = calendar.startOfDay(for: thirtyDaysAgo)
+        let monthSeconds = days.filter { $0.day >= monthStart }.reduce(0) { $0 + $1.seconds }
+        let activeBooks30d = Set(records.filter { $0.endedAt >= thirtyDaysAgo }.map(\.mediaID)).count
 
-        let allDurations = sessions.map(\.durationSeconds) + (live > 0 ? [live] : [])
+        let allDurations = records.compactMap { session -> TimeInterval? in
+            let span = session.endedAt.timeIntervalSince(session.startedAt)
+            guard session.durationSeconds.isFinite, session.durationSeconds > 0, span > 0 else { return nil }
+            return min(session.durationSeconds, span)
+        }
         let avgSession = allDurations.isEmpty
             ? 0
             : allDurations.reduce(0, +) / Double(allDurations.count)
 
         let recentDays = (0..<7).reversed().map { offset -> PRDailyAggregate in
-            let day = calendar.date(byAdding: .day, value: -offset, to: todayStart) ?? todayStart
-            var listen = sessionsForDay(day, kind: .listening, calendar: calendar)
-            var read = sessionsForDay(day, kind: .reading, calendar: calendar)
-            if live > 0,
-                let liveStartedAt,
-                calendar.isDate(liveStartedAt, inSameDayAs: day),
-                let liveKind
-            {
-                switch liveKind {
-                    case .listening: listen += live
-                    case .reading: read += live
-                }
-            }
-            return PRDailyAggregate(day: day, listenSeconds: listen, readSeconds: read)
+            let day = calendar.date(byAdding: .day, value: -offset, to: today) ?? today
+            let activity = days.first(where: { $0.day == day })
+            return PRDailyAggregate(
+                day: day,
+                listenSeconds: activity?.listeningSeconds ?? 0,
+                readSeconds: activity?.readingSeconds ?? 0
+            )
         }
 
         return PRStatsSnapshot(
@@ -254,6 +287,26 @@ final class SessionTracker {
         {
             finished = decoded
         }
+        if let data = defaults.data(forKey: streakDaysKey),
+            let decoded = try? JSONDecoder().decode(Set<ReadingMotivationActivityDay>.self, from: data)
+        {
+            archivedActivityDays = decoded
+        } else if let data = defaults.data(forKey: legacyStreakDaysKey),
+            let legacy = try? JSONDecoder().decode(Set<Date>.self, from: data)
+        {
+            let now = Date()
+            let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: .current)
+            let cutoff = calendar.date(byAdding: .year, value: -1, to: now) ?? now
+            archivedActivityDays = ReadingMotivationCalculations.migrateLegacyActivityDays(
+                staleDates: legacy,
+                sessions: sessions.map(Self.toSyncSession),
+                before: cutoff,
+                calendar: calendar,
+                now: now
+            )
+            persist()
+            defaults.removeObject(forKey: legacyStreakDaysKey)
+        }
     }
 
     private func scheduleSave() {
@@ -272,77 +325,98 @@ final class SessionTracker {
         if let data = try? JSONEncoder().encode(finished) {
             defaults.set(data, forKey: finishedKey)
         }
+        if let data = try? JSONEncoder().encode(archivedActivityDays) {
+            defaults.set(data, forKey: streakDaysKey)
+        }
     }
 
     // MARK: - Helpers
 
-    private func sessionsForDay(_ day: Date, kind: PRMediaSession.Kind, calendar: Calendar) -> TimeInterval {
-        sessions
-            .filter { calendar.isDate($0.endedAt, inSameDayAs: day) && $0.kind == kind }
-            .reduce(0) { $0 + $1.durationSeconds }
-    }
-
-    private func computeStreak(calendar: Calendar, today: Date, activeCountsToday: Bool) -> Int {
-        // Count consecutive days (ending today or yesterday) with any session.
-        var daysWithSessions = Set(
-            sessions.map { calendar.startOfDay(for: $0.endedAt) }
-        )
-        if activeCountsToday {
-            daysWithSessions.insert(today)
-        }
-
-        var streak = 0
-        var cursor = today
-        if !daysWithSessions.contains(cursor) {
-            // Allow streak to persist if today hasn't started yet, but yesterday counted.
-            guard let yesterday = calendar.date(byAdding: .day, value: -1, to: cursor),
-                daysWithSessions.contains(yesterday)
-            else { return 0 }
-            cursor = yesterday
-        }
-
-        while daysWithSessions.contains(cursor) {
-            streak += 1
-            guard let prev = calendar.date(byAdding: .day, value: -1, to: cursor) else { break }
-            cursor = prev
-        }
-        return streak
-    }
-
-    private func computeLongestStreak(
-        calendar: Calendar,
-        today: Date,
-        activeCountsToday: Bool
-    ) -> Int {
-        var daysWithSessions = Set(
-            sessions.map { calendar.startOfDay(for: $0.endedAt) }
-        )
-        if activeCountsToday {
-            daysWithSessions.insert(today)
-        }
-        let sortedDays = daysWithSessions.sorted()
-        guard !sortedDays.isEmpty else { return 0 }
-
-        var longest = 1
-        var current = 1
-        for idx in 1..<sortedDays.count {
-            let prev = sortedDays[idx - 1]
-            let day = sortedDays[idx]
-            if let expectedNext = calendar.date(byAdding: .day, value: 1, to: prev),
-                calendar.isDate(expectedNext, inSameDayAs: day)
-            {
-                current += 1
-                longest = Swift.max(longest, current)
-            } else {
-                current = 1
-            }
-        }
-        return longest
-    }
-
     private func closeActiveIfNeeded() {
         guard activeSession != nil else { return }
         endSession()
+    }
+
+    private func startMotivationCadenceLoopIfNeeded() {
+        motivationReconcileTask?.cancel()
+        guard ReadingMotivationActiveSessionReconcilePolicy.shouldRunCadence(
+            hasActiveSession: activeSession != nil
+        ) else {
+            motivationReconcileTask = nil
+            return
+        }
+        motivationReconcileTask = Task { @MainActor [weak self] in
+            let interval = ReadingMotivationActiveSessionReconcilePolicy.tickIntervalSeconds
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(interval))
+                guard let self, !Task.isCancelled else { return }
+                guard ReadingMotivationActiveSessionReconcilePolicy.shouldRunCadence(
+                    hasActiveSession: self.activeSession != nil
+                ) else { return }
+                // Authoritative streak at retention / day change — independent of reminders.
+                self.publishAuthoritativeStreakIfNeeded()
+                if ReadingMotivationActiveSessionReconcilePolicy.shouldReconcileNotificationsOnTick(
+                    notificationsEnabled: ReadingMotivationStore.shared.settings.notificationsEnabled
+                ) {
+                    // Uses motivationSessionRecords(at:) live elapsed via refresh path.
+                    await ReadingMotivationStore.shared.refreshNotifications()
+                }
+            }
+        }
+    }
+
+    private func stopMotivationCadenceLoopAndRefresh(publishStreak: Bool) {
+        motivationReconcileTask?.cancel()
+        motivationReconcileTask = nil
+        if publishStreak {
+            publishAuthoritativeStreakIfNeeded()
+        }
+        Task { await ReadingMotivationStore.shared.refreshNotifications() }
+    }
+
+    /// Push current streak+activity anchor into the shared Continue snapshot.
+    /// Runs from SessionTracker lifecycle (not a Home-only timer) so the widget
+    /// stays honest while Home is off-screen. Arbitrary iOS suspension can still
+    /// delay ticks until foreground restore.
+    private func publishAuthoritativeStreakIfNeeded(now: Date = Date(), force: Bool = false) {
+        let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: .current)
+        let records = motivationSessionRecords(at: now)
+        let effectiveElapsed: TimeInterval
+        if let active = activeSession {
+            effectiveElapsed = now.timeIntervalSince(active.startedAt)
+        } else if let last = sessions.last {
+            // Retained end path: closed session already appended.
+            effectiveElapsed = last.durationSeconds
+        } else {
+            effectiveElapsed = 0
+        }
+        let streakDays = ReadingMotivationCalculations.streaks(
+            sessions: records,
+            calendar: calendar,
+            now: now,
+            archivedActivityDays: motivationArchivedActivityDays()
+        ).current
+        let activityDayKey = ReadingMotivationCalculations.streakActivityDayKey(
+            sessions: records,
+            calendar: calendar,
+            now: now,
+            archivedActivityDays: motivationArchivedActivityDays()
+        )
+        // Sync imports can increase OR decrease activity with no live session.
+        // The shared store still no-ops identical authoritative data.
+        guard force || ReadingMotivationActiveSessionReconcilePolicy.shouldPublishAuthoritativeStreak(
+            sessionElapsed: effectiveElapsed,
+            streakDays: streakDays,
+            activityDayKey: activityDayKey,
+            lastPublishedStreakDays: lastPublishedWidgetStreakDays,
+            lastPublishedActivityDayKey: lastPublishedWidgetStreakDayKey
+        ) else { return }
+        guard ContinueWidgetSnapshotStore.updateAuthoritativeStreak(
+            streakDays: streakDays,
+            streakActivityDayKey: activityDayKey
+        ) else { return }
+        lastPublishedWidgetStreakDays = streakDays
+        lastPublishedWidgetStreakDayKey = activityDayKey
     }
 
     private static func toSyncSession(_ session: PRMediaSession) -> InkampStatsSessionRecord {
