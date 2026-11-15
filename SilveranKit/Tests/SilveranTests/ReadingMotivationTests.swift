@@ -1499,6 +1499,47 @@ struct ReadingMotivationTests {
         #expect(await scheduler.pendingCount() == 0)
     }
 
+    @Test func deliveryDismissedDuringCancellationStillConsumesDayAfterRestart() async throws {
+        let start = date(2026, 11, 15, 18)
+        let delivery = date(2026, 11, 15, 20)
+        let dayKey = "2026-11-15"
+        let clock = TestMotivationClock(start)
+        let scheduler = TestMotivationScheduler()
+        let storage = TestMotivationStateStore()
+        let (coordinator, _) = makeCoordinator(
+            scheduler: scheduler, stateStore: storage, now: start, clock: clock
+        )
+        #expect(try await coordinator.reconcile(
+            candidates: [.init(kind: .rescue, deliveryDate: delivery)],
+            enabled: true, now: start, calendar: calendar, requestRevision: 1
+        ) == .schedule(kind: .rescue, dayKey: dayKey))
+        await scheduler.pauseNextCancelCall()
+        let cancelling = Task {
+            try await coordinator.reconcile(
+                candidates: [], enabled: true, now: start,
+                calendar: calendar, requestRevision: 2
+            )
+        }
+        await scheduler.waitForPausedCancel()
+        clock.advance(to: delivery.addingTimeInterval(30))
+        await scheduler.setDelivered(
+            identifier: ReadingMotivationNotificationCoordinator.identifier(for: dayKey), at: delivery
+        )
+        // The user dismisses OS evidence while cancellation is still suspended.
+        await scheduler.clearDelivered()
+        await scheduler.resumePausedCancel()
+        #expect(try await cancelling.value == .cancelPending)
+        #expect(await storage.load().hasConsumedDayKey(dayKey))
+        let (restarted, _) = makeCoordinator(
+            scheduler: scheduler, stateStore: storage, now: clock.now(), clock: clock
+        )
+        #expect(try await restarted.reconcile(
+            candidates: [.init(kind: .rescue, deliveryDate: date(2026, 11, 15, 21))],
+            enabled: true, now: clock.now(), calendar: calendar, requestRevision: 3
+        ) == .none)
+        #expect(await scheduler.pendingCount() == 0)
+    }
+
     @Test func ingestDeliveredPersistsConsumedDaysBeforeRemoveAndSurvivesCrashAtRemoval() async throws {
         let requestDay = "2026-11-15"
         let actualDay = "2026-11-16"

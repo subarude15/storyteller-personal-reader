@@ -505,7 +505,10 @@ public enum ContinueWidgetSnapshotStore {
             let paintChanged = previousPaint != snapshot.paintSignature
             let transportChanged = previousTransport != snapshot.transportSignature
             let now = Date()
-            guard paintChanged || transportChanged else {
+            // The activity anchor affects future expiry even if today's text
+            // matches, as when a one-day streak restarts after a gap.
+            let anchorChanged = previous?.streakActivityDayKey != snapshot.streakActivityDayKey
+            guard paintChanged || transportChanged || anchorChanged else {
                 publishLock.unlock()
                 return
             }

@@ -960,11 +960,7 @@ public actor ReadingMotivationNotificationCoordinator {
             case .none:
                 return .none
             case .cancelPending:
-                if let pendingDay = state.pendingDayKey {
-                    await scheduler.cancelPending(identifier: Self.identifier(for: pendingDay))
-                }
-                clearPendingState()
-                await stateStore.save(state)
+                await abandonPending(referenceNow: referenceNow, calendar: calendar)
                 return .cancelPending
             case .schedule(_, let dayKey), .replacePending(_, let dayKey):
                 let intendedReplace: Bool = {
@@ -975,7 +971,7 @@ public actor ReadingMotivationNotificationCoordinator {
                 referenceNow = max(now, clock.now())
                 await consumeExpiredPending(now: referenceNow, calendar: calendar)
                 if state.hasConsumedDayKey(dayKey) {
-                    await abandonPending()
+                    await abandonPending(referenceNow: referenceNow, calendar: calendar)
                     return .cancelPending
                 }
 
@@ -994,11 +990,7 @@ public actor ReadingMotivationNotificationCoordinator {
                         installKind = liveKind
                         installDay = liveDay
                     case .cancelPending:
-                        if let pendingDay = state.pendingDayKey {
-                            await scheduler.cancelPending(identifier: Self.identifier(for: pendingDay))
-                        }
-                        clearPendingState()
-                        await stateStore.save(state)
+                        await abandonPending(referenceNow: referenceNow, calendar: calendar)
                         return .cancelPending
                     case .none:
                         return .none
@@ -1047,7 +1039,7 @@ public actor ReadingMotivationNotificationCoordinator {
                 referenceNow = max(now, clock.now())
                 await consumeExpiredPending(now: referenceNow, calendar: calendar)
                 if state.hasConsumedDayKey(installDay) {
-                    await abandonPending()
+                    await abandonPending(referenceNow: referenceNow, calendar: calendar)
                     return .cancelPending
                 }
                 return intendedReplace
@@ -1113,10 +1105,15 @@ public actor ReadingMotivationNotificationCoordinator {
         state.pendingDeliveryDate = nil
     }
 
-    private func abandonPending() async {
+    private func abandonPending(referenceNow: Date, calendar: Calendar) async {
         if let pendingDay = state.pendingDayKey {
             await scheduler.cancelPending(identifier: Self.identifier(for: pendingDay))
         }
+        // OS delivery can happen during cancellation, and its alert can already
+        // be dismissed. Account for evidence and elapsed fire time before erasing
+        // the pending record so a later same-day request cannot duplicate it.
+        await ingestDelivered(calendar: calendar)
+        await consumeExpiredPending(now: max(referenceNow, clock.now()), calendar: calendar)
         clearPendingState()
         await stateStore.save(state)
     }

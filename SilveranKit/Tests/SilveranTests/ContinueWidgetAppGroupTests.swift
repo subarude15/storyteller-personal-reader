@@ -203,10 +203,10 @@ struct ContinueWidgetSnapshotTests {
             progress: 0.25,
             elapsedSeconds: 900,
             durationSeconds: 3600,
-            streakDays: 2,
-            streakActivityDayKey: "2026-11-14",
             hasLiveSession: true,
-            rate: 1
+            rate: 1,
+            streakDays: 2,
+            streakActivityDayKey: "2026-11-14"
         )
         var laterStamp = base
         laterStamp.generatedAt = Date(timeIntervalSince1970: 1_800_000_000)
@@ -285,6 +285,32 @@ struct ContinueWidgetSnapshotTests {
         let final = store.readSnapshot(in: root)
         #expect(final?.streakDays == 7)
         #expect(final?.streakActivityDayKey == "2026-11-15")
+    }
+
+    @Test func unchangedPaintPersistsNewStreakAnchor() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("continue-anchor-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        }
+        let store = PausableContinueWidgetFileStore(root: root)
+        ContinueWidgetSnapshotStore.resetPublishSignaturesForTesting()
+        for anchor in ["2026-11-10", "2026-11-15"] {
+            ContinueWidgetSnapshotStore.publish(
+                title: "Piranesi", subtitle: "Clarke", isPlaying: false,
+                kind: .ebook, coverData: nil, streakDays: 1,
+                streakActivityDayKey: anchor, fileStore: store
+            )
+        }
+        let saved = try #require(store.readSnapshot(in: root))
+        #expect(saved.streakDays == 1)
+        #expect(saved.streakActivityDayKey == "2026-11-15")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let today = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 15)))
+        #expect(saved.resolvingStreak(at: today, calendar: calendar).streakDays == 1)
     }
 
     @Test func continueWidgetPublisherSourceDoesNotPreassertStoredStreak() throws {
