@@ -18,10 +18,18 @@ images supplied by Chief (local references only; images are not uploaded here):
 
 ## Scope and limitations
 
-- Synthetic local cards replace only Home's greeting/queue CONTENT in this
-  target. No server, real user library or real audio transport is needed.
-- These cards deliberately overflow the viewport. Their fixture dimensions are
-  NOT player-height reservations, padding fixes or measurements of Josh's cards.
+- Local `BookMetadata`, progress timestamps and podcast inputs pass through the
+  production `HomeMixedQueue.build`. Home renders its real greeting,
+  Finish-tonight, Continue, covers/badges, horizontal Up next and Stats strip;
+  there is no longer a substitute fixed-size card path.
+- Inputs match screenshot title lengths, readaloud/podcast badges, Played copy,
+  long Continue time and the podcast's 1h36 remaining. Stats use a local history
+  ledger through the real tracker. Artwork is the real renderer's placeholder
+  branch because no authenticated VM or live covers are loaded.
+- Matrix profiles cover the real bedtime card present/absent, plus player
+  restoration after the initial scroll layout. A harness-only toolbar action
+  injects that state transition without changing any production layout policy.
+  Its pre/post UIScrollView measurements expose the first propagation failure.
 - The actual Stats strip/action, scroll hierarchy, inset and bar chrome remain
   production code. Runtime frames/insets are observed, never imposed by a mock.
 - The host has its own `com.punkrally.reader.geometry` bundle. Production bundle
@@ -29,8 +37,16 @@ images supplied by Chief (local references only; images are not uploaded here):
 - The data seam in SilveranAppleKit is DEBUG-only and opt-in via
   `INKAMP_GEOMETRY_FIXTURE=1`. App-side fixture/probes compile only under
   `INKAMP_GEOMETRY_HARNESS`, which only this isolated target defines.
-- A passing simulator baseline means **not reproduced in this fixture/runtime**;
-  it does not overrule Josh's device report or establish a device fix.
+- Remaining differences: isolated fresh Debug host instead of the release
+  entrypoint/startup-restore wrapper, no authenticated MediaViewModel or real
+  progress/cover refresh races, simulated player chrome state instead of real
+  audio transport/session restoration, deterministic local sample metadata and
+  history rather than an exported device library, and the runner's simulator
+  device/OS/text settings rather than a verified match for Josh's device/zoom.
+  The restoration profile adds a diagnostic toolbar item and controls the
+  reveal explicitly, rather than replaying the real asynchronous audio monitor.
+- A passing production-renderer fixture still means **not reproduced under
+  these represented conditions**. Do not overrule Josh or claim a Home fix.
 
 ## Native acceptance and evidence
 

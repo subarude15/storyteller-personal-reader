@@ -485,6 +485,9 @@ private struct HomeTabView: View {
     /// In-progress books + podcasts (Continue sources), last-touched order.
     private var inProgressItems: [HomeMixedItem] {
         let _ = queueTick
+#if INKAMP_GEOMETRY_HARNESS
+        let queue = InkAmpGeometryFixture.queue
+#else
         let vm = mediaViewModel
         let books = vm?.library.bookMetaData ?? []
         let progress = vm?.bookProgressCache ?? [:]
@@ -499,6 +502,7 @@ private struct HomeTabView: View {
             bookLocalTouches: BookRecentStore.shared.all(),
             upNextLimit: 40
         )
+#endif
         return ([queue.continueItem].compactMap { $0 }) + queue.upNext
     }
 
@@ -518,7 +522,11 @@ private struct HomeTabView: View {
 
     private var finishTonightPicks: (minutes: Int, items: [HomeMixedItem])? {
         let _ = queueTick
+#if INKAMP_GEOMETRY_HARNESS
+        guard let minutes = InkAmpGeometryFixture.minutesUntilBedtime else { return nil }
+#else
         guard let minutes = BedtimeSettings.minutesUntilBedtime() else { return nil }
+#endif
         let items = FinishTonight.picks(
             from: inProgressItems,
             minutesUntilBedtime: minutes
@@ -546,16 +554,10 @@ private struct HomeTabView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-#if INKAMP_GEOMETRY_HARNESS
-                    // Isolated simulator target only; keep the production scroll
-                    // boundary and stats action, but require no server/library.
-                    InkAmpGeometryFixture.content
-#else
                     greetingHeader
                     finishTonightCard
                     continueHero
                     upNextRow
-#endif
                     statsStrip
                 }
                 .padding(.horizontal, PunkRallyTheme.Metric.screenInset)
@@ -573,6 +575,16 @@ private struct HomeTabView: View {
             .background(chrome.bg)
             .navigationTitle("ink+amp")
             .toolbar {
+#if INKAMP_GEOMETRY_HARNESS
+                if InkAmpGeometryFixture.restoreAfterLayout {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Restore fixture player") {
+                            NotificationCenter.default.post(
+                                name: Notification.Name("InkAmpGeometryRestorePlayer"), object: nil)
+                        }
+                    }
+                }
+#endif
                 if mediaViewModel?.hasServerConnectionIssue == true {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
@@ -722,6 +734,10 @@ private struct HomeTabView: View {
                 homeItemContextMenu(for: item)
             }
         }
+#if INKAMP_GEOMETRY_HARNESS
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("geometry.continue.production")
+#endif
     }
 
     private var upNextRow: some View {
@@ -770,6 +786,10 @@ private struct HomeTabView: View {
                 }
             }
         }
+#if INKAMP_GEOMETRY_HARNESS
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("geometry.upnext")
+#endif
     }
 
     private var statsStrip: some View {

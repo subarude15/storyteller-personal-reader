@@ -358,14 +358,17 @@ private struct MiniPlayerGeometryFixture: View {
     let topClearance: CGFloat
     @State private var stopped = false
     @State private var toggled = false
+    @State private var restored = false
 
     private var state: String {
         ProcessInfo.processInfo.environment["INKAMP_GEOMETRY_PLAYER"] ?? "paused"
     }
 
     var body: some View {
+        Group {
         if MiniPlayerPolicy.isDockedBarVisible(
-            hasSession: !stopped && state != "hidden",
+            hasSession: !stopped && state != "hidden" && (restored ||
+                ProcessInfo.processInfo.environment["INKAMP_GEOMETRY_RESTORE_AFTER_LAYOUT"] != "1"),
             isCardPresented: false,
             isPodcastEpisodePresented: false
         ) {
@@ -387,6 +390,11 @@ private struct MiniPlayerGeometryFixture: View {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("geometry.player")
             .padding(.top, topClearance)
+        }
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: Notification.Name("InkAmpGeometryRestorePlayer"))) { _ in
+            restored = true
         }
     }
 }

@@ -9,16 +9,50 @@ final class HomeScrollGeometryTests: XCTestCase {
     }
 
     func testHomeRestingBottomAndStatsTapMatrix() throws {
+        try verifyHomeMatrix(profile: "bedtime")
+    }
+
+    func testHomeWithoutBedtimeCardMatrix() throws {
+        try verifyHomeMatrix(profile: "no-bedtime")
+    }
+
+    func testHomePlayerRestorationAfterInitialLayoutMatrix() throws {
+        try verifyHomeMatrix(profile: "bedtime", restoreAfterLayout: true)
+    }
+
+    private func verifyHomeMatrix(profile: String, restoreAfterLayout: Bool = false) throws {
         for orientation in [UIDeviceOrientation.portrait, .landscapeLeft] {
             for type in ["normal", "accessibility"] {
                 for player in ["playing", "paused", "hidden"] {
-                    let name = "home-\(orientation.rawValue)-\(type)-\(player)"
+                    let name = "home-\(orientation.rawValue)-\(type)-\(player)-\(profile)-restore-\(restoreAfterLayout)"
                     try XCTContext.runActivity(named: name) { activity in
-                        let app = launch(orientation: orientation, type: type, player: player)
+                        let app = launch(orientation: orientation, type: type, player: player,
+                            homeProfile: profile, restoreAfterLayout: restoreAfterLayout)
                         defer { app.terminate() }
                         let scroll = app.scrollViews["geometry.scroll.home"]
                         XCTAssertTrue(scroll.waitForExistence(timeout: 15), name)
                         guard scroll.exists else { return }
+                        XCTAssertTrue(element("geometry.continue.production", in: app).exists,
+                            "Must exercise the actual Continue renderer, not a synthetic card")
+                        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(
+                            format: "label CONTAINS %@", "Adam Nevill - The Reddening: A Gripping Folk-Horror"
+                        )).firstMatch.exists, "Fixture must populate the real mixed queue")
+                        if restoreAfterLayout && player != "hidden" {
+                            XCTAssertFalse(element("geometry.player", in: app).exists)
+                            let before = try metrics("home", in: app)
+                            app.buttons["Restore fixture player"].tap()
+                            XCTAssertTrue(element("geometry.player", in: app).waitForExistence(timeout: 5))
+                            Thread.sleep(forTimeInterval: 1)
+                            let after = try metrics("home", in: app)
+                            attach(app, activity: activity, name: "\(name)-restoration",
+                                metrics: ["before": before, "after": after])
+                            let insetBefore = try XCTUnwrap(before["adjustedInsetBottom"] as? Double)
+                            let insetAfter = try XCTUnwrap(after["adjustedInsetBottom"] as? Double)
+                            let heightBefore = try XCTUnwrap(before["viewportHeight"] as? Double)
+                            let heightAfter = try XCTUnwrap(after["viewportHeight"] as? Double)
+                            XCTAssertTrue(insetAfter > insetBefore + 1 || heightAfter < heightBefore - 1,
+                                "First failing boundary: restored player did not reserve scroll viewport space")
+                        }
                         try scrollToRestingBottom(scroll, app: app, probe: "home")
                         let stats = app.buttons["Open Stats"]
                         let upNext = element("geometry.upnext", in: app)
@@ -107,12 +141,15 @@ final class HomeScrollGeometryTests: XCTestCase {
             "Stopped bar must release its reservation, not leave a permanent empty gap: \(before) -> \(after)")
     }
 
-    private func launch(orientation: UIDeviceOrientation, type: String, player: String) -> XCUIApplication {
+    private func launch(orientation: UIDeviceOrientation, type: String, player: String,
+        homeProfile: String = "bedtime", restoreAfterLayout: Bool = false) -> XCUIApplication {
         XCUIDevice.shared.orientation = orientation
         let app = XCUIApplication()
         app.launchEnvironment["INKAMP_GEOMETRY_FIXTURE"] = "1"
         app.launchEnvironment["INKAMP_GEOMETRY_PLAYER"] = player
         app.launchEnvironment["INKAMP_GEOMETRY_DYNAMIC_TYPE"] = type
+        app.launchEnvironment["INKAMP_GEOMETRY_HOME_PROFILE"] = homeProfile
+        app.launchEnvironment["INKAMP_GEOMETRY_RESTORE_AFTER_LAYOUT"] = restoreAfterLayout ? "1" : "0"
         app.launch()
         XCUIDevice.shared.orientation = orientation
         Thread.sleep(forTimeInterval: 0.6)
@@ -181,7 +218,14 @@ final class HomeScrollGeometryTests: XCTestCase {
         screenshot.name = name
         screenshot.lifetime = .keepAlways
         activity.add(screenshot)
-        let text = XCTAttachment(string: "\(metrics)\n\(app.debugDescription)")
+        let data: Data
+        do {
+            data = try JSONSerialization.data(withJSONObject: metrics, options: .sortedKeys)
+        } catch {
+            XCTFail("Native evidence could not be encoded: \(error)")
+            return
+        }
+        let text = XCTAttachment(string: String(decoding: data, as: UTF8.self) + "\n" + app.debugDescription)
         text.name = "\(name)-geometry-and-accessibility"
         text.lifetime = .keepAlways
         activity.add(text)
