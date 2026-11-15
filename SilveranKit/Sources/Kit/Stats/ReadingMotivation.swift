@@ -112,7 +112,11 @@ public struct ReadingMotivationDay: Equatable, Sendable, Identifiable {
     public var seconds: TimeInterval { readingSeconds + listeningSeconds }
 }
 
-/// Frozen local-calendar date identity for activity already removed from SessionTracker.
+/// Frozen Gregorian local-day identity for activity already removed from SessionTracker.
+/// New archives always normalize to Gregorian while preserving the source time zone.
+/// Older non-Gregorian `calendarIdentifier` values decode unchanged but are not remapped:
+/// era/leap-month ambiguity cannot be recovered honestly, so streak filtering only unions
+/// Gregorian (and legacy-UTC Gregorian) archive keys.
 public struct ReadingMotivationActivityDay: Codable, Equatable, Hashable, Sendable, Identifiable {
     public let year: Int
     public let month: Int
@@ -127,12 +131,13 @@ public struct ReadingMotivationActivityDay: Codable, Equatable, Hashable, Sendab
     public var id: String { dayKey + "|" + calendarIdentifier + "|" + timeZoneIdentifier }
 
     public init(date: Date, calendar: Calendar, timeZoneIdentifier: String? = nil) {
-        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        let normalized = ReadingMotivationCalculations.normalizedLocalCalendar(from: calendar)
+        let components = normalized.dateComponents([.year, .month, .day], from: date)
         year = components.year ?? 0
         month = components.month ?? 0
         day = components.day ?? 0
-        calendarIdentifier = String(describing: calendar.identifier)
-        self.timeZoneIdentifier = timeZoneIdentifier ?? calendar.timeZone.identifier
+        calendarIdentifier = String(describing: normalized.identifier)
+        self.timeZoneIdentifier = timeZoneIdentifier ?? normalized.timeZone.identifier
     }
 }
 
@@ -159,6 +164,16 @@ public enum ReadingMotivationFinishProjection: Equatable, Sendable {
 }
 
 public enum ReadingMotivationCalculations {
+    /// Feature local-day math always uses Gregorian year/month/day identities while
+    /// preserving the caller's time zone and week-start conventions.
+    public static func normalizedLocalCalendar(from calendar: Calendar) -> Calendar {
+        var normalized = Calendar(identifier: .gregorian)
+        normalized.timeZone = calendar.timeZone
+        normalized.firstWeekday = calendar.firstWeekday
+        normalized.minimumDaysInFirstWeek = calendar.minimumDaysInFirstWeek
+        return normalized
+    }
+
     /// Keep live contributions consistent with the existing persisted-session
     /// threshold so a discarded short session cannot create a temporary streak.
     public static func isRecordableSession(duration: TimeInterval) -> Bool {
@@ -171,6 +186,7 @@ public enum ReadingMotivationCalculations {
         calendar: Calendar,
         now: Date
     ) -> [ReadingMotivationDay] {
+        let calendar = normalizedLocalCalendar(from: calendar)
         var totals: [Date: (reading: TimeInterval, listening: TimeInterval)] = [:]
         for session in normalizedSessions(sessions, now: now) {
             let span = session.endedAt.timeIntervalSince(session.startedAt)
@@ -208,6 +224,7 @@ public enum ReadingMotivationCalculations {
         now: Date,
         archivedActivityDays: [ReadingMotivationActivityDay] = []
     ) -> ReadingMotivationStreaks {
+        let calendar = normalizedLocalCalendar(from: calendar)
         let today = localDayKey(now, calendar: calendar)
         var activeDays = Set(dailyTotals(sessions: sessions, calendar: calendar, now: now).map {
             localDayKey($0.day, calendar: calendar)
@@ -258,6 +275,7 @@ public enum ReadingMotivationCalculations {
         calendar: Calendar,
         now: Date
     ) -> Set<ReadingMotivationActivityDay> {
+        let calendar = normalizedLocalCalendar(from: calendar)
         let expired = normalizedSessions(sessions, now: now).filter { $0.endedAt < cutoff }
         let days = dailyTotals(sessions: expired, calendar: calendar, now: now)
         let existingKeys = Set(existing.map(\.dayKey))
@@ -277,6 +295,7 @@ public enum ReadingMotivationCalculations {
         // v1 stored local-midnight instants without the source time zone and included
         // still-retained sessions. Rebuild overlapping days from sessions; freeze orphaned
         // markers as UTC date identities so they are never reinterpreted after travel.
+        let calendar = normalizedLocalCalendar(from: calendar)
         let normalized = normalizedSessions(sessions, now: now)
         var migrated = archiveExpiredActivityDays(
             sessions: sessions,
@@ -309,6 +328,7 @@ public enum ReadingMotivationCalculations {
         now: Date,
         archivedActivityDays: [ReadingMotivationActivityDay] = []
     ) -> ReadingMotivationWeeklyReceipt {
+        let calendar = normalizedLocalCalendar(from: calendar)
         let current = calendar.dateInterval(of: .weekOfYear, for: now)
             ?? DateInterval(start: calendar.startOfDay(for: now), duration: 7 * 24 * 3600)
         let shiftedStart = calendar.date(byAdding: .weekOfYear, value: weekOffset, to: current.start)
@@ -360,6 +380,7 @@ public enum ReadingMotivationCalculations {
         for key: String,
         calendar: Calendar
     ) -> Date? {
+        let calendar = normalizedLocalCalendar(from: calendar)
         let parts = key.split(separator: "-").compactMap { Int($0) }
         guard parts.count == 3, parts[0] > 0 else { return nil }
         let components = DateComponents(year: parts[0], month: parts[1], day: parts[2])
@@ -501,6 +522,7 @@ public enum ReadingMotivationCalculations {
         now: Date,
         archivedActivityDays: [ReadingMotivationActivityDay] = []
     ) -> String {
+        let calendar = normalizedLocalCalendar(from: calendar)
         let today = localDayKey(now, calendar: calendar)
         var activeDays = Set(dailyTotals(sessions: sessions, calendar: calendar, now: now).map {
             localDayKey($0.day, calendar: calendar)
@@ -521,6 +543,7 @@ public enum ReadingMotivationCalculations {
     }
 
     public static func localDayKey(_ date: Date, calendar: Calendar) -> String {
+        let calendar = normalizedLocalCalendar(from: calendar)
         let components = calendar.dateComponents([.year, .month, .day], from: date)
         return String(
             format: "%04d-%02d-%02d",
@@ -736,8 +759,7 @@ public enum ReadingMotivationNotificationDecision: Equatable, Sendable {
 
 public enum ReadingMotivationNotificationPolicy {
     public static func localDayKey(_ date: Date, calendar: Calendar) -> String {
-        let parts = calendar.dateComponents([.year, .month, .day], from: date)
-        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+        ReadingMotivationCalculations.localDayKey(date, calendar: calendar)
     }
 
     public static func quietDeliveryDate(
@@ -746,6 +768,7 @@ public enum ReadingMotivationNotificationPolicy {
         minute: Int,
         calendar: Calendar
     ) -> Date? {
+        let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: calendar)
         guard (0...23).contains(hour), (0...59).contains(minute) else { return nil }
         return calendar.date(
             bySettingHour: hour,
@@ -776,6 +799,7 @@ public enum ReadingMotivationNotificationPolicy {
         activityDaysThisWeek: Int,
         calendar: Calendar
     ) -> [ReadingMotivationNotificationCandidate] {
+        let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: calendar)
         guard let quietDeliveryDate,
             quietDeliveryDate > now,
             localDayKey(quietDeliveryDate, calendar: calendar) == localDayKey(now, calendar: calendar)
@@ -833,6 +857,7 @@ public enum ReadingMotivationNotificationPolicy {
         now: Date,
         calendar: Calendar
     ) -> ReadingMotivationNotificationDecision {
+        let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: calendar)
         guard enabled, authorized else {
             return state.pendingKind == nil ? .none : .cancelPending
         }
@@ -974,7 +999,10 @@ public actor UserDefaultsReadingMotivationNotificationStateStore: ReadingMotivat
 }
 
 /// Serializes permission, pending replacement, and the one-delivery-per-day ledger.
-/// The transaction gate orders callers; it does not control OS delivery timing.
+/// The transaction gate orders shared-state mutations; latest preference/request
+/// invalidation is registered synchronously before the first gate await so a newer
+/// opt-out cannot queue invisibly behind an in-flight enabled transaction.
+/// Already-entered OS schedule adds remain best-effort cancellation only.
 public actor ReadingMotivationNotificationCoordinator {
     private let scheduler: any ReadingMotivationNotificationScheduling
     private let stateStore: any ReadingMotivationNotificationStateStoring
@@ -985,6 +1013,7 @@ public actor ReadingMotivationNotificationCoordinator {
     private var transactionWaiters: [CheckedContinuation<Void, Never>] = []
     private var latestPreferenceRevision: UInt64 = 0
     private var latestRequestRevision: UInt64 = 0
+    private var latestEnabledPreference = false
 
     public init(
         scheduler: any ReadingMotivationNotificationScheduling,
@@ -1014,14 +1043,27 @@ public actor ReadingMotivationNotificationCoordinator {
         preferenceRevision: UInt64 = 0,
         requestRevision: UInt64 = 0
     ) async throws -> ReadingMotivationNotificationDecision {
+        let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: calendar)
+        // Control-plane invalidation must win before any transaction wait.
+        registerLatestIntent(
+            enabled: enabled,
+            preferenceRevision: preferenceRevision,
+            requestRevision: requestRevision
+        )
         await beginTransaction()
         defer { endTransaction() }
+        guard isLatestIntent(
+            enabled: enabled,
+            preferenceRevision: preferenceRevision,
+            requestRevision: requestRevision
+        ) else { return .none }
+
         await loadStateIfNeeded()
-        guard preferenceRevision >= latestPreferenceRevision,
-            requestRevision >= latestRequestRevision
-        else { return .none }
-        latestPreferenceRevision = preferenceRevision
-        latestRequestRevision = requestRevision
+        guard isLatestIntent(
+            enabled: enabled,
+            preferenceRevision: preferenceRevision,
+            requestRevision: requestRevision
+        ) else { return .none }
 
         // Caller `now` is a reference instant; after awaits the injected clock is
         // authoritative so a late OS delivery cannot be followed by a replacement.
@@ -1029,9 +1071,19 @@ public actor ReadingMotivationNotificationCoordinator {
         await ingestDelivered(calendar: calendar)
         await consumeExpiredPending(now: referenceNow, calendar: calendar)
         await stateStore.save(state)
+        guard isLatestIntent(
+            enabled: enabled,
+            preferenceRevision: preferenceRevision,
+            requestRevision: requestRevision
+        ) else { return .none }
 
         let authorized = await scheduler.authorization() == .authorized
         referenceNow = max(now, clock.now())
+        guard isLatestIntent(
+            enabled: enabled,
+            preferenceRevision: preferenceRevision,
+            requestRevision: requestRevision
+        ) else { return .none }
         let decision = ReadingMotivationNotificationPolicy.decide(
             candidates: candidates,
             state: state,
@@ -1048,7 +1100,9 @@ public actor ReadingMotivationNotificationCoordinator {
                     authorized: authorized,
                     now: now,
                     referenceNow: referenceNow,
-                    calendar: calendar
+                    calendar: calendar,
+                    preferenceRevision: preferenceRevision,
+                    requestRevision: requestRevision
                 )
             case .cancelPending:
                 await abandonPending(referenceNow: referenceNow, calendar: calendar)
@@ -1061,6 +1115,11 @@ public actor ReadingMotivationNotificationCoordinator {
                 await ingestDelivered(calendar: calendar)
                 referenceNow = max(now, clock.now())
                 await consumeExpiredPending(now: referenceNow, calendar: calendar)
+                guard isLatestIntent(
+                    enabled: enabled,
+                    preferenceRevision: preferenceRevision,
+                    requestRevision: requestRevision
+                ) else { return .none }
                 if state.hasConsumedDayKey(dayKey) {
                     await abandonPending(referenceNow: referenceNow, calendar: calendar)
                     return .cancelPending
@@ -1094,6 +1153,11 @@ public actor ReadingMotivationNotificationCoordinator {
                 await ingestDelivered(calendar: calendar)
                 referenceNow = max(now, clock.now())
                 await consumeExpiredPending(now: referenceNow, calendar: calendar)
+                guard isLatestIntent(
+                    enabled: enabled,
+                    preferenceRevision: preferenceRevision,
+                    requestRevision: requestRevision
+                ) else { return .none }
                 if state.hasConsumedDayKey(installDay) {
                     clearPendingState()
                     await stateStore.save(state)
@@ -1110,6 +1174,11 @@ public actor ReadingMotivationNotificationCoordinator {
                     await stateStore.save(state)
                     return .none
                 }
+                guard isLatestIntent(
+                    enabled: enabled,
+                    preferenceRevision: preferenceRevision,
+                    requestRevision: requestRevision
+                ) else { return .none }
                 let request = ReadingMotivationNotificationRequest(
                     identifier: Self.identifier(for: installDay),
                     kind: installKind,
@@ -1119,6 +1188,16 @@ public actor ReadingMotivationNotificationCoordinator {
                 state.pendingDayKey = installDay
                 state.pendingDeliveryDate = deliveryDate
                 await stateStore.save(state)
+                guard isLatestIntent(
+                    enabled: enabled,
+                    preferenceRevision: preferenceRevision,
+                    requestRevision: requestRevision
+                ) else {
+                    // Opt-out/supersession observed after ledger write, before OS add.
+                    clearPendingState()
+                    await stateStore.save(state)
+                    return .none
+                }
                 do {
                     try await scheduler.schedule(request)
                 } catch {
@@ -1126,9 +1205,26 @@ public actor ReadingMotivationNotificationCoordinator {
                     await stateStore.save(state)
                     throw error
                 }
+                // OS add already entered: cancellation is best-effort only.
+                if !isLatestIntent(
+                    enabled: enabled,
+                    preferenceRevision: preferenceRevision,
+                    requestRevision: requestRevision
+                ) {
+                    await abandonPending(referenceNow: max(now, clock.now()), calendar: calendar)
+                    return latestEnabledPreference ? .none : .cancelPending
+                }
                 await ingestDelivered(calendar: calendar)
                 referenceNow = max(now, clock.now())
                 await consumeExpiredPending(now: referenceNow, calendar: calendar)
+                if !isLatestIntent(
+                    enabled: enabled,
+                    preferenceRevision: preferenceRevision,
+                    requestRevision: requestRevision
+                ) {
+                    await abandonPending(referenceNow: referenceNow, calendar: calendar)
+                    return latestEnabledPreference ? .none : .cancelPending
+                }
                 if state.hasConsumedDayKey(installDay) {
                     await abandonPending(referenceNow: referenceNow, calendar: calendar)
                     return .cancelPending
@@ -1144,6 +1240,7 @@ public actor ReadingMotivationNotificationCoordinator {
         deliveredAt: Date? = nil,
         calendar: Calendar = .current
     ) async {
+        let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: calendar)
         await beginTransaction()
         defer { endTransaction() }
         await loadStateIfNeeded()
@@ -1177,6 +1274,29 @@ public actor ReadingMotivationNotificationCoordinator {
         return ReadingMotivationCalculations.ordinalDate(for: key, calendar: calendar) == nil ? nil : key
     }
 
+    private func registerLatestIntent(
+        enabled: Bool,
+        preferenceRevision: UInt64,
+        requestRevision: UInt64
+    ) {
+        guard preferenceRevision >= latestPreferenceRevision,
+            requestRevision >= latestRequestRevision
+        else { return }
+        latestPreferenceRevision = preferenceRevision
+        latestRequestRevision = requestRevision
+        latestEnabledPreference = enabled
+    }
+
+    private func isLatestIntent(
+        enabled: Bool,
+        preferenceRevision: UInt64,
+        requestRevision: UInt64
+    ) -> Bool {
+        enabled == latestEnabledPreference
+            && preferenceRevision == latestPreferenceRevision
+            && requestRevision == latestRequestRevision
+    }
+
     private func beginTransaction() async {
         guard transactionActive else {
             transactionActive = true
@@ -1208,9 +1328,16 @@ public actor ReadingMotivationNotificationCoordinator {
         authorized: Bool,
         now: Date,
         referenceNow: Date,
-        calendar: Calendar
+        calendar: Calendar,
+        preferenceRevision: UInt64,
+        requestRevision: UInt64
     ) async throws -> ReadingMotivationNotificationDecision {
         guard enabled, authorized,
+            isLatestIntent(
+                enabled: enabled,
+                preferenceRevision: preferenceRevision,
+                requestRevision: requestRevision
+            ),
             let pendingDay = state.pendingDayKey,
             let pendingKind = state.pendingKind,
             let deliveryDate = state.pendingDeliveryDate,
@@ -1226,7 +1353,12 @@ public actor ReadingMotivationNotificationCoordinator {
         await consumeExpiredPending(now: liveNow, calendar: calendar)
         await stateStore.save(state)
 
-        guard state.pendingDayKey == pendingDay,
+        guard isLatestIntent(
+                enabled: enabled,
+                preferenceRevision: preferenceRevision,
+                requestRevision: requestRevision
+            ),
+            state.pendingDayKey == pendingDay,
             state.pendingKind == pendingKind,
             state.pendingDeliveryDate == deliveryDate,
             !state.hasConsumedDayKey(pendingDay),
@@ -1245,7 +1377,12 @@ public actor ReadingMotivationNotificationCoordinator {
         await consumeExpiredPending(now: liveNow, calendar: calendar)
         await stateStore.save(state)
 
-        guard state.pendingDayKey == pendingDay,
+        guard isLatestIntent(
+                enabled: enabled,
+                preferenceRevision: preferenceRevision,
+                requestRevision: requestRevision
+            ),
+            state.pendingDayKey == pendingDay,
             state.pendingKind == pendingKind,
             let stillDelivery = state.pendingDeliveryDate,
             stillDelivery == deliveryDate,
@@ -1277,6 +1414,11 @@ public actor ReadingMotivationNotificationCoordinator {
             })
         else { return .none }
 
+        guard isLatestIntent(
+            enabled: enabled,
+            preferenceRevision: preferenceRevision,
+            requestRevision: requestRevision
+        ) else { return .none }
         let request = ReadingMotivationNotificationRequest(
             identifier: identifier,
             kind: pendingKind,
@@ -1288,6 +1430,14 @@ public actor ReadingMotivationNotificationCoordinator {
             clearPendingState()
             await stateStore.save(state)
             throw error
+        }
+        if !isLatestIntent(
+            enabled: enabled,
+            preferenceRevision: preferenceRevision,
+            requestRevision: requestRevision
+        ) {
+            await abandonPending(referenceNow: max(now, clock.now()), calendar: calendar)
+            return latestEnabledPreference ? .none : .cancelPending
         }
         await ingestDelivered(calendar: calendar)
         liveNow = max(now, clock.now())

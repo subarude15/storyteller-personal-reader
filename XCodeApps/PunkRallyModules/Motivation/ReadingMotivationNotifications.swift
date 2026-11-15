@@ -100,11 +100,12 @@ private final class UserNotificationScheduler: NSObject,
         content.userInfo["dayKey"] = request.identifier.replacingOccurrences(
             of: "reading-motivation.", with: ""
         )
-        var components = Calendar.current.dateComponents(
+        let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: .current)
+        var components = calendar.dateComponents(
             [.year, .month, .day, .hour, .minute], from: request.deliveryDate
         )
-        components.calendar = Calendar.current
-        components.timeZone = Calendar.current.timeZone
+        components.calendar = calendar
+        components.timeZone = calendar.timeZone
         let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
         try await center.add(
             UNNotificationRequest(identifier: request.identifier, content: content, trigger: trigger)

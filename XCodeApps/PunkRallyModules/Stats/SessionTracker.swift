@@ -187,12 +187,13 @@ final class SessionTracker {
     /// Prune sessions older than 1 year to keep storage small.
     func pruneOldSessions() {
         let now = Date()
-        let cutoff = Calendar.current.date(byAdding: .year, value: -1, to: now) ?? now
+        let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: .current)
+        let cutoff = calendar.date(byAdding: .year, value: -1, to: now) ?? now
         archivedActivityDays = ReadingMotivationCalculations.archiveExpiredActivityDays(
             sessions: sessions.map(Self.toSyncSession),
             before: cutoff,
             existing: archivedActivityDays,
-            calendar: Calendar.current,
+            calendar: calendar,
             now: now
         )
         sessions.removeAll { $0.endedAt < cutoff }
@@ -201,7 +202,7 @@ final class SessionTracker {
 
     /// Compute the full stats snapshot (includes live active session time).
     var snapshot: PRStatsSnapshot {
-        let calendar = Calendar.current
+        let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: .current)
         let now = Date()
         let records = motivationSessionRecords(at: now)
         let days = ReadingMotivationCalculations.dailyTotals(
@@ -277,12 +278,13 @@ final class SessionTracker {
             let legacy = try? JSONDecoder().decode(Set<Date>.self, from: data)
         {
             let now = Date()
-            let cutoff = Calendar.current.date(byAdding: .year, value: -1, to: now) ?? now
+            let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: .current)
+            let cutoff = calendar.date(byAdding: .year, value: -1, to: now) ?? now
             archivedActivityDays = ReadingMotivationCalculations.migrateLegacyActivityDays(
                 staleDates: legacy,
                 sessions: sessions.map(Self.toSyncSession),
                 before: cutoff,
-                calendar: Calendar.current,
+                calendar: calendar,
                 now: now
             )
             persist()
@@ -360,7 +362,7 @@ final class SessionTracker {
     /// stays honest while Home is off-screen. Arbitrary iOS suspension can still
     /// delay ticks until foreground restore.
     private func publishAuthoritativeStreakIfNeeded(now: Date = Date()) {
-        let calendar = Calendar.current
+        let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: .current)
         let records = motivationSessionRecords(at: now)
         let effectiveElapsed: TimeInterval
         if let active = activeSession {

@@ -32,10 +32,11 @@ final class ReadingMotivationStore {
 
     var today: ReadingMotivationDay {
         let now = Date()
-        let day = Calendar.current.startOfDay(for: now)
+        let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: .current)
+        let day = calendar.startOfDay(for: now)
         return ReadingMotivationCalculations.dailyTotals(
             sessions: sessions,
-            calendar: Calendar.current,
+            calendar: calendar,
             now: now
         ).first(where: { $0.day == day }) ?? ReadingMotivationDay(
             day: day, readingSeconds: 0, listeningSeconds: 0
@@ -45,7 +46,7 @@ final class ReadingMotivationStore {
     var streaks: ReadingMotivationStreaks {
         ReadingMotivationCalculations.streaks(
             sessions: sessions,
-            calendar: Calendar.current,
+            calendar: ReadingMotivationCalculations.normalizedLocalCalendar(from: .current),
             now: Date(),
             archivedActivityDays: SessionTracker.shared.motivationArchivedActivityDays()
         )
@@ -60,7 +61,7 @@ final class ReadingMotivationStore {
                 )
             },
             weekOffset: offset,
-            calendar: Calendar.current,
+            calendar: ReadingMotivationCalculations.normalizedLocalCalendar(from: .current),
             now: Date(),
             archivedActivityDays: SessionTracker.shared.motivationArchivedActivityDays()
         )
@@ -124,7 +125,8 @@ final class ReadingMotivationStore {
         {
             return ReadingMotivationCalculations.projectedAudioFinish(
                 snapshot: liveSnapshot, expectedMediaID: mediaID,
-                calendar: Calendar.current, now: now
+                calendar: ReadingMotivationCalculations.normalizedLocalCalendar(from: .current),
+                now: now
             )
         }
         return ReadingMotivationCalculations.projectedFinish(
@@ -135,7 +137,7 @@ final class ReadingMotivationStore {
             playbackRate: effectiveRate,
             paceKind: paceKind,
             paceBasis: paceBasis,
-            calendar: Calendar.current,
+            calendar: ReadingMotivationCalculations.normalizedLocalCalendar(from: .current),
             now: now
         )
     }
@@ -227,7 +229,7 @@ final class ReadingMotivationStore {
         notificationRequestRevision &+= 1
         let requestRevision = notificationRequestRevision
         let preferenceRevision = notificationPreferencesRevision
-        let calendar = Calendar.current
+        let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: .current)
         let candidates = notificationCandidates(now: now, calendar: calendar)
         await ReadingMotivationNotifications.shared.reconcile(
             candidates: candidates,

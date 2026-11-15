@@ -154,6 +154,13 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
     /// Expire stale streak counts on local calendar rollover while preserving
     /// today/yesterday grace. Activity day is the anchor; `generatedAt` is only
     /// a legacy fallback for snapshots written before the dated field existed.
+    /// Widget/app-group boundary for Gregorian local-day identities with device TZ.
+    public static func normalizedLocalCalendar(
+        from calendar: Calendar = .current
+    ) -> Calendar {
+        ReadingMotivationCalculations.normalizedLocalCalendar(from: calendar)
+    }
+
     public func resolvingStreak(
         at now: Date,
         calendar: Calendar = .current
@@ -177,6 +184,7 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         calendar: Calendar
     ) -> Int? {
         guard let streakDays else { return nil }
+        let calendar = Self.normalizedLocalCalendar(from: calendar)
         let today = ReadingMotivationCalculations.localDayKey(now, calendar: calendar)
         let anchor = activityDayKey
             ?? ReadingMotivationCalculations.localDayKey(generatedAt, calendar: calendar)

@@ -89,7 +89,7 @@ struct InkAmpContinueTimelineProvider: TimelineProvider {
         completion: @escaping (Timeline<InkAmpContinueEntry>) -> Void,
     ) {
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "continue.timeline")
-        let calendar = Calendar.current
+        let calendar = ContinueWidgetSnapshot.normalizedLocalCalendar()
         let now = Date()
         let raw = Self.loadSnapshot()
         let entry = InkAmpContinueEntry(

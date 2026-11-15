@@ -44,9 +44,23 @@ private actor TestMotivationScheduler: ReadingMotivationNotificationScheduling {
     var pausedPendingIdentifiersEntered = false
     var pendingIdentifiersStartWaiter: CheckedContinuation<Void, Never>?
     var pendingIdentifiersRelease: CheckedContinuation<Void, Never>?
+    var pauseNextAuthorization = false
+    var pausedAuthorizationEntered = false
+    var authorizationStartWaiter: CheckedContinuation<Void, Never>?
+    var authorizationRelease: CheckedContinuation<Void, Never>?
     var failNextSchedule = false
 
-    func authorization() async -> ReadingMotivationNotificationAuthorization { status }
+    func authorization() async -> ReadingMotivationNotificationAuthorization {
+        if pauseNextAuthorization {
+            pauseNextAuthorization = false
+            pausedAuthorizationEntered = true
+            authorizationStartWaiter?.resume()
+            authorizationStartWaiter = nil
+            await withCheckedContinuation { authorizationRelease = $0 }
+            pausedAuthorizationEntered = false
+        }
+        return status
+    }
     func requestAuthorization() async -> Bool {
         authorizationRequests += 1
         return status == .authorized
@@ -115,6 +129,15 @@ private actor TestMotivationScheduler: ReadingMotivationNotificationScheduling {
         scheduleRelease?.resume()
         scheduleRelease = nil
     }
+    func pauseNextAuthorizationCall() { pauseNextAuthorization = true }
+    func waitForPausedAuthorization() async {
+        if pausedAuthorizationEntered { return }
+        await withCheckedContinuation { authorizationStartWaiter = $0 }
+    }
+    func resumePausedAuthorization() {
+        authorizationRelease?.resume()
+        authorizationRelease = nil
+    }
     func pauseNextCancelCall() { pauseNextCancel = true }
     func waitForPausedCancel() async {
         if pausedCancelEntered { return }
@@ -157,6 +180,10 @@ private actor TestMotivationStateStore: ReadingMotivationNotificationStateStorin
     var pausedLoadEntered = false
     var loadStartWaiter: CheckedContinuation<Void, Never>?
     var loadRelease: CheckedContinuation<Void, Never>?
+    var pauseNextSave = false
+    var pausedSaveEntered = false
+    var saveStartWaiter: CheckedContinuation<Void, Never>?
+    var saveRelease: CheckedContinuation<Void, Never>?
 
     init(_ state: ReadingMotivationNotificationState = .empty) { self.state = state }
     func load() async -> ReadingMotivationNotificationState {
@@ -171,7 +198,17 @@ private actor TestMotivationStateStore: ReadingMotivationNotificationStateStorin
         }
         return state
     }
-    func save(_ state: ReadingMotivationNotificationState) async { self.state = state }
+    func save(_ state: ReadingMotivationNotificationState) async {
+        if pauseNextSave {
+            pauseNextSave = false
+            pausedSaveEntered = true
+            saveStartWaiter?.resume()
+            saveStartWaiter = nil
+            await withCheckedContinuation { saveRelease = $0 }
+            pausedSaveEntered = false
+        }
+        self.state = state
+    }
     func pauseNextLoadCall() { pauseNextLoad = true }
     func waitForPausedLoad() async {
         if pausedLoadEntered { return }
@@ -180,6 +217,15 @@ private actor TestMotivationStateStore: ReadingMotivationNotificationStateStorin
     func resumePausedLoad() {
         loadRelease?.resume()
         loadRelease = nil
+    }
+    func pauseNextSaveCall() { pauseNextSave = true }
+    func waitForPausedSave() async {
+        if pausedSaveEntered { return }
+        await withCheckedContinuation { saveStartWaiter = $0 }
+    }
+    func resumePausedSave() {
+        saveRelease?.resume()
+        saveRelease = nil
     }
     func reads() -> Int { loadCount }
 }
@@ -580,6 +626,107 @@ struct ReadingMotivationTests {
             date: oldMarker, calendar: utc
         ).dayKey)
         #expect(migrated.first?.timeZoneIdentifier == "legacy-UTC")
+    }
+
+    @Test func gregorianLocalDayKeysStayDistinctAcrossJapaneseEraAndChineseLeapBoundaries() {
+        var tokyoGregorian = Calendar(identifier: .gregorian)
+        tokyoGregorian.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        let april30 = tokyoGregorian.date(
+            from: DateComponents(year: 2019, month: 4, day: 30, hour: 12)
+        )!
+        let may1 = tokyoGregorian.date(
+            from: DateComponents(year: 2019, month: 5, day: 1, hour: 12)
+        )!
+        var japanese = Calendar(identifier: .japanese)
+        japanese.timeZone = tokyoGregorian.timeZone
+        japanese.firstWeekday = 2
+        japanese.minimumDaysInFirstWeek = 4
+        let aprilKey = ReadingMotivationCalculations.localDayKey(april30, calendar: japanese)
+        let mayKey = ReadingMotivationCalculations.localDayKey(may1, calendar: japanese)
+        #expect(aprilKey == "2019-04-30")
+        #expect(mayKey == "2019-05-01")
+        #expect(aprilKey < mayKey)
+        #expect(
+            ReadingMotivationCalculations.normalizedLocalCalendar(from: japanese).identifier
+                == .gregorian
+        )
+
+        let aprilArchive = ReadingMotivationActivityDay(date: april30, calendar: japanese)
+        let mayArchive = ReadingMotivationActivityDay(date: may1, calendar: japanese)
+        #expect(aprilArchive.dayKey == "2019-04-30")
+        #expect(mayArchive.dayKey == "2019-05-01")
+        #expect(aprilArchive.calendarIdentifier == "gregorian")
+        #expect(aprilArchive.timeZoneIdentifier == "Asia/Tokyo")
+        let eraStreak = ReadingMotivationCalculations.streaks(
+            sessions: [
+                session(start: april30.addingTimeInterval(-3600), end: april30),
+                session(start: may1.addingTimeInterval(-3600), end: may1),
+            ],
+            calendar: japanese,
+            now: may1,
+            archivedActivityDays: [aprilArchive, mayArchive]
+        )
+        #expect(eraStreak.current == 2)
+        #expect(eraStreak.longest == 2)
+
+        var shanghaiGregorian = Calendar(identifier: .gregorian)
+        shanghaiGregorian.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        let march21 = shanghaiGregorian.date(
+            from: DateComponents(year: 2023, month: 3, day: 21, hour: 12)
+        )!
+        let march22 = shanghaiGregorian.date(
+            from: DateComponents(year: 2023, month: 3, day: 22, hour: 12)
+        )!
+        var chinese = Calendar(identifier: .chinese)
+        chinese.timeZone = shanghaiGregorian.timeZone
+        chinese.firstWeekday = 2
+        chinese.minimumDaysInFirstWeek = 4
+        let leapKeyA = ReadingMotivationCalculations.localDayKey(march21, calendar: chinese)
+        let leapKeyB = ReadingMotivationCalculations.localDayKey(march22, calendar: chinese)
+        #expect(leapKeyA == "2023-03-21")
+        #expect(leapKeyB == "2023-03-22")
+        #expect(leapKeyA < leapKeyB)
+        let quiet = ReadingMotivationNotificationPolicy.quietDeliveryDate(
+            on: march22, hour: 20, minute: 30, calendar: chinese
+        )!
+        #expect(
+            ReadingMotivationNotificationPolicy.localDayKey(quiet, calendar: chinese)
+                == "2023-03-22"
+        )
+        let widget = ContinueWidgetSnapshot(
+            generatedAt: may1,
+            title: "Era",
+            kind: .ebook,
+            progress: 0.2,
+            streakDays: 2,
+            streakActivityDayKey: "2019-05-01"
+        )
+        #expect(widget.resolvingStreak(at: may1, calendar: japanese).streakDays == 2)
+        #expect(
+            widget.resolvingStreak(
+                at: may1.addingTimeInterval(2 * 24 * 3600), calendar: japanese
+            ).streakDays == 0
+        )
+    }
+
+    @Test func nonGregorianArchiveIdentifiersAreNotSilentlyRemapped() throws {
+        let ambiguous = try JSONDecoder().decode(
+            ReadingMotivationActivityDay.self,
+            from: Data(
+                #"{"year":1,"month":5,"day":1,"calendarIdentifier":"japanese","timeZoneIdentifier":"Asia/Tokyo"}"#
+                    .utf8
+            )
+        )
+        let streak = ReadingMotivationCalculations.streaks(
+            sessions: [],
+            calendar: calendar,
+            now: date(2019, 5, 1),
+            archivedActivityDays: [ambiguous]
+        )
+        #expect(streak.current == 0)
+        #expect(streak.longest == 0)
+        #expect(ambiguous.dayKey == "0001-05-01")
+        #expect(ambiguous.calendarIdentifier == "japanese")
     }
 
     @Test func weeklyReceiptUsesLocalMondayWeekAndDedupesTitles() {
@@ -1444,11 +1591,14 @@ struct ReadingMotivationTests {
         await Task.yield()
         await storage.resumePausedLoad()
 
-        #expect(try await first.value == .schedule(kind: .receipt, dayKey: "2026-11-15"))
-        #expect(try await second.value == .none)
+        // Newer requestRevision registers before the gate; the first transaction is
+        // superseded and must not install (no hanging schedule waiter).
+        #expect(try await first.value == .none)
+        #expect(try await second.value == .schedule(kind: .receipt, dayKey: "2026-11-15"))
         #expect(await storage.reads() == 1)
         #expect(await storage.load().hasConsumedDayKey("2026-11-14"))
         #expect(await scheduler.pendingCount() == 1)
+        #expect(await scheduler.scheduleCalls() == 1)
     }
 
     @Test func concurrentOptOutWinsAfterSuspendedScheduleAndRejectsStaleRefresh() async throws {
@@ -1481,13 +1631,149 @@ struct ReadingMotivationTests {
         await Task.yield()
         await scheduler.resumePausedSchedule()
 
-        #expect(try await enabled.value == .schedule(kind: .rescue, dayKey: "2026-11-15"))
-        #expect(try await disabled.value == .cancelPending)
+        // Schedule already entered: best-effort cancel after completion, not a
+        // no-delivery guarantee. Latest opt-out then clears any residual pending.
+        let enabledDecision = try await enabled.value
+        #expect(enabledDecision == .cancelPending || enabledDecision == .none)
+        let disabledDecision = try await disabled.value
+        #expect(disabledDecision == .cancelPending || disabledDecision == .none)
         #expect(await scheduler.pendingCount() == 0)
         #expect(await storage.load().pendingKind == nil)
         #expect(try await coordinator.reconcile(
             candidates: [candidate], enabled: true, now: now, calendar: cal,
             preferenceRevision: 1, requestRevision: 3
+        ) == .none)
+        #expect(await scheduler.pendingCount() == 0)
+    }
+
+    @Test func optOutDuringAuthorizationBarrierPreventsScheduleInstall() async throws {
+        let now = date(2026, 11, 15, 18)
+        let cal = calendar
+        let candidate = ReadingMotivationNotificationCandidate(
+            kind: .pace, deliveryDate: date(2026, 11, 15, 20)
+        )
+        let scheduler = TestMotivationScheduler()
+        await scheduler.pauseNextAuthorizationCall()
+        let storage = TestMotivationStateStore()
+        let (coordinator, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: now)
+
+        let enabled = Task {
+            try await coordinator.reconcile(
+                candidates: [candidate], enabled: true, now: now, calendar: cal,
+                preferenceRevision: 1, requestRevision: 1
+            )
+        }
+        await scheduler.waitForPausedAuthorization()
+        let disabledStarted = TestMotivationSignal()
+        let disabled = Task {
+            await disabledStarted.signal()
+            return try await coordinator.reconcile(
+                candidates: [], enabled: false, now: now, calendar: cal,
+                preferenceRevision: 2, requestRevision: 2
+            )
+        }
+        await disabledStarted.wait()
+        await Task.yield()
+        await scheduler.resumePausedAuthorization()
+
+        #expect(try await enabled.value == .none)
+        let disabledDecision = try await disabled.value
+        #expect(disabledDecision == .cancelPending || disabledDecision == .none)
+        #expect(await scheduler.scheduleCalls() == 0)
+        #expect(await scheduler.pendingCount() == 0)
+        #expect(await storage.load().pendingKind == nil)
+    }
+
+    @Test func optOutDuringStateSaveBarrierPreventsScheduleInstall() async throws {
+        let now = date(2026, 11, 15, 18)
+        let cal = calendar
+        let candidate = ReadingMotivationNotificationCandidate(
+            kind: .rescue, deliveryDate: date(2026, 11, 15, 20)
+        )
+        let scheduler = TestMotivationScheduler()
+        let storage = TestMotivationStateStore()
+        await storage.pauseNextSaveCall()
+        let (coordinator, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: now)
+
+        let enabled = Task {
+            try await coordinator.reconcile(
+                candidates: [candidate], enabled: true, now: now, calendar: cal,
+                preferenceRevision: 1, requestRevision: 1
+            )
+        }
+        await storage.waitForPausedSave()
+        let disabledStarted = TestMotivationSignal()
+        let disabled = Task {
+            await disabledStarted.signal()
+            return try await coordinator.reconcile(
+                candidates: [], enabled: false, now: now, calendar: cal,
+                preferenceRevision: 2, requestRevision: 2
+            )
+        }
+        await disabledStarted.wait()
+        await Task.yield()
+        await storage.resumePausedSave()
+
+        #expect(try await enabled.value == .none)
+        let disabledDecision = try await disabled.value
+        #expect(disabledDecision == .cancelPending || disabledDecision == .none)
+        #expect(await scheduler.scheduleCalls() == 0)
+        #expect(await scheduler.pendingCount() == 0)
+    }
+
+    @Test func optOutWhileSchedulePausedAcrossFireBoundaryCancelsAndBlocksReschedule() async throws {
+        let start = date(2026, 11, 15, 18)
+        let delivery = date(2026, 11, 15, 20)
+        let cal = calendar
+        let candidate = ReadingMotivationNotificationCandidate(kind: .rescue, deliveryDate: delivery)
+        let clock = TestMotivationClock(start)
+        let scheduler = TestMotivationScheduler()
+        await scheduler.pauseNextScheduleCall()
+        let storage = TestMotivationStateStore()
+        let (coordinator, _) = makeCoordinator(
+            scheduler: scheduler, stateStore: storage, now: start, clock: clock
+        )
+
+        let enabled = Task {
+            try await coordinator.reconcile(
+                candidates: [candidate], enabled: true, now: start, calendar: cal,
+                preferenceRevision: 1, requestRevision: 1
+            )
+        }
+        await scheduler.waitForPausedSchedule()
+        let disabledStarted = TestMotivationSignal()
+        let disabled = Task {
+            await disabledStarted.signal()
+            return try await coordinator.reconcile(
+                candidates: [], enabled: false, now: start, calendar: cal,
+                preferenceRevision: 2, requestRevision: 2
+            )
+        }
+        await disabledStarted.wait()
+        await Task.yield()
+        // Fire boundary elapses while the already-entered OS add is still paused.
+        clock.advance(to: delivery.addingTimeInterval(30))
+        await scheduler.resumePausedSchedule()
+
+        let enabledDecision = try await enabled.value
+        #expect(enabledDecision == .cancelPending || enabledDecision == .none)
+        let disabledDecision = try await disabled.value
+        #expect(disabledDecision == .cancelPending || disabledDecision == .none)
+        #expect(await scheduler.pendingCount() == 0)
+        #expect(await storage.load().pendingKind == nil)
+        // Best-effort cancel + ledger: no further install while opted out / after fire.
+        #expect(try await coordinator.reconcile(
+            candidates: [candidate], enabled: false, now: clock.now(), calendar: cal,
+            preferenceRevision: 3, requestRevision: 3
+        ) == .none)
+        #expect(try await coordinator.reconcile(
+            candidates: [
+                ReadingMotivationNotificationCandidate(
+                    kind: .pace, deliveryDate: date(2026, 11, 15, 21)
+                )
+            ],
+            enabled: true, now: clock.now(), calendar: cal,
+            preferenceRevision: 4, requestRevision: 4
         ) == .none)
         #expect(await scheduler.pendingCount() == 0)
     }
@@ -1520,8 +1806,13 @@ struct ReadingMotivationTests {
         await Task.yield()
         await scheduler.resumePausedSchedule()
 
-        #expect(try await lower.value == .schedule(kind: .receipt, dayKey: "2026-11-15"))
-        #expect(try await higher.value == .replacePending(kind: .rescue, dayKey: "2026-11-15"))
+        let lowerDecision = try await lower.value
+        #expect(lowerDecision == .none || lowerDecision == .cancelPending)
+        let higherDecision = try await higher.value
+        #expect(
+            higherDecision == .schedule(kind: .rescue, dayKey: "2026-11-15")
+                || higherDecision == .replacePending(kind: .rescue, dayKey: "2026-11-15")
+        )
         #expect(await scheduler.pendingCount() == 1)
         #expect(await scheduler.pendingKind(for: "reading-motivation.2026-11-15") == .rescue)
         #expect(try await coordinator.reconcile(

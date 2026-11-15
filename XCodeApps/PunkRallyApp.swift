@@ -799,7 +799,7 @@ private struct HomeTabView: View {
             durationSeconds: item.durationSeconds,
             streakProvider: {
                 let now = Date()
-                let calendar = Calendar.current
+                let calendar = ReadingMotivationCalculations.normalizedLocalCalendar(from: .current)
                 let sessions = SessionTracker.shared.motivationSessionRecords(at: now)
                 let archived = SessionTracker.shared.motivationArchivedActivityDays()
                 return (
