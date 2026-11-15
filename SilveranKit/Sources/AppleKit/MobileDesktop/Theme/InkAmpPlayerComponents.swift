@@ -15,11 +15,48 @@ public enum InkAmpPlayerMetrics {
     public static let coverWidthFraction: CGFloat = 0.55
     public static let coverCornerRadius: CGFloat = 18
     public static let optionCornerRadius: CGFloat = InkAmpMetrics.controlRadius
+    /// Audiobook / podcast Now Playing cover (Cover tint tokens in DESIGN.md).
+    public static let tintedCoverInset: CGFloat = 24
+    public static let tintedCoverMaxSide: CGFloat = 320
+    public static let tintedCoverCornerRadius: CGFloat = 10
+
+    public static func tintedCoverSide(availableWidth: CGFloat) -> CGFloat {
+        max(0, min(availableWidth - tintedCoverInset * 2, tintedCoverMaxSide))
+    }
+}
+
+extension View {
+    /// Cover shadow tinted by `\.coverTint`; falls back to the neutral cover shadow.
+    public func coverTintShadow() -> some View {
+        modifier(CoverTintShadowModifier())
+    }
+}
+
+private struct CoverTintShadowModifier: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.coverTint) private var coverTint
+
+    func body(content: Content) -> some View {
+        if let coverTint {
+            content.shadow(
+                color: coverTint.control.opacity(colorScheme == .dark ? 0.45 : 0.30),
+                radius: 18,
+                y: 8,
+            )
+        } else {
+            content.shadow(
+                color: colorScheme == .dark ? .clear : .black.opacity(0.08),
+                radius: 10,
+                y: 3,
+            )
+        }
+    }
 }
 
 /// Filled circular play/pause — strongest transport control.
 public struct InkAmpPlayerPlayPauseButton: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.coverTint) private var coverTint
     private var theme: InkAmpAppTheme { .resolve(for: colorScheme) }
 
     private let isPlaying: Bool
@@ -40,7 +77,7 @@ public struct InkAmpPlayerPlayPauseButton: View {
         Button(action: action) {
             ZStack {
                 Circle()
-                    .fill(theme.accent)
+                    .fill(coverTint?.control ?? theme.accent)
                     .frame(
                         width: InkAmpPlayerMetrics.playButtonSize,
                         height: InkAmpPlayerMetrics.playButtonSize,
@@ -67,7 +104,7 @@ public struct InkAmpPlayerPlayPauseButton: View {
     }
 
     private var iconColor: Color {
-        theme.isDark ? theme.background : Color.white
+        coverTint?.onControl ?? (theme.isDark ? theme.background : Color.white)
     }
 }
 
@@ -115,7 +152,9 @@ public struct InkAmpPlayerSkipButton: View {
 /// Compact option chip (speed / sleep / chapters) used under transport.
 public struct InkAmpPlaybackOptionButton<Label: View>: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.coverTint) private var coverTint
     private var theme: InkAmpAppTheme { .resolve(for: colorScheme) }
+    private var activeColor: Color { coverTint?.control ?? theme.accent }
 
     private let selected: Bool
     private let action: () -> Void
@@ -135,7 +174,7 @@ public struct InkAmpPlaybackOptionButton<Label: View>: View {
         Button(action: action) {
             label
                 .font(.callout.weight(.semibold))
-                .foregroundStyle(selected ? theme.accent : theme.primaryText)
+                .foregroundStyle(selected ? activeColor : theme.primaryText)
                 .frame(
                     width: InkAmpPlayerMetrics.secondaryControlVisualSize,
                     height: InkAmpPlayerMetrics.secondaryControlVisualSize,
@@ -147,7 +186,7 @@ public struct InkAmpPlaybackOptionButton<Label: View>: View {
                     )
                     .fill(
                         selected
-                            ? theme.accent.opacity(0.16)
+                            ? activeColor.opacity(0.16)
                             : theme.surface
                     )
                 )
@@ -157,7 +196,7 @@ public struct InkAmpPlaybackOptionButton<Label: View>: View {
                         style: .continuous,
                     )
                     .strokeBorder(
-                        selected ? theme.accent.opacity(0.35) : theme.border,
+                        selected ? activeColor.opacity(0.35) : theme.border,
                         lineWidth: 1,
                     )
                 )

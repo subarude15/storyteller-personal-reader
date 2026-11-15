@@ -313,22 +313,60 @@ extension EnvironmentValues {
 /// Mini-player bar that sits above the tab bar via per-tab `safeAreaInset`
 /// (never overlay the UITabBar — TabView-level inset covers the bar on iOS).
 public struct PunkRallyMiniPlayerBar: View {
-    public init() {}
+    private let topClearance: CGFloat
+
+    public init(topClearance: CGFloat = 0) {
+        self.topClearance = topClearance
+    }
 
     public var body: some View {
-        GlobalMiniPlayerBar()
+        GlobalMiniPlayerBar(topClearance: topClearance)
             .accessibilityLabel("Mini player")
     }
 }
 
+/// Own the reservation on the scrolling surface, not on its navigation host.
+/// Measuring the displayed bar (including its clearance) avoids a second height
+/// constant and makes late session/cover transitions invalidate the scroll root.
+private struct PunkRallyMiniPlayerScrollInset: ViewModifier {
+    let topClearance: CGFloat
+    @State private var playerHeight: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .safeAreaPadding(.bottom, playerHeight)
+            .overlay(alignment: .bottom) {
+                // A concrete, intrinsically sized container also reports zero
+                // when GlobalMiniPlayerBar's conditional content disappears.
+                VStack(spacing: 0) {
+                    PunkRallyMiniPlayerBar(topClearance: topClearance)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    proxy.size.height
+                } action: { height in
+                    playerHeight = max(0, height)
+                }
+            }
+    }
+}
+
 extension View {
+    /// Apply ONCE to ScrollView/List inside NavigationStack (or its destination).
+    /// The overlay and its measured scroll clearance share one owner; do not
+    /// combine with punkRallyMiniPlayerInset on a surrounding container.
+    public func punkRallyMiniPlayerScrollInset(topClearance: CGFloat = 0) -> some View {
+        modifier(PunkRallyMiniPlayerScrollInset(topClearance: topClearance))
+    }
+
     /// Pads content and places GlobalMiniPlayerBar above the tab bar (or sheet
     /// bottom). Use on every tab root **and** every sheet that can sit over
     /// playback (Find, show, Import, Settings, …) so close/stop stay reachable.
-    /// Collapses to zero height when nothing is playing.
-    public func punkRallyMiniPlayerInset() -> some View {
+    /// Collapses to zero height when nothing is playing. `topClearance` adds
+    /// space between content and the bar only while the bar is visible.
+    public func punkRallyMiniPlayerInset(topClearance: CGFloat = 0) -> some View {
         safeAreaInset(edge: .bottom, spacing: 0) {
-            PunkRallyMiniPlayerBar()
+            PunkRallyMiniPlayerBar(topClearance: topClearance)
         }
     }
 }
@@ -696,7 +734,6 @@ public struct PunkRallyLibraryView: View {
     @State private var ideasSearchText = ""
     @State private var showSettings = false
     @State private var showOfflineSheet = false
-    @State private var showImport = false
     @State private var navigationPath = NavigationPath()
 
     public init() {}
@@ -724,7 +761,8 @@ public struct PunkRallyLibraryView: View {
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, InkAmpMetrics.screenInset)
-                .padding(.vertical, 8)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
                 .tint(theme.accent)
 
                 Group {
@@ -744,20 +782,6 @@ public struct PunkRallyLibraryView: View {
                 showOfflineSheet: $showOfflineSheet,
                 includeDownloadsAndSettingsShortcuts: false
             )
-            .toolbar {
-                if segment == .library {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button {
-                            showImport = true
-                        } label: {
-                            Label("Import", systemImage: "square.and.arrow.down")
-                        }
-                        .accessibilityHint(
-                            "Upload EPUB and audiobook to Storyteller, then generate read-aloud"
-                        )
-                    }
-                }
-            }
             .searchable(
                 text: searchBinding,
                 placement: .navigationBarDrawer(displayMode: .always),
@@ -770,12 +794,6 @@ public struct PunkRallyLibraryView: View {
                 showSettings: $showSettings,
                 showOfflineSheet: $showOfflineSheet
             )
-            .sheet(isPresented: $showImport) {
-                NavigationStack {
-                    UploadNewBookView()
-                }
-                .punkRallyMiniPlayerInset()
-            }
         }
         .punkRallySheets(
             showSettings: $showSettings,

@@ -87,6 +87,36 @@ These change **book page** only. Tab bar / library stay on system chrome.
 
 Default reader page when unset: match system (Light → Paper, Dark → Night) until user picks an Aa override.
 
+### Cover tint (player chrome only)
+Derived from the playing cover by `CoverTintMath` (24×24 sample, saturation-weighted hue buckets; pixels with S < 0.15, near-black or near-white are ignored). No usable hue, tint toggle off, or Increase Contrast → app accent (`--accent`). Never recolors the reader page body.
+
+| Token | Light | Dark |
+|-------|-------|------|
+| `--tint-surface` | cover hue, relative luminance ≥ 0.80 | cover hue, relative luminance ≤ 0.06 |
+| `--tint-control` | ≥ 3:1 against every rendered gradient color on `#FFFFFF` / `#F5F7F6` | ≥ 3:1 against every rendered gradient color on `#2E2E2E` / `#454545` |
+| `--tint-on-control` | `#FFFFFF` or `#111111`, ≥ 4.5:1 on control | same |
+| Player wash (top → bottom) | `--tint-surface` → dominant cover `--tint-base`, at 18% over the theme background | same, at 28% |
+| Mini-bar wash (leading → trailing) | same gradient at 12% | 12% |
+
+- Player cover: side `min(width − 48, 320)`, radius 10, shadow tinted with `--tint-control`
+- Tinted: scrubber, play button, active option tiles, mini-bar play + 2pt progress line. Text stays `--label` / `--label-secondary`
+- Ebook toolbar icons tint only while readaloud is the active session, and only at ≥ 3:1 on the page background
+- Setting: “Tint player from cover” (default on)
+
+### Live Activity (Lock Screen / Dynamic Island)
+Always the dark tint scheme (`--tint-*` dark) over `surfaceDark` `#2E2E2E`; falls back to `--accent` (tangerine) under the same rules as cover tint.
+
+| Presentation | Layout |
+|-------------|--------|
+| Compact | 20pt cover r5 · remaining time in `--tint-control` |
+| Minimal | 22pt cover inside a progress ring |
+| Expanded | 52pt cover · title / chapter · progress · 44pt −30 / play / +30 |
+| Lock Screen | 68pt cover · title / chapter · progress · buttons · `--tint-control` keyline |
+
+- Time and progress use timer intervals while playing (rate-correct, no per-second updates); static while paused
+- Cover is a 120×120 JPEG in the App Group, never in the payload
+- Setting: “Show on Lock Screen & Dynamic Island” (default on)
+
 ## Reader fonts — Fast Font (Born2Root)
 Source: https://github.com/Born2Root/Fast-Font/tree/main/fast-fonts  
 Open-source speed-reading faces (bionic-style fixation via contextual alternates). Bundle TTFs; expose in Silveran Aa picker **in addition to** existing fonts.
@@ -140,6 +170,7 @@ UI chrome: SF Pro. Reader body: Fast Serif default (Silveran + Fast Font list).
 - Short (200–280ms) ease for tab / sheet
 - Appearance changes follow system (no custom flash)
 - Reduce Motion: disable chart draw animations
+- Cover tint change: 350ms easeInOut crossfade; instant under Reduce Motion
 
 ## Accessibility
 - Contrast ≥ WCAG AA on **both** chrome schemes

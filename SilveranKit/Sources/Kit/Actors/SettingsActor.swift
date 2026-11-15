@@ -479,6 +479,8 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
         public var showOverlaySkipForward: Bool
         public var showOverlayPlayPause: Bool
         public var showMiniPlayerStats: Bool
+        /// `ReaderControlsMode` raw value (iOS ebook/readaloud reader).
+        public var controlsMode: String
 
         public init(
             enabled: Bool = kDefaultReadingBarEnabled,
@@ -494,6 +496,7 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
             showOverlaySkipForward: Bool = kDefaultShowOverlaySkipForward,
             showOverlayPlayPause: Bool = kDefaultShowOverlayPlayPause,
             showMiniPlayerStats: Bool = kDefaultShowMiniPlayerStats,
+            controlsMode: String = kDefaultReaderControlsMode,
         ) {
             self.enabled = enabled
             #if os(iOS)
@@ -512,6 +515,7 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
             self.showOverlaySkipForward = showOverlaySkipForward
             self.showOverlayPlayPause = showOverlayPlayPause
             self.showMiniPlayerStats = showMiniPlayerStats
+            self.controlsMode = controlsMode
         }
 
         public init(from decoder: Decoder) throws {
@@ -559,6 +563,9 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
             showMiniPlayerStats =
                 (try? container?.decode(Bool.self, forKey: .showMiniPlayerStats))
                 ?? kDefaultShowMiniPlayerStats
+            controlsMode =
+                (try? container?.decode(String.self, forKey: .controlsMode))
+                ?? kDefaultReaderControlsMode
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -566,7 +573,7 @@ public struct SilveranGlobalConfig: Codable, Equatable, Sendable {
             case showTimeRemainingInBook, showTimeRemainingInChapter, showPageNumber
             case overlayTransparency, alwaysShowMiniPlayer
             case showOverlaySkipBackward, showOverlaySkipForward, showOverlayPlayPause
-            case showMiniPlayerStats
+            case showMiniPlayerStats, controlsMode
         }
     }
 
@@ -774,6 +781,7 @@ public actor SettingsActor {
         showOverlaySkipForward: Bool? = nil,
         showOverlayPlayPause: Bool? = nil,
         showMiniPlayerStats: Bool? = nil,
+        readerControlsMode: String? = nil,
         progressSyncIntervalSeconds: Double? = nil,
         metadataRefreshIntervalSeconds: Double? = nil,
         autoSyncToNewerServerPosition: Bool? = nil,
@@ -866,6 +874,7 @@ public actor SettingsActor {
         if let alwaysShowMiniPlayer {
             updated.readingBar.alwaysShowMiniPlayer = alwaysShowMiniPlayer
         }
+        if let readerControlsMode { updated.readingBar.controlsMode = readerControlsMode }
         if let showOverlaySkipBackward {
             updated.readingBar.showOverlaySkipBackward = showOverlaySkipBackward
         }

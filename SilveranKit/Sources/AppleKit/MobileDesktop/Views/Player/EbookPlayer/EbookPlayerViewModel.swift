@@ -114,9 +114,13 @@ class EbookPlayerViewModel {
     }
     var isTitleBarHovered = false
     #else
+    /// Immersive never auto-opens the iPad sidebar on entry; the stored
+    /// preference belongs to Classic and is only read/written there.
     var showAudioSidebar: Bool = false {
         didSet {
-            if _sidebarInitialized && oldValue != showAudioSidebar {
+            if _sidebarInitialized && oldValue != showAudioSidebar
+                && chrome.state.mode == .classic
+            {
                 UserDefaults.standard.set(
                     showAudioSidebar,
                     forKey: "EbookPlayerShowAudioSidebarIOS",
@@ -125,12 +129,23 @@ class EbookPlayerViewModel {
         }
     }
     var showAudioSheet = false
-    var isReadingBarVisible = true
-    var isTopBarVisible = true
-    /// True while a page-curl gesture/overlay is active. Hides floating chrome
-    /// for the curl lifetime without permanently toggling overlay preferences.
-    var isPageCurlActive = false
+    /// Single owner of iOS ebook/readaloud chrome visibility (`ReaderChromePolicy`).
+    let chrome: ReaderChromeController
+    var isReadingBarVisible: Bool { chrome.state.isBottomVisible }
+    var isTopBarVisible: Bool { chrome.state.isTopVisible }
+    /// True while a page-curl gesture/overlay is active. Masks floating chrome
+    /// for the curl lifetime without changing chrome state.
+    var isPageCurlActive: Bool { chrome.state.isCurlActive }
+    var isSelectTextMode: Bool { chrome.state.isSelectionMode }
     var collapseCardTrigger = 0
+    /// Section content is laid out (the first-run hint waits for this).
+    var isReaderContentReady = false
+    private var presentedChromeSheets: Set<UUID> = []
+    @ObservationIgnored private var lastAppliedControlsMode: ReaderControlsMode?
+    /// iPad landscape two-page spread, measured by the view (`ReaderSpreadPolicy`).
+    var isSpreadLayout = false {
+        didSet { styleManager?.setSpreadMode(isSpreadLayout) }
+    }
     #endif
     var showCustomizePopover = false
     var commsBridge: ReaderCommsBridge? = nil
@@ -230,6 +245,35 @@ class EbookPlayerViewModel {
         highlights.filter { !$0.isBookmark }.sorted { $0.createdAt > $1.createdAt }
     }
 
+    var chapterTicks: [ReaderScrubberPolicy.ChapterTick] {
+        ReaderScrubberPolicy.buildChapterTicks(
+            tocEntries: tocEntries,
+            sections: bookStructure,
+            sectionFractions: session?.sectionFractions
+        )
+    }
+
+    var currentPageBookmark: Highlight? {
+        ReaderScrubberPolicy.matchingBookmark(
+            in: bookmarks,
+            sectionIndex: progressManager?.selectedChapterId,
+            cfi: progressManager?.currentCfi,
+            href: progressManager?.currentHref,
+            bookFraction: progressManager?.bookFraction,
+            totalPagesInSection: progressManager?.chapterTotalPages,
+            sections: bookStructure
+        )
+    }
+
+    var isCurrentPageBookmarked: Bool {
+        currentPageBookmark != nil
+    }
+
+    private(set) var jumpSnapshot: ReaderScrubberPolicy.JumpSnapshot? = nil
+    @ObservationIgnored private var isScrubJumpSessionActive = false
+    @ObservationIgnored private var jumpPillAutoDismissTask: Task<Void, Never>? = nil
+    @ObservationIgnored private var userFlipsSinceJump = 0
+
     init(bookData: PlayerBookData?, settingsVM: SettingsViewModel = SettingsViewModel()) {
         self.bookData = bookData
         self.settingsVM = settingsVM
@@ -244,13 +288,13 @@ class EbookPlayerViewModel {
             "[EbookPlayerViewModel] Init - audio sidebar: \(self.showAudioSidebar), chapter sidebar: \(self.showChapterSidebar)"
         )
         #else
-        self.showAudioSidebar =
-            UserDefaults.standard.object(forKey: "EbookPlayerShowAudioSidebarIOS") as? Bool ?? false
+        self.chrome = ReaderChromeController()
         #endif
         self._sidebarInitialized = true
     }
 
     func handleChapterSelection(_ chapter: ChapterItem) {
+        recordJumpSnapshotBeforeNavigation()
         userSelectedTocId = chapter.id
         if isComicBook, let index = Int(chapter.href) ?? Int(chapter.id) {
             progressManager?.handleNativePageSelected(index)
@@ -289,6 +333,7 @@ class EbookPlayerViewModel {
     }
 
     func handlePrevChapter() {
+        recordJumpSnapshotBeforeNavigation()
         userSelectedTocId = nil
         if isComicBook {
             progressManager?.handleNativeNavLeft()
@@ -331,6 +376,7 @@ class EbookPlayerViewModel {
     }
 
     func handleNextChapter() {
+        recordJumpSnapshotBeforeNavigation()
         userSelectedTocId = nil
         if isComicBook {
             progressManager?.handleNativeNavRight()
@@ -394,19 +440,106 @@ class EbookPlayerViewModel {
 
     func handleToggleOverlay() {
         #if os(iOS)
-        if settingsVM.alwaysShowMiniPlayer {
-            isTopBarVisible.toggle()
-            if !isTopBarVisible {
-                collapseCardTrigger += 1
-            }
-            debugLog("[EbookPlayerViewModel] Toggled top bar visibility: \(isTopBarVisible)")
-        } else {
-            isReadingBarVisible.toggle()
-            isTopBarVisible = isReadingBarVisible
-            debugLog("[EbookPlayerViewModel] Toggled overlay visibility: \(isReadingBarVisible)")
-        }
+        sendChrome(.centerTap(alwaysShowMiniPlayer: settingsVM.alwaysShowMiniPlayer))
+        debugLog(
+            "[EbookPlayerViewModel] Center tap - top: \(isTopBarVisible), bottom: \(isReadingBarVisible)"
+        )
         #endif
     }
+
+    #if os(iOS)
+    /// Comics keep the legacy tap-toggle chrome.
+    var effectiveControlsMode: ReaderControlsMode {
+        isComicBook ? .classic : settingsVM.readerControlsMode
+    }
+
+    var isChromeModalPresented: Bool {
+        showCustomizePopover || showSearchPanel || showBookmarksPanel || showTranslation
+            || showServerPositionDialog || pendingSelection != nil || pendingEditHighlight != nil
+            || !presentedChromeSheets.isEmpty
+    }
+
+    func sendChrome(_ event: ReaderChromeEvent) {
+        let before = chrome.state
+        chrome.send(event)
+        let after = chrome.state
+        // Legacy Always Show: hiding the toolbar also collapses the pinned card.
+        if before.isTopVisible && !after.isTopVisible
+            && after.cardAlwaysShows(
+                alwaysShowMiniPlayer: settingsVM.alwaysShowMiniPlayer,
+                hasAudioNarration: hasAudioNarration
+            )
+        {
+            collapseCardTrigger += 1
+        }
+        if before.mode != after.mode || before.isSelectionMode != after.isSelectionMode {
+            pushReaderControlsToJS()
+        }
+    }
+
+    func noteChromeActivity() {
+        sendChrome(.userActivity)
+    }
+
+    /// Applies the persisted mode once settings load, and again when it changes.
+    func applyControlsMode() {
+        guard settingsVM.isLoaded else { return }
+        let mode = effectiveControlsMode
+        sendChrome(.setMode(mode))
+        // Also covers the first load: an unchanged default mode sends no event.
+        pushReaderControlsToJS()
+        let previous = lastAppliedControlsMode
+        lastAppliedControlsMode = mode
+        if let open = ReaderSidebarPolicy.sidebarOnModeChange(
+            from: previous,
+            to: mode,
+            storedPreference: UserDefaults.standard.object(
+                forKey: "EbookPlayerShowAudioSidebarIOS"
+            ) as? Bool
+        ) {
+            showAudioSidebar = open
+        }
+    }
+
+    func toggleSelectTextMode() {
+        sendChrome(.setBlocker(.selectionMode, !isSelectTextMode))
+    }
+
+    func reportChromeSheet(_ id: UUID, presented: Bool) {
+        if presented {
+            presentedChromeSheets.insert(id)
+        } else {
+            presentedChromeSheets.remove(id)
+        }
+    }
+
+    func setCardChromeBlockers(_ blockers: Set<ReaderChromeBlocker>) {
+        for blocker in [ReaderChromeBlocker.cardExpanded, .cardDrag, .scrubbing] {
+            sendChrome(.setBlocker(blocker, blockers.contains(blocker)))
+        }
+    }
+
+    /// Before settings load nothing is sent, so JS stays on legacy behavior
+    /// (Classic readers never get a stray selection lock); `applyControlsMode`
+    /// pushes as soon as they load.
+    private func pushReaderControlsToJS(to target: ReaderCommsBridge? = nil) {
+        guard settingsVM.isLoaded, !isComicBook, let bridge = target ?? commsBridge else { return }
+        let state = chrome.state
+        let immersive = state.mode == .immersive
+        bridge.setReaderControlsForPageLoads(immersive: immersive)
+        Task { @MainActor in
+            do {
+                let result = try await bridge.sendJsSetReaderControls(
+                    immersive: immersive,
+                    selectionMode: state.isSelectionMode
+                )
+                debugLog("[EbookPlayerViewModel] Reader controls pushed: \(result ?? "nil")")
+            } catch {
+                debugLog("[EbookPlayerViewModel] Reader controls push failed: \(error)")
+            }
+        }
+    }
+    #endif
 
     func handleNextSentence() {
         mediaOverlayManager?.nextSentence()
@@ -416,11 +549,123 @@ class EbookPlayerViewModel {
         mediaOverlayManager?.prevSentence()
     }
 
+    func beginScrubSession() {
+        if !isScrubJumpSessionActive {
+            recordJumpSnapshotBeforeNavigation()
+            isScrubJumpSessionActive = true
+        }
+        jumpPillAutoDismissTask?.cancel()
+    }
+
     func handleProgressSeek(_ fraction: Double) {
+        if !isScrubJumpSessionActive {
+            recordJumpSnapshotBeforeNavigation()
+        }
+        isScrubJumpSessionActive = false
+        scheduleJumpPillAutoDismiss()
         if isComicBook {
             progressManager?.handleNativeProgressSeek(fraction)
         } else {
             progressManager?.handleUserProgressSeek(fraction)
+        }
+    }
+
+    func handleBookProgressSeek(_ fraction: Double) {
+        if !isScrubJumpSessionActive {
+            recordJumpSnapshotBeforeNavigation()
+        }
+        isScrubJumpSessionActive = false
+        scheduleJumpPillAutoDismiss()
+        if isComicBook {
+            progressManager?.handleNativeProgressSeek(fraction)
+        } else {
+            progressManager?.handleUserBookProgressSeek(fraction)
+        }
+    }
+
+    func recordJumpSnapshotBeforeNavigation(isForwardTarget: Bool = false) {
+        guard let pm = progressManager else { return }
+        let sectionIndex = pm.selectedChapterId
+        let chapterTitle = sectionIndex.flatMap { bookStructure[safe: $0]?.label }
+        let candidate = ReaderScrubberPolicy.JumpSnapshot(
+            sectionIndex: sectionIndex,
+            cfi: pm.currentCfi,
+            href: pm.currentHref ?? sectionIndex.flatMap { bookStructure[safe: $0]?.id },
+            chapterFraction: pm.chapterSeekBarValue,
+            bookFraction: pm.bookFraction,
+            pageNumber: pm.chapterCurrentPage,
+            totalPages: pm.chapterTotalPages,
+            chapterTitle: chapterTitle,
+            isForwardTarget: isForwardTarget
+        )
+        guard candidate.sectionIndex != nil || candidate.bookFraction != nil || candidate.cfi != nil
+        else {
+            return
+        }
+        userFlipsSinceJump = 0
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+            jumpSnapshot = candidate
+        }
+        scheduleJumpPillAutoDismiss()
+    }
+
+    func dismissJumpSnapshot() {
+        jumpPillAutoDismissTask?.cancel()
+        jumpPillAutoDismissTask = nil
+        isScrubJumpSessionActive = false
+        userFlipsSinceJump = 0
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+            jumpSnapshot = nil
+        }
+    }
+
+    func returnToJumpSnapshot() {
+        guard let target = jumpSnapshot else { return }
+        ReaderHaptics.jumpNavigation()
+
+        // Capture the current position as the opposite direction so the user can bounce back if desired.
+        recordJumpSnapshotBeforeNavigation(isForwardTarget: !target.isForwardTarget)
+
+        if isComicBook, let page = target.pageNumber, page > 0 {
+            progressManager?.handleNativePageSelected(page - 1)
+            return
+        }
+
+        Task { @MainActor in
+            progressManager?.prepareForDirectJump(targetSection: target.sectionIndex)
+            if let cfi = target.cfi, !cfi.isEmpty, let bridge = commsBridge {
+                do {
+                    try await bridge.sendJsGoToCFICommand(cfi: cfi)
+                    return
+                } catch {
+                    debugLog("[EbookPlayerViewModel] Jump-back CFI failed, falling back: \(error)")
+                }
+            }
+            if let section = target.sectionIndex, let bridge = commsBridge {
+                do {
+                    try await bridge.sendJsGoToFractionInSectionCommand(
+                        sectionIndex: section,
+                        fraction: target.chapterFraction
+                    )
+                    return
+                } catch {
+                    debugLog(
+                        "[EbookPlayerViewModel] Jump-back section fraction failed, falling back: \(error)"
+                    )
+                }
+            }
+            if let bookFrac = target.bookFraction {
+                progressManager?.handleUserBookProgressSeek(bookFrac)
+            }
+        }
+    }
+
+    private func scheduleJumpPillAutoDismiss() {
+        jumpPillAutoDismissTask?.cancel()
+        jumpPillAutoDismissTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(10))
+            guard !Task.isCancelled, let self else { return }
+            self.dismissJumpSnapshot()
         }
     }
 
@@ -442,6 +687,8 @@ class EbookPlayerViewModel {
     func handleOnAppear() {
         #if os(iOS)
         recoveryManager = WebViewRecoveryManager(viewModel: self)
+        // Re-arm the idle window cancelled by a previous disappear.
+        noteChromeActivity()
         #endif
 
         if let data = bookData {
@@ -462,7 +709,14 @@ class EbookPlayerViewModel {
             self?.prepareComicPages(from: url)
         }
         session.onUserNavigation = { [weak self] in
-            self?.userSelectedTocId = nil
+            guard let self else { return }
+            self.userSelectedTocId = nil
+            if self.jumpSnapshot != nil && !self.isScrubJumpSessionActive {
+                self.userFlipsSinceJump += 1
+                if self.userFlipsSinceJump >= 2 {
+                    self.dismissJumpSnapshot()
+                }
+            }
         }
         #if os(iOS)
         session.isViewRecovering = { [weak self] in
@@ -482,11 +736,20 @@ class EbookPlayerViewModel {
         }
         session.onViewStructureReady = { [weak self] in
             guard let self else { return }
+            self.progressManager?.onChapterBoundaryCrossed = { _, _ in
+                Task { @MainActor in
+                    ReaderHaptics.chapterBoundaryCrossed()
+                }
+            }
             self.settingsVM.applyActiveTheme(for: self.bridgeInitialColorScheme)
             self.styleManager?.sendInitialStyles(
                 isDarkMode: self.bridgeInitialColorScheme == .dark
             )
             await self.loadHighlights()
+            #if os(iOS)
+            self.pushReaderControlsToJS()
+            self.isReaderContentReady = true
+            #endif
         }
         session.onIncomingServerPosition = { [weak self] position in
             Task { @MainActor [weak self] in
@@ -586,6 +849,9 @@ class EbookPlayerViewModel {
 
     func handleOnDisappear(close policy: ReadingSessionClosePolicy? = .endSession) {
         debugLog("[EbookPlayerViewModel] View disappearing (policy: \(String(describing: policy)))")
+        #if os(iOS)
+        chrome.invalidate()
+        #endif
 
         session?.removeIncomingPositionObserver()
 
@@ -605,11 +871,17 @@ class EbookPlayerViewModel {
     func handleScenePhaseChange(_ phase: ScenePhase) {
         switch phase {
             case .active:
+                #if os(iOS)
+                sendChrome(.setForeground(true))
+                #endif
                 Task { @MainActor in
                     await progressManager?.handleResume()
                     await session?.handleSceneBecameActive()
                 }
             case .background:
+                #if os(iOS)
+                sendChrome(.setForeground(false))
+                #endif
                 debugLog("[EbookPlayerViewModel] Entering background - audio continues natively")
                 Task { @MainActor in
                     await session?.handleSceneEnteredBackground()
@@ -649,6 +921,9 @@ class EbookPlayerViewModel {
             settingsVM: settingsVM,
             bridge: bridge,
         )
+        #if os(iOS)
+        styleManager?.setSpreadMode(isSpreadLayout)
+        #endif
 
         setupBridgeCallbacks(bridge)
     }
@@ -667,7 +942,7 @@ class EbookPlayerViewModel {
             Task { @MainActor in
                 #if os(iOS)
                 if self.isPageCurlActive != active {
-                    self.isPageCurlActive = active
+                    self.sendChrome(.setCurlActive(active))
                     debugLog(
                         "[EbookPlayerViewModel] Page curl chrome suppress active=\(active)"
                     )
@@ -675,6 +950,34 @@ class EbookPlayerViewModel {
                 #endif
             }
         }
+
+        #if os(iOS)
+        // A recovered WebView never sends the curl-ended message for the old page.
+        if isPageCurlActive {
+            sendChrome(.setCurlActive(false))
+        }
+
+        // Before the reader HTML loads (first open and recovery alike), so the
+        // first section attaches with the current controls state.
+        pushReaderControlsToJS(to: bridge)
+
+        bridge.onReaderChromeReveal = { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in
+                self.sendChrome(.reveal)
+            }
+        }
+
+        // Session owns margin navigation; immersive chrome also dismisses on it.
+        let sessionMarginClickNav = bridge.onMarginClickNav
+        bridge.onMarginClickNav = { [weak self] message in
+            sessionMarginClickNav?(message)
+            guard let self else { return }
+            Task { @MainActor in
+                self.sendChrome(.marginTap)
+            }
+        }
+        #endif
 
         bridge.onTextSelected = { [weak self] message in
             guard let self else { return }
@@ -752,6 +1055,7 @@ class EbookPlayerViewModel {
 
     /// Navigate to search result - view only, no audio sync
     func handleSearchResultNavigation(_ result: SearchResult) {
+        recordJumpSnapshotBeforeNavigation()
         Task { @MainActor in
             await searchManager?.navigateToResult(result)
         }
@@ -779,9 +1083,9 @@ class EbookPlayerViewModel {
             title: selection.title,
             locations: BookLocator.Locations(
                 fragments: [selection.cfi],
-                progression: nil,
+                progression: progressManager?.chapterSeekBarValue,
                 position: nil,
-                totalProgression: nil,
+                totalProgression: progressManager?.bookFraction,
                 cssSelector: selection.startCssSelector,
                 partialCfi: selection.cfi,
                 domRange: BookLocator.Locations.DomRange(
@@ -841,6 +1145,10 @@ class EbookPlayerViewModel {
 
     func navigateToHighlight(_ highlight: Highlight) async {
         guard let bridge = commsBridge else { return }
+        recordJumpSnapshotBeforeNavigation()
+        progressManager?.prepareForDirectJump(
+            targetSection: findSectionIndex(for: highlight.locator.href, in: bookStructure)
+        )
 
         if let cfi = highlight.locator.locations?.partialCfi {
             do {
@@ -970,6 +1278,7 @@ class EbookPlayerViewModel {
         await BookmarkActor.shared.updateHighlight(updated)
         highlights = await BookmarkActor.shared.getHighlights(bookID: bookID)
         await sendHighlightsToJS()
+        rememberLastUsedColor(colorId)
     }
 
     func handleHighlightDelete(id: String) async {
@@ -1030,7 +1339,7 @@ class EbookPlayerViewModel {
             title: position.title,
             locations: BookLocator.Locations(
                 fragments: position.elementId.map { [$0] },
-                progression: nil,
+                progression: progressManager?.chapterSeekBarValue,
                 position: nil,
                 totalProgression: progressManager?.bookFraction,
                 cssSelector: nil,
@@ -1052,6 +1361,16 @@ class EbookPlayerViewModel {
         highlights = await BookmarkActor.shared.getHighlights(bookID: bookID)
 
         debugLog("[EbookPlayerViewModel] Added bookmark: \(position.text.prefix(50))...")
+    }
+
+    func toggleBookmarkAtCurrentPage() async {
+        if let existing = currentPageBookmark {
+            ReaderHaptics.bookmarkToggled(added: false)
+            await deleteHighlight(existing)
+        } else {
+            ReaderHaptics.bookmarkToggled(added: true)
+            await addBookmarkAtCurrentPage()
+        }
     }
 }
 

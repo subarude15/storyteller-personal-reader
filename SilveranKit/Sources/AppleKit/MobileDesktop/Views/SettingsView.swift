@@ -214,6 +214,7 @@ public struct SettingsView: View {
                         showPageNumber: newValue.readingBar.showPageNumber,
                         overlayTransparency: newValue.readingBar.overlayTransparency,
                         alwaysShowMiniPlayer: newValue.readingBar.alwaysShowMiniPlayer,
+                        readerControlsMode: newValue.readingBar.controlsMode,
                         progressSyncIntervalSeconds: newValue.sync.progressSyncIntervalSeconds,
                         metadataRefreshIntervalSeconds: newValue.sync.metadataRefreshIntervalSeconds,
                         autoSyncToNewerServerPosition: newValue.sync.autoSyncToNewerServerPosition,
@@ -420,6 +421,8 @@ extension SettingsView {
                         "Used for Finish tonight on Home. Stored on this device only."
                     )
                 }
+
+                PlayerAppearanceSettingsSection()
 
                 Section("Tab Bar") {
                     Picker("First Tab", selection: $config.library.tabBarSlot1) {
@@ -645,6 +648,20 @@ extension SettingsView {
                 }
             }
             .navigationTitle("Settings")
+        }
+    }
+}
+
+private struct PlayerAppearanceSettingsSection: View {
+    @AppStorage(CoverTintSettings.enabledKey) private var coverTintEnabled = CoverTintSettings.defaultEnabled
+
+    var body: some View {
+        Section {
+            Toggle("Tint player from cover", isOn: $coverTintEnabled)
+        } header: {
+            Text("Player")
+        } footer: {
+            Text("Uses the cover's color for player controls. Increase Contrast always uses the app accent. System Now Playing controls appear on the Lock Screen and Dynamic Island while listening.")
         }
     }
 }

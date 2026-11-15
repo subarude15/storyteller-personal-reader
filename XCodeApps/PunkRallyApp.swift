@@ -75,6 +75,7 @@ public struct PunkRallyTabView: View {
                     )
                 }
             }
+            .coverTintEnvironment()
     }
 
     /// Five-tab host only — kept separate so `rootShell` type-checks.
@@ -82,7 +83,6 @@ public struct PunkRallyTabView: View {
     private var primaryTabView: some View {
         TabView(selection: $selectedTab) {
             HomeTabView()
-                .punkRallyMiniPlayerInset()
                 .tabItem {
                     Label(InkAmpPrimaryTab.home.title, systemImage: InkAmpPrimaryTab.home.systemImage)
                 }
@@ -110,7 +110,6 @@ public struct PunkRallyTabView: View {
                 .tag(InkAmpPrimaryTab.podcasts)
 
             MoreTabView(path: $morePath, showSettings: $showSettings)
-                .punkRallyMiniPlayerInset()
                 .tabItem {
                     Label(InkAmpPrimaryTab.more.title, systemImage: InkAmpPrimaryTab.more.systemImage)
                 }
@@ -283,10 +282,21 @@ public struct PunkRallyTabView: View {
             shellWithLifecycle
                 .fullScreenCover(item: PlayerPresenter.shared.cardItemBinding) { wrapper in
                     NavigationStack {
+                        #if INKAMP_GEOMETRY_HARNESS
+                        if InkAmpGeometryLifecycle.isEnabled {
+                            GeometryLifecycleLocalPlayer()
+                        } else {
+                            PunkRallyPlayerHost.playerView(
+                                for: wrapper.data,
+                                onFailure: { showShellToast("Can't open yet · try again") }
+                            )
+                        }
+                        #else
                         PunkRallyPlayerHost.playerView(
                             for: wrapper.data,
                             onFailure: { showShellToast("Can't open yet · try again") }
                         )
+                        #endif
                     }
                     .formatSwitchDiscrepancyDialog()
                 }
@@ -485,6 +495,9 @@ private struct HomeTabView: View {
     /// In-progress books + podcasts (Continue sources), last-touched order.
     private var inProgressItems: [HomeMixedItem] {
         let _ = queueTick
+#if INKAMP_GEOMETRY_HARNESS
+        let queue = InkAmpGeometryFixture.queue
+#else
         let vm = mediaViewModel
         let books = vm?.library.bookMetaData ?? []
         let progress = vm?.bookProgressCache ?? [:]
@@ -499,6 +512,7 @@ private struct HomeTabView: View {
             bookLocalTouches: BookRecentStore.shared.all(),
             upNextLimit: 40
         )
+#endif
         return ([queue.continueItem].compactMap { $0 }) + queue.upNext
     }
 
@@ -518,7 +532,11 @@ private struct HomeTabView: View {
 
     private var finishTonightPicks: (minutes: Int, items: [HomeMixedItem])? {
         let _ = queueTick
+#if INKAMP_GEOMETRY_HARNESS
+        guard let minutes = InkAmpGeometryFixture.minutesUntilBedtime else { return nil }
+#else
         guard let minutes = BedtimeSettings.minutesUntilBedtime() else { return nil }
+#endif
         let items = FinishTonight.picks(
             from: inProgressItems,
             minutesUntilBedtime: minutes
@@ -555,9 +573,28 @@ private struct HomeTabView: View {
                 .padding(.horizontal, PunkRallyTheme.Metric.screenInset)
                 .padding(.vertical, 12)
             }
+#if INKAMP_GEOMETRY_HARNESS
+            .accessibilityIdentifier("geometry.scroll.home")
+            .background(alignment: .topLeading) {
+                ScrollGeometryProbe(name: "home").frame(width: 1, height: 1)
+            }
+#endif
+            // The scroll root observes the rendered bar's height, including
+            // clearance, even after asynchronous reveal or cover dismissal.
+            .punkRallyMiniPlayerScrollInset(topClearance: 24)
             .background(chrome.bg)
             .navigationTitle("ink+amp")
             .toolbar {
+#if INKAMP_GEOMETRY_HARNESS
+                if InkAmpGeometryFixture.restoreAfterLayout {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Restore fixture player") {
+                            NotificationCenter.default.post(
+                                name: Notification.Name("InkAmpGeometryRestorePlayer"), object: nil)
+                        }
+                    }
+                }
+#endif
                 if mediaViewModel?.hasServerConnectionIssue == true {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
@@ -707,6 +744,10 @@ private struct HomeTabView: View {
                 homeItemContextMenu(for: item)
             }
         }
+#if INKAMP_GEOMETRY_HARNESS
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("geometry.continue.production")
+#endif
     }
 
     private var upNextRow: some View {
@@ -755,6 +796,10 @@ private struct HomeTabView: View {
                 }
             }
         }
+#if INKAMP_GEOMETRY_HARNESS
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("geometry.upnext")
+#endif
     }
 
     private var statsStrip: some View {

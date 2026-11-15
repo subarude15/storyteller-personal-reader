@@ -74,16 +74,44 @@ public struct PRDailyAggregate: Identifiable, Codable, Equatable, Sendable {
 public struct PRStatsSnapshot: Equatable, Sendable {
     public var todaySeconds: TimeInterval
     public var weekSeconds: TimeInterval
+    public var monthSeconds: TimeInterval
     public var streakDays: Int
+    public var longestStreakDays: Int
     public var finishedBooks30d: Int
+    public var activeBooks30d: Int
     public var averageSessionSeconds: TimeInterval
     public var recentDays: [PRDailyAggregate]
+
+    public init(
+        todaySeconds: TimeInterval,
+        weekSeconds: TimeInterval,
+        monthSeconds: TimeInterval = 0,
+        streakDays: Int,
+        longestStreakDays: Int = 0,
+        finishedBooks30d: Int,
+        activeBooks30d: Int = 0,
+        averageSessionSeconds: TimeInterval,
+        recentDays: [PRDailyAggregate]
+    ) {
+        self.todaySeconds = todaySeconds
+        self.weekSeconds = weekSeconds
+        self.monthSeconds = monthSeconds
+        self.streakDays = streakDays
+        self.longestStreakDays = longestStreakDays
+        self.finishedBooks30d = finishedBooks30d
+        self.activeBooks30d = activeBooks30d
+        self.averageSessionSeconds = averageSessionSeconds
+        self.recentDays = recentDays
+    }
 
     public static let empty = PRStatsSnapshot(
         todaySeconds: 0,
         weekSeconds: 0,
+        monthSeconds: 0,
         streakDays: 0,
+        longestStreakDays: 0,
         finishedBooks30d: 0,
+        activeBooks30d: 0,
         averageSessionSeconds: 0,
         recentDays: []
     )

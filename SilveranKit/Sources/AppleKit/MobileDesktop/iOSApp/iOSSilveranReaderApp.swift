@@ -316,7 +316,7 @@ private struct iOSRootView: View {
                 "[RestoreTrace][Restore] awaitPrerequisites deltaMs=\(String(format: "%.1f", (afterStartup - restoreStarted) * 1000))"
             )
             if mediaViewModel.pendingOpenBookID == nil {
-                if let bookData = await LastOpenBookStore.loadPlayerBookData(),
+                if let bookData = await restoredBookData(),
                     mediaViewModel.pendingOpenBookID == nil
                 {
                     PlayerPresenter.shared.present(bookData)
@@ -326,7 +326,21 @@ private struct iOSRootView: View {
                 "[RestoreTrace][Restore] loadPlayerBookData deltaMs=\(String(format: "%.1f", (CFAbsoluteTimeGetCurrent() - afterStartup) * 1000))"
             )
             restoreStartupFinished = true
+            #if DEBUG
+            if InkAmpGeometryLifecycle.isEnabled { InkAmpGeometryLifecycle.rootRestored = true }
+            #endif
         }
+    }
+
+    private func restoredBookData() async -> PlayerBookData? {
+        #if DEBUG
+        if InkAmpGeometryLifecycle.isEnabled {
+            // Substitute local route data, not the production startup gate,
+            // PlayerPresenter.present call, hosting wrapper or presentation.
+            return InkAmpGeometryLifecycle.flow == "cover" ? InkAmpGeometryLifecycle.bookData : nil
+        }
+        #endif
+        return await LastOpenBookStore.loadPlayerBookData()
     }
 
     private func handleOpenURL(_ url: URL) {
@@ -355,4 +369,34 @@ private struct iOSRootView: View {
         mediaViewModel.pendingOpenBookID = bookID
     }
 }
+
+#if DEBUG
+/// Public test bridge to the SAME private production iOSRootView. Only its
+/// migration/network prerequisites and route data are local in the isolated app.
+@MainActor
+public struct GeometryLifecycleProductionRoot: View {
+    @State private var mediaViewModel: MediaViewModel
+    private let prerequisites: Task<Bool, Never>
+
+    public init(root: AnyView, library: BookLibrary) {
+        precondition(InkAmpGeometryLifecycle.isEnabled)
+        AppLaunchContext.iosRootView = root
+        let vm = MediaViewModel(injectLibrary: library)
+        vm.isReady = true
+        _mediaViewModel = State(initialValue: vm)
+        prerequisites = Task {
+            await vm.start() // injected-library initializer makes this local-only
+            await InkAmpGeometryLifecycle.prepareStartup()
+            return true
+        }
+    }
+
+    public var body: some View {
+        iOSRootView(restorePrerequisitesTask: prerequisites)
+            .environment(AppLaunchContext.environment)
+            .environment(mediaViewModel)
+            .background(GeometryLifecycleStateProbe())
+    }
+}
+#endif
 #endif

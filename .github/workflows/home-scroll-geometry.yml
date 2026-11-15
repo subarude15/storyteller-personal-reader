@@ -1,0 +1,79 @@
+name: Home scroll native geometry
+
+on:
+  push:
+    branches: [cursor/home-scroll-clearance-v2, cursor/home-lifecycle-native-repro, cursor/home-scroll-root-reservation]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: home-scroll-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  geometry:
+    runs-on: macos-15
+    timeout-minutes: 75
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Select Xcode with Swift 6.2 support
+        run: |
+          set -euo pipefail
+          for xcode in /Applications/Xcode_26.3.app /Applications/Xcode_26.app /Applications/Xcode.app; do
+            if [[ -d "$xcode" ]]; then
+              sudo xcode-select -s "$xcode"
+              break
+            fi
+          done
+          xcodebuild -version
+          swift --version
+      - name: Generate isolated unsigned simulator host
+        run: |
+          brew install xcodegen
+          xcodegen generate --spec tools/native-scroll/project.yml --project "$PWD" --project-root "$PWD"
+      - name: Select available iPhone simulator
+        run: |
+          mkdir -p geometry-results
+          xcrun simctl list devices available --json > geometry-results/simulators.json
+          python3 - <<'PY'
+          import json, os, re
+          data = json.load(open('geometry-results/simulators.json'))
+          runtimes = sorted(
+              (r for r in data['devices'] if 'iOS-' in r),
+              key=lambda r: tuple(map(int, re.findall(r'iOS-(\d+)-(\d+)', r)[0])), reverse=True)
+          candidates = [d for r in runtimes for d in data['devices'][r]
+                        if d.get('isAvailable') and d['name'].startswith('iPhone')]
+          if not candidates:
+              raise SystemExit('No available iPhone simulator; cannot collect native evidence')
+          device = candidates[0]
+          print('Simulator:', device['name'], device['udid'])
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('GEOMETRY_SIMULATOR=' + device['udid'] + '\n')
+          PY
+      - name: Native released-scroll geometry and coordinate hit tests
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project InkAmpGeometry.xcodeproj \
+            -scheme InkAmpGeometry \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$GEOMETRY_SIMULATOR" \
+            -derivedDataPath "$RUNNER_TEMP/InkAmpGeometryDerivedData" \
+            -resultBundlePath "$PWD/geometry-results/HomeScroll.xcresult" \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            2>&1 | tee geometry-results/xcodebuild.log
+      - name: Retain native evidence even for a regression failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: home-scroll-native-${{ github.sha }}
+          path: geometry-results/
+          if-no-files-found: error
+          retention-days: 14

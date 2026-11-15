@@ -22,6 +22,7 @@ public struct RelocatedMessage: Codable {
 /// Sent from JS when book structure is ready after opening a book
 public struct BookStructureReadyMessage: Codable {
     public let sections: [SectionInfo]
+    public let sectionFractions: [Double]?
 }
 
 /// Sent when foliate detects a user gesture that flips a page
@@ -33,6 +34,11 @@ public struct PageFlippedMessage: Codable {
 
 /// Sent when user taps to toggle overlay visibility (iOS only)
 public struct OverlayToggledMessage: Codable {
+}
+
+/// Sent when an immersive-mode long-press is recognized (iOS only). The contact
+/// was consumed in JS: no page turn, selection, or seek accompanies it.
+public struct ReaderChromeRevealMessage: Codable {
 }
 
 /// Sent when the page-curl animator needs floating reader chrome hidden/restored.

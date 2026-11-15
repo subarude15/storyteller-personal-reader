@@ -120,9 +120,9 @@ struct CoverDerivedPalette {
         )
     }
 
-    private static func sampledRGBA(of image: CGImage) -> [UInt8]? {
-        let sampleWidth = 8
-        let sampleHeight = 8
+    static func sampledRGBA(of image: CGImage, side: Int = 8) -> [UInt8]? {
+        let sampleWidth = side
+        let sampleHeight = side
         let bytesPerPixel = 4
         let bytesPerRow = sampleWidth * bytesPerPixel
         var pixels = [UInt8](repeating: 0, count: sampleHeight * bytesPerRow)

@@ -1,4 +1,4 @@
-public struct CoverRGB8: Equatable, Sendable {
+public struct CoverRGB8: Codable, Equatable, Hashable, Sendable {
     public let red: UInt8
     public let green: UInt8
     public let blue: UInt8

@@ -63,6 +63,7 @@ struct MediaGridSortAndFilterBar: View {
             viewOptionsButton
         }
         .font(.callout)
+        .lineLimit(1)
     }
 
     @ViewBuilder
@@ -83,6 +84,7 @@ struct MediaGridSortAndFilterBar: View {
             #endif
             .help("Import EPUB and audiobook")
             .accessibilityLabel("Import")
+            .accessibilityHint("Upload EPUB and audiobook to Storyteller, then generate read-aloud")
         }
     }
 
@@ -607,7 +609,12 @@ struct MediaGridSortAndFilterBar: View {
         Button {
             showViewOptions.toggle()
         } label: {
+            #if os(iOS)
             Label("View Options", systemImage: "ellipsis.circle")
+                .labelStyle(.iconOnly)
+            #else
+            Label("View Options", systemImage: "ellipsis.circle")
+            #endif
         }
         #if os(macOS)
         .buttonStyle(.borderless)

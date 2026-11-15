@@ -1,0 +1,62 @@
+name: InkAmpGeometry
+options:
+  minimumXcodeGenVersion: 2.38.0
+  deploymentTarget:
+    iOS: '18.0'
+packages:
+  Silveran:
+    path: .
+settings:
+  base:
+    SWIFT_VERSION: '5.10'
+    CODE_SIGNING_ALLOWED: NO
+    CODE_SIGNING_REQUIRED: NO
+    TARGETED_DEVICE_FAMILY: '1,2'
+    GENERATE_INFOPLIST_FILE: YES
+    MARKETING_VERSION: '0.1'
+    CURRENT_PROJECT_VERSION: '1'
+targets:
+  InkAmpGeometry:
+    type: application
+    platform: iOS
+    sources:
+      - path: XCodeApps
+        includes: ['**/*.swift']
+        excludes: [EntryPointStub.swift, 'ShareExtension/**']
+      - path: tools/native-scroll/App
+    dependencies:
+      - package: Silveran
+        product: SilveranAppleKit
+      - package: Silveran
+        product: SilveranReadaloud
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.punkrally.reader.geometry
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: '$(inherited) DEBUG INKAMP_GEOMETRY_HARNESS'
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: 'UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight'
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+  InkAmpGeometryUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: tools/native-scroll/Tests
+    dependencies:
+      - target: InkAmpGeometry
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.punkrally.reader.geometry.uitests
+        TEST_TARGET_NAME: InkAmpGeometry
+schemes:
+  InkAmpGeometry:
+    build:
+      targets:
+        InkAmpGeometry: all
+        InkAmpGeometryUITests: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - name: InkAmpGeometryUITests
+          parallelizable: false

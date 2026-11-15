@@ -25,6 +25,7 @@ class EntryPointStub {
         // now-playing) runs normally underneath; AppLaunchContext.iosRootView replaces
         // just the root library view.
         AppLaunchContext.iosRootView = AnyView(PunkRallyTabView())
+        CarPlayPodcastCatalog.install()
         iosAppEntryPoint(
             environment: SilveranEnvironment(readaloudAligner: ReadaloudEngine())
         )

@@ -80,6 +80,8 @@ struct EbookPlayerToolbar: ToolbarContent {
                 BookmarksPanel(
                     bookmarks: viewModel.bookmarks,
                     highlights: viewModel.coloredHighlights,
+                    bookTitle: viewModel.bookData?.metadata.title,
+                    bookAuthor: viewModel.bookData?.metadata.authors?.first?.name,
                     onDismiss: { viewModel.showBookmarksPanel = false },
                     onNavigate: { highlight in
                         Task {
@@ -92,6 +94,18 @@ struct EbookPlayerToolbar: ToolbarContent {
                     },
                     onAddBookmark: {
                         Task { await viewModel.addBookmarkAtCurrentPage() }
+                    },
+                    onEdit: { highlight in
+                        viewModel.showBookmarksPanel = false
+                        viewModel.pendingEditHighlight = highlight
+                    },
+                    onChangeColor: { highlight, color in
+                        Task {
+                            await viewModel.handleHighlightSetColor(
+                                id: highlight.id.uuidString,
+                                colorId: color.rawValue
+                            )
+                        }
                     },
                     highlightColorResolver: { color in
                         guard let color else { return Color.yellow.opacity(0.4) }

@@ -6,6 +6,10 @@ import UIKit
 
 struct EbookPlayerTopToolbar: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @AppStorage(CoverTintSettings.enabledKey) private var coverTintEnabled = CoverTintSettings.defaultEnabled
+    private var coverTintModel: CoverTintModel { .shared }
+    private var audioMonitor: AudioSessionMonitor { .shared }
 
     let hasAudioNarration: Bool
     let playbackSpeed: Double
@@ -35,6 +39,14 @@ struct EbookPlayerTopToolbar: View {
     /// Other downloaded formats for this title (excludes the current category).
     var switchableFormats: [(label: String, category: LocalMediaCategory)] = []
     var onSwitchFormat: ((LocalMediaCategory) -> Void)?
+    var isCurrentPageBookmarked: Bool = false
+    var onTogglePageBookmark: (() -> Void)? = nil
+    /// Immersive mode only: whether Select Text is active (`nil` hides the control).
+    var isSelectTextMode: Bool? = nil
+    var onToggleSelectText: (() -> Void)? = nil
+    var onHideControls: (() -> Void)? = nil
+    /// Taps on chrome that do not open a sheet restart the immersive idle window.
+    var onActivity: () -> Void = {}
 
     @State private var showSleepTimerSheet = false
     @State private var showOptionsSheet = false
@@ -43,11 +55,28 @@ struct EbookPlayerTopToolbar: View {
         UIDevice.current.userInterfaceIdiom == .pad
     }
 
-    private var toolbarForegroundColor: Color {
-        let bgHex =
-            settingsVM.backgroundColor
+    private var backgroundHex: String {
+        settingsVM.backgroundColor
             ?? (colorScheme == .dark ? kDefaultBackgroundColorDark : kDefaultBackgroundColorLight)
-        return isLightColor(hex: bgHex) ? .black : .white
+    }
+
+    private var toolbarForegroundColor: Color {
+        isLightColor(hex: backgroundHex) ? .black : .white
+    }
+
+    /// Chrome icons pick up the cover tint only while readaloud narration is the active
+    /// session, and only when the tint keeps 3:1 against this reader page background.
+    private var iconColor: Color {
+        guard coverTintEnabled,
+            colorSchemeContrast != .increased,
+            case .readaloud? = audioMonitor.snapshot?.kind,
+            let palette = coverTintModel.palette,
+            let background = CoverRGB8(hex: backgroundHex)
+        else { return toolbarForegroundColor }
+        let control = palette.colors(dark: CoverTintMath.relativeLuminance(background) < 0.18).control
+        guard CoverTintMath.contrast(control, background) >= CoverTintMath.controlMinimumContrast
+        else { return toolbarForegroundColor }
+        return Color(coverRGB: control)
     }
 
     private var toolbarBackgroundColor: Color {
@@ -78,14 +107,14 @@ struct EbookPlayerTopToolbar: View {
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(toolbarForegroundColor)
+                        .foregroundStyle(iconColor)
                         .contentShape(Rectangle())
                 }
                 .frame(width: 44, height: 44)
 
                 Spacer(minLength: 0)
 
-                HStack(spacing: 4) {
+                HStack(spacing: 2) {
                     if hasAudioNarration {
                         sleepTimerButton
                     }
@@ -94,33 +123,34 @@ struct EbookPlayerTopToolbar: View {
                         chapters: chapters,
                         selectedChapterId: selectedChapterId,
                         onChapterSelected: onChapterSelected,
-                        backgroundColor: toolbarForegroundColor,
-                        foregroundColor: toolbarForegroundColor,
+                        backgroundColor: iconColor,
+                        foregroundColor: iconColor,
                         transparency: 1.0,
                         showLabel: false,
-                        buttonSize: 44,
+                        buttonSize: 42,
                         showBackground: false,
                     )
 
                     Button {
                         showBookmarksPanel = true
                     } label: {
-                        Image(systemName: "bookmark")
-                            .font(.system(size: 20, weight: .regular))
-                            .foregroundStyle(toolbarForegroundColor)
+                        Image(systemName: "highlighter")
+                            .font(.system(size: 19, weight: .regular))
+                            .foregroundStyle(iconColor)
                             .contentShape(Rectangle())
                     }
-                    .frame(width: 44, height: 44)
+                    .frame(width: 42, height: 44)
+                    .accessibilityLabel("Bookmarks and Highlights")
 
                     Button {
                         showSearchSheet = true
                     } label: {
                         Image(systemName: "magnifyingglass")
-                            .font(.system(size: 20, weight: .regular))
-                            .foregroundStyle(toolbarForegroundColor)
+                            .font(.system(size: 19, weight: .regular))
+                            .foregroundStyle(iconColor)
                             .contentShape(Rectangle())
                     }
-                    .frame(width: 44, height: 44)
+                    .frame(width: 42, height: 44)
                     .sheet(isPresented: $showSearchSheet) {
                         NavigationStack {
                             if let manager = searchManager {
@@ -151,7 +181,7 @@ struct EbookPlayerTopToolbar: View {
                     } label: {
                         Image(systemName: "textformat.size")
                             .font(.system(size: 20, weight: .regular))
-                            .foregroundStyle(toolbarForegroundColor)
+                            .foregroundStyle(iconColor)
                             .contentShape(Rectangle())
                     }
                     .frame(width: 44, height: 44)
@@ -180,12 +210,13 @@ struct EbookPlayerTopToolbar: View {
 
                     if isPad {
                         Button {
+                            onActivity()
                             withAnimation(.easeInOut) { showAudioSidebar.toggle() }
                         } label: {
                             Image(systemName: "sidebar.trailing")
                                 .font(.system(size: 20, weight: .regular))
                                 .symbolVariant(showAudioSidebar ? .fill : .none)
-                                .foregroundStyle(toolbarForegroundColor)
+                                .foregroundStyle(iconColor)
                                 .contentShape(Rectangle())
                         }
                         .frame(width: 44, height: 44)
@@ -195,14 +226,57 @@ struct EbookPlayerTopToolbar: View {
                         showOptionsSheet = true
                     } label: {
                         Image(systemName: "ellipsis.circle")
-                            .font(.system(size: 20, weight: .regular))
-                            .foregroundStyle(toolbarForegroundColor)
+                            .font(.system(size: 19, weight: .regular))
+                            .foregroundStyle(iconColor)
                             .contentShape(Rectangle())
                     }
-                    .frame(width: 44, height: 44)
+                    .frame(width: 42, height: 44)
                     .accessibilityLabel("Display Options")
                     .sheet(isPresented: $showOptionsSheet) {
                         optionsSheet
+                    }
+                    .reportsReaderChromeSheet(showOptionsSheet)
+
+                    Button {
+                        if let onTogglePageBookmark {
+                            onTogglePageBookmark()
+                        } else {
+                            showBookmarksPanel = true
+                        }
+                    } label: {
+                        Image(systemName: isCurrentPageBookmarked ? "bookmark.fill" : "bookmark")
+                            .font(.system(size: 20, weight: .regular))
+                            .foregroundStyle(
+                                isCurrentPageBookmarked
+                                    ? BookmarkPageRibbonView.ribbonColor
+                                    : iconColor
+                            )
+                            .scaleEffect(isCurrentPageBookmarked ? 1.08 : 1.0)
+                            .animation(
+                                .spring(response: 0.28, dampingFraction: 0.7),
+                                value: isCurrentPageBookmarked
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .frame(width: 42, height: 44)
+                    .accessibilityLabel(
+                        isCurrentPageBookmarked ? "Remove Page Bookmark" : "Bookmark Page"
+                    )
+                    .contextMenu {
+                        Button {
+                            onTogglePageBookmark?()
+                        } label: {
+                            Label(
+                                isCurrentPageBookmarked ? "Remove Bookmark" : "Bookmark This Page",
+                                systemImage: isCurrentPageBookmarked
+                                    ? "bookmark.slash" : "bookmark.fill"
+                            )
+                        }
+                        Button {
+                            showBookmarksPanel = true
+                        } label: {
+                            Label("All Bookmarks & Highlights", systemImage: "list.bullet")
+                        }
                     }
                 }
             }
@@ -210,16 +284,60 @@ struct EbookPlayerTopToolbar: View {
             .frame(height: 44)
             .background(toolbarBackgroundColor.ignoresSafeArea(edges: .top))
 
+            if let isSelectTextMode {
+                selectTextControl(active: isSelectTextMode)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.top, 8)
+                    .padding(.trailing, 12)
+            }
+
             Spacer()
         }
         .sheet(isPresented: $showSleepTimerSheet) {
             sleepTimerSheet
         }
+        .reportsReaderChromeSheet(showSleepTimerSheet)
+        .accessibilityElement(children: .contain)
+        .accessibilityAction(named: "Hide reader controls") {
+            onHideControls?()
+        }
+    }
+
+    private func selectTextControl(active: Bool) -> some View {
+        Button {
+            onToggleSelectText?()
+        } label: {
+            if active {
+                Label("Done Selecting", systemImage: "checkmark")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 44)
+                    .background(Capsule().fill(Color.accentColor))
+            } else {
+                Label("Select Text", systemImage: "character.cursor.ibeam")
+                    .font(.subheadline)
+                    .foregroundStyle(iconColor)
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 44)
+                    .background(Capsule().fill(toolbarBackgroundColor.opacity(0.92)))
+                    .overlay(Capsule().stroke(iconColor.opacity(0.18), lineWidth: 1))
+            }
+        }
+        .buttonStyle(.plain)
+        .contentShape(Capsule())
+        .accessibilityLabel(active ? "Done selecting text" : "Select Text")
+        .accessibilityHint(
+            active
+                ? "Returns to immersive reading."
+                : "Lets you touch and hold text to select and highlight it."
+        )
     }
 
     private var sleepTimerButton: some View {
         Button(action: {
             if sleepTimerActive {
+                onActivity()
                 onSleepTimerCancel()
             } else {
                 showSleepTimerSheet = true
@@ -227,7 +345,7 @@ struct EbookPlayerTopToolbar: View {
         }) {
             Image(systemName: sleepTimerActive ? "moon.zzz.fill" : "moon.zzz")
                 .font(.system(size: 20, weight: .regular))
-                .foregroundStyle(sleepTimerActive ? .accentColor : toolbarForegroundColor)
+                .foregroundStyle(sleepTimerActive ? .accentColor : iconColor)
                 .contentShape(Rectangle())
         }
         .frame(width: 44, height: 44)
@@ -288,7 +406,7 @@ struct EbookPlayerTopToolbar: View {
                         }
                     }
 
-                    Section("Mini Player") {
+                    Section {
                         Toggle(
                             isOn: Binding(
                                 get: { settingsVM.alwaysShowMiniPlayer },
@@ -312,6 +430,14 @@ struct EbookPlayerTopToolbar: View {
                         ) {
                             Label("Show Stats Below", systemImage: "clock")
                         }
+                    } header: {
+                        Text("Mini Player")
+                    } footer: {
+                        Text(
+                            settingsVM.readerControlsMode == .immersive
+                                ? "With Immersive controls, Always Show keeps only the compact narration player on screen; the toolbar and scrubber still hide."
+                                : "Keeps the mini player on screen when you tap to hide controls."
+                        )
                     }
                 }
 

@@ -51,6 +51,9 @@ public final class SettingsViewModel {
     public var showOverlaySkipForward: Bool = kDefaultShowOverlaySkipForward
     public var showOverlayPlayPause: Bool = kDefaultShowOverlayPlayPause
     public var showMiniPlayerStats: Bool = kDefaultShowMiniPlayerStats
+    public var readerControlsMode: ReaderControlsMode = ReaderControlsMode(
+        storedValue: kDefaultReaderControlsMode
+    )
     #endif
 
     public var progressSyncIntervalSeconds: Double = kDefaultProgressSyncIntervalSeconds
@@ -185,6 +188,7 @@ public final class SettingsViewModel {
         showOverlaySkipForward = config.readingBar.showOverlaySkipForward
         showOverlayPlayPause = config.readingBar.showOverlayPlayPause
         showMiniPlayerStats = config.readingBar.showMiniPlayerStats
+        readerControlsMode = ReaderControlsMode(storedValue: config.readingBar.controlsMode)
         #endif
 
         progressSyncIntervalSeconds = config.sync.progressSyncIntervalSeconds
@@ -451,6 +455,7 @@ public final class SettingsViewModel {
             showOverlaySkipForward: showOverlaySkipForwardValue,
             showOverlayPlayPause: showOverlayPlayPauseValue,
             showMiniPlayerStats: showMiniPlayerStatsValue,
+            readerControlsMode: readerControlsModeValue,
             progressSyncIntervalSeconds: progressSyncIntervalSeconds,
             metadataRefreshIntervalSeconds: metadataRefreshIntervalSeconds,
             autoSyncToNewerServerPosition: autoSyncToNewerServerPosition,
@@ -475,6 +480,7 @@ public final class SettingsViewModel {
     private var showOverlaySkipForwardValue: Bool { showOverlaySkipForward }
     private var showOverlayPlayPauseValue: Bool { showOverlayPlayPause }
     private var showMiniPlayerStatsValue: Bool { showMiniPlayerStats }
+    private var readerControlsModeValue: String? { readerControlsMode.rawValue }
     private var tabBarSlot1Value: String { tabBarSlot1 }
     private var tabBarSlot2Value: String { tabBarSlot2 }
     private var tapToPlayPreferredPlayerValue: Bool { tapToPlayPreferredPlayer }
@@ -485,6 +491,7 @@ public final class SettingsViewModel {
     private var showOverlaySkipForwardValue: Bool { kDefaultShowOverlaySkipForward }
     private var showOverlayPlayPauseValue: Bool { kDefaultShowOverlayPlayPause }
     private var showMiniPlayerStatsValue: Bool { kDefaultShowMiniPlayerStats }
+    private var readerControlsModeValue: String? { nil }
     private var tabBarSlot1Value: String { kDefaultTabBarSlot1 }
     private var tabBarSlot2Value: String { kDefaultTabBarSlot2 }
     private var tapToPlayPreferredPlayerValue: Bool { kDefaultTapToPlayPreferredPlayer }

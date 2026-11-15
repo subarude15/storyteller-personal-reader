@@ -380,7 +380,7 @@ public enum AudiobookProgressConflict {
             case .appBackgrounding, .userPausedPlayback, .appTerminating:
                 return true
             case .userFlippedPage, .userSelectedChapter, .userDraggedSeekBar,
-                .userStartedPlayback, .userSkippedForward, .userSkippedBackward,
+                .userStartedPlayback, .userSkippedForward, .userSkippedBackward, .userMarkedSpot,
                 .periodicDuringActivePlayback, .periodicWhileReading, .userClosedBook,
                 .userRestoredFromHistory, .userConfirmedRestart, .userSwitchedFormat,
                 .connectionRestored, .watchReconnected, .relayedFromWatch, .initialLoad,

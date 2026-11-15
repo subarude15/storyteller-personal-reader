@@ -16,6 +16,8 @@ public final class EphemeralProgressManager {
     public var bookFraction: Double? = nil
     public var chapterCurrentPage: Int? = nil
     public var chapterTotalPages: Int? = nil
+    public private(set) var currentCfi: String? = nil
+    public private(set) var currentHref: String? = nil
 
     /// Current chapter index (source of truth, typically from JS progress events)
     /// Reflects JS reader reality but may need sync with Swift value (below).
@@ -48,6 +50,8 @@ public final class EphemeralProgressManager {
     }
 
     public var bookStructure: [SectionInfo] = []
+    public var sectionFractions: [Double] = []
+    @ObservationIgnored public var onChapterBoundaryCrossed: ((Int, Int) -> Void)?
 
     public weak var commsBridge: ReaderCommsBridge?
     public weak var mediaOverlayManager: MediaOverlayManager?
@@ -248,7 +252,11 @@ public final class EphemeralProgressManager {
             return
         }
 
-        chapterSeekBarValue = Double(current - 1) / Double(total)
+        if total > 1 {
+            chapterSeekBarValue = min(max(Double(current - 1) / Double(total - 1), 0.0), 1.0)
+        } else {
+            chapterSeekBarValue = 0.0
+        }
         debugLog(
             "[EPM] Chapter progress updated: \(String(format: "%.1f%%", chapterSeekBarValue * 100))"
         )
@@ -637,11 +645,25 @@ public final class EphemeralProgressManager {
             shouldNotifyUserNav = true
         }
 
+        let previousSection = selectedChapterId
         selectedChapterId = message.sectionIndex
+        if !message.cfi.isEmpty {
+            currentCfi = message.cfi
+        }
+        if let href = message.href, !href.isEmpty {
+            currentHref = href
+        }
         updateBookProgress(fraction: message.fraction)
         chapterCurrentPage = message.pageIndex
         chapterTotalPages = message.totalPages
         updateChapterProgress(currentPage: message.pageIndex, totalPages: message.totalPages)
+
+        if let prev = previousSection,
+            let next = message.sectionIndex,
+            prev != next
+        {
+            onChapterBoundaryCrossed?(prev, next)
+        }
 
         let isUserNav = shouldNotifyUserNav || shouldNotifyUserNavForChapterTransition
 
@@ -685,10 +707,24 @@ public final class EphemeralProgressManager {
         pendingSwiftCommandFlipEchoes = 0
         cancelUserNavFallback()
 
+        let previousSection = selectedChapterId
         selectedChapterId = message.sectionIndex
+        if !message.cfi.isEmpty {
+            currentCfi = message.cfi
+        }
+        if let href = message.href, !href.isEmpty {
+            currentHref = href
+        }
         updateBookProgress(fraction: message.fraction)
         chapterCurrentPage = nil
         chapterTotalPages = nil
+
+        if let prev = previousSection,
+            let next = message.sectionIndex,
+            prev != next
+        {
+            onChapterBoundaryCrossed?(prev, next)
+        }
 
         if let chapterFraction = message.chapterFraction {
             chapterSeekBarValue = max(0.0, min(1.0, chapterFraction))
@@ -869,6 +905,22 @@ public final class EphemeralProgressManager {
     private func cancelUserNavFallback() {
         userNavFallbackTask?.cancel()
         userNavFallbackTask = nil
+    }
+
+    /// Clears pending page/chapter expectations before a direct CFI/locator/jump-back navigation.
+    public func prepareForDirectJump(targetSection: Int? = nil) {
+        cancelUserNavFallback()
+        pendingPageNav = nil
+        pendingSeekNav = nil
+        pendingChapterTransition = nil
+        pendingSwiftCommandFlipEchoes = 0
+        if let targetSection {
+            pendingSeekNav = PendingSeekNav(sectionIndex: targetSection)
+        }
+        if !isFreeBrowseMode || isScrollingMode {
+            pendingUserNavSyncReason = .userSelectedChapter
+        }
+        scheduleUserNavFallback(source: "direct-jump")
     }
 
     private func queueSeekNav(sectionIndex: Int) {
@@ -1113,6 +1165,49 @@ public final class EphemeralProgressManager {
             } catch {
                 debugLog("[EPM] Failed to send seek command: \(error)")
                 pendingSeekNav = nil
+            }
+        }
+    }
+
+    /// User dragged book-wide progress bar to seek across entire book (0.0 - 1.0)
+    public func handleUserBookProgressSeek(_ progress: Double) {
+        let clampedProgress = max(0.0, min(1.0, progress))
+        bookFraction = clampedProgress
+
+        debugLog(
+            "[EPM] User seeking to book progress: \(String(format: "%.1f%%", clampedProgress * 100))"
+        )
+
+        guard let bridge = commsBridge else {
+            debugLog("[EPM] Cannot book-seek - bridge unavailable")
+            return
+        }
+
+        cancelUserNavFallback()
+        pendingPageNav = nil
+        pendingSeekNav = nil
+        pendingChapterTransition = nil
+
+        if !isFreeBrowseMode || isScrollingMode {
+            pendingUserNavSyncReason = .userDraggedSeekBar
+        }
+        scheduleUserNavFallback(source: "book-seek-nav")
+
+        Task { @SilveranUIActor in
+            do {
+                try await bridge.sendJsGoToBookFractionCommand(fraction: clampedProgress)
+
+                if !self.isFreeBrowseMode,
+                    let mom = self.mediaOverlayManager,
+                    mom.hasMediaOverlay,
+                    let (smilSection, anchor) = await self.findSmilEntryByBookFraction(
+                        clampedProgress
+                    )
+                {
+                    await mom.handleSeekEvent(sectionIndex: smilSection, anchor: anchor)
+                }
+            } catch {
+                debugLog("[EPM] Failed to send book seek command: \(error)")
             }
         }
     }

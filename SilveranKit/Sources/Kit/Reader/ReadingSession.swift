@@ -121,6 +121,7 @@ public final class ReadingSession {
     public private(set) var isViewAttached = false
 
     public var bookStructure: [SectionInfo] = []
+    public var sectionFractions: [Double] = []
     public var tocEntries: [TocEntry] = []
     public var hasAudioNarration = false
     public var extractedEbookPath: URL?
@@ -585,7 +586,12 @@ public final class ReadingSession {
             structureToUse = message.sections
         }
 
+        if let fractions = message.sectionFractions, !fractions.isEmpty {
+            sectionFractions = fractions
+        }
+
         progressManager?.bookStructure = structureToUse
+        progressManager?.sectionFractions = sectionFractions
 
         if isRecovering {
             debugLog("[ReadingSession] Recovery mode - reusing existing MOM/SMILPlayerActor")

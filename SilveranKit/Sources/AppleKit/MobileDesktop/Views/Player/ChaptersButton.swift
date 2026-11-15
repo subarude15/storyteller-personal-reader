@@ -68,6 +68,7 @@ public struct ChaptersButton: View {
                     .foregroundStyle(foregroundColor.opacity(0.7 * transparency))
             }
         }
+        .reportsReaderChromeSheet(showSheet)
     }
 
     private var buttonLabel: some View {

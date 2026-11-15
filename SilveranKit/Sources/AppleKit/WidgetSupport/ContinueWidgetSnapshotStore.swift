@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import SilveranKit
 
 #if canImport(WidgetKit) && (os(iOS) || os(macOS))
@@ -19,6 +20,15 @@ public enum ContinueWidgetKindTag: String, Codable, Sendable {
             case .podcast: return "POD"
         }
     }
+
+    public var symbolName: String {
+        switch self {
+            case .ebook: return "book.closed.fill"
+            case .audiobook: return "headphones"
+            case .readaloud: return "text.book.closed.fill"
+            case .podcast: return "mic.fill"
+        }
+    }
 }
 
 /// One Up next row in the Continue widget. Same identity string as `HomeMixedItem.id`
@@ -31,6 +41,17 @@ public struct ContinueWidgetQueueItem: Codable, Sendable, Hashable, Identifiable
     public var kind: ContinueWidgetKindTag?
     public var deepLink: String
     public var progress: Double?
+
+    public var clampedProgress: Double? {
+        guard let progress, progress > 0 else { return nil }
+        return min(max(progress, 0), 1)
+    }
+
+    public var percentComplete: Int? {
+        guard let clampedProgress else { return nil }
+        let pct = Int((clampedProgress * 100).rounded())
+        return pct > 0 ? pct : nil
+    }
 
     public init(
         id: String,
@@ -172,13 +193,15 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         clampedProgress.map { Int(($0 * 100).rounded()) }
     }
 
-    /// "12m left" / "1h 5m left" when a duration is known.
+    /// "12m left" / "1h 5m left" when a duration is known, adjusted for playback rate.
     public var remainingText: String? {
         guard let durationSeconds, durationSeconds > 0 else { return nil }
         let elapsed = elapsedSeconds ?? ((clampedProgress ?? 0) * durationSeconds)
-        let remaining = max(0, durationSeconds - elapsed)
-        guard remaining > 0 else { return nil }
-        return Self.durationText(remaining) + " left"
+        let rawRemaining = max(0, durationSeconds - elapsed)
+        guard rawRemaining > 0 else { return nil }
+        let effectiveRate = (rate ?? 1.0) > 0.05 ? (rate ?? 1.0) : 1.0
+        let adjustedRemaining = rawRemaining / effectiveRate
+        return Self.durationText(adjustedRemaining) + " left"
     }
 
     public var elapsedText: String? {
@@ -250,6 +273,25 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         )
     }
 
+    /// Determines whether an existing audio session should take priority over the
+    /// Home mixed-queue's top `continueItem`. Active playback always wins, and a
+    /// paused session wins when there is no newer Home item or when the Home item
+    /// is the same book/episode. A paused session does not block a more recently
+    /// read ebook from becoming the Continue widget's Now card.
+    public static func shouldPreferLiveSession(
+        sessionIsPlaying: Bool,
+        sessionItemID: String,
+        homeItemID: String?,
+    ) -> Bool {
+        if sessionIsPlaying { return true }
+        guard let homeItemID = homeItemID?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !homeItemID.isEmpty
+        else {
+            return true
+        }
+        return sessionItemID == homeItemID
+    }
+
     /// Identity for "did anything the widget paints change?" comparisons —
     /// deliberately excludes `generatedAt`.
     var paintSignature: String {
@@ -286,6 +328,7 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
 }
 
 public enum ContinueWidgetSnapshotStore {
+    private static let logger = Logger(subsystem: "com.punkrally.reader", category: "ContinueWidget")
     private static let snapshotFilename = ContinueWidgetCurrentSnapshot.storageKey
     private static let coversDirectoryName = "ContinueCovers"
     private static let lastTitleDefaultsKey = "inkamp.continueWidget.lastTitle"
@@ -295,23 +338,38 @@ public enum ContinueWidgetSnapshotStore {
     nonisolated(unsafe) private static var lastReloadDate: Date = .distantPast
 
     public static func loadSnapshot(bundle: Bundle = .main) -> ContinueWidgetSnapshot {
+        let bundleRole = bundle.bundleURL.pathExtension == "appex" ? "widget" : "app"
         let fallback = localFallbackSnapshot()
         guard let container = SilveranWidgetSnapshotStore.sharedContainerURL(bundle: bundle)
         else {
-            return ContinueWidgetCurrentSnapshot.select(
+            logger.notice("snapshot bundle=\(bundleRole, privacy: .public) container=false")
+            let snapshot = ContinueWidgetCurrentSnapshot.select(
                 shared: nil,
                 localFallback: fallback,
                 sharedContainerReachable: false,
             )
+            logger.notice("snapshot bundle=\(bundleRole, privacy: .public) selectedHasItem=\(snapshot.hasItem, privacy: .public)")
+            return snapshot
         }
         let url = snapshotURL(in: container)
+        let exists = FileManager.default.fileExists(atPath: url.path)
+        logger.notice("snapshot bundle=\(bundleRole, privacy: .public) container=true exists=\(exists, privacy: .public)")
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let shared: ContinueWidgetSnapshot?
-        if let data = try? Data(contentsOf: url) {
-            shared = try? decoder.decode(ContinueWidgetSnapshot.self, from: data)
-        } else {
+        do {
+            let data = try Data(contentsOf: url)
+            logger.notice("snapshot bundle=\(bundleRole, privacy: .public) read=success")
+            do {
+                shared = try decoder.decode(ContinueWidgetSnapshot.self, from: data)
+                logger.notice("snapshot bundle=\(bundleRole, privacy: .public) decode=success")
+            } catch {
+                shared = nil
+                logger.error("snapshot bundle=\(bundleRole, privacy: .public) decode=failure errorType=\(String(describing: type(of: error)), privacy: .public)")
+            }
+        } catch {
             shared = nil
+            logger.error("snapshot bundle=\(bundleRole, privacy: .public) read=failure errorType=\(String(describing: type(of: error)), privacy: .public)")
         }
         // Reachable container is authoritative: compact tiles must not keep an
         // older process-local audiobook after the shared file has moved on.
@@ -320,6 +378,7 @@ public enum ContinueWidgetSnapshotStore {
             localFallback: fallback,
             sharedContainerReachable: true,
         )
+        logger.notice("snapshot bundle=\(bundleRole, privacy: .public) selectedHasItem=\(snapshot.hasItem, privacy: .public)")
         if snapshot.hasItem {
             rememberLastSnapshot(snapshot)
         }
@@ -399,6 +458,7 @@ public enum ContinueWidgetSnapshotStore {
     ) {
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "publish")
         guard let container = SilveranWidgetSnapshotStore.sharedContainerURL() else {
+            logger.notice("publish outcome=skipped reason=containerUnavailable")
             print("[ContinueWidget] publish skipped — App group container unavailable")
             return
         }
@@ -464,7 +524,10 @@ public enum ContinueWidgetSnapshotStore {
             guard ContinueWidgetReloadPolicy.shouldWrite(
                 previous: previousSnapshot,
                 next: snapshot,
-            ) else { return }
+            ) else {
+                logger.notice("publish outcome=skipped reason=unchanged")
+                return
+            }
 
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
@@ -485,9 +548,14 @@ public enum ContinueWidgetSnapshotStore {
             if reloadNow { lastReloadDate = now }
             publishLock.unlock()
 
-            guard reloadNow else { return }
+            guard reloadNow else {
+                logger.notice("publish outcome=success hasItem=\(snapshot.hasItem, privacy: .public) reloaded=false")
+                return
+            }
             reloadTimelines()
+            logger.notice("publish outcome=success hasItem=\(snapshot.hasItem, privacy: .public) reloaded=true")
         } catch {
+            logger.error("publish outcome=failure errorType=\(String(describing: type(of: error)), privacy: .public)")
             print("[ContinueWidget] publish failed: \(error)")
         }
     }

@@ -49,6 +49,13 @@ public struct EbookPlayerView: View {
     #else
     @Environment(\.dismiss) private var dismiss
     @Environment(MediaViewModel.self) private var mediaViewModel: MediaViewModel?
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @AppStorage(ReaderSpreadPolicy.settingKey) private var twoPagesInLandscape = true
+    @AppStorage(ReaderControlsHint.storageKey) private var controlsHintAcknowledgedVersion = 0
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Reader container after the iPad audio sidebar (not the screen).
+    @State private var readerSize: CGSize = .zero
     #endif
     @State private var viewModel: EbookPlayerViewModel
     @State private var isComicScrubberVisible = false
@@ -76,6 +83,18 @@ public struct EbookPlayerView: View {
         .formatSwitchDiscrepancyDialog()
         .statusBarHidden(!viewModel.isTopBarVisible)
         .persistentSystemOverlays(viewModel.isTopBarVisible ? .automatic : .hidden)
+        .onChange(of: viewModel.settingsVM.isLoaded) { _, _ in
+            viewModel.applyControlsMode()
+        }
+        .onChange(of: viewModel.effectiveControlsMode, initial: true) { _, _ in
+            viewModel.applyControlsMode()
+        }
+        .onChange(of: viewModel.isChromeModalPresented, initial: true) { _, presented in
+            viewModel.sendChrome(.setBlocker(.modal, presented))
+        }
+        .onChange(of: voiceOverEnabled, initial: true) { _, running in
+            viewModel.sendChrome(.setVoiceOver(running))
+        }
         .navigationBarHidden(true)
         .toolbar(.hidden, for: .tabBar)
         .onReceive(NotificationCenter.default.publisher(for: .appWillResignActive)) { _ in
@@ -90,6 +109,13 @@ public struct EbookPlayerView: View {
             }
 
             Task {
+                if let metadata = viewModel.bookData?.metadata {
+                    ContinueWidgetPublisher.publishEbookProgress(
+                        book: metadata,
+                        progress: viewModel.progressManager?.bookFraction,
+                        isReadaloud: viewModel.hasAudioNarration,
+                    )
+                }
                 await viewModel.handleAppBackgrounding()
 
                 if backgroundTask != .invalid {
@@ -146,6 +172,13 @@ public struct EbookPlayerView: View {
             debugLog(
                 "[EbookPlayerView] onDisappear scenePhase=\(scenePhase) bookId=\(viewModel.bookData?.metadata.uuid ?? "nil")"
             )
+            if let metadata = viewModel.bookData?.metadata {
+                ContinueWidgetPublisher.publishEbookProgress(
+                    book: metadata,
+                    progress: viewModel.progressManager?.bookFraction,
+                    isReadaloud: viewModel.hasAudioNarration,
+                )
+            }
             if scenePhase == .active {
                 let keepsSession = PlayerPresenter.shared.cardDismissalKeepsSession()
                 viewModel.handleOnDisappear(close: keepsSession ? .detachView : .endSession)
@@ -171,6 +204,8 @@ public struct EbookPlayerView: View {
                 BookmarksPanel(
                     bookmarks: viewModel.bookmarks,
                     highlights: viewModel.coloredHighlights,
+                    bookTitle: viewModel.bookData?.metadata.title,
+                    bookAuthor: viewModel.bookData?.metadata.authors?.first?.name,
                     onDismiss: { viewModel.showBookmarksPanel = false },
                     onNavigate: { highlight in
                         Task {
@@ -183,6 +218,21 @@ public struct EbookPlayerView: View {
                     },
                     onAddBookmark: {
                         Task { await viewModel.addBookmarkAtCurrentPage() }
+                    },
+                    onEdit: { highlight in
+                        viewModel.showBookmarksPanel = false
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(350))
+                            viewModel.pendingEditHighlight = highlight
+                        }
+                    },
+                    onChangeColor: { highlight, color in
+                        Task {
+                            await viewModel.handleHighlightSetColor(
+                                id: highlight.id.uuidString,
+                                colorId: color.rawValue
+                            )
+                        }
                     },
                     highlightColorResolver: { color in
                         guard let color else { return Color.yellow.opacity(0.4) }
@@ -375,6 +425,17 @@ public struct EbookPlayerView: View {
         HStack(spacing: 0) {
             readerContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .environment(\.readerChromeSheetReporter) { id, presented in
+                    viewModel.reportChromeSheet(id, presented: presented)
+                }
+                .animation(
+                    reduceMotion ? nil : .easeInOut(duration: 0.24),
+                    value: viewModel.chrome.state.isTopVisible
+                )
+                .onGeometryChange(for: CGSize.self) { $0.size } action: { readerSize = $0 }
+                .onChange(of: isSpread, initial: true) { _, spread in
+                    viewModel.isSpreadLayout = spread
+                }
 
             if isPad && viewModel.showAudioSidebar {
                 Rectangle()
@@ -508,6 +569,10 @@ public struct EbookPlayerView: View {
                         )
                     )
                     .ignoresSafeArea(.all)
+
+                    if isSpread {
+                        spreadSpine
+                    }
                     #else
                     AnyView(
                         EbookPlayerWebView(
@@ -530,6 +595,13 @@ public struct EbookPlayerView: View {
 
             #if os(iOS)
             let alwaysShowMini = viewModel.settingsVM.alwaysShowMiniPlayer
+            let cardPinned = viewModel.chrome.state.cardAlwaysShows(
+                alwaysShowMiniPlayer: alwaysShowMini,
+                hasAudioNarration: viewModel.hasAudioNarration
+            )
+            let isBottomCardPresented =
+                !(isPad && viewModel.showAudioSidebar)
+                && (cardPinned || viewModel.isReadingBarVisible)
             let overlayBookFraction = viewModel.progressManager?.bookFraction
             let overlayBookTimeRemaining = viewModel.mediaOverlayManager?.bookTimeRemaining
             let overlayChapterTimeRemaining = viewModel.mediaOverlayManager?.chapterTimeRemaining
@@ -537,16 +609,12 @@ public struct EbookPlayerView: View {
             let overlayTotalPages = viewModel.progressManager?.chapterTotalPages
             let overlayIsPlaying = viewModel.mediaOverlayManager?.isPlaying ?? false
 
-            // Immersive ebook reading: no persistent bottom % / page footer.
-            // Read-aloud / narration still gets its bottom time + transport chrome.
-            // Hide while page-curl is active so progress chrome never floats over the sheet.
-            let shouldShowImmersiveAudioChrome =
-                viewModel.hasAudioNarration
-                && !viewModel.showAudioSidebar
-                && !viewModel.isTopBarVisible
-                && !viewModel.isPageCurlActive
+            let chromeState = viewModel.chrome.state
 
-            if shouldShowImmersiveAudioChrome {
+            if chromeState.showsNarrationOverlay(
+                hasAudioNarration: viewModel.hasAudioNarration,
+                isSidebarOpen: viewModel.showAudioSidebar
+            ) {
                 EbookOverlayIos(
                     showProgress: false,
                     showTimeRemainingInBook: viewModel.settingsVM.showTimeRemainingInBook,
@@ -579,8 +647,11 @@ public struct EbookPlayerView: View {
                 .transition(.opacity)
             }
 
-            // Tap-revealed chrome: floating progress/page (no solid footer band).
-            if viewModel.isTopBarVisible && !viewModel.showAudioSidebar && !viewModel.isPageCurlActive {
+            // Tap-revealed chrome: floating progress/page when the bottom scrubber card is not covering the footer.
+            if chromeState.showsRevealedProgressOverlay(
+                isSidebarOpen: viewModel.showAudioSidebar,
+                isBottomCardPresented: isBottomCardPresented
+            ) {
                 EbookOverlayIos(
                     showProgress: viewModel.settingsVM.showProgress,
                     showTimeRemainingInBook: viewModel.hasAudioNarration
@@ -607,6 +678,18 @@ public struct EbookPlayerView: View {
                     onSkipForward: {},
                 )
                 .transition(.opacity)
+            }
+
+            if chromeState.showsBookmarkRibbon(
+                isCurrentPageBookmarked: viewModel.isCurrentPageBookmarked
+            ) {
+                BookmarkPageRibbonView {
+                    Task { await viewModel.toggleBookmarkAtCurrentPage() }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .padding(.trailing, 20)
+                .ignoresSafeArea(edges: .top)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
 
             if viewModel.isTopBarVisible && !viewModel.isPageCurlActive {
@@ -644,18 +727,93 @@ public struct EbookPlayerView: View {
                     onSwitchFormat: { category in
                         Task { await switchEbookFormat(to: category) }
                     },
+                    isCurrentPageBookmarked: viewModel.isCurrentPageBookmarked,
+                    onTogglePageBookmark: {
+                        viewModel.noteChromeActivity()
+                        Task { await viewModel.toggleBookmarkAtCurrentPage() }
+                    },
+                    isSelectTextMode: viewModel.chrome.state.mode == .immersive
+                        && !viewModel.isComicBook
+                        ? viewModel.isSelectTextMode : nil,
+                    onToggleSelectText: viewModel.toggleSelectTextMode,
+                    onHideControls: { viewModel.sendChrome(.hide) },
+                    onActivity: viewModel.noteChromeActivity,
                 )
                 .transition(.opacity)
             }
 
-            if !(isPad && viewModel.showAudioSidebar) {
+            if !(isPad && viewModel.showAudioSidebar) && !viewModel.isPageCurlActive {
+                // Spread: the card sits bottom-trailing on the right page.
                 draggableAudioCard
+                    .frame(width: isSpread ? readerSize.width / 2 : nil)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
 
-            // Thin bottom scrub indicator is for narration/audio; keep ebook pages
-            // full-bleed without a permanent progress strip.
-            if viewModel.hasAudioNarration && !viewModel.isPageCurlActive {
+            if let snapshot = viewModel.jumpSnapshot, !viewModel.isPageCurlActive {
+                let isPureEbookDirectScrubber =
+                    !viewModel.hasAudioNarration && !viewModel.isComicBook && !cardPinned
+                let cardLift: CGFloat =
+                    if isBottomCardPresented {
+                        isPureEbookDirectScrubber ? 142 : 70
+                    } else {
+                        24
+                    }
+                ReaderJumpBackPillView(
+                    snapshot: snapshot,
+                    foregroundColor: readerForegroundColor,
+                    backgroundColor: readerBackgroundColor,
+                    onReturn: {
+                        viewModel.returnToJumpSnapshot()
+                    },
+                    onDismiss: {
+                        viewModel.dismissJumpSnapshot()
+                    }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .padding(.leading, 18)
+                .padding(.bottom, cardLift)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            if chromeState.showsPlaybackProgressStrip(
+                alwaysShowMiniPlayer: alwaysShowMini,
+                hasAudioNarration: viewModel.hasAudioNarration
+            ) {
                 playbackProgressBar
+            }
+
+            if ReaderControlsHint.shouldShow(
+                mode: viewModel.chrome.state.mode,
+                isReaderReady: viewModel.isReaderContentReady && !viewModel.isComicBook,
+                acknowledgedVersion: controlsHintAcknowledgedVersion
+            ) && !viewModel.isPageCurlActive {
+                ReaderControlsHintCard(
+                    foregroundColor: readerForegroundColor,
+                    backgroundColor: readerBackgroundColor,
+                    onDismiss: {
+                        controlsHintAcknowledgedVersion = ReaderControlsHint.currentVersion
+                    }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .transition(.opacity)
+            }
+
+            // VoiceOver cannot discover a touch-and-hold on web content.
+            if voiceOverEnabled
+                && viewModel.chrome.state.mode == .immersive
+                && !viewModel.isTopBarVisible
+            {
+                Button("Show reader controls") {
+                    viewModel.sendChrome(.reveal)
+                }
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 16)
+                .frame(minHeight: 44)
+                .background(Capsule().fill(readerBackgroundColor))
+                .overlay(Capsule().stroke(readerForegroundColor.opacity(0.2)))
+                .foregroundStyle(readerForegroundColor)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.top, 8)
             }
             #else
             let shouldShowBar = viewModel.settingsVM.enableReadingBar && !viewModel.showAudioSidebar
@@ -710,6 +868,46 @@ public struct EbookPlayerView: View {
         UIDevice.current.userInterfaceIdiom == .pad
     }
 
+    private var isSpread: Bool {
+        !viewModel.isComicBook
+            && ReaderSpreadPolicy.showsSpread(
+                enabled: twoPagesInLandscape,
+                regularWidth: horizontalSizeClass == .regular,
+                scrolling: viewModel.settingsVM.scrollingMode,
+                width: readerSize.width,
+                height: readerSize.height
+            )
+    }
+
+    /// Book gutter: soft shadow either side of a 1pt hairline, centered on the spread.
+    private var spreadSpine: some View {
+        let background =
+            viewModel.settingsVM.backgroundColor.flatMap { $0.isEmpty ? nil : $0 }
+            ?? (colorScheme == .dark ? kDefaultBackgroundColorDark : kDefaultBackgroundColorLight)
+        let shade = ReaderSpreadPolicy.spineOpacity(isDark: ReaderSpreadPolicy.isDark(backgroundHex: background))
+        return HStack(spacing: 0) {
+            LinearGradient(
+                colors: [.black.opacity(0), .black.opacity(shade)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: ReaderSpreadPolicy.spineShadowWidth)
+            Rectangle()
+                .fill(readerForegroundColor.opacity(ReaderSpreadPolicy.hairlineOpacity))
+                .frame(width: 1)
+            LinearGradient(
+                colors: [.black.opacity(shade), .black.opacity(0)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: ReaderSpreadPolicy.spineShadowWidth)
+        }
+        .frame(maxHeight: .infinity)
+        .ignoresSafeArea(.all)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
     private var safeAreaInsets: EdgeInsets {
         guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
             let window = windowScene.windows.first
@@ -731,15 +929,24 @@ public struct EbookPlayerView: View {
         let currentChapterTitle = pm?.selectedChapterId.flatMap { index in
             viewModel.bookStructure[safe: index]?.label
         }
-        let alwaysShow = viewModel.settingsVM.alwaysShowMiniPlayer
+        let alwaysShow = viewModel.chrome.state.cardAlwaysShows(
+            alwaysShowMiniPlayer: viewModel.settingsVM.alwaysShowMiniPlayer,
+            hasAudioNarration: viewModel.hasAudioNarration
+        )
         let isPresentedBinding = Binding(
             get: { alwaysShow || self.viewModel.isReadingBarVisible },
             set: { newValue in
-                if !alwaysShow {
-                    self.viewModel.isReadingBarVisible = newValue
+                if !alwaysShow && !newValue {
+                    self.viewModel.sendChrome(.cardDismissed)
                 }
             },
         )
+        let active = { (action: @escaping () -> Void) -> () -> Void in
+            {
+                viewModel.noteChromeActivity()
+                action()
+            }
+        }
 
         DraggableAudioCard(
             isPresented: isPresentedBinding,
@@ -751,6 +958,11 @@ public struct EbookPlayerView: View {
             chapterTitle: currentChapterTitle,
             isPlaying: mom?.isPlaying ?? false,
             chapterProgress: viewModel.chapterProgressBinding.wrappedValue,
+            bookFraction: pm?.bookFraction,
+            currentPage: pm?.chapterCurrentPage,
+            totalPages: pm?.chapterTotalPages,
+            chapterTicks: viewModel.chapterTicks,
+            jumpOriginFraction: viewModel.jumpSnapshot?.bookFraction,
             chapterElapsedSeconds: mom?.chapterElapsedSeconds,
             chapterTotalSeconds: mom?.chapterTotalSeconds,
             bookTimeRemaining: mom?.bookTimeRemaining,
@@ -763,32 +975,49 @@ public struct EbookPlayerView: View {
             sleepTimerType: mom?.sleepTimerType,
             showMiniPlayerStats: viewModel.settingsVM.showMiniPlayerStats,
             supportsComicScrubber: viewModel.isComicBook,
-            onPlayPause: {
+            onPlayPause: active {
                 Task { await pm?.togglePlaying() }
             },
-            onSkipBackward: {
+            onSkipBackward: active {
                 viewModel.handlePrevSentence()
             },
-            onSkipForward: {
+            onSkipForward: active {
                 viewModel.handleNextSentence()
             },
-            onPrevChapter: {
+            onPrevChapter: active {
                 viewModel.handlePrevChapter()
             },
-            onNextChapter: {
+            onNextChapter: active {
                 viewModel.handleNextChapter()
             },
             onProgressSeek: viewModel.handleProgressSeek,
-            onPlaybackRateChange: viewModel.handlePlaybackRateChange,
-            onChapterSelected: viewModel.handleChapterSelection,
-            onSleepTimerStart: viewModel.handleSleepTimerStart,
-            onSleepTimerCancel: viewModel.handleSleepTimerCancel,
+            onBookProgressSeek: viewModel.handleBookProgressSeek,
+            onScrubBegan: {
+                viewModel.beginScrubSession()
+            },
+            onPlaybackRateChange: { rate in
+                viewModel.noteChromeActivity()
+                viewModel.handlePlaybackRateChange(rate)
+            },
+            onChapterSelected: { chapter in
+                viewModel.noteChromeActivity()
+                viewModel.handleChapterSelection(chapter)
+            },
+            onSleepTimerStart: { duration, type in
+                viewModel.noteChromeActivity()
+                viewModel.handleSleepTimerStart(duration, type)
+            },
+            onSleepTimerCancel: active {
+                viewModel.handleSleepTimerCancel()
+            },
             onDismiss: {
-                viewModel.isReadingBarVisible = false
+                viewModel.sendChrome(.cardDismissed)
             },
             onComicScrubberVisibilityChange: { visible in
                 isComicScrubberVisible = visible
             },
+            onChromeBlockersChange: viewModel.setCardChromeBlockers,
+            onActivity: viewModel.noteChromeActivity,
             fullContent: {
                 audiobookSidebar()
             },
@@ -809,6 +1038,8 @@ public struct EbookPlayerView: View {
         .frame(height: 3)
         .frame(maxHeight: .infinity, alignment: .bottom)
         .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
     #endif
 
@@ -913,6 +1144,48 @@ public struct EbookPlayerView: View {
         )
     }
 }
+
+#if os(iOS)
+/// First-run, per-device tip for immersive controls (`ReaderControlsHint`).
+private struct ReaderControlsHintCard: View {
+    let foregroundColor: Color
+    let backgroundColor: Color
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Reading Controls")
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+            Label("Touch and hold the page to show controls.", systemImage: "hand.tap")
+            Label("Tap the middle of the page to hide them.", systemImage: "hand.point.up")
+            Label(
+                "To highlight, show controls and tap Select Text.",
+                systemImage: "character.cursor.ibeam"
+            )
+            Button("Got It", action: onDismiss)
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .trailing)
+        }
+        .font(.subheadline)
+        .foregroundStyle(foregroundColor)
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(backgroundColor)
+                .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(foregroundColor.opacity(0.12), lineWidth: 1)
+        )
+        .frame(maxWidth: 420)
+        .padding(.horizontal, 24)
+        .accessibilityElement(children: .contain)
+        .accessibilitySortPriority(1)
+    }
+}
+#endif
 
 #if os(macOS)
 // Reports whether the cursor is within `threshold` points of the window's top edge.

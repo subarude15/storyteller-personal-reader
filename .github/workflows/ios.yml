@@ -32,6 +32,25 @@ jobs:
       - name: Run Swift package tests
         run: ./scripts/test
 
+  reader-js-selfchecks:
+    name: Reader JS Self-checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Page-turn animator
+        run: node scripts/page-turn-animator-selfcheck.mjs
+
+      - name: Spread layout
+        run: node scripts/spread-layout-selfcheck.mjs
+
+      - name: Immersive reader gestures
+        run: node scripts/reader-gestures-selfcheck.mjs
+
   build:
     name: iOS Simulator Build
     runs-on: macos-15

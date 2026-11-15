@@ -1,4 +1,5 @@
 import AppIntents
+import ImageIO
 import SilveranAppleWidgets
 import SwiftUI
 import WidgetKit
@@ -140,6 +141,7 @@ struct SilveranReadingEntry: TimelineEntry {
     let date: Date
     let configuration: SilveranReadingWidgetIntent
     let snapshot: SilveranWidgetSnapshot
+    var continueSnapshot: ContinueWidgetSnapshot = .empty
 
     var progressStyle: SilveranWidgetProgressStyle {
         configuration.progressStyle
@@ -204,6 +206,7 @@ struct SilveranReadingTimelineProvider: AppIntentTimelineProvider {
             date: Date(),
             configuration: SilveranReadingWidgetIntent(),
             snapshot: .empty,
+            continueSnapshot: .empty,
         )
     }
 
@@ -215,6 +218,7 @@ struct SilveranReadingTimelineProvider: AppIntentTimelineProvider {
             date: Date(),
             configuration: configuration,
             snapshot: SilveranWidgetSnapshotStore.loadSnapshot(),
+            continueSnapshot: ContinueWidgetSnapshotStore.loadSnapshot(),
         )
     }
 
@@ -226,6 +230,7 @@ struct SilveranReadingTimelineProvider: AppIntentTimelineProvider {
             date: Date(),
             configuration: configuration,
             snapshot: SilveranWidgetSnapshotStore.loadSnapshot(),
+            continueSnapshot: ContinueWidgetSnapshotStore.loadSnapshot(),
         )
         return Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(15 * 60)))
     }
@@ -241,7 +246,7 @@ struct SilveranReadingWidget: Widget {
             SilveranReadingWidgetView(entry: entry)
         }
         .configurationDisplayName("Library")
-        .description("Track current books and reading progress.")
+        .description("Track current books, shelves, and Lock Screen reading progress.")
         .supportedFamilies(Self.supportedFamilies)
         .contentMarginsDisabled()
     }
@@ -261,16 +266,28 @@ struct SilveranReadingWidget: Widget {
 }
 
 // @main WidgetBundle lives in InkAmpContinueWidget.swift (registers the four
-// Continue + Next Up tiles). This Library widget stays in-tree for paid /
-// SideStore later — it is not part of the Sideload iOS extension.
+// Continue + Next Up tiles and this configurable Library + Lock Screen widget).
 
 private struct SilveranReadingWidgetView: View {
     let entry: SilveranReadingEntry
     @Environment(\.widgetFamily) private var family
 
+    private var isAccessoryFamily: Bool {
+        #if !os(macOS)
+        switch family {
+            case .accessoryCircular, .accessoryRectangular, .accessoryInline:
+                return true
+            default:
+                return false
+        }
+        #else
+        return false
+        #endif
+    }
+
     var body: some View {
         Group {
-            if entry.snapshot.books.isEmpty {
+            if entry.snapshot.books.isEmpty && (!isAccessoryFamily || !entry.continueSnapshot.hasItem) {
                 EmptyReadingWidgetView()
             } else {
                 content
@@ -324,11 +341,20 @@ private struct SilveranReadingWidgetView: View {
                 )
             #if !os(macOS)
                 case .accessoryCircular:
-                    AccessoryCircularReadingView(book: entry.featuredBook)
+                    AccessoryCircularReadingView(
+                        book: entry.featuredBook,
+                        continueSnapshot: entry.continueSnapshot,
+                    )
                 case .accessoryRectangular:
-                    AccessoryRectangularReadingView(book: entry.featuredBook)
+                    AccessoryRectangularReadingView(
+                        book: entry.featuredBook,
+                        continueSnapshot: entry.continueSnapshot,
+                    )
                 case .accessoryInline:
-                    AccessoryInlineReadingView(book: entry.featuredBook)
+                    AccessoryInlineReadingView(
+                        book: entry.featuredBook,
+                        continueSnapshot: entry.continueSnapshot,
+                    )
             #endif
             default:
                 FocusedBookWidgetView(book: entry.featuredBook, compact: true)
@@ -680,7 +706,11 @@ private struct CoverPercentTextView: View {
 }
 
 private enum WidgetCoverLoader {
-    static func image(for book: SilveranWidgetBookSnapshot, preferSquare: Bool) -> Image? {
+    static func image(
+        for book: SilveranWidgetBookSnapshot,
+        preferSquare: Bool,
+        maxPoints: CGFloat = 180,
+    ) -> Image? {
         let filename =
             preferSquare
             ? (book.audioCoverFilename ?? book.coverFilename)
@@ -691,6 +721,18 @@ private enum WidgetCoverLoader {
             return nil
         }
         #if canImport(UIKit)
+        let maxPixels = max(96, Int((maxPoints * 2.5).rounded(.up)))
+        if let source = CGImageSourceCreateWithURL(url as CFURL, nil) {
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+            ]
+            if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+                return Image(uiImage: UIImage(cgImage: cgImage))
+            }
+        }
         guard let image = UIImage(contentsOfFile: url.path) else { return nil }
         return Image(uiImage: image)
         #elseif canImport(AppKit)
@@ -720,10 +762,15 @@ private struct CoverArtView: View {
 
     var body: some View {
         GeometryReader { proxy in
+            let maxSide = max(proxy.size.width, proxy.size.height)
             ZStack {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(WidgetPalette.coverFallback)
-                if let image = WidgetCoverLoader.image(for: book, preferSquare: preferSquare) {
+                if let image = WidgetCoverLoader.image(
+                    for: book,
+                    preferSquare: preferSquare,
+                    maxPoints: max(96, maxSide),
+                ) {
                     CoverImageView(image: image)
                 } else {
                     Image(
@@ -776,16 +823,29 @@ private struct ProgressStripView: View {
 
 private struct AccessoryCircularReadingView: View {
     let book: SilveranWidgetBookSnapshot?
+    var continueSnapshot: ContinueWidgetSnapshot = .empty
 
     var body: some View {
         if let book {
+            let symbol = book.readingKind == .audiobook ? "headphones" : "book.closed.fill"
             Gauge(value: book.progress) {
-                Image(systemName: "book.closed.fill")
+                Image(systemName: symbol)
             } currentValueLabel: {
                 Text("\(book.percentComplete)")
             }
             .gaugeStyle(.accessoryCircular)
             .widgetURL(book.widgetURL)
+        } else if continueSnapshot.hasItem {
+            let progress = continueSnapshot.clampedProgress ?? 0
+            let percent = continueSnapshot.percentComplete ?? 0
+            let symbol = (continueSnapshot.kind ?? .ebook).symbolName
+            Gauge(value: progress) {
+                Image(systemName: symbol)
+            } currentValueLabel: {
+                Text("\(percent)")
+            }
+            .gaugeStyle(.accessoryCircular)
+            .widgetURL(InkAmpContinueWidgetActions.continueURL(for: continueSnapshot))
         } else {
             Image(systemName: "book.closed")
         }
@@ -794,34 +854,69 @@ private struct AccessoryCircularReadingView: View {
 
 private struct AccessoryRectangularReadingView: View {
     let book: SilveranWidgetBookSnapshot?
+    var continueSnapshot: ContinueWidgetSnapshot = .empty
 
     var body: some View {
         if let book {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(book.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                Text("\(book.percentComplete)%")
-                    .font(.caption)
+            let symbol = book.readingKind == .audiobook ? "headphones" : "book.closed.fill"
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Image(systemName: symbol)
+                        .font(.caption2.weight(.semibold))
+                    Text(book.title)
+                        .font(.headline)
+                        .lineLimit(1)
+                }
+                Text(book.remainingLabel ?? "\(book.percentComplete)% complete")
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
                 ProgressView(value: book.progress)
             }
             .widgetURL(book.widgetURL)
+        } else if continueSnapshot.hasItem, let title = continueSnapshot.title {
+            let symbol = (continueSnapshot.kind ?? .ebook).symbolName
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Image(systemName: symbol)
+                        .font(.caption2.weight(.semibold))
+                    Text(title)
+                        .font(.headline)
+                        .lineLimit(1)
+                }
+                Text(continueSnapshot.progressCaption ?? continueSnapshot.subtitle ?? "In progress")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                ProgressView(value: continueSnapshot.clampedProgress ?? 0)
+            }
+            .widgetURL(InkAmpContinueWidgetActions.continueURL(for: continueSnapshot))
         } else {
-            Text("Silveran Reader")
+            Text("ink+amp")
         }
     }
 }
 
 private struct AccessoryInlineReadingView: View {
     let book: SilveranWidgetBookSnapshot?
+    var continueSnapshot: ContinueWidgetSnapshot = .empty
 
     var body: some View {
         if let book {
-            Text("\(book.title) \(book.percentComplete)%")
+            let symbol = book.readingKind == .audiobook ? "headphones" : "book.closed.fill"
+            Label("\(book.title) · \(book.percentComplete)%", systemImage: symbol)
                 .widgetURL(book.widgetURL)
+        } else if continueSnapshot.hasItem, let title = continueSnapshot.title {
+            let symbol = (continueSnapshot.kind ?? .ebook).symbolName
+            if let pct = continueSnapshot.percentComplete {
+                Label("\(title) · \(pct)%", systemImage: symbol)
+                    .widgetURL(InkAmpContinueWidgetActions.continueURL(for: continueSnapshot))
+            } else {
+                Label(title, systemImage: symbol)
+                    .widgetURL(InkAmpContinueWidgetActions.continueURL(for: continueSnapshot))
+            }
         } else {
-            Text("Silveran Reader")
+            Text("ink+amp")
         }
     }
 }
@@ -829,13 +924,13 @@ private struct AccessoryInlineReadingView: View {
 private struct EmptyReadingWidgetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Image(systemName: "book.closed")
+            Image(systemName: "books.vertical.fill")
                 .font(.title2)
                 .foregroundStyle(WidgetPalette.secondaryText)
-            Text("Open ink+amp")
+            Text("Library Shelf")
                 .font(.headline)
                 .foregroundStyle(WidgetPalette.primaryText)
-            Text("Library shelf needs App Groups (paid Apple ID or SideStore).")
+            Text("Open ink+amp to sync your books and reading progress.")
                 .font(.caption)
                 .foregroundStyle(WidgetPalette.secondaryText)
                 .lineLimit(3)

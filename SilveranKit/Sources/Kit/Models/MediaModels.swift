@@ -572,6 +572,8 @@ public enum SyncReason: String, Sendable, Codable {
     case userStartedPlayback
     case userSkippedForward
     case userSkippedBackward
+    /// Explicit "Mark spot" (CarPlay) — a Previous Positions entry with no transport change.
+    case userMarkedSpot
 
     // Timer/system events
     case periodicDuringActivePlayback

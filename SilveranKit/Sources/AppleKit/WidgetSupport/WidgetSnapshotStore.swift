@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import OSLog
 import SilveranKit
 
 #if canImport(WidgetKit) && (os(iOS) || os(macOS))
@@ -157,6 +158,8 @@ public struct SilveranWidgetSnapshot: Codable, Sendable, Hashable {
 }
 
 public enum SilveranWidgetSnapshotStore {
+    private static let logger = Logger(subsystem: "com.punkrally.reader", category: "ContinueWidget")
+
     /// Hidden at the App Group root because AltStore Classic excludes hidden
     /// entries while backing up App Group containers. Widget snapshots and cover
     /// thumbnails are derived data and must never be restored across installs.
@@ -198,8 +201,14 @@ public enum SilveranWidgetSnapshotStore {
         source: String,
         bundle: Bundle = .main,
     ) {
+        let bundleRole = bundle.bundleURL.pathExtension == "appex" ? "widget" : "app"
         let candidates = appGroupCandidates(bundle: bundle)
+        for candidate in candidates {
+            let resolved = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: candidate) != nil
+            logger.notice("appGroup bundle=\(bundleRole, privacy: .public) candidate=\(candidate, privacy: .public) resolved=\(resolved, privacy: .public)")
+        }
         let available = sharedContainerURL(bundle: bundle) != nil
+        logger.notice("appGroup source=\(source, privacy: .public) bundle=\(bundleRole, privacy: .public) resolved=\(available, privacy: .public)")
         let altGroups = (bundle.object(
             forInfoDictionaryKey: SilveranWidgetConstants.altStoreAppGroupsInfoKey
         ) as? [String]) ?? []
@@ -210,16 +219,31 @@ public enum SilveranWidgetSnapshotStore {
     }
 
     public static func loadSnapshot(bundle: Bundle = .main) -> SilveranWidgetSnapshot {
+        let bundleRole = bundle.bundleURL.pathExtension == "appex" ? "widget" : "app"
         guard let container = sharedContainerURL(bundle: bundle) else {
+            logger.notice("snapshot bundle=\(bundleRole, privacy: .public) container=false")
             return .empty
         }
         let url = snapshotURL(in: container)
-        guard let data = try? Data(contentsOf: url) else {
+        let exists = FileManager.default.fileExists(atPath: url.path)
+        logger.notice("snapshot bundle=\(bundleRole, privacy: .public) container=true exists=\(exists, privacy: .public)")
+        do {
+            let data = try Data(contentsOf: url)
+            logger.notice("snapshot bundle=\(bundleRole, privacy: .public) read=success")
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            do {
+                let snapshot = try decoder.decode(SilveranWidgetSnapshot.self, from: data)
+                logger.notice("snapshot bundle=\(bundleRole, privacy: .public) decode=success")
+                return snapshot
+            } catch {
+                logger.error("snapshot bundle=\(bundleRole, privacy: .public) decode=failure errorType=\(String(describing: type(of: error)), privacy: .public)")
+                return .empty
+            }
+        } catch {
+            logger.error("snapshot bundle=\(bundleRole, privacy: .public) read=failure errorType=\(String(describing: type(of: error)), privacy: .public)")
             return .empty
         }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode(SilveranWidgetSnapshot.self, from: data)) ?? .empty
     }
 
     public static func coverURL(for filename: String, bundle: Bundle = .main) -> URL? {

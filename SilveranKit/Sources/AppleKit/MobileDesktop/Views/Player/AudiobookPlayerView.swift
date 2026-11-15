@@ -21,6 +21,9 @@ public struct AudiobookPlayerView: View {
     @State private var showServerPositionDialog = false
     @State private var lastPendingServerPosition: AudiobookSessionServerPosition?
     @State private var showListeningHistory = false
+    @State private var toastMessage: String?
+    @State private var toastDismissTask: Task<Void, Never>?
+    @State private var didJustBookmarkSpot = false
     #if os(iOS)
     @State private var showFormatSwitchDialog = false
     #endif
@@ -31,8 +34,25 @@ public struct AudiobookPlayerView: View {
     }
 
     public var body: some View {
-        readingSidebarView
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        ZStack(alignment: .top) {
+            readingSidebarView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            VStack(spacing: 8) {
+                if showServerPositionDialog {
+                    serverPositionBanner
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                if let toastMessage {
+                    toastPill(message: toastMessage)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .animation(.spring(response: 0.34, dampingFraction: 0.82), value: showServerPositionDialog)
+            .animation(.spring(response: 0.32, dampingFraction: 0.82), value: toastMessage)
+        }
             .inkAmpAppThemed()
             #if os(iOS)
         .formatSwitchDiscrepancyDialog()
@@ -46,21 +66,6 @@ public struct AudiobookPlayerView: View {
                 if let error = errorMessage {
                     Text(error)
                 }
-            }
-            .alert(
-                "Server Has Newer Position",
-                isPresented: $showServerPositionDialog,
-            ) {
-                Button("Go to New Position") {
-                    control(.acceptServerPosition)
-                    showServerPositionDialog = false
-                }
-                Button("Stay Here", role: .cancel) {
-                    control(.declineServerPosition)
-                    showServerPositionDialog = false
-                }
-            } message: {
-                Text(serverPositionDescription)
             }
             .sheet(isPresented: $showListeningHistory) {
                 if let bookData {
@@ -137,6 +142,15 @@ public struct AudiobookPlayerView: View {
                     }
                     .accessibilityLabel("Switch Format")
                 }
+                Button {
+                    markCurrentSpot()
+                } label: {
+                    Label(
+                        "Bookmark Spot",
+                        systemImage: didJustBookmarkSpot ? "bookmark.fill" : "bookmark"
+                    )
+                }
+                .accessibilityLabel("Bookmark current listening spot")
                 Button {
                     showListeningHistory = true
                 } label: {
@@ -272,18 +286,130 @@ public struct AudiobookPlayerView: View {
             onSleepTimerStart: { duration, type in
                 if type == .endOfChapter {
                     control(.startEndOfChapterSleepTimer)
+                    presentToast("Sleep timer: End of chapter")
                 } else if let duration {
                     control(.startSleepTimer(duration))
+                    let mins = max(1, Int(round(duration / 60)))
+                    presentToast("Sleep timer: \(mins) min")
                 }
             },
             onSleepTimerCancel: {
                 control(.cancelSleepTimer)
+                presentToast("Sleep timer off")
             },
             onProgressSeek: { fraction in
                 control(.seekChapterFraction(fraction))
             },
             seekWhileDragging: false,
         )
+    }
+
+    @MainActor
+    private func markCurrentSpot() {
+        ReaderHaptics.bookmarkToggled(added: true)
+        didJustBookmarkSpot = true
+        presentToast("Saved to Previous Positions")
+        Task {
+            await AudioSessionActor.shared.markListeningSpot()
+            try? await Task.sleep(for: .seconds(1.5))
+            await MainActor.run {
+                didJustBookmarkSpot = false
+            }
+        }
+    }
+
+    @MainActor
+    private func presentToast(_ message: String) {
+        toastDismissTask?.cancel()
+        toastMessage = message
+        toastDismissTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2.2))
+            if !Task.isCancelled {
+                toastMessage = nil
+            }
+        }
+    }
+
+    private var serverPositionBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                .font(.title3)
+                .foregroundStyle(.tint)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Newer Server Position")
+                    .font(.subheadline.weight(.semibold))
+                Text(serverPositionCompactSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 8) {
+                Button("Stay") {
+                    ReaderHaptics.selectionTick()
+                    control(.declineServerPosition)
+                    showServerPositionDialog = false
+                }
+                .font(.caption.weight(.medium))
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Button("Sync") {
+                    ReaderHaptics.selectionTick()
+                    control(.acceptServerPosition)
+                    showServerPositionDialog = false
+                }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.12), radius: 10, x: 0, y: 4)
+    }
+
+    private func toastPill(message: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tint)
+            Text(message)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.primary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(
+            Capsule()
+                .strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 3)
+    }
+
+    private var serverPositionCompactSummary: String {
+        guard let position = sessionState?.pendingServerPosition else {
+            return "Another device synced a newer position."
+        }
+        var details: [String] = []
+        if let title = position.title, !title.isEmpty {
+            details.append(title)
+        }
+        if let progression = position.totalProgression {
+            details.append("\(Int(progression * 100))%")
+        }
+        if details.isEmpty {
+            return "Another device synced a newer position."
+        }
+        return details.joined(separator: " · ")
     }
 
     @MainActor

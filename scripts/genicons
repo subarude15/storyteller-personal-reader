@@ -36,8 +36,8 @@ if [ ! -f "$SOURCE_ICON" ]; then
 fi
 
 if [[ "$SOURCE_ICON" == *"twin-pages"* ]]; then
-    # twin-pages-final.png is full 1280x720 art (dark bg + centered book + bottom glow).
-    # Scale-to-cover 1024, then center-crop to the iOS square.
+    # twin-pages-final.png is the square 1024 dark ink+amp icon; scale-to-cover + center-crop
+    # also handles the landscape original (icons/twin-pages-final-original-1280x720.png).
     magick "${SOURCE_ICON}" -auto-orient -resize '1024x1024^' -gravity center -extent 1024x1024 \
         -colorspace sRGB -profile "${SRGB_PROFILE}" "${MAIN_ICON}"
 else
@@ -47,8 +47,10 @@ else
         -colorspace sRGB -profile "${SRGB_PROFILE}" "${MAIN_ICON}"
 fi
 
-magick "${MAIN_ICON}" "${ASSETS_DIR}/icon_1024x1024.png"
-magick "${MAIN_ICON}" "${WATCH_ASSETS_DIR}/icon_1024x1024.png"
+# App Store Connect rejects a 1024 icon with an alpha channel (ITMS-90717).
+magick "${MAIN_ICON}" -alpha off "${ASSETS_DIR}/icon_1024x1024.png"
+magick "${MAIN_ICON}" -alpha off "${WATCH_ASSETS_DIR}/icon_1024x1024.png"
+magick "${MAIN_ICON}" -alpha off -colorspace Gray "${ASSETS_DIR}/icon_tinted_1024.png"
 magick -size 2048x2048 canvas:none \
     \( "${STORYTELLER_LOGO}" -trim +repage -resize 1024x1024 \) \
     -gravity center -compose over -composite "${ANDROID_FOREGROUND}"

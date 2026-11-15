@@ -134,6 +134,8 @@ public struct AudioSessionSnapshot: Sendable {
     public let elapsedSeconds: TimeInterval
     /// Total duration of the current item; 0 when unknown.
     public let durationSeconds: TimeInterval
+    /// Media time left in the current chapter; nil when the item has no chapters.
+    public let chapterRemainingSeconds: TimeInterval?
 
     public init(
         kind: AudioSessionKind,
@@ -144,8 +146,10 @@ public struct AudioSessionSnapshot: Sendable {
         bookProgress: Double,
         playbackRate: Double,
         elapsedSeconds: TimeInterval = 0,
-        durationSeconds: TimeInterval = 0
+        durationSeconds: TimeInterval = 0,
+        chapterRemainingSeconds: TimeInterval? = nil
     ) {
+        self.chapterRemainingSeconds = chapterRemainingSeconds
         self.kind = kind
         self.title = title
         self.author = author
@@ -195,6 +199,7 @@ public actor AudioSessionActor {
     private var smilObserverID: UUID?
     private var attachments: Set<UUID> = []
     private var snapshotObservers: [UUID: @Sendable (AudioSessionSnapshot?) -> Void] = [:]
+    private var remoteSkipInterval: TimeInterval = AudioSessionActor.podcastSkipInterval
 
     private var book: BookMetadata?
     private var mediaURL: URL?
@@ -503,6 +508,8 @@ public actor AudioSessionActor {
         switch event {
             case .didFinishPlaying:
                 podcastIsPlaying = false
+                podcastNowPlayingTask?.cancel()
+                podcastNowPlayingTask = nil
                 await publishPodcastState()
                 NotificationCenter.default.post(
                     name: Notification.Name("punkRallyPodcastDidFinish"),
@@ -511,6 +518,8 @@ public actor AudioSessionActor {
                 )
             case .interruptionBegan, .routeChanged:
                 podcastIsPlaying = false
+                podcastNowPlayingTask?.cancel()
+                podcastNowPlayingTask = nil
                 await publishPodcastState()
                 if podcastYouTubeVideoID != nil {
                     NotificationCenter.default.post(
@@ -617,13 +626,12 @@ public actor AudioSessionActor {
         }
     }
 
-    /// Push elapsed/rate to the system Now Playing center while podcast/YouTube plays
-    /// (Lock Screen scrubber freezes without this — mini-player polls separately).
+    /// Push elapsed/rate to the system Now Playing center and snapshot observers while podcast/YouTube plays.
     private func startPodcastNowPlayingTicker() {
         podcastNowPlayingTask?.cancel()
         podcastNowPlayingTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(for: .milliseconds(500))
                 guard !Task.isCancelled, let self else { return }
                 guard case .podcast = await self.currentKind else { return }
                 guard await self.podcastIsPlaying else { continue }
@@ -851,7 +859,9 @@ public actor AudioSessionActor {
 
             nextPeriodicSync =
                 syncInterval > 0 ? Date().addingTimeInterval(syncInterval) : .distantFuture
-            startRefreshTask()
+            if lastObservedIsPlaying {
+                startRefreshTask()
+            }
             await configureNowPlayingCommands(for: .audiobook(book.id))
             await publishState()
             startCoverTask(for: book, sessionID: sessionID)
@@ -922,7 +932,9 @@ public actor AudioSessionActor {
 
             await installPlaybackObserver(for: sessionID)
             nextPeriodicSync = .distantFuture
-            startRefreshTask()
+            if lastObservedIsPlaying {
+                startRefreshTask()
+            }
             await configureNowPlayingCommands(for: .audiobook(book.id))
             await publishState()
             if let artworkURL = playback.artworkURL {
@@ -1305,6 +1317,8 @@ public actor AudioSessionActor {
                     case .pause:
                         await podcastPlayer?.pause()
                         podcastIsPlaying = false
+                        podcastNowPlayingTask?.cancel()
+                        podcastNowPlayingTask = nil
                         await publishPodcastState()
                         if podcastYouTubeVideoID != nil {
                             NotificationCenter.default.post(
@@ -1454,7 +1468,27 @@ public actor AudioSessionActor {
         snapshotObservers.removeValue(forKey: id)
     }
 
+    #if DEBUG
+    // Local data seam ONLY in the unsigned native geometry host. Publication
+    // still traverses the real actor observer/monitor/live-policy pipeline.
+    private var geometryLifecycleSnapshot: AudioSessionSnapshot?
+    private var usesGeometryLifecycleSnapshot: Bool {
+        Bundle.main.bundleIdentifier == "com.punkrally.reader.geometry"
+            && ["cover", "async", "launch"].contains(
+                ProcessInfo.processInfo.environment["INKAMP_GEOMETRY_LIFECYCLE"] ?? "")
+    }
+    public func publishGeometryLifecycleSnapshot(_ snapshot: AudioSessionSnapshot?) {
+        guard usesGeometryLifecycleSnapshot else { return }
+        geometryLifecycleSnapshot = snapshot
+        currentKind = snapshot?.kind
+        notifySnapshotObservers(snapshot)
+    }
+    #endif
+
     public func currentSnapshot() async -> AudioSessionSnapshot? {
+        #if DEBUG
+        if usesGeometryLifecycleSnapshot { return geometryLifecycleSnapshot }
+        #endif
         switch currentKind {
             case .audiobook:
                 return (await makeState()).flatMap(audiobookSnapshot(from:))
@@ -1551,7 +1585,9 @@ public actor AudioSessionActor {
             bookProgress: state.bookTotal > 0 ? state.bookElapsed / state.bookTotal : 0,
             playbackRate: state.playbackRate,
             elapsedSeconds: state.bookElapsed,
-            durationSeconds: state.bookTotal
+            durationSeconds: state.bookTotal,
+            chapterRemainingSeconds: state.chapterTotal > 0
+                ? max(0, state.chapterTotal - state.chapterElapsed) : nil
         )
     }
 
@@ -1567,7 +1603,9 @@ public actor AudioSessionActor {
             bookProgress: state.bookProgress,
             playbackRate: state.playbackRate,
             elapsedSeconds: state.currentTime,
-            durationSeconds: state.duration
+            durationSeconds: state.duration,
+            chapterRemainingSeconds: chapter != nil && state.chapterDuration > 0
+                ? max(0, state.chapterDuration - state.chapterElapsed) : nil
         )
     }
 
@@ -1600,6 +1638,12 @@ public actor AudioSessionActor {
         guard activeSessionID == sessionID else { return }
         let shouldSyncPause = lastObservedIsPlaying && !state.isPlaying
         lastObservedIsPlaying = state.isPlaying
+
+        if state.isPlaying {
+            startRefreshTaskIfNeeded()
+        } else {
+            stopRefreshTask()
+        }
 
         if shouldSyncPause {
             // Covers Bluetooth route loss and AVAudioSession interruptions —
@@ -1720,8 +1764,14 @@ public actor AudioSessionActor {
         sleepTimerChapterID = nil
     }
 
+    private func startRefreshTaskIfNeeded() {
+        guard refreshTask == nil else { return }
+        startRefreshTask()
+    }
+
     private func startRefreshTask() {
         refreshTask?.cancel()
+        lastSleepTimerUpdate = Date()
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(250))
@@ -1729,6 +1779,11 @@ public actor AudioSessionActor {
                 await self.refresh()
             }
         }
+    }
+
+    private func stopRefreshTask() {
+        refreshTask?.cancel()
+        refreshTask = nil
     }
 
     private func refresh() async {
@@ -1858,6 +1913,19 @@ public actor AudioSessionActor {
         }
     }
 
+    /// Adds the current audiobook position to Previous Positions without changing
+    /// playback. Returns false for readaloud/podcast (no Previous Positions) or when the
+    /// checkpoint is rejected.
+    public func markListeningSpot() async -> Bool {
+        guard case .audiobook = currentKind else { return false }
+        let result = await persistRecoveryCheckpoint(
+            reason: SyncReason.userMarkedSpot.rawValue,
+            recordMilestone: true,
+        )
+        if case .saved = result { return true }
+        return false
+    }
+
     private func syncProgress(reason: SyncReason, isExplicitUserAction: Bool = false) async {
         if resolvedPlayback != nil {
             await persistResolvedResume()
@@ -1926,7 +1994,7 @@ public actor AudioSessionActor {
     private func isMilestoneReason(_ reason: SyncReason) -> Bool {
         switch reason {
             case .userPausedPlayback, .userClosedBook, .userDraggedSeekBar,
-                .userSkippedForward, .userSkippedBackward, .userSelectedChapter,
+                .userSkippedForward, .userSkippedBackward, .userMarkedSpot, .userSelectedChapter,
                 .userConfirmedRestart, .userRestoredFromHistory, .userSwitchedFormat,
                 .appBackgrounding, .appTerminating:
                 return true
@@ -2174,6 +2242,14 @@ public actor AudioSessionActor {
         }
     }
 
+    /// Remote skip interval (Lock Screen, headphones, CarPlay share one command center).
+    /// CarPlay raises it to 30s while connected and restores `podcastSkipInterval` after.
+    public func setRemoteSkipInterval(_ seconds: TimeInterval) async {
+        guard seconds.isFinite, seconds > 0, seconds != remoteSkipInterval else { return }
+        remoteSkipInterval = seconds
+        if let currentKind { await configureNowPlayingCommands(for: currentKind) }
+    }
+
     private func configureNowPlayingCommands(for kind: AudioSessionKind) async {
         guard let presenter = SilveranPlatform.nowPlaying else { return }
         let supportsChangePlaybackPosition: Bool
@@ -2183,7 +2259,7 @@ public actor AudioSessionActor {
             case .readaloud:
                 supportsChangePlaybackPosition = false
         }
-        let skip = Self.podcastSkipInterval
+        let skip = remoteSkipInterval
         await presenter.configureCommands(
             skipForwardInterval: skip,
             skipBackwardInterval: skip,
