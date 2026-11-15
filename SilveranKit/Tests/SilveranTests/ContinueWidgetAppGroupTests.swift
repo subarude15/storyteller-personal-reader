@@ -1558,7 +1558,7 @@ struct ContinueWidgetCurrentSnapshotTests {
             hasLiveSession: true,
             streakDays: 3,
             streakActivityDayKey: "2026-11-15",
-            todayActiveSeconds: 15 * 60,
+            todayActiveSeconds: 15.0 * 60.0,
             dailyGoalMinutes: 30,
             todayGoalDayKey: "2026-11-15",
             longestStreakDays: 7,
@@ -1579,7 +1579,7 @@ struct ContinueWidgetCurrentSnapshotTests {
             fileStore: store
         )
         let afterAudio = try #require(store.readSnapshot(in: root))
-        #expect(afterAudio.todayActiveSeconds == 15 * 60)
+        #expect(afterAudio.todayActiveSeconds == 15.0 * 60.0)
         #expect(afterAudio.dailyGoalMinutes == 30)
         #expect(afterAudio.todayGoalDayKey == "2026-11-15")
         #expect(afterAudio.longestStreakDays == 7)
@@ -1588,7 +1588,7 @@ struct ContinueWidgetCurrentSnapshotTests {
         let updatedOK = ContinueWidgetSnapshotStore.updateAuthoritativeStreak(
             streakDays: 4,
             streakActivityDayKey: "2026-11-15",
-            todayActiveSeconds: 24 * 60,
+            todayActiveSeconds: 24.0 * 60.0,
             dailyGoalMinutes: 45,
             todayGoalDayKey: "2026-11-15",
             longestStreakDays: 8,
@@ -1597,7 +1597,7 @@ struct ContinueWidgetCurrentSnapshotTests {
         #expect(updatedOK)
         let afterGoalUpdate = try #require(store.readSnapshot(in: root))
         #expect(afterGoalUpdate.streakDays == 4)
-        #expect(afterGoalUpdate.todayActiveSeconds == 24 * 60)
+        #expect(afterGoalUpdate.todayActiveSeconds == 24.0 * 60.0)
         #expect(afterGoalUpdate.dailyGoalMinutes == 45)
         #expect(afterGoalUpdate.longestStreakDays == 8)
         #expect(afterGoalUpdate.progress == 0.30)
