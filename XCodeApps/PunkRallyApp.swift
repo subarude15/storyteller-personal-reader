@@ -204,7 +204,7 @@ public struct PunkRallyTabView: View {
                     )
                 }
             }
-            .onReceive(NotificationCenter.default.publisher(for: NSSystemTimeZoneDidChange)) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in
                 Task { await ReadingMotivationStore.shared.refreshNotifications() }
             }
             .fullScreenCover(item: PlayerPresenter.shared.cardItemBinding) { wrapper in
