@@ -1101,7 +1101,7 @@ struct ContinueWidgetCurrentSnapshotTests {
             )
             audioDone.signal()
         }
-        store.waitForPausedRead()
+        try store.waitForPausedRead()
         // Home publishes a fresher streak while audio still holds the publish lock.
         let homeDone = DispatchSemaphore(value: 0)
         DispatchQueue.global().async {
@@ -1198,7 +1198,7 @@ struct ContinueWidgetCurrentSnapshotTests {
             )
             audioDone.signal()
         }
-        store.waitForPausedRead()
+        try store.waitForPausedRead()
         let homeDone = DispatchSemaphore(value: 0)
         DispatchQueue.global().async {
             ContinueWidgetSnapshotStore.publish(
@@ -1447,8 +1447,11 @@ private final class PausableContinueWidgetFileStore: ContinueWidgetSnapshotFileS
         if shouldPause { pauseRead = false }
         lock.unlock()
         if shouldPause {
+            print("[WidgetRace] paused snapshot read: \(root.lastPathComponent)")
             readStarted.signal()
-            readGate.wait()
+            let released = readGate.wait(timeout: .now() + 10)
+            #expect(released == .success, "Paused snapshot read was not released within 10 seconds")
+            print("[WidgetRace] read gate completed: \(released)")
         }
         return ContinueWidgetSnapshotStore.readSnapshotFile(in: container)
     }
@@ -1478,8 +1481,12 @@ private final class PausableContinueWidgetFileStore: ContinueWidgetSnapshotFileS
         lock.unlock()
     }
 
-    func waitForPausedRead() {
-        readStarted.wait()
+    func waitForPausedRead() throws {
+        print("[WidgetRace] waiting for snapshot read: \(root.lastPathComponent)")
+        try #require(
+            readStarted.wait(timeout: .now() + 10) == .success,
+            "Publish never reached its snapshot-read suspension point within 10 seconds"
+        )
     }
 
     func resumePausedRead() {

@@ -48,6 +48,7 @@ jobs:
   swift-tests:
     name: SilveranKit regression tests
     runs-on: macos-15
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
         with:
@@ -56,17 +57,28 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_26.3.app || sudo xcode-select -s /Applications/Xcode_26.app || sudo xcode-select -s /Applications/Xcode.app || true
 
-      - name: Run Swift package tests
+      - name: Diagnose widget race handshake tests
+        timeout-minutes: 15
         shell: bash
         run: |
           set -euo pipefail
-          ./scripts/test 2>&1 | tee reading-motivation-tests.log
+          ./scripts/test --filter 'ContinueWidgetAppGroupTests/(concurrentPublishPreservesFresherStreakAcrossAudioHomeRace|publishLiveMirrorSeamPreservesFresherHomeStreakDuringAudioRace)' 2>&1 | tee widget-race-diagnostic.log
+          python3 -c 'from pathlib import Path; s=Path("widget-race-diagnostic.log").read_text(); names=["concurrentPublishPreservesFresherStreakAcrossAudioHomeRace", "publishLiveMirrorSeamPreservesFresherHomeStreakDuringAudioRace"]; assert all("Test " + n + "() started." in s for n in names), "Both diagnostic tests must actually execute"'
+
+      - name: Run Swift package tests
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/test --skip-build 2>&1 | tee reading-motivation-tests.log
 
       - name: Retain Swift test log and results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: reading-motivation-swift-test-results
-          path: reading-motivation-tests.log
+          path: |
+            reading-motivation-tests.log
+            widget-race-diagnostic.log
           if-no-files-found: warn
           retention-days: 14
