@@ -2390,6 +2390,21 @@ struct ReadingMotivationTests {
         #expect(await scheduler.pendingCount() == 0)
         #expect(await storage.load().hasConsumedDayKey(dayKey))
         #expect(await storage.load().pendingKind == nil)
+        #expect(await storage.load().pendingDayKey == nil)
+        #expect(await storage.load().pendingDeliveryDate == nil)
+
+        // A fresh coordinator must load the completed cleanup, not a phantom
+        // pending intent left behind by the pre-cancellation ledger save.
+        let (restarted, _) = makeCoordinator(
+            scheduler: scheduler, stateStore: storage, now: clock.now(), clock: clock
+        )
+        #expect(try await restarted.reconcile(
+            candidates: [.init(kind: .rescue, deliveryDate: delivery.addingTimeInterval(3600))],
+            enabled: true, now: clock.now(), calendar: calendar,
+            preferenceRevision: 1, requestRevision: 1
+        ) == .none)
+        #expect(await scheduler.scheduleCalls() == 0)
+        #expect(await storage.load().pendingKind == nil)
     }
 
     @Test func recoveryInspectionSpanningFireBoundaryDeclinesReinstall() async throws {

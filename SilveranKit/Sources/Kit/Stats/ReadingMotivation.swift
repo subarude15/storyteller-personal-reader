@@ -1786,6 +1786,10 @@ public actor ReadingMotivationNotificationCoordinator {
         await stateStore.save(state)
         await scheduler.cancelPending(identifier: Self.identifier(for: pendingDay))
         clearPendingState()
+        // The pre-cancel save preserves consumed-day evidence, but still contains
+        // the old pending intent. Persist its removal before returning to callers
+        // that may decline installation without another state mutation/save.
+        await stateStore.save(state)
     }
 
     private func loadStateIfNeeded() async {
