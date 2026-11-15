@@ -55,13 +55,18 @@ public enum ContinueWidgetPublisher {
         coverData: Data?,
         progress: Double? = nil,
         durationSeconds: Double? = nil,
+        streakProvider: (@MainActor () -> (days: Int, dayKey: String))? = nil,
     ) {
         Task { @MainActor in
             let session = await AudioSessionActor.shared.currentSnapshot()
             if session != nil {
-                await publishSession(session)
+                await publishSession(
+                    session,
+                    authoritativeStreakProvider: streakProvider
+                )
                 return
             }
+            let streak = streakProvider?()
             ContinueWidgetSnapshotStore.publish(
                 title: title,
                 subtitle: subtitle,
@@ -71,6 +76,8 @@ public enum ContinueWidgetPublisher {
                 progress: progress,
                 durationSeconds: durationSeconds,
                 hasLiveSession: false,
+                streakDays: streak?.days,
+                streakActivityDayKey: streak?.dayKey,
             )
         }
     }
@@ -93,12 +100,17 @@ public enum ContinueWidgetPublisher {
         }
     }
 
-    private static func publishSession(_ snapshot: AudioSessionSnapshot?) async {
+    private static func publishSession(
+        _ snapshot: AudioSessionSnapshot?,
+        authoritativeStreakProvider: (@MainActor () -> (days: Int, dayKey: String))? = nil
+    ) async {
         guard let snapshot else {
             // Session ended — keep title/cover, clear playing so the tile isn't stuck.
+            // Do not pre-read and re-assert streak: a Home publish can land between
+            // load and the store lock; nil preserves the freshest locked value.
             let last = ContinueWidgetSnapshotStore.loadSnapshot()
             guard last.isPlaying || (last.hasLiveSession ?? false) else { return }
-            ContinueWidgetSnapshotStore.publish(
+            ContinueWidgetSnapshotStore.publishLiveMirror(
                 title: last.title,
                 subtitle: last.subtitle,
                 isPlaying: false,
@@ -108,7 +120,7 @@ public enum ContinueWidgetPublisher {
                 elapsedSeconds: last.elapsedSeconds,
                 durationSeconds: last.durationSeconds,
                 hasLiveSession: false,
-                rate: last.rate,
+                rate: last.rate
             )
             return
         }
@@ -136,7 +148,10 @@ public enum ContinueWidgetPublisher {
             }
         }
 
-        ContinueWidgetSnapshotStore.publish(
+        // Refresh only AFTER every artwork/session await. The provider and
+        // synchronous locked store write cannot suspend this main-actor turn.
+        let streak = authoritativeStreakProvider?()
+        ContinueWidgetSnapshotStore.publishLiveMirror(
             title: snapshot.title,
             subtitle: snapshot.author ?? snapshot.chapterLabel,
             isPlaying: snapshot.isPlaying,
@@ -147,6 +162,8 @@ public enum ContinueWidgetPublisher {
             durationSeconds: snapshot.durationSeconds,
             hasLiveSession: true,
             rate: snapshot.playbackRate,
+            authoritativeStreakDays: streak?.days,
+            authoritativeStreakActivityDayKey: streak?.dayKey
         )
     }
 

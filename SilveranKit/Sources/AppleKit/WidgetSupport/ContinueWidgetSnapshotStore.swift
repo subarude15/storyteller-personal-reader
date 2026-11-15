@@ -41,6 +41,11 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
     public var progress: Double?
     public var elapsedSeconds: Double?
     public var durationSeconds: Double?
+    /// Real current/longest-independent streak count from SessionTracker.
+    public var streakDays: Int?
+    /// Local calendar day (`yyyy-MM-dd`) of the activity that anchors `streakDays`.
+    /// Dated to real activity, not each subsequent audio/snapshot publish.
+    public var streakActivityDayKey: String?
     /// True while the app holds a live audio session, i.e. transport buttons can
     /// actually do something. False for the "Home Continue" fallback card.
     public var hasLiveSession: Bool?
@@ -59,6 +64,8 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         durationSeconds: Double? = nil,
         hasLiveSession: Bool? = nil,
         rate: Double? = nil,
+        streakDays: Int? = nil,
+        streakActivityDayKey: String? = nil,
     ) {
         self.generatedAt = generatedAt
         self.title = title
@@ -67,11 +74,16 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
         self.isPlaying = isPlaying
         self.kind = kind
         self.deepLink = deepLink
-        self.progress = progress
-        self.elapsedSeconds = elapsedSeconds
-        self.durationSeconds = durationSeconds
+        self.progress = progress.flatMap { $0.isFinite ? $0 : nil }
+        self.elapsedSeconds = elapsedSeconds.flatMap { $0.isFinite ? $0 : nil }
+        self.durationSeconds = durationSeconds.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        self.streakDays = streakDays.map { max(0, $0) }
+        self.streakActivityDayKey = streakActivityDayKey.flatMap { key in
+            let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
         self.hasLiveSession = hasLiveSession
-        self.rate = rate
+        self.rate = rate.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
     }
 
     public static let empty = ContinueWidgetSnapshot()
@@ -93,7 +105,7 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
     }
 
     public var clampedProgress: Double? {
-        progress.map { min(max($0, 0), 1) }
+        progress.flatMap { $0.isFinite ? min(max($0, 0), 1) : nil }
     }
 
     public var percentComplete: Int? {
@@ -102,30 +114,107 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
 
     /// "12m left" / "1h 5m left" when a duration is known.
     public var remainingText: String? {
-        guard let durationSeconds, durationSeconds > 0 else { return nil }
-        let elapsed = elapsedSeconds ?? ((clampedProgress ?? 0) * durationSeconds)
-        let remaining = max(0, durationSeconds - elapsed)
-        guard remaining > 0 else { return nil }
+        guard let timing = widgetTiming,
+            let remaining = timing.remainingWallSeconds,
+            remaining > 0
+        else { return nil }
         return Self.durationText(remaining) + " left"
     }
 
+    public var remainingStatusText: String? {
+        guard isTimedKind else { return nil }
+        return isFinished ? "Finished" : (remainingText ?? "Remaining time unknown")
+    }
+
     public var elapsedText: String? {
-        guard let durationSeconds, durationSeconds > 0 else { return nil }
-        let elapsed = max(0, elapsedSeconds ?? ((clampedProgress ?? 0) * durationSeconds))
-        return Self.durationText(elapsed)
+        guard let timing = widgetTiming else { return nil }
+        return Self.durationText(timing.elapsedSeconds)
+    }
+
+    public var lengthText: String? {
+        guard kind != .ebook else { return nil }
+        guard let durationSeconds, durationSeconds.isFinite, durationSeconds > 0 else { return nil }
+        return Self.durationText(durationSeconds)
+    }
+
+    public var elapsedLengthText: String? {
+        guard let elapsedText else { return nil }
+        if let lengthText {
+            return elapsedText + " / " + lengthText
+        }
+        // Known elapsed with unknown total: still paint an elapsed caption.
+        return elapsedText + " elapsed"
+    }
+
+    public var streakText: String? {
+        guard let streakDays else { return nil }
+        return streakDays == 0 ? "Start a streak today" : String(streakDays) + "-day streak"
+    }
+
+    /// Expire stale streak counts on local calendar rollover while preserving
+    /// today/yesterday grace. Activity day is the anchor; `generatedAt` is only
+    /// a legacy fallback for snapshots written before the dated field existed.
+    /// Widget/app-group boundary for Gregorian local-day identities with device TZ.
+    public static func normalizedLocalCalendar(
+        from calendar: Calendar = .current
+    ) -> Calendar {
+        ReadingMotivationCalculations.normalizedLocalCalendar(from: calendar)
+    }
+
+    public func resolvingStreak(
+        at now: Date,
+        calendar: Calendar = .current
+    ) -> ContinueWidgetSnapshot {
+        var copy = self
+        copy.streakDays = Self.resolvedStreakDays(
+            streakDays: streakDays,
+            activityDayKey: streakActivityDayKey,
+            generatedAt: generatedAt,
+            now: now,
+            calendar: calendar
+        )
+        return copy
+    }
+
+    public static func resolvedStreakDays(
+        streakDays: Int?,
+        activityDayKey: String?,
+        generatedAt: Date,
+        now: Date,
+        calendar: Calendar
+    ) -> Int? {
+        guard let streakDays else { return nil }
+        let calendar = Self.normalizedLocalCalendar(from: calendar)
+        let today = ReadingMotivationCalculations.localDayKey(now, calendar: calendar)
+        let anchor = activityDayKey
+            ?? ReadingMotivationCalculations.localDayKey(generatedAt, calendar: calendar)
+        if anchor == today { return streakDays }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: now)) {
+            let yesterdayKey = ReadingMotivationCalculations.localDayKey(yesterday, calendar: calendar)
+            if anchor == yesterdayKey { return streakDays }
+        }
+        return 0
     }
 
     /// Compact "31% · 12m left" style caption for the tile.
     public var progressCaption: String? {
         var parts: [String] = []
         if let percentComplete { parts.append("\(percentComplete)%") }
-        if let remainingText { parts.append(remainingText) }
+        if let elapsedLengthText { parts.append(elapsedLengthText) }
+        if let remainingText {
+            parts.append(remainingText)
+        } else if isTimedKind && !isFinished {
+            parts.append("Remaining unknown")
+        }
         guard !parts.isEmpty else { return nil }
         return parts.joined(separator: " · ")
     }
 
     public static func durationText(_ seconds: Double) -> String {
-        let total = Int(seconds.rounded())
+        guard seconds.isFinite, seconds >= 0 else { return "0m" }
+        if seconds == 0 { return "0m" }
+        if seconds < 60 { return "<1m" }
+        let total = Int(min(seconds.rounded(), Double(Int.max / 2)))
         let hours = total / 3600
         let minutes = (total % 3600) / 60
         if hours > 0 {
@@ -136,8 +225,16 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
 
     /// Identity for "did anything the widget paints change?" comparisons —
     /// deliberately excludes `generatedAt`.
-    var paintSignature: String {
-        [
+    public var paintSignature: String {
+        // Typed intermediates avoid `String.init` overload explosion that made
+        // Swift 6.2 unable to type-check this expression in reasonable time.
+        let percent: String
+        if let percentComplete {
+            percent = String(percentComplete)
+        } else {
+            percent = ""
+        }
+        let parts: [String] = [
             title ?? "",
             subtitle ?? "",
             coverFilename ?? "",
@@ -145,14 +242,90 @@ public struct ContinueWidgetSnapshot: Codable, Sendable, Hashable {
             kind?.rawValue ?? "",
             deepLink ?? "",
             (hasLiveSession ?? false) ? "1" : "0",
-            percentComplete.map(String.init) ?? "",
-        ].joined(separator: "|")
+            percent,
+            elapsedLengthText ?? "",
+            remainingText ?? "",
+            streakText ?? "",
+        ]
+        return parts.joined(separator: "|")
     }
 
     /// Transport state identity — changes flip the play/pause glyph right away.
     var transportSignature: String {
         [title ?? "", isPlaying ? "1" : "0", kind?.rawValue ?? "",
          (hasLiveSession ?? false) ? "1" : "0"].joined(separator: "|")
+    }
+
+    private var widgetTiming: ContinueWidgetTiming? {
+        guard kind != .ebook else { return nil }
+        return ContinueWidgetTiming.calculate(
+            progress: progress,
+            elapsedSeconds: elapsedSeconds,
+            durationSeconds: durationSeconds,
+            rate: rate,
+        )
+    }
+
+    private var isTimedKind: Bool {
+        switch kind {
+            case .audiobook, .readaloud, .podcast: return true
+            case .ebook, .none: return false
+        }
+    }
+
+    private var isFinished: Bool {
+        clampedProgress == 1 || widgetTiming?.remainingWallSeconds == 0
+    }
+}
+
+/// Injectable App Group / file seam for Continue snapshot publication tests.
+public protocol ContinueWidgetSnapshotFileStoring: Sendable {
+    func resolveContainer() -> URL?
+    func ensureDirectories(in container: URL) throws
+    func readSnapshot(in container: URL) -> ContinueWidgetSnapshot?
+    func writeSnapshotData(_ data: Data, to container: URL) throws
+    func existingCoverFilename(in container: URL) -> String?
+    func writeCoverData(_ data: Data, to container: URL) throws -> String
+}
+
+public struct AppGroupContinueWidgetSnapshotFileStore: ContinueWidgetSnapshotFileStoring {
+    public init() {}
+
+    public func resolveContainer() -> URL? {
+        SilveranWidgetSnapshotStore.sharedContainerURL()
+    }
+
+    public func ensureDirectories(in container: URL) throws {
+        try FileManager.default.createDirectory(
+            at: container, withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: ContinueWidgetSnapshotStore.coversDirectory(in: container),
+            withIntermediateDirectories: true
+        )
+    }
+
+    public func readSnapshot(in container: URL) -> ContinueWidgetSnapshot? {
+        ContinueWidgetSnapshotStore.readSnapshotFile(in: container)
+    }
+
+    public func writeSnapshotData(_ data: Data, to container: URL) throws {
+        try data.write(
+            to: ContinueWidgetSnapshotStore.snapshotURL(in: container),
+            options: [.atomic]
+        )
+    }
+
+    public func existingCoverFilename(in container: URL) -> String? {
+        readSnapshot(in: container)?.coverFilename
+    }
+
+    public func writeCoverData(_ data: Data, to container: URL) throws -> String {
+        let name = "continue_cover.dat"
+        let url = ContinueWidgetSnapshotStore.coversDirectory(in: container)
+            .appendingPathComponent(name, isDirectory: false)
+        try data.write(to: url, options: [.atomic])
+        return name
     }
 }
 
@@ -239,6 +412,43 @@ public enum ContinueWidgetSnapshotStore {
 
     // MARK: - Publishing
 
+    /// Audio / session-end mirror used by ContinueWidgetPublisher and live-session
+    /// republish. Pass streak only when this call carries Home-authoritative values;
+    /// nil lets the locked publish preserve whatever is currently stored.
+    public static func publishLiveMirror(
+        title: String?,
+        subtitle: String?,
+        isPlaying: Bool,
+        kind: ContinueWidgetKindTag?,
+        coverData: Data?,
+        deepLink: String = InkAmpContinueLink.continueURL.absoluteString,
+        progress: Double? = nil,
+        elapsedSeconds: Double? = nil,
+        durationSeconds: Double? = nil,
+        hasLiveSession: Bool,
+        rate: Double? = nil,
+        authoritativeStreakDays: Int? = nil,
+        authoritativeStreakActivityDayKey: String? = nil,
+        fileStore: (any ContinueWidgetSnapshotFileStoring)? = nil,
+    ) {
+        publish(
+            title: title,
+            subtitle: subtitle,
+            isPlaying: isPlaying,
+            kind: kind,
+            coverData: coverData,
+            deepLink: deepLink,
+            progress: progress,
+            elapsedSeconds: elapsedSeconds,
+            durationSeconds: durationSeconds,
+            hasLiveSession: hasLiveSession,
+            rate: rate,
+            streakDays: authoritativeStreakDays,
+            streakActivityDayKey: authoritativeStreakActivityDayKey,
+            fileStore: fileStore
+        )
+    }
+
     /// Publish the Continue / Now Playing tile. Pass `coverData` when available;
     /// nil keeps the previous cover file when a title is present. Title-only
     /// writes are OK (cover bytes may be nil for ebook / uncached covers).
@@ -254,37 +464,34 @@ public enum ContinueWidgetSnapshotStore {
         durationSeconds: Double? = nil,
         hasLiveSession: Bool = false,
         rate: Double? = nil,
+        streakDays: Int? = nil,
+        streakActivityDayKey: String? = nil,
+        fileStore: (any ContinueWidgetSnapshotFileStoring)? = nil,
     ) {
         SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "publish")
-        guard let container = SilveranWidgetSnapshotStore.sharedContainerURL() else {
+        let store = fileStore ?? AppGroupContinueWidgetSnapshotFileStore()
+        guard let container = store.resolveContainer() else {
             print("[ContinueWidget] publish skipped — App group container unavailable")
             return
         }
 
+        // Serialize read → streak/cover preserve → write → signature update so a
+        // concurrent audio tick cannot overwrite a fresher Home streak with a
+        // stale previous snapshot. reloadTimelines stays outside the lock.
+        var shouldReload = false
+        publishLock.lock()
         do {
-            try FileManager.default.createDirectory(
-                at: container,
-                withIntermediateDirectories: true,
-            )
-            let covers = coversDirectory(in: container)
-            try FileManager.default.createDirectory(
-                at: covers,
-                withIntermediateDirectories: true,
-            )
+            try store.ensureDirectories(in: container)
 
             var coverFilename: String?
             if let coverData, !coverData.isEmpty {
-                let name = "continue_cover.dat"
-                let url = covers.appendingPathComponent(name, isDirectory: false)
-                try coverData.write(to: url, options: [.atomic])
-                coverFilename = name
-            } else if let existing = readSnapshotFile(in: container)?.coverFilename,
-                title != nil
-            {
+                coverFilename = try store.writeCoverData(coverData, to: container)
+            } else if title != nil {
                 // Keep last cover while the same session refreshes without image bytes.
-                coverFilename = existing
+                coverFilename = store.existingCoverFilename(in: container)
             }
 
+            let previous = store.readSnapshot(in: container)
             let snapshot = ContinueWidgetSnapshot(
                 generatedAt: Date(),
                 title: title,
@@ -298,42 +505,56 @@ public enum ContinueWidgetSnapshotStore {
                 durationSeconds: durationSeconds,
                 hasLiveSession: hasLiveSession,
                 rate: rate,
+                streakDays: streakDays ?? previous?.streakDays,
+                // Preserve the activity anchor across audio-only publishes; never
+                // re-date it from generatedAt or progress ticks.
+                streakActivityDayKey: streakActivityDayKey ?? previous?.streakActivityDayKey,
             )
 
-            publishLock.lock()
             let previousPaint = lastPublishedPaintSignature
             let previousTransport = lastPublishedTransportSignature
             let previousReload = lastReloadDate
-            publishLock.unlock()
-
             let paintChanged = previousPaint != snapshot.paintSignature
             let transportChanged = previousTransport != snapshot.transportSignature
             let now = Date()
-
-            guard paintChanged || transportChanged else { return }
+            // The activity anchor affects future expiry even if today's text
+            // matches, as when a one-day streak restarts after a gap.
+            let contentChanged = previous.map { prior in
+                var comparable = prior
+                comparable.generatedAt = snapshot.generatedAt
+                return comparable != snapshot
+            } ?? true
+            guard paintChanged || transportChanged || contentChanged else {
+                publishLock.unlock()
+                return
+            }
 
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.sortedKeys]
             let data = try encoder.encode(snapshot)
-            try data.write(to: snapshotURL(in: container), options: [.atomic])
+            try store.writeSnapshotData(data, to: container)
+            // UserDefaults only — must not re-enter publishLock.
             rememberLastSnapshot(snapshot)
 
             let progressTickDue =
                 now.timeIntervalSince(previousReload) >= progressReloadInterval
-            let reloadNow =
-                transportChanged || (paintChanged && progressTickDue) || now.timeIntervalSince(previousReload) >= 300
+            shouldReload =
+                transportChanged || (paintChanged && progressTickDue)
+                || now.timeIntervalSince(previousReload) >= 300
 
-            publishLock.lock()
             lastPublishedPaintSignature = snapshot.paintSignature
             lastPublishedTransportSignature = snapshot.transportSignature
-            if reloadNow { lastReloadDate = now }
+            if shouldReload { lastReloadDate = now }
             publishLock.unlock()
-
-            guard reloadNow else { return }
-            reloadTimelines()
         } catch {
+            publishLock.unlock()
             print("[ContinueWidget] publish failed: \(error)")
+            return
+        }
+
+        if shouldReload {
+            reloadTimelines()
         }
     }
 
@@ -353,7 +574,7 @@ public enum ContinueWidgetSnapshotStore {
             case .readaloud: kind = .readaloud
             case .podcast: kind = .podcast
         }
-        publish(
+        publishLiveMirror(
             title: session.title,
             subtitle: session.author ?? session.chapterLabel,
             isPlaying: session.isPlaying,
@@ -363,7 +584,7 @@ public enum ContinueWidgetSnapshotStore {
             elapsedSeconds: session.elapsedSeconds,
             durationSeconds: session.durationSeconds,
             hasLiveSession: true,
-            rate: session.playbackRate,
+            rate: session.playbackRate
         )
     }
 
@@ -372,7 +593,7 @@ public enum ContinueWidgetSnapshotStore {
     public static func markSessionInactive() {
         let last = loadSnapshot()
         guard last.hasItem else { return }
-        publish(
+        publishLiveMirror(
             title: last.title,
             subtitle: last.subtitle,
             isPlaying: false,
@@ -382,7 +603,7 @@ public enum ContinueWidgetSnapshotStore {
             elapsedSeconds: last.elapsedSeconds,
             durationSeconds: last.durationSeconds,
             hasLiveSession: false,
-            rate: last.rate,
+            rate: last.rate
         )
     }
 
@@ -394,7 +615,7 @@ public enum ContinueWidgetSnapshotStore {
 
     // MARK: - Paths
 
-    private static func readSnapshotFile(in container: URL) -> ContinueWidgetSnapshot? {
+    static func readSnapshotFile(in container: URL) -> ContinueWidgetSnapshot? {
         let url = snapshotURL(in: container)
         guard let data = try? Data(contentsOf: url) else { return nil }
         let decoder = JSONDecoder()
@@ -402,12 +623,94 @@ public enum ContinueWidgetSnapshotStore {
         return try? decoder.decode(ContinueWidgetSnapshot.self, from: data)
     }
 
-    private static func snapshotURL(in container: URL) -> URL {
+    static func snapshotURL(in container: URL) -> URL {
         container.appendingPathComponent(snapshotFilename, isDirectory: false)
     }
 
-    private static func coversDirectory(in container: URL) -> URL {
+    static func coversDirectory(in container: URL) -> URL {
         container.appendingPathComponent(coversDirectoryName, isDirectory: true)
+    }
+
+    /// Atomic streak-only update under the existing publish lock. Reads the
+    /// current snapshot, updates only streak/anchor/`generatedAt`, and never
+    /// overwrites title/progress/transport from pre-lock values. No-ops (no
+    /// write/reload) when streak data is unchanged. Must not call `publish`.
+    @discardableResult
+    public static func updateAuthoritativeStreak(
+        streakDays: Int,
+        streakActivityDayKey: String,
+        fileStore: (any ContinueWidgetSnapshotFileStoring)? = nil,
+    ) -> Bool {
+        let normalizedDays = max(0, streakDays)
+        let normalizedKey = streakActivityDayKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedKey.isEmpty else { return false }
+
+        SilveranWidgetSnapshotStore.logAppGroupAvailability(source: "streak")
+        let store = fileStore ?? AppGroupContinueWidgetSnapshotFileStore()
+        guard let container = store.resolveContainer() else { return false }
+
+        var shouldReload = false
+        publishLock.lock()
+        do {
+            try store.ensureDirectories(in: container)
+            guard var snapshot = store.readSnapshot(in: container), snapshot.hasItem else {
+                publishLock.unlock()
+                return false
+            }
+            if snapshot.streakDays == normalizedDays,
+                snapshot.streakActivityDayKey == normalizedKey
+            {
+                publishLock.unlock()
+                return true
+            }
+
+            snapshot.streakDays = normalizedDays
+            snapshot.streakActivityDayKey = normalizedKey
+            snapshot.generatedAt = Date()
+
+            let previousPaint = lastPublishedPaintSignature
+            let previousTransport = lastPublishedTransportSignature
+            let previousReload = lastReloadDate
+            let paintChanged = previousPaint != snapshot.paintSignature
+            let transportChanged = previousTransport != snapshot.transportSignature
+            let now = Date()
+
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.sortedKeys]
+            let data = try encoder.encode(snapshot)
+            try store.writeSnapshotData(data, to: container)
+            rememberLastSnapshot(snapshot)
+
+            let progressTickDue =
+                now.timeIntervalSince(previousReload) >= progressReloadInterval
+            shouldReload =
+                transportChanged || (paintChanged && progressTickDue)
+                || now.timeIntervalSince(previousReload) >= 300
+
+            lastPublishedPaintSignature = snapshot.paintSignature
+            lastPublishedTransportSignature = snapshot.transportSignature
+            if shouldReload { lastReloadDate = now }
+            publishLock.unlock()
+        } catch {
+            publishLock.unlock()
+            print("[ContinueWidget] streak update failed: \(error)")
+            return false
+        }
+
+        if shouldReload {
+            reloadTimelines()
+        }
+        return true
+    }
+
+    /// Test hook: reset in-process publish signatures between injectable-store runs.
+    public static func resetPublishSignaturesForTesting() {
+        publishLock.lock()
+        lastPublishedPaintSignature = nil
+        lastPublishedTransportSignature = nil
+        lastReloadDate = .distantPast
+        publishLock.unlock()
     }
 }
 

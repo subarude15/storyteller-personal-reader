@@ -103,10 +103,15 @@ struct PodcastShelfPrunePolicyTests {
                 )
             )
         }
+        // Fixture-only: disable age pruning so the default 30-day maxAgeDays
+        // cannot empty over-limit candidates before the cap pass. Production
+        // PodcastShelfPrunePolicy / PodcastDownloadSettings.default unchanged.
+        var capSettings = PodcastDownloadSettings.default
+        capSettings.maxAgeDays = nil
         // total 55 → need to remove 5 oldest eligible (bare-*)
         let candidates = PodcastShelfPrunePolicy.candidates(
             from: records,
-            settings: settings,
+            settings: capSettings,
             now: now
         )
         let overLimit = candidates.filter { $0.reason == .overLimit }
