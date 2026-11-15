@@ -961,6 +961,53 @@ struct ReadingMotivationTests {
         #expect(ebook.elapsedLengthText == nil)
     }
 
+    @Test func liveAudioProjectionUsesMatchingCurrentTimingRatherThanStoredFraction() {
+        let now = date(2026, 11, 15, 12)
+        let live = AudioSessionSnapshot(
+            kind: .podcast("episode"), title: "Episode", author: nil,
+            isPlaying: true, chapterLabel: nil, bookProgress: 0.2, playbackRate: 2,
+            elapsedSeconds: 80, durationSeconds: 100
+        )
+        let result = ReadingMotivationCalculations.projectedAudioFinish(
+            snapshot: live, expectedMediaID: "podcast/episode", calendar: calendar, now: now
+        )
+        guard case .estimate(let finish, _) = result else {
+            Issue.record("Expected live audio projection")
+            return
+        }
+        #expect(finish.timeIntervalSince(now) == 10)
+        #expect(ReadingMotivationCalculations.projectedAudioFinish(
+            snapshot: live, expectedMediaID: "podcast/another", calendar: calendar, now: now
+        ) == nil)
+        let unknown = AudioSessionSnapshot(
+            kind: .podcast("episode"), title: "Episode", author: nil,
+            isPlaying: true, chapterLabel: nil, bookProgress: 0.2, playbackRate: 2,
+            elapsedSeconds: 80, durationSeconds: 0
+        )
+        #expect(ReadingMotivationCalculations.projectedAudioFinish(
+            snapshot: unknown, expectedMediaID: "podcast/episode", calendar: calendar, now: now
+        ) == nil)
+    }
+
+    @Test func dismissedLegacyUndatedPendingIntentCannotInstallAgainToday() async throws {
+        let now = date(2026, 11, 15, 12)
+        let storage = TestMotivationStateStore(ReadingMotivationNotificationState(
+            pendingKind: .rescue, pendingDayKey: "2026-11-15"
+        ))
+        let scheduler = TestMotivationScheduler()
+        let (coordinator, _) = makeCoordinator(scheduler: scheduler, stateStore: storage, now: now)
+        _ = try await coordinator.reconcile(
+            candidates: [ReadingMotivationNotificationCandidate(
+                kind: .rescue, deliveryDate: date(2026, 11, 15, 20)
+            )], enabled: true, now: now, calendar: calendar,
+            preferenceRevision: 1, requestRevision: 1
+        )
+        #expect(await scheduler.scheduleCalls() == 0)
+        #expect(await scheduler.pendingCount() == 0)
+        let persisted = await storage.load()
+        #expect(persisted.hasConsumedDayKey("2026-11-15"))
+    }
+
     @Test func oldWidgetSnapshotDecodesWithoutNewMotivationFields() throws {
         let oldJSON = Data(#"{"generatedAt":"2026-11-15T17:00:00Z","title":"Book","isPlaying":false,"progress":0.5}"#.utf8)
         let decoder = JSONDecoder()

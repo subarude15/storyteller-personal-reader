@@ -84,6 +84,7 @@ final class ReadingMotivationStore {
     func finishProjection(
         for item: HomeMixedItem,
         playbackRate: Double?,
+        liveSnapshot: AudioSessionSnapshot? = nil,
         now: Date = Date()
     ) -> ReadingMotivationFinishProjection? {
         let mediaID: String
@@ -117,6 +118,14 @@ final class ReadingMotivationStore {
                 effectiveRate = playbackRate
                 paceKind = .listening
                 paceBasis = "Based on your recent listening pace"
+        }
+        if paceKind == .listening, let liveSnapshot,
+            ReadingMotivationCalculations.audioMediaID(for: liveSnapshot) == mediaID
+        {
+            return ReadingMotivationCalculations.projectedAudioFinish(
+                snapshot: liveSnapshot, expectedMediaID: mediaID,
+                calendar: Calendar.current, now: now
+            )
         }
         return ReadingMotivationCalculations.projectedFinish(
             sessions: SessionTracker.shared.motivationSessionRecords(at: now),

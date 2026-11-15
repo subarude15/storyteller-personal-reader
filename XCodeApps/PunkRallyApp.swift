@@ -528,7 +528,8 @@ private struct HomeTabView: View {
                         }
                         if let item, let projection = motivation.finishProjection(
                             for: item,
-                            playbackRate: playbackRate(for: item)
+                            playbackRate: playbackRate(for: item),
+                            liveSnapshot: liveAudioSnapshot
                         ) {
                             Text(projectedFinishLabel(projection))
                                 .font(.caption)

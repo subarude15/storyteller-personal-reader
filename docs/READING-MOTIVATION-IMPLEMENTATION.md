@@ -46,6 +46,13 @@ Fix-pass-5 regression names: `projectedFinishNearCompletionEstimatesRemainingNot
 
 The iOS Swift compile, WidgetKit rendering/reload behavior, App Group sharing on signed and sideload builds, notification authorization/delivery/cancellation, SessionTracker timer behavior under suspension, and Home/Stats interaction require macOS CI and device testing. Fix-pass-5 regressions are authored but unrun locally. Native Swift regression + app/widget CI and merge remain parent-gated. Arbitrary iOS background suspension can delay active-session cadence ticks; foreground restore restarts the loop and is the honesty boundary claimed here.
 
+## Final consistency follow-up
+
+- Authoritative streak publication returns success (including an already-matching persisted snapshot). SessionTracker caches only success, so no-container/no-item/write failures remain retryable; a regression creates the snapshot after the first failed attempt.
+- Home passes its live audio snapshot into projection. Matching audio/podcast items use current elapsed, duration and rate from that same snapshot, not a stale queue fraction; mismatched items do not inherit its timing and unknown live duration stays unknown. Pure shared-policy regression covers live timing overriding stale progress and item mismatch.
+- A legacy pending intent without a fire date is ambiguous after dismissal. Reconciliation conservatively consumes its requested day and current day, persists before OS cancellation, and declines another notification rather than risk a duplicate. This may suppress a reminder for one day on legacy migration.
+- Native/normal CI was started on pushed `087b96a7`; these subsequent consistency regressions require a new exact-tip run. No local native result or merge approval is claimed.
+
 ## Integration review overlaps
 
 The shipping geometry branch has substantially diverged Home/Stats surfaces. Reconcile these task changes deliberately against that branch before integration, especially:

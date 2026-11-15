@@ -369,6 +369,34 @@ public enum ReadingMotivationCalculations {
         return date
     }
 
+    public static func audioMediaID(for snapshot: AudioSessionSnapshot) -> String {
+        switch snapshot.kind {
+            case .audiobook(let id), .readaloud(let id): return String(describing: id)
+            case .podcast(let id): return "podcast/" + id
+        }
+    }
+
+    /// Use one matching live snapshot atomically, never an old queue fraction
+    /// with a new playback rate. Unknown live length remains unknown.
+    public static func projectedAudioFinish(
+        snapshot: AudioSessionSnapshot,
+        expectedMediaID: String,
+        calendar: Calendar,
+        now: Date
+    ) -> ReadingMotivationFinishProjection? {
+        guard audioMediaID(for: snapshot) == expectedMediaID,
+            snapshot.elapsedSeconds.isFinite, snapshot.elapsedSeconds >= 0
+        else { return nil }
+        let duration = snapshot.durationSeconds
+        let progress = duration.isFinite && duration > 0
+            ? min(snapshot.elapsedSeconds / duration, 1) : snapshot.bookProgress
+        return projectedFinish(
+            sessions: [], mediaID: expectedMediaID, progress: progress,
+            totalUnits: duration, playbackRate: snapshot.playbackRate,
+            calendar: calendar, now: now
+        )
+    }
+
     /// Audio uses its known remaining content and current playback rate. Ebooks
     /// require at least two real progress checkpoints to establish a reading pace.
     public static func projectedFinish(
@@ -1316,10 +1344,20 @@ public actor ReadingMotivationNotificationCoordinator {
     /// Conservatively consume the day when a pending delivery boundary is already past
     /// (crash/restart gap or await that outlived the scheduled fire time).
     private func consumeExpiredPending(now: Date, calendar: Calendar) async {
-        guard let pendingDay = state.pendingDayKey,
-            let deliveryDate = state.pendingDeliveryDate,
-            deliveryDate <= now
-        else { return }
+        guard let pendingDay = state.pendingDayKey else { return }
+        guard let deliveryDate = state.pendingDeliveryDate else {
+            // Old persisted intent has no fire boundary. It may already have
+            // fired and been dismissed; absence from OS is not non-delivery proof.
+            // Prefer losing a reminder over duplicating one on either possible day.
+            state.consume(dayKey: pendingDay)
+            state.consume(dayKey: ReadingMotivationNotificationPolicy.localDayKey(now, calendar: calendar))
+            await stateStore.save(state)
+            await scheduler.cancelPending(identifier: Self.identifier(for: pendingDay))
+            clearPendingState()
+            await stateStore.save(state)
+            return
+        }
+        guard deliveryDate <= now else { return }
         state.consume(dayKey: pendingDay)
         state.consume(
             dayKey: ReadingMotivationNotificationPolicy.localDayKey(deliveryDate, calendar: calendar)
