@@ -962,7 +962,7 @@ struct ReadingMotivationTests {
     }
 
     @Test func oldWidgetSnapshotDecodesWithoutNewMotivationFields() throws {
-        let oldJSON = Data(#"{"generatedAt":"2026-11-15T17:00:00Z","title":"Book","progress":0.5}"#.utf8)
+        let oldJSON = Data(#"{"generatedAt":"2026-11-15T17:00:00Z","title":"Book","isPlaying":false,"progress":0.5}"#.utf8)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let snapshot = try decoder.decode(ContinueWidgetSnapshot.self, from: oldJSON)

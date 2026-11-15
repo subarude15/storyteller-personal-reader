@@ -567,8 +567,8 @@ public struct ContinueWidgetTiming: Equatable, Sendable {
         rate: Double?
     ) -> ContinueWidgetTiming? {
         let knownElapsed: Double? = {
-            guard let elapsedSeconds, elapsedSeconds.isFinite else { return nil }
-            return max(elapsedSeconds, 0)
+            guard let elapsedSeconds, elapsedSeconds.isFinite, elapsedSeconds >= 0 else { return nil }
+            return elapsedSeconds
         }()
         guard let durationSeconds, durationSeconds.isFinite, durationSeconds > 0 else {
             // Independently known elapsed stands alone; never invent from progress
